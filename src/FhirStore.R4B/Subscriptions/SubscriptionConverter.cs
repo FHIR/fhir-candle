@@ -89,47 +89,49 @@ public class SubscriptionConverter
         };
 
         // check for extended information
-        IEnumerable<Hl7.Fhir.Model.Extension>? exts;
+        IEnumerable<Hl7.Fhir.Model.Extension>? extensions;
 
-        exts = sub.Channel.Extension?.Where(e => e.Url.Equals(_heartbeatPeriodUrl));
-        if (exts?.Any() ?? false)
+        extensions = sub.Channel.Extension?.Where(e => e.Url == _heartbeatPeriodUrl);
+        if (extensions?.Any() ?? false)
         {
-            if (int.TryParse(exts.First().Value.ToString(), out int heartbeat))
+            if (int.TryParse(extensions.First().Value?.ToString(), out int heartbeat))
             {
                 common.HeartbeatSeconds = heartbeat;
             }
         }
 
-        exts = sub.Channel.Extension?.Where(e => e.Url.Equals(_timeoutUrl));
-        if (exts?.Any() ?? false)
+        extensions = sub.Channel.Extension?.Where(e => e.Url == _timeoutUrl);
+        if (extensions?.Any() ?? false)
         {
-            if (int.TryParse(exts.First().Value.ToString(), out int timeout))
+            if (int.TryParse(extensions.First().Value?.ToString(), out int timeout))
             {
                 common.TimeoutSeconds = timeout;
             }
         }
 
-        exts = sub.Channel.Extension?.Where(e => e.Url.Equals(_maxCountUrl));
-        if (exts?.Any() ?? false)
+        extensions = sub.Channel.Extension?.Where(e => e.Url == _maxCountUrl);
+        if (extensions?.Any() ?? false)
         {
-            if (int.TryParse(exts.First().Value.ToString(), out int maxCount))
+            if (int.TryParse(extensions.First().Value?.ToString(), out int maxCount))
             {
                 common.MaxEventsPerNotification = maxCount;
             }
         }
 
-        exts = sub.Channel.TypeElement?.Extension?.Where(e => e.Url.Equals(_channelTypeUrl));
-        if (exts?.Any() ?? false)
+        extensions = sub.Channel.TypeElement?.Extension?.Where(e => e.Url == _channelTypeUrl);
+        if (extensions?.Any() ?? false)
         {
-            Hl7.Fhir.Model.Coding c = (Hl7.Fhir.Model.Coding)exts.First().Value;
-            common.ChannelSystem = c.System;
-            common.ChannelCode = c.Code;
+            if (extensions.First().Value is Hl7.Fhir.Model.Coding c)
+            {
+                common.ChannelSystem = c.System;
+                common.ChannelCode = c.Code;
+            }
         }
 
-        exts = sub.Channel.PayloadElement?.Extension?.Where(e => e.Url.Equals(_contentUrl));
-        if (exts?.Any() ?? false)
+        extensions = sub.Channel.PayloadElement?.Extension?.Where(e => e.Url == _contentUrl);
+        if (extensions?.Any() ?? false)
         {
-            common.ContentLevel = exts.First().Value.ToString() ?? string.Empty;
+            common.ContentLevel = extensions.First().Value?.ToString() ?? string.Empty;
         }
 
         // add parameters
@@ -162,10 +164,10 @@ public class SubscriptionConverter
         }
 
         // add filters
-        exts = sub.CriteriaElement?.Extension?.Where(e => e.Url.Equals(_filterCriteriaUrl)) ?? null;
-        if (exts?.Any() ?? false)
+        extensions = sub.CriteriaElement?.Extension?.Where(e => e.Url == _filterCriteriaUrl) ?? null;
+        if (extensions?.Any() ?? false)
         {
-            foreach (string criteria in exts.Select(e => e.Value.ToString() ?? string.Empty))
+            foreach (string criteria in extensions.Select(e => e.Value?.ToString() ?? string.Empty))
             {
                 if (string.IsNullOrEmpty(criteria))
                 {

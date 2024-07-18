@@ -69,7 +69,10 @@ internal static class ConverterUtils
                 values.Add(name, new());
             }
 
-            values[name].Add(ext.Value);
+            if (ext.Value != null)
+            {
+                values[name].Add(ext.Value);
+            }
         }
     }
 

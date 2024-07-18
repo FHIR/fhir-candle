@@ -165,7 +165,7 @@ public class SubscriptionConverter
         exts = sub.CriteriaElement.GetExtensions(_urlBackport + _filterCriteria);
         if (exts?.Any() ?? false)
         {
-            foreach (string criteria in exts.Select(e => e.Value.ToString() ?? string.Empty))
+            foreach (string criteria in exts.Select(e => e.Value?.ToString() ?? string.Empty))
             {
                 if (string.IsNullOrEmpty(criteria))
                 {

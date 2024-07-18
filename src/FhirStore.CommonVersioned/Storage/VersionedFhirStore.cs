@@ -89,7 +89,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>(Immutable) The subscriptions, by id.</summary>
     internal readonly ConcurrentDictionary<string, ParsedSubscription> _subscriptions = new();
 
-    /// <summary>(Immutable) The fhirpath variable matcher.</summary>
+    /// <summary>(Immutable) The FHIRPath variable matcher.</summary>
     [GeneratedRegex("[%][\\w\\-]+", RegexOptions.Compiled)]
     private static partial Regex _fhirpathVarMatcher();
 
@@ -1917,7 +1917,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? sForHook = null;
 
-        foreach (IFhirInteractionHook hook in hooks)
+        foreach (IFhirInteractionHook hook in hooks ?? [])
         {
             sForHook ??= (Resource?)r?.DeepCopy();
 
@@ -4369,12 +4369,12 @@ public partial class VersionedFhirStore : IFhirStore
                 addedIds.Add(relativeUrl);
             }
 
-            // add any incuded resources
+            // add any included resources
             AddInclusions(bundle, resource, resultParameters, addedIds);
 
             // check for include:iterate directives
 
-            // add any reverse incuded resources
+            // add any reverse included resources
             AddReverseInclusions(bundle, resource, resultParameters, addedIds);
         }
 
@@ -4594,12 +4594,12 @@ public partial class VersionedFhirStore : IFhirStore
                 addedIds.Add(relativeUrl);
             }
 
-            // add any incuded resources
+            // add any included resources
             AddInclusions(bundle, resource, resultParameters, addedIds);
 
             // check for include:iterate directives
 
-            // add any reverse incuded resources
+            // add any reverse included resources
             AddReverseInclusions(bundle, resource, resultParameters, addedIds);
         }
 

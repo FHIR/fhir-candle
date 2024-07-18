@@ -85,14 +85,14 @@ public class CandleClient
     /// <returns>
     /// The resource as created on the server, or an exception if the create failed.
     /// </returns>
-    public virtual Task<TResource?> CreateAsync<TResource>(
+    public virtual Task<TResource?> ConditionalCreateAsync<TResource>(
         TResource resource, 
         SearchParams condition, 
         CancellationToken? ct = null) 
             where TResource : Resource
     {
         CreateClientIfNeeded();
-        return _client.CreateAsync(resource, condition, ct);
+        return _client.ConditionalCreateAsync(resource, condition, ct);
     }
 
     /// <summary>Fetches a typed resource from a FHIR resource endpoint.</summary>
@@ -192,7 +192,7 @@ public class CandleClient
     /// <returns>
     /// The body of the updated resource, unless ReturnFullResource is set to "false".
     /// </returns>
-    public virtual Task<TResource?> UpdateAsync<TResource>(
+    public virtual Task<TResource?> ConditionalUpdateAsync<TResource>(
         TResource resource, 
         SearchParams condition, 
         bool versionAware = false, 
@@ -200,7 +200,7 @@ public class CandleClient
             where TResource : Resource
     {
         CreateClientIfNeeded();
-        return _client.UpdateAsync(resource, condition, versionAware, ct);
+        return _client.ConditionalUpdateAsync(resource, condition, versionAware, ct);
     }
 
     /// <summary>Delete a resource at the given endpoint.</summary>
@@ -239,16 +239,28 @@ public class CandleClient
         await _client.DeleteAsync(resource, ct);
     }
 
-    /// <summary>Conditionally delete a resource.</summary>
+    /// <summary>Conditionally delete a single resource.</summary>
     /// <param name="resourceType">The type of resource to delete.</param>
     /// <param name="condition">   Criteria to use to match the resource to delete.</param>
     /// <param name="ct">          (Optional)</param>
     /// <returns>A System.Threading.Tasks.Task.</returns>
-    public virtual async System.Threading.Tasks.Task DeleteAsync(string resourceType, SearchParams condition, CancellationToken? ct = null)
+    public virtual async System.Threading.Tasks.Task ConditionalDeleteSingleAsync(string resourceType, SearchParams condition, CancellationToken? ct = null)
     {
         CreateClientIfNeeded();
-        await _client.DeleteAsync(resourceType, condition, ct);
+        await _client.ConditionalDeleteSingleAsync(condition, resourceType, ct: ct);
     }
+
+    /// <summary>Conditionally delete one or more resources.</summary>
+    /// <param name="resourceType">The type of resource to delete.</param>
+    /// <param name="condition">   Criteria to use to match the resource to delete.</param>
+    /// <param name="ct">          (Optional)</param>
+    /// <returns>A System.Threading.Tasks.Task.</returns>
+    public virtual async System.Threading.Tasks.Task ConditionalDeleteMultipleAsync(string resourceType, SearchParams condition, CancellationToken? ct = null)
+    {
+        CreateClientIfNeeded();
+        await _client.ConditionalDeleteMultipleAsync(condition, resourceType, ct);
+    }
+
 
     /// <summary>Patch a resource on a FHIR Endpoint.</summary>
     /// <param name="location">       Location of the resource.</param>
@@ -288,14 +300,14 @@ public class CandleClient
     ///  perform.</param>
     /// <param name="ct">             (Optional)</param>
     /// <returns>The patched resource.</returns>
-    public Task<TResource?> PatchAsync<TResource>(
+    public Task<TResource?> ConditionalPatchAsync<TResource>(
         SearchParams condition, 
         Parameters patchParameters, 
         CancellationToken? ct = null) 
             where TResource : Resource
     {
         CreateClientIfNeeded();
-        return _client.PatchAsync<TResource>(condition, patchParameters, ct);
+        return _client.ConditionalPatchAsync<TResource>(condition, patchParameters, ct);
     }
 
     /// <summary>Retrieve the version history for a specific resource type.</summary>

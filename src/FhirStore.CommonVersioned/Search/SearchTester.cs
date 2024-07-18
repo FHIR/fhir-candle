@@ -193,7 +193,7 @@ public class SearchTester
                 // loop over any extracted values and test them against the chained parameters
                 foreach (ITypedElement node in extracted)
                 {
-                    // TODO(ginoc): add support for chaining into canonical references (QuestionnareResponse.questionnaire case)
+                    // TODO(ginoc): add support for chaining into canonical references (QuestionnaireResponse.questionnaire case)
                     if ((node == null) ||
                         (node.InstanceType != "Reference"))
                     {
@@ -215,7 +215,7 @@ public class SearchTester
                         ElementResolver = FhirStore.Resolve,
                     };
 
-                    string rt = resolved.InstanceType.ToString();
+                    string rt = resolved.InstanceType ?? "Resource";
 
                     if (sp.ChainedParameters.ContainsKey(rt))
                     {
@@ -257,7 +257,7 @@ public class SearchTester
             }
         }
 
-        // succesfully matching all parameters means this resource is a match
+        // successfully matching all parameters means this resource is a match
         return true;
     }
 
