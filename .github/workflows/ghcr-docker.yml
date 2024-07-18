@@ -32,9 +32,14 @@ jobs:
 
     - name: Extract metadata (tags, labels) for Docker
       id: meta
-      uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+      uses: docker/metadata-action@v5
       with:
+        labels: |
+          org.opencontainers.image.title=fhir-candle
+          org.opencontainers.image.description=A small in-memory FHIR server that can be used for testing and development - NOT for production workloads.
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push Docker image
       id: push

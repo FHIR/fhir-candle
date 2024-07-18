@@ -1,6 +1,7 @@
 # fhir-candle
 [![Tests](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml)
 [![Publish dotnet tool](https://img.shields.io/nuget/v/fhir-candle.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml)
+[![Publish Docker image on GitHub CR](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml)
 [![Deploy to subscriptions.argo.run](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml)
 
 When you need a small FHIR.
@@ -81,15 +82,15 @@ dotnet build src/fhir-candle/fhir-candle.csproj -c Release
 The output of the release build can be run (from the root directory of the repo)
 * on all platforms:
 ```
-dotnet ./src/fhir-candle/bin/Release/net7.0/fhir-candle.dll
+dotnet ./src/fhir-candle/bin/Release/net8.0/fhir-candle.dll
 ```
 * if you built on Windows:
 ```
-.\src\fhir-candle\bin\Release\net7.0\fhir-candle.exe
+.\src\fhir-candle\bin\Release\net8.0\fhir-candle.exe
 ```
 * if you built on Linux or MacOs:
 ```
-./src/fhir-candle/bin/Release/net7.0/fhir-candle
+./src/fhir-candle/bin/Release/net8.0/fhir-candle
 ```
 
 ### FHIR Tenants
