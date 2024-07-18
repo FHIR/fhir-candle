@@ -1,29 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RootNamespace>FhirCandle</RootNamespace>
-    <VersionPrefix>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</VersionPrefix>
-    <Version>$(VersionPrefix)</Version>
-    <AssemblyVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</AssemblyVersion>
-    <FileVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</FileVersion>
-  </PropertyGroup>
-  <ItemGroup>
-    <Compile Remove="Services\**" />
-    <EmbeddedResource Remove="Services\**" />
-    <None Remove="Services\**" />
-    <None Remove="Extensions\" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Extensions\" />
-    <Folder Include="Operations\" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Remove="Operations\" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="7.5.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
-  </ItemGroup>
+	<Import Project="..\..\fhir-candle.props" />
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<RootNamespace>FhirCandle</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Remove="Services\**" />
+		<EmbeddedResource Remove="Services\**" />
+		<None Remove="Services\**" />
+		<None Remove="Extensions\" />
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="Extensions\" />
+		<Folder Include="Operations\" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Remove="Operations\" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+	</ItemGroup>
 </Project>

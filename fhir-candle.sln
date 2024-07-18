@@ -19,9 +19,11 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Common", "src\Fh
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8B6BFF93-0260-40D3-BF26-175BC295D77B}"
 	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
 		.gitignore = .gitignore
 		CONTRIBUTING.MD = CONTRIBUTING.MD
 		Dockerfile = Dockerfile
+		fhir-candle.props = fhir-candle.props
 		LICENSE = LICENSE
 		README.md = README.md
 		THIRDPARTYNOTICES.md = THIRDPARTYNOTICES.md

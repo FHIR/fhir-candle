@@ -1,29 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+  <Import Project="..\..\fhir-candle.props" />
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>fhir.candle</RootNamespace>
     <StartupObject>fhir.candle.Program</StartupObject>
-    <VersionPrefix>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</VersionPrefix>
-    <Version>$(VersionPrefix)</Version>
-	<AssemblyName>$(AssemblyName.Replace(' ', '_'))</AssemblyName>
-	<AssemblyVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</AssemblyVersion>
-    <FileVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</FileVersion>
+    <Title>fhir-candle</Title>
+    <Description>A small in-memory FHIR server that can be used for testing and development - NOT for production workloads.</Description>
+
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <PackageVersion>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</PackageVersion>
+    <PackageTags>HL7;FHIR;Firely;Package;SDK;</PackageTags>
     <ToolCommandName>fhir-candle</ToolCommandName>
     <PackageOutputPath>..\..\nupkg</PackageOutputPath>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/GinoCanessa/fhir-candle</PackageProjectUrl>
-    <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/GinoCanessa/fhir-candle</RepositoryUrl>
-    <Authors>GinoCanessa</Authors>
-    <Title>fhir-candle</Title>
     <PackageTags>fhir;server;</PackageTags>
-    <NeutralLanguage>en</NeutralLanguage>
+
     <!--<StaticWebAssetBasePath>ui</StaticWebAssetBasePath>-->
     <StaticWebAssetBasePath Condition="$(StaticWebAssetBasePath) == ''">/</StaticWebAssetBasePath>
     <!--<AddRazorSupportForMvc>true</AddRazorSupportForMvc>
@@ -33,14 +28,18 @@
 		<GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
 		<EnableDefaultRazorGenerateItems>true</EnableDefaultRazorGenerateItems>-->
   </PropertyGroup>
+
   <PropertyGroup Condition=" '$(RunConfiguration)' == 'candle' " />
   <PropertyGroup Condition=" '$(RunConfiguration)' == 'candle-test-data' " />
   <PropertyGroup Condition=" '$(RunConfiguration)' == 'subscriptions' " />
+
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
+
   <PropertyGroup Condition=" '$(RunConfiguration)' == 'ecr' " />
   <PropertyGroup Condition=" '$(RunConfiguration)' == 'davinci-cdex' " />
+
   <ItemGroup>
     <Compile Remove="data\**" />
     <Compile Remove="Processors\**" />
@@ -66,22 +65,25 @@
     <None Remove="Ucum\ucum-essence.xml" />
     <None Remove="Ucum\UCUM.g4" />
   </ItemGroup>
+
   <ItemGroup>
     <Compile Remove="Services\FhirWebSerializer.cs" />
     <Compile Remove="Services\IFhirWebSerializer.cs" />
   </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="ini-parser-netcore" Version="3.0.0" />
-    <PackageReference Include="MailKit" Version="4.5.0" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.7.2" />
+    <PackageReference Include="MailKit" Version="4.7.1.1" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.9.1" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="4.6.0" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.7.2" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.9.1" />
     <PackageReference Include="BlazorMonaco" Version="3.2.0" IncludeAssets="all" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="System.CommandLine.NamingConventionBinder" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.5.2" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.0.0" />
     <PackageReference Include="zulip-cs-lib" Version="0.0.1-alpha.6" />
   </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\FhirCandle.Ui.Common\FhirCandle.Ui.Common.csproj" />
     <ProjectReference Include="..\FhirCandle.Ui.R4B\FhirCandle.Ui.R4B.csproj" />
@@ -92,9 +94,11 @@
     <ProjectReference Include="..\FhirStore.R4B\FhirCandle.R4B.csproj" />
     <ProjectReference Include="..\FhirStore.R5\FhirCandle.R5.csproj" />
   </ItemGroup>
+
   <ItemGroup>
     <None Remove="Models\" />
   </ItemGroup>
+
   <ItemGroup>
     <None Include="..\..\fhirData\**\*.json" Pack="true" PackagePath="fhirData\%(RecursiveDir)%(FileName)%(Extension)">
       <!--<None Include="..\..\fhirData\**\*.json" Pack="true">-->
@@ -103,11 +107,7 @@
       <IncludeInPackage>true</IncludeInPackage>
     </None>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\">
-      <Link>README.md</Link>
-    </None>
-  </ItemGroup>
+
   <ItemGroup>
     <None Include="bin\Release\net7.0\publish\wwwroot\**\*.*" Pack="true" PackagePath="staticwebassets\%(RecursiveDir)%(FileName)%(Extension)">
       <Link>wwwroot\_content\%(RecursiveDir)%(FileName)%(Extension)</Link>
@@ -115,14 +115,17 @@
       <IncludeInPackage>true</IncludeInPackage>
     </None>
   </ItemGroup>
+
   <ItemGroup>
     <Include Update="wwwroot\css\monaco.css" Pack="false">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Include>
   </ItemGroup>
+
   <ItemGroup>
     <Folder Include="Pages\Client\" />
   </ItemGroup>
+
   <Target Name="AddPackageAliases" BeforeTargets="ResolveReferences" Outputs="%(PackageReference.Identity)">
     <ItemGroup>
       <ReferencePath Condition="'%(FileName)'=='FhirCandle.R4'">

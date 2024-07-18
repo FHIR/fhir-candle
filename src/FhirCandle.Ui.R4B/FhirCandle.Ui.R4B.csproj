@@ -1,29 +1,31 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <VersionPrefix>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</VersionPrefix>
-    <Version>$(VersionPrefix)</Version>
-    <AssemblyVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</AssemblyVersion>
-    <FileVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</FileVersion>
-  </PropertyGroup>
-  <ItemGroup>
-    <SupportedPlatform Include="browser" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.6.0" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="4.6.0" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.6.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.3" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\FhirCandle.Ui.Common\FhirCandle.Ui.Common.csproj" />
-    <ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
-    <ProjectReference Include="..\FhirStore.R4B\FhirCandle.R4B.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Components\Pickers\" />
-    <Folder Include="wwwroot\" />
-  </ItemGroup>
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+	<Import Project="..\..\fhir-candle.props" />
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <Compile Remove="wwwroot\**" />
+	  <Content Remove="wwwroot\**" />
+	  <EmbeddedResource Remove="wwwroot\**" />
+	  <None Remove="wwwroot\**" />
+	</ItemGroup>
+	<ItemGroup>
+		<SupportedPlatform Include="browser" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.9.1" />
+		<PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="4.6.0" />
+		<PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.9.1" />
+		<PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.7" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\FhirCandle.Ui.Common\FhirCandle.Ui.Common.csproj" />
+		<ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
+		<ProjectReference Include="..\FhirStore.R4B\FhirCandle.R4B.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="Components\Pickers\" />
+	</ItemGroup>
 </Project>

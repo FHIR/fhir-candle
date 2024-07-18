@@ -1,21 +1,19 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <VersionPrefix>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</VersionPrefix>
-    <Version>$(VersionPrefix)</Version>
-    <AssemblyVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</AssemblyVersion>
-    <FileVersion>$([System.DateTime]::Now.ToString("0.yyyy.MMdd.HHmm"))</FileVersion>
-  </PropertyGroup>
-  <Import Project="..\FhirStore.CommonVersioned\FhirStore.CommonVersioned.projitems" Label="Shared" />
-  <ItemGroup>
-    <PackageReference Include="Hl7.Fhir.R4B" Version="5.7.0" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Client\" />
-  </ItemGroup>
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\fhir-candle.props" />
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+	</PropertyGroup>
+	<Import Project="..\FhirStore.CommonVersioned\FhirStore.CommonVersioned.projitems" Label="Shared" />
+	<ItemGroup>
+	  <Compile Remove="Client\**" />
+	  <EmbeddedResource Remove="Client\**" />
+	  <None Remove="Client\**" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Hl7.Fhir.R4B" Version="5.8.2" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
+	</ItemGroup>
 </Project>
