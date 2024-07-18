@@ -1,6 +1,7 @@
 # fhir-candle
 [![Tests](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml)
 [![Publish dotnet tool](https://img.shields.io/nuget/v/fhir-candle.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml)
+[![Publish Docker image on GitHub CR](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml)
 [![Deploy to subscriptions.argo.run](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml)
 
 When you need a small FHIR.
