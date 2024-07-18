@@ -1,7 +1,7 @@
 # fhir-candle
-[![Tests](https://github.com/GinoCanessa/fhir-candle/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/GinoCanessa/fhir-candle/actions/workflows/build-and-test.yml)
-[![Publish dotnet tool](https://img.shields.io/nuget/v/fhir-candle.svg)](https://github.com/GinoCanessa/fhir-candle/actions/workflows/nuget-tool.yml)
-[![Deploy to subscriptions.argo.run](https://github.com/GinoCanessa/fhir-candle/actions/workflows/argo-subscriptions.yml/badge.svg)](https://github.com/GinoCanessa/fhir-candle/actions/workflows/argo-subscriptions.yml)
+[![Tests](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml)
+[![Publish dotnet tool](https://img.shields.io/nuget/v/fhir-candle.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml)
+[![Deploy to subscriptions.argo.run](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml)
 
 When you need a small FHIR.
 
@@ -18,7 +18,7 @@ While there are many existing OSS FHIR servers, somewhere between most and all o
 
 ## FHIR Foundation Project Statement
 * Maintainers: Gino Canessa
-* Issues / Discussion: Any issues should be submitted on [GitHub](https://github.com/ginocanessa/fhir-candle/issues). Discussion can be performed here on GitHub, or on the [dotnet stream on chat.fhir.org](https://chat.fhir.org/#narrow/stream/179171-dotnet).
+* Issues / Discussion: Any issues should be submitted on [GitHub](https://github.com/FHIR/fhir-candle/issues). Discussion can be performed here on GitHub, or on the [dotnet stream on chat.fhir.org](https://chat.fhir.org/#narrow/stream/179171-dotnet).
 * License: This software is offered under the [MIT License](LICENSE).
 * Contribution Policy: See [Contributing](#contributing).
 * Security Information: See [Security](#security).
@@ -26,8 +26,8 @@ While there are many existing OSS FHIR servers, somewhere between most and all o
 ## Contributing
 
 There are many ways to contribute:
-* [Submit bugs](https://github.com/ginocanessa/fhir-candle/issues) and help us verify fixes as they are checked in.
-* Review the [source code changes](https://github.com/ginocanessa/fhir-candle/pulls).
+* [Submit bugs](https://github.com/FHIR/fhir-candle/issues) and help us verify fixes as they are checked in.
+* Review the [source code changes](https://github.com/FHIR/fhir-candle/pulls).
 * Engage with users and developers on the [dotnet stream on FHIR Zulip](https://chat.fhir.org/#narrow/stream/179171-dotnet)
 * Contribute features or bug fixes - see [Contributing](CONTRIBUTING.md) for details.
 
@@ -38,7 +38,7 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ### Security
 
-To report a security issue, please use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/ginocanessa/fhir-candle/security/advisories/new) tab.
+To report a security issue, please use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/FHIR/fhir-candle/security/advisories/new) tab.
 
 For more information, please see the [Security Readme](SECURITY.MD).
 
