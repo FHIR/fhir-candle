@@ -21,10 +21,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		.editorconfig = .editorconfig
 		.gitignore = .gitignore
+		.github\workflows\argo-subscriptions.yml = .github\workflows\argo-subscriptions.yml
+		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
 		CONTRIBUTING.MD = CONTRIBUTING.MD
 		Dockerfile = Dockerfile
 		fhir-candle.props = fhir-candle.props
+		.github\workflows\ghcr-docker.yml = .github\workflows\ghcr-docker.yml
 		LICENSE = LICENSE
+		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
 		README.md = README.md
 		THIRDPARTYNOTICES.md = THIRDPARTYNOTICES.md
 	EndProjectSection
