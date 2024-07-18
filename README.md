@@ -82,15 +82,15 @@ dotnet build src/fhir-candle/fhir-candle.csproj -c Release
 The output of the release build can be run (from the root directory of the repo)
 * on all platforms:
 ```
-dotnet ./src/fhir-candle/bin/Release/net7.0/fhir-candle.dll
+dotnet ./src/fhir-candle/bin/Release/net8.0/fhir-candle.dll
 ```
 * if you built on Windows:
 ```
-.\src\fhir-candle\bin\Release\net7.0\fhir-candle.exe
+.\src\fhir-candle\bin\Release\net8.0\fhir-candle.exe
 ```
 * if you built on Linux or MacOs:
 ```
-./src/fhir-candle/bin/Release/net7.0/fhir-candle
+./src/fhir-candle/bin/Release/net8.0/fhir-candle
 ```
 
 ### FHIR Tenants
