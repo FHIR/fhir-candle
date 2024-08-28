@@ -2507,13 +2507,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>A CompiledExpression.</returns>
     public static CompiledExpression CompileFhirPathCriteria(string fpc)
     {
-        MatchCollection matches = _fhirpathVarMatcher().Matches(fpc);
+        //MatchCollection matches = _fhirpathVarMatcher().Matches(fpc);
 
-        // replace the variable with a resolve call
-        foreach (string matchValue in matches.Select(m => m.Value).Distinct())
-        {
-            fpc = fpc.Replace(matchValue, $"'{FhirPathVariableResolver._fhirPathPrefix}{matchValue.Substring(1)}'.resolve()");
-        }
+        //// replace the variable with a resolve call
+        //foreach (string matchValue in matches.Select(m => m.Value).Distinct())
+        //{
+        //    fpc = fpc.Replace(matchValue, $"'{FhirPathVariableResolver._fhirPathPrefix}{matchValue.Substring(1)}'.resolve()");
+        //}
 
         return _compiler.Compile(fpc);
     }

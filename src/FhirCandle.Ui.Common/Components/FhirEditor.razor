@@ -11,6 +11,8 @@
     OnDidInit="EditorOnDidInit"/>
 
 @code {
+#pragma warning disable BL0007
+
     private string _language = "json";
 
     /// <summary>Gets or sets the language.</summary>
@@ -48,7 +50,6 @@
         }
     }
 
-
     private string _editorContent = "";
 
     /// <summary>Gets or sets the editor content.</summary>
@@ -70,6 +71,9 @@
 
     /// <summary>The editor.</summary>
     private StandaloneCodeEditor? _editor = null;
+
+#pragma warning restore BL0007
+
 
     /// <summary>Resource construction options.</summary>
     /// <param name="editor">The editor.</param>
@@ -147,3 +151,4 @@
     {
     }
 }
+

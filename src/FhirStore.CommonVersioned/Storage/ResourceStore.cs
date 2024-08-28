@@ -1445,20 +1445,15 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             ITypedElement currentTE = current.ToTypedElement();
 
-            FhirPathVariableResolver resolver = new FhirPathVariableResolver()
-            {
-                NextResolver = _store.Resolve,
-                Variables = new()
-                {
-                    { "current", currentTE },
-                    //{ "previous", Enumerable.Empty<ITypedElement>() },
-                },
-            };
-
             FhirEvaluationContext fpContext = new FhirEvaluationContext(currentTE.ToScopedNode())
             {
                 TerminologyService = _store.Terminology,
-                ElementResolver = resolver.Resolve,
+                ElementResolver = _store.Resolve,
+                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                {
+                    { "current", [currentTE] },
+                    { "previous", [] },
+                },
             };
 
             PerformSubscriptionTest(
@@ -1496,20 +1491,15 @@ public class ResourceStore<T> : IVersionedResourceStore
             ITypedElement currentTE = current.ToTypedElement();
             ITypedElement previousTE = previous.ToTypedElement();
 
-            FhirPathVariableResolver resolver = new FhirPathVariableResolver()
-            {
-                NextResolver = _store.Resolve,
-                Variables = new()
-                {
-                    { "current", currentTE },
-                    { "previous", previousTE },
-                },
-            };
-
             FhirEvaluationContext fpContext = new FhirEvaluationContext(currentTE.ToScopedNode())
             {
                 TerminologyService = _store.Terminology,
-                ElementResolver = resolver.Resolve,
+                ElementResolver = _store.Resolve,
+                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                {
+                    { "current", [currentTE] },
+                    { "previous", [previousTE] },
+                },
             };
 
             //string test = "meta.tag.memberOf('http://hl7.org/fhir/us/davinci-cdex/ValueSet/cdex-work-queue')";
@@ -1547,20 +1537,15 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             ITypedElement previousTE = previous.ToTypedElement();
 
-            FhirPathVariableResolver resolver = new FhirPathVariableResolver()
-            {
-                NextResolver = _store.Resolve,
-                Variables = new()
-                {
-                    //{ "current", currentTE },
-                    { "previous", previousTE },
-                },
-            };
-
             FhirEvaluationContext fpContext = new FhirEvaluationContext(previousTE.ToScopedNode())
             {
                 TerminologyService = _store.Terminology,
-                ElementResolver = resolver.Resolve,
+                ElementResolver = _store.Resolve,
+                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                {
+                    { "current", [] },
+                    { "previous", [ previousTE ] },
+                },
             };
 
             PerformSubscriptionTest(

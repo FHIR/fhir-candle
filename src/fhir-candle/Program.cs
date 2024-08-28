@@ -48,9 +48,6 @@ public static partial class Program
     [GeneratedRegex("(http[s]*:\\/\\/.*(:\\d+)*)")]
     private static partial Regex InputUrlFormatRegex();
 
-    /// <summary>(Immutable) The default subscription expiration.</summary>
-    private static readonly int DefaultSubscriptionExpirationMinutes = 30;
-
     /// <summary>Main entry-point for this application.</summary>
     /// <param name="args">An array of command-line argument strings.</param>
     public static async Task<int> Main(string[] args)

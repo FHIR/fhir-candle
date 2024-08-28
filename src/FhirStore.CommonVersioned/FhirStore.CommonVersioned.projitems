@@ -12,7 +12,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Client\CandleClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\SearchParamDefinitionExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ExecutableSubscriptionInfo.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Models\FhirPathVariableResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedResultParameter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedSearchParameter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Interactions\IFhirInteractionHook.cs" />
