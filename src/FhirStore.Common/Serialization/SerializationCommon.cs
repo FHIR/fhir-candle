@@ -22,7 +22,11 @@ public static class SerializationCommon
         string format = "application/json",
         bool pretty = false)
     {
+#if NET8_0_OR_GREATER
         string[] formatComponents = format.Split(';', StringSplitOptions.TrimEntries);
+#else
+        string[] formatComponents = format.Split(';').Select(s => s.Trim()).ToArray();
+#endif
 
         System.Text.Encoding encoding = System.Text.Encoding.UTF8;
         switch (formatComponents[0])

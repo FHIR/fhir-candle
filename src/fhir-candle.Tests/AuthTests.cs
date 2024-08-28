@@ -11,6 +11,7 @@ using fhir.candle.Tests.Extensions;
 using FhirCandle.Models;
 using FhirCandle.Smart;
 using FhirCandle.Storage;
+using FhirCandle.Utils;
 using FluentAssertions;
 using Microsoft.IdentityModel.Tokens;
 using Org.BouncyCastle.Asn1.Ocsp;
@@ -364,7 +365,7 @@ public class AuthTestFixture
     {
         ConfigR4 = new()
         {
-            FhirVersion = TenantConfiguration.SupportedFhirVersions.R4,
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
             ControllerName = Name,
             BaseUrl = "http://localhost:5826/fhir/r4",
             SmartRequired = true,
@@ -377,13 +378,13 @@ public class AuthTestFixture
 
         AuthR4 = new SmartAuthManager(
             Tenants, 
-            new ServerConfiguration()
+            new()
             {
                 PublicUrl = "http://localhost:5826/fhir/r4",
                 ListenPort = 5826,
                 OpenBrowser = false,
-                TenantsR4 = new() { Name },
-                SmartRequiredTenants = new() { Name },
+                TenantsR4 = [ Name ],
+                SmartRequiredTenants = [ Name ],
             },
             null);
 

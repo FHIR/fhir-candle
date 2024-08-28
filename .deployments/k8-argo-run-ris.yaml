@@ -82,7 +82,7 @@ metadata:
   name: subscriptions-ingress
   namespace: subscriptions-ri
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   tls:
   - hosts:

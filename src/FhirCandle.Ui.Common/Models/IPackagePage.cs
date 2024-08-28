@@ -1,7 +1,13 @@
-﻿// <copyright file="IRiPage.cs" company="Microsoft Corporation">
+﻿// <copyright file="IPackagePage.cs" company="Microsoft Corporation">
 //     Copyright (c) Microsoft Corporation. All rights reserved.
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace FhirCandle.Models;
 
@@ -14,11 +20,11 @@ namespace FhirCandle.Models;
 /// <param name="FhirVersionNumeric">The FHIR version numeric.</param>
 /// <param name="OnlyShowOnEndpoint">The only show on endpoint.</param>
 public record struct PackagePageInfo(
-    string ContentFor, 
-    string PageName, 
-    string Description, 
-    string RoutePath, 
-    string FhirVersionLiteral, 
+    string ContentFor,
+    string PageName,
+    string Description,
+    string RoutePath,
+    string FhirVersionLiteral,
     string FhirVersionNumeric,
     string OnlyShowOnEndpoint);
 

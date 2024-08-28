@@ -64,7 +64,10 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
         bool includeExamples);
 
     /// <summary>Gets a list of names of the loaded packages.</summary>
-    HashSet<string> LoadedPackages { get; }
+    HashSet<string> LoadedPackageDirectives { get; }
+
+    /// <summary>Gets a list of identifiers of the loaded packages.</summary>
+    HashSet<string> LoadedPackageIds { get; }
 
     /// <summary>Gets the loaded supplements.</summary>
     HashSet<string> LoadedSupplements { get; }

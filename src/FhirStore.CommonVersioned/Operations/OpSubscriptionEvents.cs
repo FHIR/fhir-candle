@@ -22,11 +22,11 @@ public class OpSubscriptionEvents : IFhirOperation
     public string OperationVersion => "0.0.1";
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    public Dictionary<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion => new()
+    public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-events" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4B, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-events" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R5, "http://hl7.org/fhir/OperationDefinition/Subscription-events" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-events" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-events" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://hl7.org/fhir/OperationDefinition/Subscription-events" },
     };
 
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
@@ -91,7 +91,7 @@ public class OpSubscriptionEvents : IFhirOperation
             opResponse = new()
             {
                 StatusCode = HttpStatusCode.NotFound,
-                Outcome = FhirCandle.Serialization.Utils.BuildOutcomeForRequest(
+                Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Subscription {ctx.Id} was not found."),
             };
@@ -179,7 +179,7 @@ public class OpSubscriptionEvents : IFhirOperation
                 eventNumbers,
                 "query-event",
                 contentLevel),
-            Outcome = FhirCandle.Serialization.Utils.BuildOutcomeForRequest(
+            Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.OK,
                 $"Events for subscription {ctx.Id}."),
         };
@@ -191,7 +191,7 @@ public class OpSubscriptionEvents : IFhirOperation
     /// <param name="fhirVersion">The FHIR version.</param>
     /// <returns>The definition.</returns>
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
-        FhirCandle.Models.TenantConfiguration.SupportedFhirVersions fhirVersion)
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
         Hl7.Fhir.Model.OperationDefinition def = new()
         {
@@ -255,9 +255,9 @@ public class OpSubscriptionEvents : IFhirOperation
 
         string GetReturnDocValue() => fhirVersion switch
         {
-            Models.TenantConfiguration.SupportedFhirVersions.R4 => "The operation returns a valid notification bundle, with the first entry being a Parameters resource. The bundle type is \"history\".",
-            Models.TenantConfiguration.SupportedFhirVersions.R4B => "The operation returns a valid notification bundle, with the first entry being a SubscriptionStatus resource. The bundle type is \"history\".",
-            Models.TenantConfiguration.SupportedFhirVersions.R5 => "The operation returns a valid notification bundle, with the first entry being a SubscriptionStatus resource. The bundle type is \"subscription-notification\".",
+            Utils.FhirReleases.FhirSequenceCodes.R4 => "The operation returns a valid notification bundle, with the first entry being a Parameters resource. The bundle type is \"history\".",
+            Utils.FhirReleases.FhirSequenceCodes.R4B => "The operation returns a valid notification bundle, with the first entry being a SubscriptionStatus resource. The bundle type is \"history\".",
+            Utils.FhirReleases.FhirSequenceCodes.R5 => "The operation returns a valid notification bundle, with the first entry being a SubscriptionStatus resource. The bundle type is \"subscription-notification\".",
             _ => string.Empty,
         };
 

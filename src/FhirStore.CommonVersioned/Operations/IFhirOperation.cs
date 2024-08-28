@@ -8,7 +8,7 @@ using System.Net;
 
 namespace FhirCandle.Operations;
 
-/// <summary>Interface for executalbe FHIR operations.</summary>
+/// <summary>Interface for executable FHIR operations.</summary>
 public interface IFhirOperation
 {
     /// <summary>Gets the name of the operation.</summary>
@@ -18,7 +18,7 @@ public interface IFhirOperation
     string OperationVersion { get; }
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    Dictionary<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion { get; }
+    Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion { get; }
 
     /// <summary>Gets a value indicating whether this object is named query.</summary>
     bool IsNamedQuery { get; }
@@ -76,7 +76,7 @@ public interface IFhirOperation
     /// <summary>Gets an OperationDefinition resource describing this operation.</summary>
     /// <param name="fhirVersion">The FHIR version.</param>
     /// <returns>The definition.</returns>
-    Hl7.Fhir.Model.OperationDefinition? GetDefinition(FhirCandle.Models.TenantConfiguration.SupportedFhirVersions fhirVersion);
+    Hl7.Fhir.Model.OperationDefinition? GetDefinition(FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion);
 
 }
 

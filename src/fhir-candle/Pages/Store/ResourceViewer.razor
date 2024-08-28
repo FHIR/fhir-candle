@@ -1,4 +1,5 @@
-﻿@using Microsoft.FluentUI.AspNetCore.Components;
+﻿@using FhirCandle.Configuration
+@using Microsoft.FluentUI.AspNetCore.Components;
 
 @page "/store/resource-viewer"
 
@@ -6,7 +7,7 @@
 @using BlazorMonaco
 @using BlazorMonaco.Editor
 
-@inject ServerConfiguration ServerConfig
+@inject CandleConfig ServerConfig
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JS
 @inject IFhirStoreManager StoreManager
@@ -30,7 +31,7 @@
 
         @switch (_store.Config.FhirVersion)
         {
-            case TenantConfiguration.SupportedFhirVersions.R4:
+            case FhirReleases.FhirSequenceCodes.R4:
                 <FhirCandle.Ui.R4.Components.FhirEditorLinks
                     BaseUrl="@_store.Config.BaseUrl"
                     ResourceType="@ResourceType"
@@ -39,7 +40,7 @@
                     />
                 break;
 
-            case TenantConfiguration.SupportedFhirVersions.R4B:
+            case FhirReleases.FhirSequenceCodes.R4B:
                 <FhirCandle.Ui.R4B.Components.FhirEditorLinks
                     BaseUrl="@_store.Config.BaseUrl"
                     ResourceType="@ResourceType"
@@ -48,7 +49,7 @@
                     />
                 break;
 
-            case TenantConfiguration.SupportedFhirVersions.R5:
+            case FhirReleases.FhirSequenceCodes.R5:
                 <FhirCandle.Ui.R5.Components.FhirEditorLinks
                     BaseUrl="@_store.Config.BaseUrl"
                     ResourceType="@ResourceType"
@@ -85,7 +86,7 @@
 
             @switch (_store.Config.FhirVersion)
             {
-                case TenantConfiguration.SupportedFhirVersions.R4:
+                case FhirReleases.FhirSequenceCodes.R4:
                     <FhirCandle.Ui.R4.Components.FhirEditorLinks
                         BaseUrl="@_store.Config.BaseUrl"
                         ResourceType="@ResourceType"
@@ -94,7 +95,7 @@
                         />
                     break;
 
-                case TenantConfiguration.SupportedFhirVersions.R4B:
+                case FhirReleases.FhirSequenceCodes.R4B:
                     <FhirCandle.Ui.R4B.Components.FhirEditorLinks
                         BaseUrl="@_store.Config.BaseUrl"
                         ResourceType="@ResourceType"
@@ -103,7 +104,7 @@
                         />
                     break;
 
-                case TenantConfiguration.SupportedFhirVersions.R5:
+                case FhirReleases.FhirSequenceCodes.R5:
                     <FhirCandle.Ui.R5.Components.FhirEditorLinks
                         BaseUrl="@_store.Config.BaseUrl"
                         ResourceType="@ResourceType"

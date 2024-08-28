@@ -3,7 +3,9 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+using fhir.candle._ForPackages;
 using fhir.candle.Services;
+using FhirCandle.Utils;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -60,14 +62,14 @@ public class RegistryPackageManifest
 
             foreach (string key in manifest.Versions.Keys)
             {
-                FhirPackageService.FhirSequenceEnum sequence = FhirPackageService.SequenceForVersion(key);
+                FhirReleases.FhirSequenceCodes sequence = FhirReleases.FhirVersionToSequence(key);
                 bool remove = false;
                 string name = manifest.Versions[key].Name;
 
                 if (string.IsNullOrEmpty(manifest.Versions[key].PackageKind) ||
                     (manifest.Versions[key].PackageKind == "??"))
                 {
-                    if (FhirPackageService.PackageIsFhirCore(name))
+                    if (VersionExtensions.PackageIsFhirCore(name))
                     {
                         manifest.Versions[key].PackageKind = "Core";
                     }
@@ -81,9 +83,9 @@ public class RegistryPackageManifest
                     (manifest.Versions[key].FhirVersion == "??"))
                 {
                     if (manifest.Versions[key].PackageKind.Equals("core", StringComparison.OrdinalIgnoreCase) &&
-                        (sequence != FhirPackageService.FhirSequenceEnum.Unknown))
+                        (sequence != FhirReleases.FhirSequenceCodes.Unknown))
                     {
-                        manifest.Versions[key].FhirVersion = FhirPackageService.LiteralForSequence(sequence);
+                        manifest.Versions[key].FhirVersion = sequence.ToLiteral();
                     }
                     else
                     {
@@ -93,7 +95,7 @@ public class RegistryPackageManifest
 
                 if (manifest.Versions[key].PackageKind.Equals("core", StringComparison.OrdinalIgnoreCase))
                 {
-                    manifest.Versions[key].FhirVersion = FhirPackageService.LiteralForSequence(sequence);
+                    manifest.Versions[key].FhirVersion = sequence.ToLiteral();
                 }
 
                 if (remove)

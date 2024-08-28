@@ -8,6 +8,7 @@ extern alias coreR5;
 
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using FhirCandle.Utils;
 using fhir.candle.Tests.Models;
 using FluentAssertions;
 using System.Text.Json;
@@ -71,7 +72,7 @@ public class R5Tests
 
         _config = new()
         {
-            FhirVersion = TenantConfiguration.SupportedFhirVersions.R5,
+            FhirVersion = FhirReleases.FhirSequenceCodes.R5,
             ControllerName = "r5",
             BaseUrl = "http://localhost/fhir/r5",
             LoadDirectory = loadDirectory,
@@ -436,7 +437,7 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
     [FileData("data/r5/SubscriptionTopic-encounter-complete.json")]
     public void ParseTopic(string json)
     {
-        HttpStatusCode sc = candleR5.FhirCandle.Serialization.Utils.TryDeserializeFhir(
+        HttpStatusCode sc = candleR5.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
             json,
             "application/fhir+json",
             out Hl7.Fhir.Model.Resource? r,
@@ -463,7 +464,7 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
     [FileData("data/r5/Subscription-encounter-complete.json")]
     public void ParseSubscription(string json)
     {
-        HttpStatusCode sc = candleR5.FhirCandle.Serialization.Utils.TryDeserializeFhir(
+        HttpStatusCode sc = candleR5.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
             json,
             "application/fhir+json",
             out Hl7.Fhir.Model.Resource? r,
@@ -494,7 +495,7 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
     [FileData("data/r5/Bundle-notification-handshake.json")]
     public void ParseHandshake(string json)
     {
-        HttpStatusCode sc = candleR5.FhirCandle.Serialization.Utils.TryDeserializeFhir(
+        HttpStatusCode sc = candleR5.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
             json,
             "application/fhir+json",
             out Hl7.Fhir.Model.Resource? r,

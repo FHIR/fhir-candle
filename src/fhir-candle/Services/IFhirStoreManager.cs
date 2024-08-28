@@ -4,10 +4,11 @@
 // </copyright>
 
 using FhirCandle.Models;
+using FhirCandle.Storage;
 using FhirStore.Smart;
 using Microsoft.Extensions.Hosting;
 
-namespace FhirCandle.Storage;
+namespace fhir.candle.Services;
 
 /// <summary>Interface for FHIR store manager.</summary>
 public interface IFhirStoreManager : IHostedService, IReadOnlyDictionary<string, IFhirStore>

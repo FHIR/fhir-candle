@@ -10,6 +10,7 @@ extern alias candleR5;
 using fhir.candle.Tests.Models;
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using FhirCandle.Utils;
 using FluentAssertions;
 using Hl7.Fhir.Model;
 using Hl7.Fhir.Rest;
@@ -31,15 +32,15 @@ public class FhirStoreTests
     {
         new object[]
         {
-            TenantConfiguration.SupportedFhirVersions.R4,
+            FhirReleases.FhirSequenceCodes.R4,
         },
         new object[]
         {
-            TenantConfiguration.SupportedFhirVersions.R4B,
+            FhirReleases.FhirSequenceCodes.R4B,
         },
         new object[]
         {
-            TenantConfiguration.SupportedFhirVersions.R5,
+            FhirReleases.FhirSequenceCodes.R5,
         },
     };
 
@@ -62,14 +63,14 @@ public class FhirStoreTests
     internal IFhirStore _candleR5;
 
     /// <summary>The stores.</summary>
-    internal Dictionary<TenantConfiguration.SupportedFhirVersions, IFhirStore> _stores = new();
+    internal Dictionary<FhirReleases.FhirSequenceCodes, IFhirStore> _stores = new();
 
     /// <summary>The expected REST resources.</summary>
-    internal Dictionary<TenantConfiguration.SupportedFhirVersions, int> _expectedRestResources = new()
+    internal Dictionary<FhirReleases.FhirSequenceCodes, int> _expectedRestResources = new()
     {
-        { TenantConfiguration.SupportedFhirVersions.R4, 146 },
-        { TenantConfiguration.SupportedFhirVersions.R4B, 140 },
-        { TenantConfiguration.SupportedFhirVersions.R5, 157 },
+        { FhirReleases.FhirSequenceCodes.R4, 146 },
+        { FhirReleases.FhirSequenceCodes.R4B, 140 },
+        { FhirReleases.FhirSequenceCodes.R5, 157 },
     };
 
     /// <summary>
@@ -80,7 +81,7 @@ public class FhirStoreTests
     {
         _configR4 = new()
         {
-            FhirVersion = TenantConfiguration.SupportedFhirVersions.R4,
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
             ControllerName = "r4",
             BaseUrl = "http://localhost/fhir/r4",
             AllowExistingId = true,
@@ -89,7 +90,7 @@ public class FhirStoreTests
 
         _configR4B = new()
         {
-            FhirVersion = TenantConfiguration.SupportedFhirVersions.R4B,
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4B,
             ControllerName = "r4b",
             BaseUrl = "http://localhost/fhir/r4b",
             AllowExistingId = true,
@@ -98,7 +99,7 @@ public class FhirStoreTests
 
         _configR5 = new()
         {
-            FhirVersion = TenantConfiguration.SupportedFhirVersions.R5,
+            FhirVersion = FhirReleases.FhirSequenceCodes.R5,
             ControllerName = "r5",
             BaseUrl = "http://localhost/fhir/r5",
             AllowExistingId = true,
@@ -107,15 +108,15 @@ public class FhirStoreTests
 
         _candleR4 = new candleR4::FhirCandle.Storage.VersionedFhirStore();
         _candleR4.Init(_configR4);
-        _stores.Add(TenantConfiguration.SupportedFhirVersions.R4, _candleR4);
+        _stores.Add(FhirReleases.FhirSequenceCodes.R4, _candleR4);
 
         _candleR4B = new candleR4B::FhirCandle.Storage.VersionedFhirStore();
         _candleR4B.Init(_configR4B);
-        _stores.Add(TenantConfiguration.SupportedFhirVersions.R4B, _candleR4B);
+        _stores.Add(FhirReleases.FhirSequenceCodes.R4B, _candleR4B);
 
         _candleR5 = new candleR5::FhirCandle.Storage.VersionedFhirStore();
         _candleR5.Init(_configR5);
-        _stores.Add(TenantConfiguration.SupportedFhirVersions.R5, _candleR5);
+        _stores.Add(FhirReleases.FhirSequenceCodes.R5, _candleR5);
     }
 
     /// <summary>Gets store for version.</summary>
@@ -123,17 +124,17 @@ public class FhirStoreTests
     ///  illegal values.</exception>
     /// <param name="version">The version.</param>
     /// <returns>The store for version.</returns>
-    public IFhirStore GetStoreForVersion(TenantConfiguration.SupportedFhirVersions version)
+    public IFhirStore GetStoreForVersion(FhirReleases.FhirSequenceCodes version)
     {
         switch (version)
         {
-            case TenantConfiguration.SupportedFhirVersions.R4:
+            case FhirReleases.FhirSequenceCodes.R4:
                 return _candleR4;
 
-            case TenantConfiguration.SupportedFhirVersions.R4B:
+            case FhirReleases.FhirSequenceCodes.R4B:
                 return _candleR4B;
 
-            case TenantConfiguration.SupportedFhirVersions.R5:
+            case FhirReleases.FhirSequenceCodes.R5:
                 return _candleR5;
         }
 
@@ -161,7 +162,7 @@ public class MetadataJson : IClassFixture<FhirStoreTests>
 
     [Theory]
     [MemberData(nameof(Configurations))]
-    public void GetMetadata(TenantConfiguration.SupportedFhirVersions version)
+    public void GetMetadata(FhirReleases.FhirSequenceCodes version)
     {
         IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
 
@@ -219,7 +220,7 @@ public class MetadataXml : IClassFixture<FhirStoreTests>
 
     [Theory]
     [MemberData(nameof(Configurations))]
-    public void GetMetadata(TenantConfiguration.SupportedFhirVersions version)
+    public void GetMetadata(FhirReleases.FhirSequenceCodes version)
     {
         IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
 
@@ -278,7 +279,7 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
 
     [Theory]
     [MemberData(nameof(Configurations))]
-    public void PatientCRUD(TenantConfiguration.SupportedFhirVersions version)
+    public void PatientCRUD(FhirReleases.FhirSequenceCodes version)
     {
         string json1 = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + _id + "\",\"language\":\"en\"}";
         string json2 = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + _id + "\",\"language\":\"en-US\"}";
@@ -424,7 +425,7 @@ public class TestResourceWrongLocation: IClassFixture<FhirStoreTests>
 
     [Theory]
     [MemberData(nameof(Configurations))]
-    public void ResourceWrongLocation(TenantConfiguration.SupportedFhirVersions version)
+    public void ResourceWrongLocation(FhirReleases.FhirSequenceCodes version)
     {
         string json = "{\"resourceType\":\"" + _resourceType1 + "\",\"id\":\"" + _id + "\",\"language\":\"en\"}";
 
@@ -474,7 +475,7 @@ public class TestResourceInvalidElement : IClassFixture<FhirStoreTests>
 
     [Theory]
     [MemberData(nameof(Configurations))]
-    public void ResourceWrongLocation(TenantConfiguration.SupportedFhirVersions version)
+    public void ResourceWrongLocation(FhirReleases.FhirSequenceCodes version)
     {
         string json = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + _id + "\",\"garbage\":true}";
 

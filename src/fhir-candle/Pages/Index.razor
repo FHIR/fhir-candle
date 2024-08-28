@@ -1,4 +1,5 @@
-﻿@using Microsoft.FluentUI.AspNetCore.Components;
+﻿@using FhirCandle.Configuration
+@using Microsoft.FluentUI.AspNetCore.Components;
 
 @page "/"
 
@@ -7,7 +8,7 @@
 
 @inject NavigationManager NavigationManager
 @inject IFhirStoreManager StoreManager
-@inject ServerConfiguration ServerConfig
+@inject CandleConfig ServerConfig
 @inject IJSRuntime JS
 
 @implements IDisposable
@@ -40,7 +41,7 @@
 
         @switch (StoreManager.First().Value.Config.FhirVersion)
         {
-            case TenantConfiguration.SupportedFhirVersions.R4:
+            case FhirReleases.FhirSequenceCodes.R4:
                 <fhir.candle.Components.FhirStoreTileR4 
                     StoreName="@StoreManager.First().Key" 
                     Store="@StoreManager.First().Value"
@@ -50,7 +51,7 @@
                     />
                 break;
 
-            case TenantConfiguration.SupportedFhirVersions.R4B:
+            case FhirReleases.FhirSequenceCodes.R4B:
                 <fhir.candle.Components.FhirStoreTileR4B
                     StoreName="@StoreManager.First().Key" 
                     Store="@StoreManager.First().Value"
@@ -60,7 +61,7 @@
                     />
                 break;
 
-            case TenantConfiguration.SupportedFhirVersions.R5:
+            case FhirReleases.FhirSequenceCodes.R5:
                 <fhir.candle.Components.FhirStoreTileR5
                     StoreName="@StoreManager.First().Key" 
                     Store="@StoreManager.First().Value"
@@ -82,7 +83,7 @@
                     <FluentCard>
                         @switch (kvp.Value.Config.FhirVersion)
                         {
-                            case TenantConfiguration.SupportedFhirVersions.R4:
+                            case FhirReleases.FhirSequenceCodes.R4:
                                 <fhir.candle.Components.FhirStoreTileR4 
                                     StoreName="@kvp.Key" 
                                     Store="@kvp.Value"
@@ -92,7 +93,7 @@
                                     />
                                 break;
 
-                            case TenantConfiguration.SupportedFhirVersions.R4B:
+                            case FhirReleases.FhirSequenceCodes.R4B:
                                 <fhir.candle.Components.FhirStoreTileR4B
                                     StoreName="@kvp.Key" 
                                     Store="@kvp.Value"
@@ -102,7 +103,7 @@
                                     />
                                 break;
 
-                            case TenantConfiguration.SupportedFhirVersions.R5:
+                            case FhirReleases.FhirSequenceCodes.R5:
                                 <fhir.candle.Components.FhirStoreTileR5
                                     StoreName="@kvp.Key" 
                                     Store="@kvp.Value"

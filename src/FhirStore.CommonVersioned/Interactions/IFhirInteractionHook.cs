@@ -20,7 +20,7 @@ public interface IFhirInteractionHook
     string Id { get; }
 
     /// <summary>Gets the supported FHIR versions.</summary>
-    HashSet<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions> SupportedFhirVersions { get; }
+    HashSet<FhirCandle.Utils.FhirReleases.FhirSequenceCodes> SupportedFhirVersions { get; }
 
     /// <summary>
     /// If this operation requires a specific FHIR package to be loaded, the package identifier.

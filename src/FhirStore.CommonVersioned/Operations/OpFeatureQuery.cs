@@ -15,11 +15,11 @@ public class OpFeatureQuery : IFhirOperation
     public string OperationVersion => "0.0.1";
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    public Dictionary<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion => new()
+    public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4, "http://www.hl7.org/fhir/uv/capstmt/OperationDefinition/feature-query" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4B, "http://www.hl7.org/fhir/uv/capstmt/OperationDefinition/feature-query" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R5, "http://www.hl7.org/fhir/uv/capstmt/OperationDefinition/feature-query" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://www.hl7.org/fhir/uv/capstmt/OperationDefinition/feature-query" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://www.hl7.org/fhir/uv/capstmt/OperationDefinition/feature-query" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://www.hl7.org/fhir/uv/capstmt/OperationDefinition/feature-query" },
     };
 
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
@@ -54,7 +54,7 @@ public class OpFeatureQuery : IFhirOperation
     /// <summary>Gets the supported resources.</summary>
     public HashSet<string> SupportedResources => [];
 
-    private readonly HashSet<string> _exlcudedParams =
+    private readonly HashSet<string> _excludedParams =
     [
         "_format",
     ];
@@ -108,7 +108,7 @@ public class OpFeatureQuery : IFhirOperation
         
         // check for feature requests as http parameters
         List<FeatureRequestRecord?> featureRequests = paramValues
-            .Where(p => !_exlcudedParams.Contains(p))
+            .Where(p => !_excludedParams.Contains(p))
             .Select(ParseFeatureRequestParam)
             .Where(r => r != null)
             .ToList() ?? [];
@@ -274,7 +274,7 @@ public class OpFeatureQuery : IFhirOperation
     }
     
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
-        FhirCandle.Models.TenantConfiguration.SupportedFhirVersions fhirVersion)
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
         return new()
         {

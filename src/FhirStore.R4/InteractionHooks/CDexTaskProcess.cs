@@ -21,9 +21,9 @@ public class CDexTaskProcess : IFhirInteractionHook
     public string Id => "036a8204-4d4f-46fc-a715-900bc2790a16";
 
     /// <summary>Gets the supported FHIR versions.</summary>
-    public HashSet<TenantConfiguration.SupportedFhirVersions> SupportedFhirVersions => new()
+    public HashSet<FhirCandle.Utils.FhirReleases.FhirSequenceCodes> SupportedFhirVersions => new()
     {
-        TenantConfiguration.SupportedFhirVersions.R4,
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4,
     };
 
     /// <summary>

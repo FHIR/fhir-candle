@@ -24,11 +24,11 @@ public class OpTestIfFhir : IFhirOperation
     public string OperationVersion => "0.0.1";
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    public Dictionary<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion => new()
+    public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4, "http://ginoc.io/fhir/OperationDefinition/test-if-fhir" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4B, "http://ginoc.io/fhir/OperationDefinition/test-if-fhir" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R5, "http://ginoc.io/fhir/OperationDefinition/test-if-fhir" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://ginoc.io/fhir/OperationDefinition/test-if-fhir" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://ginoc.io/fhir/OperationDefinition/test-if-fhir" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://ginoc.io/fhir/OperationDefinition/test-if-fhir" },
     };
 
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
@@ -151,7 +151,7 @@ public class OpTestIfFhir : IFhirOperation
     /// <param name="fhirVersion">The FHIR version.</param>
     /// <returns>The definition.</returns>
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
-        FhirCandle.Models.TenantConfiguration.SupportedFhirVersions fhirVersion)
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
         Hl7.Fhir.Model.OperationDefinition def = new()
         {
@@ -180,9 +180,9 @@ public class OpTestIfFhir : IFhirOperation
 
         string GetReturnDocValue() => fhirVersion switch
         {
-            Models.TenantConfiguration.SupportedFhirVersions.R4 => "An OperationOutcome with information about the submitted data.",
-            Models.TenantConfiguration.SupportedFhirVersions.R4B => "An OperationOutcome with information about the submitted data.",
-            Models.TenantConfiguration.SupportedFhirVersions.R5 => "An OperationOutcome with information about the submitted data.",
+            Utils.FhirReleases.FhirSequenceCodes.R4 => "An OperationOutcome with information about the submitted data.",
+            Utils.FhirReleases.FhirSequenceCodes.R4B => "An OperationOutcome with information about the submitted data.",
+            Utils.FhirReleases.FhirSequenceCodes.R5 => "An OperationOutcome with information about the submitted data.",
             _ => string.Empty,
         };
 

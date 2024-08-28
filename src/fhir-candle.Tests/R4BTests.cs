@@ -8,6 +8,7 @@ extern alias coreR4B;
 
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using FhirCandle.Utils;
 using fhir.candle.Tests.Models;
 using FluentAssertions;
 using System.Text.Json;
@@ -60,7 +61,7 @@ public class R4BTests
 
         _config = new()
         {
-            FhirVersion = TenantConfiguration.SupportedFhirVersions.R4B,
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4B,
             ControllerName = "r4b",
             BaseUrl = "http://localhost/fhir/r4b",
             LoadDirectory = loadDirectory,
@@ -353,7 +354,7 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
     [FileData("data/r4b/SubscriptionTopic-encounter-complete-qualified.json")]
     public void ParseTopic(string json)
     {
-        HttpStatusCode sc = candleR4B.FhirCandle.Serialization.Utils.TryDeserializeFhir(
+        HttpStatusCode sc = candleR4B.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
             json,
             "application/fhir+json",
             out Hl7.Fhir.Model.Resource? r,
@@ -383,7 +384,7 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
     [FileData("data/r4b/Subscription-encounter-complete.json")]
     public void ParseSubscription(string json)
     {
-        HttpStatusCode sc = candleR4B.FhirCandle.Serialization.Utils.TryDeserializeFhir(
+        HttpStatusCode sc = candleR4B.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
             json,
             "application/fhir+json",
             out Hl7.Fhir.Model.Resource? r,
@@ -415,7 +416,7 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
     [FileData("data/r4b/Bundle-notification-handshake.json")]
     public void ParseHandshake(string json)
     {
-        HttpStatusCode sc = candleR4B.FhirCandle.Serialization.Utils.TryDeserializeFhir(
+        HttpStatusCode sc = candleR4B.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
             json,
             "application/fhir+json",
             out Hl7.Fhir.Model.Resource? r,

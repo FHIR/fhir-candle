@@ -1,4 +1,5 @@
-﻿@using Microsoft.FluentUI.AspNetCore.Components;
+﻿@using FhirCandle.Configuration
+@using Microsoft.FluentUI.AspNetCore.Components;
 @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 
 @namespace fhir.candle.Layout
@@ -8,7 +9,7 @@
 @inject ProtectedLocalStorage BrowserStore
 @inject IFhirStoreManager StoreManager
 @inject ISmartAuthManager AuthManager
-@inject ServerConfiguration ServerConfig
+@inject CandleConfig ServerConfig
 @inject IJSRuntime JS
 @inject IDialogService DialogService
 

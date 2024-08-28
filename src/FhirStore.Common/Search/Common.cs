@@ -3,7 +3,11 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+#if NET8_0_OR_GREATER
 using System.Collections.Immutable;
+#elif NETSTANDARD2_0
+using FhirCandle.Polyfill;
+#endif
 
 namespace FhirCandle.Search;
 
@@ -11,7 +15,11 @@ namespace FhirCandle.Search;
 public static class Common
 {
     /// <summary>(Immutable) Options for controlling the HTTP.</summary>
+#if NET8_0_OR_GREATER
     public static readonly ImmutableHashSet<string> HttpParameters = ImmutableHashSet.Create(new string[]
+#elif NETSTANDARD2_0
+    public static readonly HashSet<string> HttpParameters = ImmutableHashSet<string>.Create(new string[]
+#endif
     {
         /// <summary>Override the HTTP content negotiation.</summary>
         "_format",
@@ -27,7 +35,11 @@ public static class Common
     });
 
     /// <summary>(Immutable) Options for controlling the search result.</summary>
+#if NET8_0_OR_GREATER
     public static readonly ImmutableHashSet<string> SearchResultParameters = ImmutableHashSet.Create(new string[]
+#elif NETSTANDARD2_0
+    public static readonly HashSet<string> SearchResultParameters = ImmutableHashSet<string>.Create(new string[]
+#endif
     {
         /// <summary>Request different types of handling for contained resources.</summary>
         "_contained",

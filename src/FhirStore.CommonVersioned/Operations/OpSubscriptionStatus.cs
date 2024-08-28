@@ -21,11 +21,11 @@ public class OpSubscriptionStatus : IFhirOperation
     public string OperationVersion => "0.0.1";
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    public Dictionary<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion => new()
+    public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4B, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status" },
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R5, "http://hl7.org/fhir/OperationDefinition/Subscription-status" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://hl7.org/fhir/OperationDefinition/Subscription-status" },
     };
 
     /// <summary>Gets a value indicating whether this object is named query.</summary>
@@ -213,7 +213,7 @@ public class OpSubscriptionStatus : IFhirOperation
         {
             StatusCode = HttpStatusCode.OK,
             Resource = bundle,
-            Outcome = FhirCandle.Serialization.Utils.BuildOutcomeForRequest(
+            Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.OK,
                 "See resource for $status data"),
         };
@@ -226,7 +226,7 @@ public class OpSubscriptionStatus : IFhirOperation
     /// <param name="fhirVersion">The FHIR version.</param>
     /// <returns>The definition.</returns>
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
-        FhirCandle.Models.TenantConfiguration.SupportedFhirVersions fhirVersion)
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
         Hl7.Fhir.Model.OperationDefinition def = new()
         {
