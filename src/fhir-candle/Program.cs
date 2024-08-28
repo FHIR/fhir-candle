@@ -58,12 +58,6 @@ public static partial class Program
             .AddEnvironmentVariables()
             .Build();
 
-        //// in order to process help correctly we have to build a parser independent of the command
-        //SCL.Parsing.Parser parser = BuildParser(envConfig);
-
-        //// attempt a parse
-        //SCL.Parsing.ParseResult pr = parser.Parse(args);
-
         SCL.RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
         foreach (SCL.Option option in BuildCliOptions(typeof(CandleConfig), envConfig: envConfig))
         {
@@ -73,129 +67,15 @@ public static partial class Program
         rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, context.GetCancellationToken()));
 
         return await rootCommand.InvokeAsync(args);
-
-        //// check for invalid arguments, help, a generate command with no subcommand, or a generate with no packages to trigger the nicely formatted help
-        //if (pr.UnmatchedTokens.Any() ||
-        //    !pr.Tokens.Any() ||
-        //    (!pr.CommandResult.Command.Parents?.Any() ?? false) ||
-        //    pr.Tokens.Any(t => t.Value.Equals("-?", StringComparison.Ordinal)) ||
-        //    pr.Tokens.Any(t => t.Value.Equals("-h", StringComparison.Ordinal)) ||
-        //    pr.Tokens.Any(t => t.Value.Equals("--help", StringComparison.Ordinal)) ||
-        //    pr.Tokens.Any(t => t.Value.Equals("help", StringComparison.Ordinal)))
-
-        //{
-        //    return await parser.InvokeAsync(args);
-        //}
-
-
-        //return await RunServer(pr);
-
-
-
-        //// in order to process help correctly we have to build a parser independent of the command
-        //SCL.Parsing.Parser parser = BuildParser(envConfig);
-
-        //// attempt a parse
-        //SCL.Parsing.ParseResult pr = parser.Parse(args);
-
-        //return await parser.InvokeAsync(args);
-
-        ////System.CommandLine.Parsing.Parser clParser = new System.CommandLine.Builder.CommandLineBuilder(_rootCommand).Build();
-
-        //return await rootCommand.InvokeAsync(args);
     }
 
-
-    private static SCL.Parsing.Parser BuildParser(IConfiguration envConfig)
-    {
-        SCL.RootCommand command = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (SCL.Option option in BuildCliOptions(typeof(CandleConfig), envConfig: envConfig))
-        {
-            // note that 'global' here is just recursive DOWNWARD
-            command.AddGlobalOption(option);
-            TrackIfEnum(option);
-        }
-
-        //command.SetHandler(async (context) => await RunServer(context.ParseResult, context.GetCancellationToken()));
-
-        SCL.Parsing.Parser parser = new CommandLineBuilder(command)
-            .UseExceptionHandler((ex, ctx) =>
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-                ctx.ExitCode = 1;
-            })
-            .UseDefaults()
-            .UseHelp(ctx =>
-            {
-                foreach (SCL.Option option in _optsWithEnums)
-                {
-                    StringBuilder sb = new();
-                    if (option.Aliases.Count != 0)
-                    {
-                        sb.AppendLine(string.Join(", ", option.Aliases));
-                    }
-                    else
-                    {
-                        sb.AppendLine(option.Name);
-                    }
-
-                    Type et = option.ValueType;
-
-                    if (option.ValueType.IsGenericType)
-                    {
-                        et = option.ValueType.GenericTypeArguments.First();
-                    }
-
-                    if (option.ValueType.IsArray)
-                    {
-                        et = option.ValueType.GetElementType()!;
-                    }
-
-                    foreach (MemberInfo mem in et.GetMembers(BindingFlags.Public | BindingFlags.Static).Where(m => m.DeclaringType == et).OrderBy(m => m.Name))
-                    {
-                        sb.AppendLine($"  opt: {mem.Name}");
-                    }
-
-                    ctx.HelpBuilder.CustomizeSymbol(
-                        option,
-                        firstColumnText: (ctx) => sb.ToString());
-                    //secondColumnText: (ctx) => option.Description);
-                }
-            })
-            .Build();
-
-        return parser;
-
-        void TrackIfEnum(SCL.Option option)
-        {
-            if (option.ValueType.IsEnum)
-            {
-                _optsWithEnums.Add(option);
-                return;
-            }
-
-            if (option.ValueType.IsGenericType)
-            {
-                if (option.ValueType.GenericTypeArguments.First().IsEnum)
-                {
-                    _optsWithEnums.Add(option);
-                }
-
-                return;
-            }
-
-            if (option.ValueType.IsArray)
-            {
-                if (option.ValueType.GetElementType()!.IsEnum)
-                {
-                    _optsWithEnums.Add(option);
-                }
-
-                return;
-            }
-        }
-    }
-
+    /// <summary>
+    /// Builds the command line options for the specified type.
+    /// </summary>
+    /// <param name="forType">The type for which to build the command line options.</param>
+    /// <param name="excludeFromType">The type to exclude from the command line options.</param>
+    /// <param name="envConfig">The environment configuration.</param>
+    /// <returns>An enumerable collection of command line options.</returns>
     private static IEnumerable<SCL.Option> BuildCliOptions(
         Type forType,
         Type? excludeFromType = null,
