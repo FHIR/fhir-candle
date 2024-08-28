@@ -8,6 +8,7 @@
   "profiles": {
     "candle": {
       "commandName": "Project",
+      "commandLineArgs": " --r4 r4 --disable-ui",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {

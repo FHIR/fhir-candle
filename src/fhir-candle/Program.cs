@@ -4,39 +4,18 @@
 // </copyright>
 
 using SCL = System.CommandLine; // this is present to disambiguate Option from System.CommandLine and Microsoft.FluentUI.AspNetCore.Components
-using System;
-using System.CommandLine.Binding;
-using System.CommandLine.Invocation;
 using System.Diagnostics;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using System.Threading;
-using fhir.candle.Models;
 using fhir.candle.Services;
-using FhirCandle.Extensions;
 using FhirCandle.Models;
-using FhirCandle.Storage;
 using FhirCandle.Utils;
-using Microsoft.AspNetCore;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
 using Microsoft.FluentUI.AspNetCore.Components;
-using fhir.candle;
-using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
-using System.Text;
 using System.CommandLine;
 using FhirCandle.Configuration;
 using System.Reflection;
-using static Org.BouncyCastle.Math.EC.ECCurve;
-using BlazorMonaco.Languages;
 
 namespace fhir.candle;
 
@@ -217,6 +196,7 @@ public static partial class Program
             builder.Services.AddHostedService<ISmartAuthManager>(sp => sp.GetRequiredService<ISmartAuthManager>());
 
             builder.Services.AddControllers();
+            builder.Services.AddHttpClient();
 
             if (config.DisableUi == true)
             {
@@ -226,6 +206,8 @@ public static partial class Program
                     Console.WriteLine("fhir-candle <<< ERROR: Cannot disable UI when SMART is configured.");
                     return -1;
                 }
+
+                builder.Services.AddAntiforgery();
             }
             else
             {
@@ -236,7 +218,6 @@ public static partial class Program
                 //    options.Conventions.AddPageRoute("/store", "/store/{storeName}");
                 //});
                 //builder.Services.AddServerSideBlazor();
-                builder.Services.AddHttpClient();
                 builder.Services.AddFluentUIComponents();
 
                 // set our default UI page
