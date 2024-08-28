@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ri-subscriptions
+  namespace: subscriptions-ri
+  labels:
+    app: ri-subscriptions
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ri-subscriptions
+  template:
+    metadata:
+      labels:
+        app: ri-subscriptions
+    spec:
+      containers:
+      - name: fhir-candle
+        image: ghcr.io/fhir/fhir-candle:latest
+        command: ["dotnet"]
+        args: ["fhir-candle.dll", "--reference-implementation", "subscriptions", "--load-package", "hl7.fhir.uv.subscriptions-backport#1.1.0", "--load-examples", "false", "--protect-source", "true", "-m", "200"]
+        envFrom:
+        - configMapRef:
+            name: special-config
+        env:
+        - name: Listen_Port
+          value: "5826"
+        - name: Public_Url
+          value: "https://subscriptions.argo.run"
+        - name: Zulip_Email
+          valueFrom:
+            secretKeyRef:
+              name: argonaut-secrets
+              key: Zulip_Email
+        - name: Zulip_Key
+          valueFrom:
+            secretKeyRef:
+              name: argonaut-secrets
+              key: Zulip_Key
+        - name: Zulip_Url
+          value: "https://chat.fhir.org"
+        - name: SMTP_Host
+          valueFrom:
+            secretKeyRef:
+              name: argonaut-secrets
+              key: SMTP_Host
+        - name: SMTP_Password
+          valueFrom:
+            secretKeyRef:
+              name: argonaut-secrets
+              key: SMTP_Password
+        - name: SMTP_Port
+          valueFrom:
+            secretKeyRef:
+              name: argonaut-secrets
+              key: SMTP_Port
+        - name: SMTP_User
+          valueFrom:
+            secretKeyRef:
+              name: argonaut-secrets
+              key: SMTP_User
+        ports:
+        - containerPort: 5826
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: subscriptions-ri
+  name: ri-subscriptions
+spec:
+  selector:
+    app: ri-subscriptions
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5826
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: subscriptions-ingress
+  namespace: subscriptions-ri
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+  - hosts:
+    - subscriptions.argo.run
+    - cdex.ri.argo.run
+    - ecr.ri.argo.run
+    - vitals-server.ri.argo.run
+    - feature-cs-server.ri.argo.run
+    secretName: tls-secret
+  rules:
+  - host: subscriptions.argo.run
+    http:
+      paths:
+      - backend:
+          service:
+            name: ri-subscriptions
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  - host: cdex.ri.argo.run
+    http:
+      paths:
+      - backend:
+          service:
+            name: ri-cdex
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  - host: ecr.ri.argo.run
+    http:
+      paths:
+      - backend:
+          service:
+            name: ri-ecr
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  - host: vitals-server.ri.argo.run
+    http:
+      paths:
+      - backend:
+          service:
+            name: ri-vitals-server
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  - host: feature-cs-server.ri.argo.run
+    http:
+      paths:
+      - backend:
+          service:
+            name: ri-feature-cs-server
+            port:
+              number: 80
+        path: /
+        pathType: Prefix

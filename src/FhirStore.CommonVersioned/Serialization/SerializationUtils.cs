@@ -18,7 +18,7 @@ using System.Diagnostics;
 namespace FhirCandle.Serialization;
 
 /// <summary>Serialization utilities.</summary>
-public static class Utils
+public static class SerializationUtils
 {
     /// <summary>The JSON parser.</summary>
     private static FhirJsonPocoDeserializer _jsonParser = new(new FhirJsonPocoDeserializerSettings()

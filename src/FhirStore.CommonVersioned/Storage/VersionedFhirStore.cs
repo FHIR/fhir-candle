@@ -7,6 +7,7 @@ using FhirCandle.Search;
 using FhirCandle.Models;
 using FhirCandle.Operations;
 using FhirCandle.Subscriptions;
+using FhirCandle.Utils;
 using Hl7.Fhir.ElementModel;
 using Hl7.Fhir.FhirPath;
 using Hl7.Fhir.Model;
@@ -63,7 +64,7 @@ public partial class VersionedFhirStore : IFhirStore
     private static FhirPathCompiler _compiler = null!;
 
     /// <summary>The store.</summary>
-    private Dictionary<string, IVersionedResourceStore> _store = new();
+    private Dictionary<string, IVersionedResourceStore> _store = [];
 
     /// <summary>The search tester.</summary>
     private SearchTester _searchTester;
@@ -72,7 +73,7 @@ public partial class VersionedFhirStore : IFhirStore
     public IEnumerable<string> SupportedResources => _store.Keys.ToArray();
 
     /// <summary>(Immutable) The cache of compiled search parameter extraction functions.</summary>
-    private readonly ConcurrentDictionary<string, CompiledExpression> _compiledSearchParameters = new();
+    private readonly ConcurrentDictionary<string, CompiledExpression> _compiledSearchParameters = [];
 
     /// <summary>The sp lock object.</summary>
     private object _spLockObject = new();
@@ -84,10 +85,10 @@ public partial class VersionedFhirStore : IFhirStore
     internal static SubscriptionConverter _subscriptionConverter = null!;
 
     /// <summary>(Immutable) The topics, by id.</summary>
-    internal readonly ConcurrentDictionary<string, ParsedSubscriptionTopic> _topics = new();
+    internal readonly ConcurrentDictionary<string, ParsedSubscriptionTopic> _topics = [];
 
     /// <summary>(Immutable) The subscriptions, by id.</summary>
-    internal readonly ConcurrentDictionary<string, ParsedSubscription> _subscriptions = new();
+    internal readonly ConcurrentDictionary<string, ParsedSubscription> _subscriptions = [];
 
     /// <summary>(Immutable) The FHIRPath variable matcher.</summary>
     [GeneratedRegex("[%][\\w\\-]+", RegexOptions.Compiled)]
@@ -103,19 +104,22 @@ public partial class VersionedFhirStore : IFhirStore
     private const string _capabilityStatementId = "metadata";
 
     /// <summary>The operations supported by this server, by name.</summary>
-    private Dictionary<string, IFhirOperation> _operations = new();
+    private Dictionary<string, IFhirOperation> _operations = [];
 
     /// <summary>The loaded hooks.</summary>
-    private Dictionary<string, string> _hookNamesById = new();
+    private Dictionary<string, string> _hookNamesById = [];
 
     /// <summary>The system hooks.</summary>
-    private Dictionary<string, Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>> _hooksByInteractionByResource = new();
+    private Dictionary<string, Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>> _hooksByInteractionByResource = [];
 
     /// <summary>The loaded directives.</summary>
-    private HashSet<string> _loadedDirectives = new();
+    private HashSet<string> _loadedDirectives = [];
+
+    /// <summary>List of ids of the loaded packages.</summary>
+    private HashSet<string> _loadedPackageIds = [];
 
     /// <summary>The loaded supplements.</summary>
-    private HashSet<string> _loadedSupplements = new();
+    private HashSet<string> _loadedSupplements = [];
 
     /// <summary>Values that represent load state codes.</summary>
     private enum LoadStateCodes
@@ -135,10 +139,10 @@ public partial class VersionedFhirStore : IFhirStore
     private int _maxResourceCount = 0;
 
     /// <summary>Queue of identifiers of resources (used for max resource cleaning).</summary>
-    private ConcurrentQueue<string> _resourceQ = new();
+    private ConcurrentQueue<string> _resourceQ = [];
 
     /// <summary>The received notifications.</summary>
-    private ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = new();
+    private ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = [];
 
     /// <summary>(Immutable) The received notification window ticks.</summary>
     private static readonly long _receivedNotificationWindowTicks = TimeSpan.FromMinutes(10).Ticks;
@@ -147,7 +151,7 @@ public partial class VersionedFhirStore : IFhirStore
     private bool _hasProtected = false;
 
     /// <summary>List of identifiers for the protected.</summary>
-    private HashSet<string> _protectedResources = new();
+    private HashSet<string> _protectedResources = [];
 
     /// <summary>The storage capacity timer.</summary>
     private System.Threading.Timer? _capacityMonitor = null;
@@ -163,8 +167,11 @@ public partial class VersionedFhirStore : IFhirStore
         _searchTester = new() { FhirStore = this, };
     }
 
-    /// <summary>Gets a list of names of the loaded packages.</summary>
-    public HashSet<string> LoadedPackages => _loadedDirectives;
+    /// <summary>Gets a list of the loaded package directives.</summary>
+    public HashSet<string> LoadedPackageDirectives => _loadedDirectives;
+
+    /// <summary>Gets a list of identifiers of the loaded packages.</summary>
+    public HashSet<string> LoadedPackageIds => _loadedPackageIds;
 
     /// <summary>Gets the loaded supplements.</summary>
     public HashSet<string> LoadedSupplements => _loadedSupplements;
@@ -352,7 +359,8 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             if ((!string.IsNullOrEmpty(fhirOp.RequiresPackage)) &&
-                (!_loadedDirectives.Contains(fhirOp.RequiresPackage)))
+                (!_loadedDirectives.Contains(fhirOp.RequiresPackage)) &&
+                (!_loadedPackageIds.Contains(fhirOp.RequiresPackage)))
             {
                 continue;
             }
@@ -396,7 +404,8 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             if ((!string.IsNullOrEmpty(hook.RequiresPackage)) &&
-                (!_loadedDirectives.Contains(hook.RequiresPackage)))
+                (!_loadedDirectives.Contains(hook.RequiresPackage)) &&
+                (!_loadedPackageIds.Contains(hook.RequiresPackage)))
             {
                 continue;
             }
@@ -474,18 +483,23 @@ public partial class VersionedFhirStore : IFhirStore
     {
         _loadReprocess = new();
         _loadState = LoadStateCodes.Read;
-
+        
         bool success;
 
         DirectoryInfo di;
+
+        string fhirVersionSuffix = "." + _config.FhirVersion.ToRLiteral().ToLowerInvariant();
 
         if ((!string.IsNullOrEmpty(directive)) &&
             (!string.IsNullOrEmpty(directory)))
         {
             _loadedDirectives.Add(directive);
-            if (directive.Contains('#'))
+
+            string packageId = directive.Split('#', '@').First();
+            _ = _loadedPackageIds.Add(packageId);
+            if (packageId.EndsWith(fhirVersionSuffix))
             {
-                _loadedDirectives.Add(directive.Split('#')[0]);
+                _ = _loadedPackageIds.Add(packageId[..^(fhirVersionSuffix.Length)]);
             }
 
             Console.WriteLine($"Store[{_config.ControllerName}] loading {directive}");
@@ -509,10 +523,6 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Console.WriteLine($"Store[{_config.ControllerName}]:{directive} <<< {ex.Message}");
                 }
-            }
-
-            if (!includeExamples)
-            {
             }
 
             FileInfo[] files;
@@ -540,6 +550,11 @@ public partial class VersionedFhirStore : IFhirStore
 
                     // process normally
                     default:
+                        if (file.Name.EndsWith(".openapi.json") ||
+                            file.Name.EndsWith(".schema.json"))
+                        {
+                            continue;
+                        }
                         break;
                 }
 
@@ -1226,7 +1241,7 @@ public partial class VersionedFhirStore : IFhirStore
             default:
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.NotImplemented,
                         $"Interaction not implemented: {ctx.Interaction}",
                         OperationOutcome.IssueType.NotSupported),
@@ -1299,7 +1314,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else
         {
-            HttpStatusCode sc = Utils.TryDeserializeFhir(
+            HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
                 ctx.SourceContent,
                 ctx.SourceFormat,
                 out r,
@@ -1307,7 +1322,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             if ((!sc.IsSuccessful()) || (r == null))
             {
-                OperationOutcome outcome = Utils.BuildOutcomeForRequest(
+                OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
                     $"Failed to deserialize resource, format: {ctx.SourceFormat}, error: {exMessage}",
                     OperationOutcome.IssueType.Structure);
@@ -1315,7 +1330,7 @@ public partial class VersionedFhirStore : IFhirStore
                 response = new()
                 {
                     Outcome = outcome,
-                    SerializedOutcome = Utils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
+                    SerializedOutcome = SerializationUtils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
                     StatusCode = sc,
                 };
 
@@ -1328,8 +1343,8 @@ public partial class VersionedFhirStore : IFhirStore
             r!,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1357,7 +1372,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Resource type: {content.TypeName} does not match request: {resourceType}",
                     OperationOutcome.IssueType.Invalid),
@@ -1370,7 +1385,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type: {resourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
@@ -1439,7 +1454,7 @@ public partial class VersionedFhirStore : IFhirStore
                                 ETag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"",
                                 LastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
                                 Location = $"{_config.BaseUrl}/{resourceType}/{r.Id}",
-                                Outcome = Utils.BuildOutcomeForRequest(
+                                Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.OK,
                                     $"Created {resourceType}/{r.Id}"),
                                 StatusCode = HttpStatusCode.OK,
@@ -1452,7 +1467,7 @@ public partial class VersionedFhirStore : IFhirStore
                         {
                             response = new()
                             {
-                                Outcome = Utils.BuildOutcomeForRequest(
+                                Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.PreconditionFailed,
                                     $"If-None-Exist query returned too many matches: {bundle?.Total}"),
                                 StatusCode = HttpStatusCode.PreconditionFailed,
@@ -1465,7 +1480,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = searchResp.Outcome ?? Utils.BuildOutcomeForRequest(
+                    Outcome = searchResp.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
                         $"If-None-Exist search failed: {ctx.IfNoneExist}"),
                     StatusCode = HttpStatusCode.PreconditionFailed,
@@ -1512,7 +1527,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     "Failed to create resource"),
                 StatusCode = HttpStatusCode.InternalServerError,
@@ -1537,7 +1552,7 @@ public partial class VersionedFhirStore : IFhirStore
             ETag = string.IsNullOrEmpty(stored.Meta?.VersionId) ? string.Empty : $"W/\"{stored.Meta.VersionId}\"",
             LastModified = stored.Meta?.LastUpdated == null ? string.Empty : stored.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
             Location = $"{_config.BaseUrl}/{resourceType}/{stored.Id}",
-            Outcome = Utils.BuildOutcomeForRequest(
+            Outcome = SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.Created,
                 $"Created {resourceType}/{stored.Id}"),
             StatusCode = HttpStatusCode.Created,
@@ -1563,7 +1578,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else
         {
-            HttpStatusCode sc = Utils.TryDeserializeFhir(
+            HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
                 ctx.SourceContent,
                 ctx.SourceFormat,
                 out r,
@@ -1571,7 +1586,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             if ((!sc.IsSuccessful()) || (r == null))
             {
-                OperationOutcome outcome = Utils.BuildOutcomeForRequest(
+                OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
                     $"Failed to deserialize resource, format: {ctx.SourceFormat}, error: {exMessage}",
                     OperationOutcome.IssueType.Structure);
@@ -1579,7 +1594,7 @@ public partial class VersionedFhirStore : IFhirStore
                 response = new()
                 {
                     Outcome = outcome,
-                    SerializedOutcome = Utils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
+                    SerializedOutcome = SerializationUtils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
                     StatusCode = sc,
                 };
 
@@ -1590,7 +1605,7 @@ public partial class VersionedFhirStore : IFhirStore
         if ((r!.TypeName != resourceType) ||
             (r is not Bundle requestBundle))
         {
-            OperationOutcome outcome = Utils.BuildOutcomeForRequest(
+            OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.UnprocessableEntity,
                 $"Cannot process non-Bundle resource type ({r.TypeName}) as a Bundle",
                 OperationOutcome.IssueType.Invalid);
@@ -1598,7 +1613,7 @@ public partial class VersionedFhirStore : IFhirStore
             response = new()
             {
                 Outcome = outcome,
-                SerializedOutcome = Utils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
+                SerializedOutcome = SerializationUtils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
                 StatusCode = HttpStatusCode.UnprocessableEntity,
             };
 
@@ -1610,8 +1625,8 @@ public partial class VersionedFhirStore : IFhirStore
             requestBundle,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1652,7 +1667,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             default:
                 {
-                    OperationOutcome outcome = Utils.BuildOutcomeForRequest(
+                    OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnprocessableEntity,
                         $"Unsupported Bundle process request! Type: {requestBundle.Type}",
                         OperationOutcome.IssueType.NotSupported);
@@ -1660,7 +1675,7 @@ public partial class VersionedFhirStore : IFhirStore
                     response = new()
                     {
                         Outcome = outcome,
-                        SerializedOutcome = Utils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
+                        SerializedOutcome = SerializationUtils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
                         StatusCode = HttpStatusCode.UnprocessableEntity,
                     };
 
@@ -1671,7 +1686,7 @@ public partial class VersionedFhirStore : IFhirStore
         response = new()
         {
             Resource = responseBundle,
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Processed {requestBundle.Type} bundle"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Processed {requestBundle.Type} bundle"),
             StatusCode = HttpStatusCode.OK,
         };
 
@@ -1690,8 +1705,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1715,7 +1730,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type: {ctx.ResourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
@@ -1784,7 +1799,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource {ctx.ResourceType}/{ctx.Id} not found"),
                 StatusCode = HttpStatusCode.NotFound,
@@ -1797,7 +1812,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = resource,
             ResourceType = resource.TypeName,
             Id = resource.Id,
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {ctx.ResourceType}/{ctx.Id}"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {ctx.ResourceType}/{ctx.Id}"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
@@ -1831,8 +1846,8 @@ public partial class VersionedFhirStore : IFhirStore
     {
         bool success = DoInstanceRead(ctx, out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1856,7 +1871,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
                     "Resource type is required",
                     OperationOutcome.IssueType.Structure),
@@ -1869,7 +1884,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type: {ctx.ResourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
@@ -1882,7 +1897,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
                     "ID required for instance level read.",
                     OperationOutcome.IssueType.Structure),
@@ -1948,7 +1963,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource: {ctx.ResourceType}/{ctx.Id} not found",
                     OperationOutcome.IssueType.Exception),
@@ -1965,7 +1980,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
                     $"If-Match: {ctx.IfMatch} does not equal found eTag: {eTag}",
                     OperationOutcome.IssueType.BusinessRule),
@@ -1982,7 +1997,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotModified,
                     $"Last modified: {lastModified} is prior to If-Modified-Since: {ctx.IfModifiedSince}",
                     OperationOutcome.IssueType.Informational),
@@ -1998,7 +2013,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
                     "Prior version exists, but If-None-Match is *"),
                 StatusCode = HttpStatusCode.PreconditionFailed,
@@ -2013,7 +2028,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.NotModified,
                         $"Read {ctx.ResourceType}/{ctx.Id} found version: {eTag}, equals If-None-Match: {ctx.IfNoneMatch}"),
                     StatusCode = HttpStatusCode.NotModified,
@@ -2032,7 +2047,7 @@ public partial class VersionedFhirStore : IFhirStore
             ETag = eTag,
             LastModified = lastModified,
             Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{_config.BaseUrl}/{r.TypeName}/{r.Id}",
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Read {r.TypeName}/{r.Id}"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Read {r.TypeName}/{r.Id}"),
             StatusCode = HttpStatusCode.OK,
         };
 
@@ -2051,7 +2066,7 @@ public partial class VersionedFhirStore : IFhirStore
         out string resourceType,
         out string id)
     {
-        HttpStatusCode sc = Utils.TryDeserializeFhir(
+        HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
             content,
             mimeType,
             out Resource? r,
@@ -2144,7 +2159,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else
         {
-            HttpStatusCode sc = Utils.TryDeserializeFhir(
+            HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
                 ctx.SourceContent,
                 ctx.SourceFormat,
                 out r,
@@ -2152,7 +2167,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             if ((!sc.IsSuccessful()) || (r == null))
             {
-                OperationOutcome outcome = Utils.BuildOutcomeForRequest(
+                OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
                     $"Failed to deserialize resource, format: {ctx.SourceFormat}, error: {exMessage}",
                     OperationOutcome.IssueType.Structure);
@@ -2160,7 +2175,7 @@ public partial class VersionedFhirStore : IFhirStore
                 response = new()
                 {
                     Outcome = outcome,
-                    SerializedOutcome = Utils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
+                    SerializedOutcome = SerializationUtils.SerializeFhir(outcome, ctx.DestinationFormat, ctx.SerializePretty),
                     StatusCode = sc,
                 };
 
@@ -2172,7 +2187,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
                     "Resource is required",
                     OperationOutcome.IssueType.Structure),
@@ -2186,8 +2201,8 @@ public partial class VersionedFhirStore : IFhirStore
             r,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -2225,7 +2240,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Resource type: {content.TypeName} does not match request: {resourceType}",
                     OperationOutcome.IssueType.Invalid),
@@ -2238,7 +2253,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type: {resourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
@@ -2306,7 +2321,7 @@ public partial class VersionedFhirStore : IFhirStore
                             {
                                 response = new()
                                 {
-                                    Outcome = Utils.BuildOutcomeForRequest(
+                                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                                         HttpStatusCode.PreconditionFailed,
                                         $"Conditional update query returned a match with a id: {bundle.Entry[0].Resource.Id}, expected {id}"),
                                     StatusCode = HttpStatusCode.PreconditionFailed,
@@ -2321,7 +2336,7 @@ public partial class VersionedFhirStore : IFhirStore
                         {
                             response = new()
                             {
-                                Outcome = Utils.BuildOutcomeForRequest(
+                                Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.PreconditionFailed,
                                     $"Conditional update query returned too many matches: {bundle?.Total}"),
                                 StatusCode = HttpStatusCode.PreconditionFailed,
@@ -2334,7 +2349,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = searchResp.Outcome ?? Utils.BuildOutcomeForRequest(
+                    Outcome = searchResp.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
                         $"Conditional update query failed: {ctx.UrlQuery}"),
                     StatusCode = HttpStatusCode.PreconditionFailed,
@@ -2387,7 +2402,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     "Failed to update resource"),
                 StatusCode = HttpStatusCode.InternalServerError,
@@ -2492,13 +2507,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>A CompiledExpression.</returns>
     public static CompiledExpression CompileFhirPathCriteria(string fpc)
     {
-        MatchCollection matches = _fhirpathVarMatcher().Matches(fpc);
+        //MatchCollection matches = _fhirpathVarMatcher().Matches(fpc);
 
-        // replace the variable with a resolve call
-        foreach (string matchValue in matches.Select(m => m.Value).Distinct())
-        {
-            fpc = fpc.Replace(matchValue, $"'{FhirPathVariableResolver._fhirPathPrefix}{matchValue.Substring(1)}'.resolve()");
-        }
+        //// replace the variable with a resolve call
+        //foreach (string matchValue in matches.Select(m => m.Value).Distinct())
+        //{
+        //    fpc = fpc.Replace(matchValue, $"'{FhirPathVariableResolver._fhirPathPrefix}{matchValue.Substring(1)}'.resolve()");
+        //}
 
         return _compiler.Compile(fpc);
     }
@@ -2904,7 +2919,7 @@ public partial class VersionedFhirStore : IFhirStore
                 return string.Empty;
             }
 
-            string serialized = Utils.SerializeFhir(
+            string serialized = SerializationUtils.SerializeFhir(
                 bundle,
                 string.IsNullOrEmpty(contentType) ? _subscriptions[subscriptionId].ContentType : contentType,
                 pretty,
@@ -2939,7 +2954,7 @@ public partial class VersionedFhirStore : IFhirStore
             destFormat = "application/fhir+json";
         }
 
-        serialized = Utils.SerializeFhir(subscription, destFormat, pretty);
+        serialized = SerializationUtils.SerializeFhir(subscription, destFormat, pretty);
         return true;
     }
 
@@ -3179,8 +3194,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3206,7 +3221,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Operation {ctx.OperationName} does not have an executable implementation on this server."),
                 StatusCode = HttpStatusCode.NotFound,
@@ -3220,7 +3235,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Operation {ctx.OperationName} does not allow system-level execution.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3241,7 +3256,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
                         $"Operation {ctx.OperationName} does not consume non-FHIR content.",
                         OperationOutcome.IssueType.Invalid),
@@ -3252,14 +3267,14 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = Utils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
                         $"Operation {ctx.OperationName} does not consume non-FHIR content.",
                         OperationOutcome.IssueType.Invalid),
@@ -3351,7 +3366,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = r,
             ResourceType = r?.TypeName ?? string.Empty,
             Id = r?.Id ?? string.Empty,
-            Outcome = opResponse.Outcome ?? Utils.BuildOutcomeForRequest(
+            Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                 opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError), 
                 $"System-Level Operation {ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
             StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
@@ -3371,8 +3386,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3396,7 +3411,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type {ctx.ResourceType} does not exist on this server.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3409,7 +3424,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Operation {ctx.OperationName} does not have an executable implementation on this server."),
                 StatusCode = HttpStatusCode.NotFound,
@@ -3423,7 +3438,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Operation {ctx.OperationName} does not allow type-level execution.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3436,7 +3451,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Operation {ctx.OperationName} is not defined for resource: {ctx.ResourceType}.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3457,7 +3472,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
                         $"Operation {ctx.OperationName} does not consume non-FHIR content.",
                         OperationOutcome.IssueType.Invalid),
@@ -3468,14 +3483,14 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = Utils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
                         $"Operation {ctx.OperationName} does not consume non-FHIR content.",
                         OperationOutcome.IssueType.Invalid),
@@ -3567,7 +3582,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = r,
             ResourceType = r?.TypeName ?? string.Empty,
             Id = r?.Id ?? string.Empty,
-            Outcome = opResponse.Outcome ?? Utils.BuildOutcomeForRequest(
+            Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                 opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
                 $"Type-Level Operation {ctx.ResourceType}/{ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
             StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
@@ -3587,8 +3602,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3612,7 +3627,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type {ctx.ResourceType} does not exist on this server.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3626,7 +3641,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Instance {ctx.ResourceType}/{ctx.Id} does not exist on this server."),
                 StatusCode = HttpStatusCode.NotFound,
@@ -3638,7 +3653,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Operation {ctx.OperationName} does not have an executable implementation on this server."),
                 StatusCode = HttpStatusCode.NotFound,
@@ -3652,7 +3667,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Operation {ctx.OperationName} does not allow instance-level execution.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3665,7 +3680,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     $"Operation {ctx.OperationName} is not defined for resource: {ctx.ResourceType}.",
                     OperationOutcome.IssueType.NotSupported),
@@ -3686,7 +3701,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
                         $"Operation {ctx.OperationName} does not consume non-FHIR content.",
                         OperationOutcome.IssueType.Invalid),
@@ -3697,14 +3712,14 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = Utils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
                         $"Operation {ctx.OperationName} does not consume non-FHIR content.",
                         OperationOutcome.IssueType.Invalid),
@@ -3798,7 +3813,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = r,
             ResourceType = r?.TypeName ?? string.Empty,
             Id = r?.Id ?? string.Empty,
-            Outcome = opResponse.Outcome ?? Utils.BuildOutcomeForRequest(
+            Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                 opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
                 $"Instance-Level Operation {ctx.ResourceType}/{ctx.Id}/{ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
             StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
@@ -3818,8 +3833,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3848,7 +3863,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = searchResp.Outcome ?? Utils.BuildOutcomeForRequest(
+                Outcome = searchResp.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     "System search failed"),
                 StatusCode = HttpStatusCode.InternalServerError,
@@ -3861,7 +3876,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     "No matches found for system delete"),
                 StatusCode = HttpStatusCode.NotFound,
@@ -3874,7 +3889,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
                     $"Too many matches found for system delete: ({resultBundle.Total})",
                     OperationOutcome.IssueType.MultipleMatches),
@@ -3889,7 +3904,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"Resource ({resultBundle.Entry.First().FullUrl}) not accessible post search!",
                     OperationOutcome.IssueType.Processing),
@@ -3971,7 +3986,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"Matched delete resource {id} could not be deleted"),
                 StatusCode = HttpStatusCode.InternalServerError,
@@ -3984,7 +3999,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = resource,
             ResourceType = resourceType,
             Id = id,
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {resourceType}/{id}"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {resourceType}/{id}"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
@@ -4002,8 +4017,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -4027,7 +4042,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
                     "Resource type is required for type-delete interactions",
                     OperationOutcome.IssueType.Structure),
@@ -4040,7 +4055,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type: {ctx.ResourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
@@ -4058,7 +4073,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = searchResp.Outcome ?? Utils.BuildOutcomeForRequest(
+                Outcome = searchResp.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"Type search against {ctx.ResourceType} failed"),
                 StatusCode = searchResp.StatusCode ?? HttpStatusCode.InternalServerError,
@@ -4071,7 +4086,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"No matches found for type ({ctx.ResourceType}) delete"),
                 StatusCode = HttpStatusCode.NotFound,
@@ -4084,7 +4099,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
                     $"Too many matches found for type ({ctx.ResourceType}) delete: ({resultBundle.Total})",
                     OperationOutcome.IssueType.MultipleMatches),
@@ -4099,7 +4114,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"Resource ({resultBundle.Entry.First().FullUrl}) not accessible post search!",
                     OperationOutcome.IssueType.Processing),
@@ -4187,7 +4202,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"Matched delete resource {id} could not be deleted"),
                 StatusCode = HttpStatusCode.InternalServerError,
@@ -4200,7 +4215,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = resource,
             ResourceType = resourceType,
             Id = id,
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {resourceType}/{id}"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {resourceType}/{id}"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
@@ -4218,8 +4233,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -4245,7 +4260,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
                     "Resource type is required for type-delete interactions",
                     OperationOutcome.IssueType.Structure),
@@ -4258,7 +4273,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.NotFound,
                     $"Resource type: {ctx.ResourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
@@ -4309,7 +4324,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"Type Search against {ctx.ResourceType} failed",
                     OperationOutcome.IssueType.Processing),
@@ -4412,7 +4427,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = bundle,
             ResourceType = "Bundle",
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
@@ -4430,8 +4445,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -4470,7 +4485,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.Forbidden,
                     $"System search with no resource types is too costly.",
                     OperationOutcome.IssueType.TooCostly),
@@ -4523,7 +4538,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = Utils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.InternalServerError,
                         $"System search into {resourceType} failed"),
                     StatusCode = HttpStatusCode.InternalServerError,
@@ -4640,7 +4655,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = bundle,
             ResourceType = "Bundle",
-            Outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
@@ -4934,8 +4949,8 @@ public partial class VersionedFhirStore : IFhirStore
     {
         bool success = DoGetMetadata(ctx, out response);
 
-        string sr = response.Resource == null ? string.Empty : Utils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : Utils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -5027,7 +5042,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = Utils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.InternalServerError,
                     $"CapabilityStatement could not be retrieved",
                     OperationOutcome.IssueType.Exception),
@@ -5042,7 +5057,7 @@ public partial class VersionedFhirStore : IFhirStore
             Resource = r,
             ResourceType = "CapabilityStatement",
             Id = _capabilityStatementId,
-            Outcome = Utils.BuildOutcomeForRequest(
+            Outcome = SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.OK,
                 $"Retrieved current CapabilityStatement",
                 OperationOutcome.IssueType.Success),
@@ -5310,17 +5325,17 @@ public partial class VersionedFhirStore : IFhirStore
     ///  required range.</exception>
     /// <param name="v">The SupportedFhirVersions to process.</param>
     /// <returns>A FHIRVersion.</returns>
-    private FHIRVersion CommonToFirelyVersion(TenantConfiguration.SupportedFhirVersions v)
+    private FHIRVersion CommonToFirelyVersion(FhirReleases.FhirSequenceCodes v)
     {
         switch (v)
         {
-            case TenantConfiguration.SupportedFhirVersions.R4:
+            case FhirReleases.FhirSequenceCodes.R4:
                 return FHIRVersion.N4_0_1;
 
-            case TenantConfiguration.SupportedFhirVersions.R4B:
+            case FhirReleases.FhirSequenceCodes.R4B:
                 return FHIRVersion.N4_3_0;
 
-            case TenantConfiguration.SupportedFhirVersions.R5:
+            case FhirReleases.FhirSequenceCodes.R5:
                 return FHIRVersion.N5_0_0;
 
             default:
@@ -5380,9 +5395,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         string securityCodeSystemUrl = _config.FhirVersion switch
         {
-            TenantConfiguration.SupportedFhirVersions.R4 => "http://terminology.hl7.org/CodeSystem/restful-security-service",
-            TenantConfiguration.SupportedFhirVersions.R4B => "http://terminology.hl7.org/CodeSystem/restful-security-service",
-            TenantConfiguration.SupportedFhirVersions.R5 => "http://hl7.org/fhir/restful-security-service",
+            FhirReleases.FhirSequenceCodes.R4 => "http://terminology.hl7.org/CodeSystem/restful-security-service",
+            FhirReleases.FhirSequenceCodes.R4B => "http://terminology.hl7.org/CodeSystem/restful-security-service",
+            FhirReleases.FhirSequenceCodes.R5 => "http://hl7.org/fhir/restful-security-service",
             _ => "http://hl7.org/fhir/restful-security-service",
         };
 
@@ -5664,7 +5679,7 @@ public partial class VersionedFhirStore : IFhirStore
                     Response = new Bundle.ResponseComponent()
                     {
                         Status = HttpStatusCode.BadRequest.ToString(),
-                        Outcome = Utils.BuildOutcomeForRequest(
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.UnprocessableEntity,
                             "Entry is missing a request",
                             OperationOutcome.IssueType.Required),
@@ -5699,7 +5714,7 @@ public partial class VersionedFhirStore : IFhirStore
                     Response = new Bundle.ResponseComponent()
                     {
                         Status = HttpStatusCode.InternalServerError.ToString(),
-                        Outcome = Utils.BuildOutcomeForRequest(
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.NotImplemented,
                             $"Request could not be parsed to known interaction: {entry.Request.Method} {entry.Request.Url}",
                             OperationOutcome.IssueType.NotSupported),
@@ -5719,7 +5734,7 @@ public partial class VersionedFhirStore : IFhirStore
                     Response = new Bundle.ResponseComponent()
                     {
                         Status = HttpStatusCode.Unauthorized.ToString(),
-                        Outcome = Utils.BuildOutcomeForRequest(
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.Unauthorized,
                             $"Unauthorized request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
                             OperationOutcome.IssueType.Forbidden),
@@ -5751,7 +5766,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 if ((opResponse.Outcome == null) || (opResponse.Outcome is not OperationOutcome oo))
                 {
-                    oo = Utils.BuildOutcomeForRequest(
+                    oo = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.NotImplemented,
                             $"Unsupported request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
                             OperationOutcome.IssueType.NotSupported);

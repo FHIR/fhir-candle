@@ -87,7 +87,7 @@ public static class EvalDateSearch
                         valueEnd = valueStart.AddMinutes(1).AddTicks(-1);
                         break;
 
-                    // we choose to igore fractions of seconds
+                    // we choose to ignore fractions of seconds
                     case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Second:
                     case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Fraction:
                         valueEnd = valueStart.AddSeconds(1).AddTicks(-1);

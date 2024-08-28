@@ -18,9 +18,9 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>
 		</PackageReference>
-		<PackageReference Include="Hl7.Fhir.R4" Version="5.8.2" Aliases="coreR4" />
-		<PackageReference Include="Hl7.Fhir.R4B" Version="5.8.2" Aliases="coreR4B" />
-		<PackageReference Include="Hl7.Fhir.R5" Version="5.8.2" Aliases="coreR5" />
+		<PackageReference Include="Hl7.Fhir.R4" Version="5.9.1" Aliases="coreR4" />
+		<PackageReference Include="Hl7.Fhir.R4B" Version="5.9.1" Aliases="coreR4B" />
+		<PackageReference Include="Hl7.Fhir.R5" Version="5.9.1" Aliases="coreR5" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />

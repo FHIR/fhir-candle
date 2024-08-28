@@ -28,9 +28,9 @@ public class OpPasClaimSubmit : IFhirOperation
     public string OperationVersion => "1.2.0";
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    public Dictionary<FhirCandle.Models.TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion => new()
+    public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { FhirCandle.Models.TenantConfiguration.SupportedFhirVersions.R4, "http://hl7.org/fhir/us/davinci-pas/OperationDefinition/Claim-submit" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://hl7.org/fhir/us/davinci-pas/OperationDefinition/Claim-submit" },
     };
 
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
@@ -454,7 +454,7 @@ public class OpPasClaimSubmit : IFhirOperation
     /// <param name="fhirVersion">The FHIR version.</param>
     /// <returns>The definition.</returns>
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
-        FhirCandle.Models.TenantConfiguration.SupportedFhirVersions fhirVersion)
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
         // operation has canonical definition in package
         return null;

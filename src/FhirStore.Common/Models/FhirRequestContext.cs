@@ -8,6 +8,10 @@ using Microsoft.Extensions.Primitives;
 using System.Diagnostics.CodeAnalysis;
 using static FhirCandle.Storage.Common;
 
+#if NETSTANDARD2_0
+using FhirCandle.Polyfill;
+#endif
+
 namespace FhirCandle.Models;
 
 /// <summary>A FHIR request context.</summary>
@@ -283,7 +287,7 @@ public record class FhirRequestContext
             default:
                 // assume there are query parameters that contain '?'
                 requestUrlPath = pathAndQuery[0];
-                requestUrlQuery = string.Join('?', pathAndQuery[1..]);
+                requestUrlQuery = string.Join("?", pathAndQuery[1..]);
                 break;
         }
 

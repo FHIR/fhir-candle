@@ -22,11 +22,11 @@ public class OpSubscriptionHook : IFhirOperation
     public string OperationVersion => "0.0.1";
 
     /// <summary>Gets the canonical by FHIR version.</summary>
-    public Dictionary<TenantConfiguration.SupportedFhirVersions, string> CanonicalByFhirVersion => new()
+    public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { TenantConfiguration.SupportedFhirVersions.R4, "http://argo.run/fhir/OperationDefinition/subscription-hook" },
-        { TenantConfiguration.SupportedFhirVersions.R4B, "http://argo.run/fhir/OperationDefinition/subscription-hook" },
-        { TenantConfiguration.SupportedFhirVersions.R5, "http://argo.run/fhir/OperationDefinition/subscription-hook" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://argo.run/fhir/OperationDefinition/subscription-hook" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://argo.run/fhir/OperationDefinition/subscription-hook" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://argo.run/fhir/OperationDefinition/subscription-hook" },
     };
 
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
@@ -85,7 +85,7 @@ public class OpSubscriptionHook : IFhirOperation
             opResponse = new()
             {
                 StatusCode = HttpStatusCode.UnprocessableEntity,
-                Outcome = FhirCandle.Serialization.Utils.BuildOutcomeForRequest(
+                Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     "Posted content is not a valid Subscription notification bundle"),
             };
@@ -105,7 +105,7 @@ public class OpSubscriptionHook : IFhirOperation
             opResponse = new()
             {
                 StatusCode = HttpStatusCode.UnprocessableEntity,
-                Outcome = FhirCandle.Serialization.Utils.BuildOutcomeForRequest(
+                Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.UnprocessableEntity,
                     "Posted content is not a valid Subscription notification bundle"),
             };
@@ -123,7 +123,7 @@ public class OpSubscriptionHook : IFhirOperation
         opResponse = new()
         {
             StatusCode = HttpStatusCode.OK,
-            Outcome = FhirCandle.Serialization.Utils.BuildOutcomeForRequest(
+            Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.OK,
                 "Subscription Notification Received"),
         };
@@ -135,7 +135,7 @@ public class OpSubscriptionHook : IFhirOperation
     /// <param name="fhirVersion">The FHIR version.</param>
     /// <returns>The definition.</returns>
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
-        TenantConfiguration.SupportedFhirVersions fhirVersion)
+        FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
         Hl7.Fhir.Model.OperationDefinition def = new()
         {

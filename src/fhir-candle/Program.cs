@@ -3,8 +3,8 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+using SCL = System.CommandLine; // this is present to disambiguate Option from System.CommandLine and Microsoft.FluentUI.AspNetCore.Components
 using System;
-using System.CommandLine;
 using System.CommandLine.Binding;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
@@ -17,6 +17,7 @@ using fhir.candle.Services;
 using FhirCandle.Extensions;
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using FhirCandle.Utils;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -28,255 +29,112 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.FluentUI.AspNetCore.Components;
 using fhir.candle;
+using System.CommandLine.Builder;
+using System.CommandLine.Parsing;
+using System.Text;
+using System.CommandLine;
+using FhirCandle.Configuration;
+using System.Reflection;
+using static Org.BouncyCastle.Math.EC.ECCurve;
+using BlazorMonaco.Languages;
 
 namespace fhir.candle;
 
 /// <summary>A program.</summary>
 public static partial class Program
 {
+    private static List<SCL.Option> _optsWithEnums = [];
+
     [GeneratedRegex("(http[s]*:\\/\\/.*(:\\d+)*)")]
     private static partial Regex InputUrlFormatRegex();
-
-    /// <summary>(Immutable) The default listen port.</summary>
-    private const int _defaultListenPort = 5826;
-
-    /// <summary>(Immutable) The default subscription expiration.</summary>
-    private static readonly int DefaultSubscriptionExpirationMinutes = 30;
 
     /// <summary>Main entry-point for this application.</summary>
     /// <param name="args">An array of command-line argument strings.</param>
     public static async Task<int> Main(string[] args)
     {
         // setup our configuration (command line > environment > appsettings.json)
-        IConfiguration configuration = new ConfigurationBuilder()
+        IConfiguration envConfig = new ConfigurationBuilder()
             .AddJsonFile("appsettings.json", optional: true)
             .AddEnvironmentVariables()
             .Build();
 
-        System.CommandLine.Option<string> optPublicUrl = new(
-            aliases: new[] { "--url", "-u" },
-            getDefaultValue: () => configuration.GetValue("Public_Url", string.Empty) ?? string.Empty,
-            "Public URL for the server");
-
-        System.CommandLine.Option<int?> optListenPort = new(
-            aliases: new[] { "--port", "-p" },
-            getDefaultValue: () => configuration.GetValue<int?>("Listen_Port", _defaultListenPort) ?? _defaultListenPort,
-            "Listen port for the server");
-
-        System.CommandLine.Option<bool?> optOpenBrowser = new(
-            aliases: new[] { "--open-browser", "-o" },
-            getDefaultValue: () => configuration.GetValue<bool>("Open_Browser", false),
-            "Open a browser once the server starts.");
-
-        System.CommandLine.Option<int?> optMaxResourceCount = new(
-            aliases: new[] { "--max-resources", "-m" },
-            getDefaultValue: () => configuration.GetValue<int?>("Max_Resources", null),
-            "Maximum number of resources allowed per tenant.");
-
-        System.CommandLine.Option<bool?> optDisableUi = new(
-            name: "--disable-ui",
-            getDefaultValue: () => configuration.GetValue<bool?>("Disable_Ui", null),
-            "If the server should run headless.");
-
-        System.CommandLine.Option<string?> optPackageCache = new(
-            name: "--fhir-package-cache",
-            getDefaultValue: () => configuration.GetValue<string?>("Fhir_Cache", null),
-            "Location of the FHIR package cache, for use with registries and IG packages.  Use empty quoted string to disable cache.");
-
-        System.CommandLine.Option<List<string>> optPublishedPackages = new(
-            name: "--load-package",
-            getDefaultValue: () => configuration.GetValue<List<string>>("Load_Packages", new List<string>())!,
-            "Published packages to load. Specifying package name alone loads highest version.");
-
-        System.CommandLine.Option<List<string>> optCiPackages = new(
-            name: "--ci-package",
-            getDefaultValue: () => configuration.GetValue<List<string>>("Ci_Packages", new List<string>())!,
-            "Continuous Integration (CI) packages to load. You may specify either just the branch name or a full URL.");
-
-        System.CommandLine.Option<bool?> optLoadPackageExamples = new(
-            name: "--load-examples",
-            getDefaultValue: () => configuration.GetValue<bool?>("Load_Examples", null),
-            "If package loading should include example instances.");
-
-        System.CommandLine.Option<string?> optPackageReferenceImplementation = new(
-            name: "--reference-implementation",
-            getDefaultValue: () => configuration.GetValue<string?>("Reference_Implementation", null),
-            "If running as the Reference Implementation, the package directive or literal.");
-
-        System.CommandLine.Option<string?> optSourceDirectory = new(
-            name: "--fhir-source",
-            getDefaultValue: () => null,
-            "FHIR Contents to load, either in this directory or by subdirectories named per tenant.");
-
-        System.CommandLine.Option<bool?> optProtectLoadedContent = new(
-            name: "--protect-source",
-            getDefaultValue: () => null,
-            "If any loaded FHIR contents cannot be altered.");
-
-        System.CommandLine.Option<List<string>> optTenantsR4 = new(
-            name: "--r4",
-            getDefaultValue: () => new(),
-            "FHIR R4 Tenants to provide");
-
-        System.CommandLine.Option<List<string>> optTenantsR4B = new(
-            name: "--r4b",
-            getDefaultValue: () => new(),
-            "FHIR R4B Tenants to provide");
-
-        System.CommandLine.Option<List<string>> optTenantsR5 = new(
-            name: "--r5",
-            getDefaultValue: () => new(),
-            "FHIR R5 Tenants to provide");
-
-        System.CommandLine.Option<List<string>> optTenantsSmartRequired = new(
-            name: "--smart-required",
-            getDefaultValue: () => new(),
-            "FHIR Tenants that require SMART auth");
-
-        System.CommandLine.Option<List<string>> optTenantsSmartOptional = new(
-            name: "--smart-optional",
-            getDefaultValue: () => new(),
-            "FHIR Tenants that allow (but do not require) SMART auth");
-
-        System.CommandLine.Option<bool?> optCreateExistingId = new(
-            name: "--create-existing-id",
-            getDefaultValue: () => configuration.GetValue<bool>("Create_Existing_Id", true),
-            "Allow Create interactions (POST) to specify an ID.");
-
-        System.CommandLine.Option<bool?> optCreateAsUpdate = new(
-            name: "--create-as-update",
-            getDefaultValue: () => configuration.GetValue<bool>("Create_As_Update", true),
-            "Allow Update interactions (PUT) to create new resources.");
-
-        System.CommandLine.Option<int?> optMaxSubscriptionExpirationMinutes = new(
-            name: "--max-subscription-minutes",
-            getDefaultValue: () => configuration.GetValue<int?>("Max_Subscription_Minutes", null),
-            "Maximum number of minutes a subscription is allowed to expire in.");
-
-        System.CommandLine.Option<string> optZulipEmail = new(
-            name: "--zulip-email",
-            getDefaultValue: () => configuration.GetValue("Zulip_Email", string.Empty) ?? string.Empty,
-            "Zulip bot email address");
-
-        System.CommandLine.Option<string> optZulipKey = new(
-            name: "--zulip-key",
-            getDefaultValue: () => configuration.GetValue("Zulip_Key", string.Empty) ?? string.Empty,
-            "Zulip bot API key");
-
-        System.CommandLine.Option<string> optZulipUrl = new(
-            name: "--zulip-url",
-            getDefaultValue: () => configuration.GetValue("Zulip_Url", string.Empty) ?? string.Empty,
-            "Zulip bot email address");
-
-        System.CommandLine.Option<string> optSmtpHost = new(
-            name: "--smtp-host",
-            getDefaultValue: () => configuration.GetValue("SMTP_Host", string.Empty) ?? string.Empty,
-            "SMTP Host name/address");
-
-        System.CommandLine.Option<int?> optSmtpPort = new(
-            name: "--smtp-port",
-            getDefaultValue: () => configuration.GetValue<int?>("SMTP_Port", null),
-            "SMTP Port");
-
-        System.CommandLine.Option<string> optSmtpUser = new(
-            name: "--smtp-user",
-            getDefaultValue: () => configuration.GetValue("SMTP_User", string.Empty) ?? string.Empty,
-            "SMTP Username");
-
-        System.CommandLine.Option<string> optSmtpPassword = new(
-            name: "--smtp-password",
-            getDefaultValue: () => configuration.GetValue("SMTP_Password", string.Empty) ?? string.Empty,
-            "SMTP Password");
-
-        System.CommandLine.Option<string> optFhirPathLabUrl = new(
-            name: "--fhirpath-lab-url",
-            getDefaultValue: () => configuration.GetValue("FHIRPath_Lab_Url", string.Empty) ?? string.Empty,
-            "FHIRPath Lab URL");
-
-        RootCommand rootCommand = new()
+        SCL.RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
+        foreach (SCL.Option option in BuildCliOptions(typeof(CandleConfig), envConfig: envConfig))
         {
-            optPublicUrl,
-            optListenPort,
-            optOpenBrowser,
-            optMaxResourceCount,
-            optDisableUi,
-            optPackageCache,
-            optPublishedPackages,
-            optCiPackages,
-            optLoadPackageExamples,
-            optPackageReferenceImplementation,
-            optSourceDirectory,
-            optProtectLoadedContent,
-            optTenantsR4,
-            optTenantsR4B,
-            optTenantsR5,
-            optTenantsSmartRequired,
-            optTenantsSmartOptional,
-            optCreateExistingId,
-            optCreateAsUpdate,
-            optMaxSubscriptionExpirationMinutes,
-            optZulipEmail,
-            optZulipKey,
-            optZulipUrl,
-            optSmtpHost,
-            optSmtpPort,
-            optSmtpUser,
-            optSmtpPassword,
-            optFhirPathLabUrl,
-        };
-
-        rootCommand.Description = "A lightweight in-memory FHIR server, for when a small FHIR will do.";
-
-        rootCommand.SetHandler(async (context) =>
-        {
-            ServerConfiguration config = new()
-            {
-                PublicUrl = context.ParseResult.GetValueForOption(optPublicUrl) ?? string.Empty,
-                ListenPort = context.ParseResult.GetValueForOption(optListenPort) ?? _defaultListenPort,
-                OpenBrowser = context.ParseResult.GetValueForOption(optOpenBrowser) ?? false,
-                MaxResourceCount = context.ParseResult.GetValueForOption(optMaxResourceCount) ?? 0,
-                DisableUi = context.ParseResult.GetValueForOption(optDisableUi) ?? false,
-                FhirCacheDirectory = context.ParseResult.GetValueForOption(optPackageCache),
-                PublishedPackages = context.ParseResult.GetValueForOption(optPublishedPackages) ?? new(),
-                CiPackages = context.ParseResult.GetValueForOption(optCiPackages) ?? new(),
-                LoadPackageExamples = context.ParseResult.GetValueForOption(optLoadPackageExamples) ?? false,
-                ReferenceImplementation = context.ParseResult.GetValueForOption(optPackageReferenceImplementation) ?? string.Empty,
-                SourceDirectory = context.ParseResult.GetValueForOption(optSourceDirectory),
-                ProtectLoadedContent = context.ParseResult.GetValueForOption(optProtectLoadedContent) ?? false,
-                TenantsR4 = context.ParseResult.GetValueForOption(optTenantsR4) ?? new(),
-                TenantsR4B = context.ParseResult.GetValueForOption(optTenantsR4B) ?? new(),
-                TenantsR5 = context.ParseResult.GetValueForOption(optTenantsR5) ?? new(),
-                SmartRequiredTenants = context.ParseResult.GetValueForOption(optTenantsSmartRequired) ?? new(),
-                SmartOptionalTenants = context.ParseResult.GetValueForOption(optTenantsSmartOptional) ?? new(),
-                AllowExistingId = context.ParseResult.GetValueForOption(optCreateExistingId) ?? true,
-                AllowCreateAsUpdate = context.ParseResult.GetValueForOption(optCreateAsUpdate) ?? true,
-                MaxSubscriptionExpirationMinutes = context.ParseResult.GetValueForOption(optMaxSubscriptionExpirationMinutes) ?? DefaultSubscriptionExpirationMinutes,
-                ZulipEmail = context.ParseResult.GetValueForOption(optZulipEmail) ?? string.Empty,
-                ZulipKey = context.ParseResult.GetValueForOption(optZulipKey) ?? string.Empty,
-                ZulipUrl = context.ParseResult.GetValueForOption(optZulipUrl) ?? string.Empty,
-                SmtpHost = context.ParseResult.GetValueForOption(optSmtpHost) ?? string.Empty,
-                SmtpPort = context.ParseResult.GetValueForOption(optSmtpPort) ?? 0,
-                SmtpUser = context.ParseResult.GetValueForOption(optSmtpUser) ?? string.Empty,
-                SmtpPassword = context.ParseResult.GetValueForOption(optSmtpPassword) ?? string.Empty,
-                FhirPathLabUrl = context.ParseResult.GetValueForOption(optFhirPathLabUrl) ?? string.Empty,
-            };
-
-            await RunServer(config, context.GetCancellationToken());
-        });
-
-        //System.CommandLine.Parsing.Parser clParser = new System.CommandLine.Builder.CommandLineBuilder(_rootCommand).Build();
+            // note that 'global' here is just recursive DOWNWARD
+            rootCommand.AddGlobalOption(option);
+        }
+        rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, context.GetCancellationToken()));
 
         return await rootCommand.InvokeAsync(args);
+    }
+
+    /// <summary>
+    /// Builds the command line options for the specified type.
+    /// </summary>
+    /// <param name="forType">The type for which to build the command line options.</param>
+    /// <param name="excludeFromType">The type to exclude from the command line options.</param>
+    /// <param name="envConfig">The environment configuration.</param>
+    /// <returns>An enumerable collection of command line options.</returns>
+    private static IEnumerable<SCL.Option> BuildCliOptions(
+        Type forType,
+        Type? excludeFromType = null,
+        IConfiguration? envConfig = null)
+    {
+        HashSet<string> inheritedPropNames = [];
+
+        if (excludeFromType != null)
+        {
+            PropertyInfo[] exProps = excludeFromType.GetProperties();
+            foreach (PropertyInfo exProp in exProps)
+            {
+                inheritedPropNames.Add(exProp.Name);
+            }
+        }
+
+        object? configDefault = null;
+        if (forType.IsAbstract)
+        {
+            throw new Exception($"Config type cannot be abstract! {forType.Name}");
+        }
+
+        configDefault = Activator.CreateInstance(forType);
+
+        if (configDefault is not CandleConfig config)
+        {
+            throw new Exception("Config type must be CandleConfig");
+        }
+
+        foreach (ConfigurationOption opt in config.GetOptions())
+        {
+            // need to configure default values
+            if ((envConfig != null) &&
+                (!string.IsNullOrEmpty(opt.EnvVarName)))
+            {
+                opt.CliOption.SetDefaultValueFactory(() => envConfig.GetSection(opt.EnvVarName).GetChildren().Select(c => c.Value));
+            }
+            else
+            {
+                opt.CliOption.SetDefaultValue(opt.DefaultValue);
+            }
+
+            yield return opt.CliOption;
+        }
     }
 
     /// <summary>Executes the server operation.</summary>
     /// <param name="config">           The configuration.</param>
     /// <param name="cancellationToken">A token that allows processing to be cancelled.</param>
     /// <returns>An asynchronous result that yields an int.</returns>
-    public static async Task<int> RunServer(ServerConfiguration config, CancellationToken cancellationToken)
+    public static async Task<int> RunServer(SCL.Parsing.ParseResult pr, CancellationToken? cancellationToken = null)
     { 
         try
         {
+            CandleConfig config = new();
+
+            // parse the arguments into the configuration object
+            config.Parse(pr);
+
             if (string.IsNullOrEmpty(config.PublicUrl))
             {
                 config.PublicUrl = $"http://localhost:{config.ListenPort}";
@@ -291,7 +149,7 @@ public static partial class Program
                 config.PublicUrl = config.PublicUrl.Substring(0, config.PublicUrl.Length - 1);
             }
 
-            if (config.FhirPathLabUrl.EndsWith('/'))
+            if (config.FhirPathLabUrl?.EndsWith('/') ?? false)
             {
                 config.FhirPathLabUrl = config.FhirPathLabUrl.Substring(0, config.FhirPathLabUrl.Length - 1);
             }
@@ -301,16 +159,9 @@ public static partial class Program
                 (!config.TenantsR4B.Any()) &&
                 (!config.TenantsR5.Any()))
             {
-                config.TenantsR4.Add("r4");
-                config.TenantsR4B.Add("r4b");
-                config.TenantsR5.Add("r5");
-            }
-
-            if (config.FhirCacheDirectory == null)
-            {
-                config.FhirCacheDirectory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".fhir");
+                config.TenantsR4 = ["r4"];
+                config.TenantsR4B = ["r4b"];
+                config.TenantsR5 = ["r5"];
             }
 
             Dictionary<string, TenantConfiguration> tenants = BuildTenantConfigurations(config);
@@ -437,8 +288,10 @@ public static partial class Program
             //await app.RunAsync(cancellationToken);
             _ = app.StartAsync();
 
+            cancellationToken ??= new CancellationToken();
+
             AfterServerStart(app, config);
-            await app.WaitForShutdownAsync(cancellationToken);
+            await app.WaitForShutdownAsync((CancellationToken)cancellationToken);
 
             return 0;
         }
@@ -457,7 +310,7 @@ public static partial class Program
     /// <summary>After server start.</summary>
     /// <param name="app">   The application.</param>
     /// <param name="config">The configuration.</param>
-    private static void AfterServerStart(WebApplication app, ServerConfiguration config)
+    private static void AfterServerStart(WebApplication app, CandleConfig config)
     {
         Console.WriteLine("Press CTRL+C to exit");
 
@@ -502,7 +355,7 @@ public static partial class Program
     /// An enumerator that allows foreach to be used to process build tenant configurations in this
     /// collection.
     /// </returns>
-    private static Dictionary<string, TenantConfiguration> BuildTenantConfigurations(ServerConfiguration config)
+    private static Dictionary<string, TenantConfiguration> BuildTenantConfigurations(CandleConfig config)
     {
         HashSet<string> smartRequired = config.SmartRequiredTenants.ToHashSet();
         HashSet<string> smartOptional = config.SmartOptionalTenants.ToHashSet();
@@ -513,7 +366,7 @@ public static partial class Program
         {
             tenants.Add(tenant, new()
             {
-                FhirVersion = TenantConfiguration.SupportedFhirVersions.R4,
+                FhirVersion = FhirReleases.FhirSequenceCodes.R4,
                 ControllerName = tenant,
                 BaseUrl = config.PublicUrl + "/fhir/" + tenant,
                 ProtectLoadedContent = config.ProtectLoadedContent,
@@ -530,7 +383,7 @@ public static partial class Program
         {
             tenants.Add(tenant, new()
             {
-                FhirVersion = TenantConfiguration.SupportedFhirVersions.R4B,
+                FhirVersion = FhirReleases.FhirSequenceCodes.R4B,
                 ControllerName = tenant,
                 BaseUrl = config.PublicUrl + "/fhir/" + tenant,
                 ProtectLoadedContent = config.ProtectLoadedContent,
@@ -547,7 +400,7 @@ public static partial class Program
         {
             tenants.Add(tenant, new()
             {
-                FhirVersion = TenantConfiguration.SupportedFhirVersions.R5,
+                FhirVersion = FhirReleases.FhirSequenceCodes.R5,
                 ControllerName = tenant,
                 BaseUrl = config.PublicUrl + "/fhir/" + tenant,
                 ProtectLoadedContent = config.ProtectLoadedContent,

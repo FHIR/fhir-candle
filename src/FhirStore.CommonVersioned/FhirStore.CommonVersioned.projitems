@@ -12,7 +12,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Client\CandleClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\SearchParamDefinitionExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ExecutableSubscriptionInfo.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Models\FhirPathVariableResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedResultParameter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedSearchParameter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Interactions\IFhirInteractionHook.cs" />
@@ -29,7 +28,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Search\EvalUriSearch.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Search\SearchDefinitions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Search\SearchTester.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Serialization\Utils.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Serialization\SerializationUtils.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Storage\IVersionedResourceStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Storage\ResourceStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Storage\StoreTerminologyService.cs" />

@@ -12,6 +12,7 @@ using MailKit;
 using MimeKit;
 using fhir.candle.Models;
 using System.Collections.Concurrent;
+using FhirCandle.Configuration;
 
 namespace fhir.candle.Services;
 
@@ -71,7 +72,7 @@ public class NotificationManager : INotificationManager
     /// <param name="fhirStoreManager">Manager for FHIR store.</param>
     /// <param name="logger">          The logger.</param>
     public NotificationManager(
-        ServerConfiguration serverConfig,
+        CandleConfig serverConfig,
         Dictionary<string, TenantConfiguration> tenants,
         IFhirStoreManager fhirStoreManager,
         ILogger<NotificationManager> logger)
@@ -79,9 +80,9 @@ public class NotificationManager : INotificationManager
         _logger = logger;
         _storeManager = fhirStoreManager;
 
-        _zulipUrl = serverConfig.ZulipUrl;
-        _zulipEmail = serverConfig.ZulipEmail;
-        _zulipKey = serverConfig.ZulipKey;
+        _zulipUrl = serverConfig.ZulipUrl ?? string.Empty;
+        _zulipEmail = serverConfig.ZulipEmail ?? string.Empty;
+        _zulipKey = serverConfig.ZulipKey ?? string.Empty;
 
         if (string.IsNullOrEmpty(_zulipUrl) ||
             string.IsNullOrEmpty(_zulipEmail) ||
@@ -95,10 +96,10 @@ public class NotificationManager : INotificationManager
             ZulipClientPool.AddOrRegisterClient(_zulipUrl, _zulipEmail, _zulipKey);
         }
 
-        _smtpHost = serverConfig.SmtpHost;
+        _smtpHost = serverConfig.SmtpHost ?? string.Empty;
         _smtpPort = serverConfig.SmtpPort;
-        _smtpUser = serverConfig.SmtpUser;
-        _smtpPassword = serverConfig.SmtpPassword;
+        _smtpUser = serverConfig.SmtpUser ?? string.Empty;
+        _smtpPassword = serverConfig.SmtpPassword ?? string.Empty;
 
         if (string.IsNullOrEmpty(_smtpHost) ||
             string.IsNullOrEmpty(_smtpUser) ||

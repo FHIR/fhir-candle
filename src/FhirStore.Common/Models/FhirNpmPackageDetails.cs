@@ -7,6 +7,10 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
+#if NETSTANDARD2_0
+using FhirCandle.Polyfill;
+#endif
+
 namespace FhirCandle.Models;
 
 /// <summary>Information about the FHIR npm package.</summary>
@@ -218,7 +222,7 @@ public class FhirNpmPackageDetails
             throw new Exception("Invalid NPM Package Manifest");
         }
 
-        if (!string.IsNullOrEmpty(details.FhirVersion))
+        if (!string.IsNullOrEmpty(details!.FhirVersion))
         {
             if (details.FhirVersion.StartsWith('['))
             {
@@ -350,7 +354,7 @@ public class FhirNpmPackageDetails
                             continue;
                         }
 
-                        val.Add(item);
+                        val.Add(item!);
                     }
                 }
                 break;

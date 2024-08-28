@@ -6,6 +6,7 @@
 using fhir.candle.Models;
 using fhir.candle.Pages.Smart;
 using fhir.candle.Pages.Subscriptions;
+using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Smart;
 using FhirCandle.Storage;
@@ -48,7 +49,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     private Dictionary<string, TenantConfiguration> _tenants;
 
     /// <summary>The server configuration.</summary>
-    private ServerConfiguration _serverConfig;
+    private CandleConfig _serverConfig;
 
     /// <summary>The smart configs.</summary>
     private Dictionary<string, SmartWellKnown> _smartConfigs = new(StringComparer.OrdinalIgnoreCase);
@@ -67,7 +68,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     /// <param name="logger">             The logger.</param>
     public SmartAuthManager(
         Dictionary<string, TenantConfiguration> tenants,
-        ServerConfiguration serverConfiguration,
+        CandleConfig serverConfiguration,
         ILogger<SmartAuthManager>? logger)
     {
         _tenants = tenants;

@@ -4,7 +4,6 @@
 // </copyright>
 
 
-using static System.Runtime.InteropServices.JavaScript.JSType;
 using System.Net;
 using FhirCandle.Extensions;
 

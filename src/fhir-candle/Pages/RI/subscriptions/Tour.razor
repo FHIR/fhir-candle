@@ -29,21 +29,21 @@
             <ChildContent>
                 @switch (_store.Config.FhirVersion)
                 {
-                    case TenantConfiguration.SupportedFhirVersions.R4:
+                    case FhirReleases.FhirSequenceCodes.R4:
                         <FhirCandle.Ui.R4.Subscriptions.TourStep01
                             Store="@_store"
                             StoreName="@StoreName"
                             />
                         break;
 
-                    case TenantConfiguration.SupportedFhirVersions.R4B:
+                    case FhirReleases.FhirSequenceCodes.R4B:
                         <FhirCandle.Ui.R4B.Subscriptions.TourStep01
                             Store="@_store"
                             StoreName="@StoreName"
                             />
                         break;
 
-                    case TenantConfiguration.SupportedFhirVersions.R5:
+                    case FhirReleases.FhirSequenceCodes.R5:
                         <FhirCandle.Ui.R5.Subscriptions.TourStep01
                             Store="@_store"
                             StoreName="@StoreName"
@@ -442,9 +442,9 @@
 
         string getJsonEncounter() => _store.Config.FhirVersion switch
         {
-            TenantConfiguration.SupportedFhirVersions.R4 => FhirCandle.Ui.R4.Subscriptions.TourUtils.EncounterJson,
-            TenantConfiguration.SupportedFhirVersions.R4B => FhirCandle.Ui.R4B.Subscriptions.TourUtils.EncounterJson,
-            TenantConfiguration.SupportedFhirVersions.R5 => FhirCandle.Ui.R5.Subscriptions.TourUtils.EncounterJson,
+            FhirReleases.FhirSequenceCodes.R4 => FhirCandle.Ui.R4.Subscriptions.TourUtils.EncounterJson,
+            FhirReleases.FhirSequenceCodes.R4B => FhirCandle.Ui.R4B.Subscriptions.TourUtils.EncounterJson,
+            FhirReleases.FhirSequenceCodes.R5 => FhirCandle.Ui.R5.Subscriptions.TourUtils.EncounterJson,
             _ => string.Empty,
         };
     }
@@ -489,7 +489,7 @@
 
             subscription.Endpoint = _store.Config.BaseUrl + "/$subscription-hook";
 
-            encounterStatus = _store.Config.FhirVersion >= TenantConfiguration.SupportedFhirVersions.R5
+            encounterStatus = _store.Config.FhirVersion >= FhirReleases.FhirSequenceCodes.R5
                 ? "completed"
                 : "finished";
         }

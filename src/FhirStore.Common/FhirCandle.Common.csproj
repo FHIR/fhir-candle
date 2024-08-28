@@ -1,11 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<Import Project="..\..\fhir-candle.props" />
 
-	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
-		<RootNamespace>FhirCandle</RootNamespace>
-	</PropertyGroup>
-	<ItemGroup>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>FhirCandle</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
 		<Compile Remove="Services\**" />
 		<EmbeddedResource Remove="Services\**" />
 		<None Remove="Services\**" />
@@ -19,7 +23,8 @@
 		<None Remove="Operations\" />
 	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.0.0" />
+		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.0.1" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+		<PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
 	</ItemGroup>
 </Project>

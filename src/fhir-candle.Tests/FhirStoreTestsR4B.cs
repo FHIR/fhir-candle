@@ -7,6 +7,7 @@ extern alias candleR4B;
 
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using FhirCandle.Utils;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
 using FluentAssertions;
@@ -26,7 +27,7 @@ public class FhirStoreTestsR4B: IDisposable
     /// <summary>(Immutable) The configuration.</summary>
     private static readonly TenantConfiguration _config = new()
     {
-        FhirVersion = TenantConfiguration.SupportedFhirVersions.R4B,
+        FhirVersion = FhirReleases.FhirSequenceCodes.R4B,
         ControllerName = "r4b",
         BaseUrl = "http://localhost/fhir/r4b",
         AllowExistingId = true,

@@ -700,14 +700,14 @@ public class ResourceStore<T> : IVersionedResourceStore
         if ((source == null) ||
             (source is not T))
         {
-            outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.BadRequest, $"Invalid resource content for {_resourceName}");
+            outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.BadRequest, $"Invalid resource content for {_resourceName}");
             sc = HttpStatusCode.BadRequest;
             return null;
         }
 
         if (string.IsNullOrEmpty(source.Id))
         {
-            outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.BadRequest, "Cannot update resources without an ID");
+            outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.BadRequest, "Cannot update resources without an ID");
             sc = HttpStatusCode.BadRequest;
             return null;
         }
@@ -719,7 +719,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         if (protectedResources.Any() && protectedResources.Contains(_resourceName + "/" + source.Id))
         {
-            outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.Unauthorized, $"Resource {_resourceName}/{source.Id} is protected and cannot be changed");
+            outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.Unauthorized, $"Resource {_resourceName}/{source.Id} is protected and cannot be changed");
             sc = HttpStatusCode.Unauthorized;
             return null;
         }
@@ -741,7 +741,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                     {
                         if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
                         {
-                            outcome = Utils.BuildOutcomeForRequest(
+                            outcome = SerializationUtils.BuildOutcomeForRequest(
                                 HttpStatusCode.BadRequest,
                                 $"Basic-wrapped SubscriptionTopic could not be parsed!");
                             sc = HttpStatusCode.BadRequest;
@@ -755,7 +755,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 // fail the request if this fails
                 if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
                 {
-                    outcome = Utils.BuildOutcomeForRequest(
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.BadRequest,
                         $"SubscriptionTopic could not be parsed!");
                     sc = HttpStatusCode.BadRequest;
@@ -767,7 +767,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 // fail the request if this fails
                 if (!_subscriptionConverter.TryParse((Subscription)source, out parsedSubscription))
                 {
-                    outcome = Utils.BuildOutcomeForRequest(
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.BadRequest,
                         $"Subscription could not be parsed!");
                     sc = HttpStatusCode.BadRequest;
@@ -789,7 +789,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 }
                 else
                 {
-                    outcome = Utils.BuildOutcomeForRequest(
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.BadRequest,
                         $"Update as Create is disabled");
                     sc = HttpStatusCode.BadRequest;
@@ -810,7 +810,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             // check preconditions
             if (ifNoneMatch.Equals("*", StringComparison.Ordinal))
             {
-                outcome = Utils.BuildOutcomeForRequest(
+                outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
                     "Prior version exists, but If-None-Match is *");
                 sc = HttpStatusCode.PreconditionFailed;
@@ -821,7 +821,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             {
                 if (ifNoneMatch.Equals($"W/\"{previous?.Meta.VersionId ?? string.Empty}\"", StringComparison.Ordinal))
                 {
-                    outcome = Utils.BuildOutcomeForRequest(
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
                         $"Conditional update query returned a match with version: {previous?.Meta.VersionId}, If-None-Match: {ifNoneMatch}");
                     sc = HttpStatusCode.PreconditionFailed;
@@ -833,7 +833,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             {
                 if (!ifMatch.Equals($"W/\"{previous?.Meta.VersionId}\"", StringComparison.Ordinal))
                 {
-                    outcome = Utils.BuildOutcomeForRequest(
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
                         $"Conditional update query returned a match with version: {previous?.Meta.VersionId}, If-Match: {ifNoneMatch}");
                     sc = HttpStatusCode.PreconditionFailed;
@@ -913,7 +913,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 break;
         }
 
-        outcome = Utils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Updated {_resourceName}/{source.Id} to version {source.Meta.VersionId}");
+        outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Updated {_resourceName}/{source.Id} to version {source.Meta.VersionId}");
         sc = HttpStatusCode.OK;
         return source;
     }
@@ -1445,20 +1445,15 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             ITypedElement currentTE = current.ToTypedElement();
 
-            FhirPathVariableResolver resolver = new FhirPathVariableResolver()
-            {
-                NextResolver = _store.Resolve,
-                Variables = new()
-                {
-                    { "current", currentTE },
-                    //{ "previous", Enumerable.Empty<ITypedElement>() },
-                },
-            };
-
             FhirEvaluationContext fpContext = new FhirEvaluationContext(currentTE.ToScopedNode())
             {
                 TerminologyService = _store.Terminology,
-                ElementResolver = resolver.Resolve,
+                ElementResolver = _store.Resolve,
+                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                {
+                    { "current", [currentTE] },
+                    { "previous", [] },
+                },
             };
 
             PerformSubscriptionTest(
@@ -1496,20 +1491,15 @@ public class ResourceStore<T> : IVersionedResourceStore
             ITypedElement currentTE = current.ToTypedElement();
             ITypedElement previousTE = previous.ToTypedElement();
 
-            FhirPathVariableResolver resolver = new FhirPathVariableResolver()
-            {
-                NextResolver = _store.Resolve,
-                Variables = new()
-                {
-                    { "current", currentTE },
-                    { "previous", previousTE },
-                },
-            };
-
             FhirEvaluationContext fpContext = new FhirEvaluationContext(currentTE.ToScopedNode())
             {
                 TerminologyService = _store.Terminology,
-                ElementResolver = resolver.Resolve,
+                ElementResolver = _store.Resolve,
+                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                {
+                    { "current", [currentTE] },
+                    { "previous", [previousTE] },
+                },
             };
 
             //string test = "meta.tag.memberOf('http://hl7.org/fhir/us/davinci-cdex/ValueSet/cdex-work-queue')";
@@ -1547,20 +1537,15 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             ITypedElement previousTE = previous.ToTypedElement();
 
-            FhirPathVariableResolver resolver = new FhirPathVariableResolver()
-            {
-                NextResolver = _store.Resolve,
-                Variables = new()
-                {
-                    //{ "current", currentTE },
-                    { "previous", previousTE },
-                },
-            };
-
             FhirEvaluationContext fpContext = new FhirEvaluationContext(previousTE.ToScopedNode())
             {
                 TerminologyService = _store.Terminology,
-                ElementResolver = resolver.Resolve,
+                ElementResolver = _store.Resolve,
+                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                {
+                    { "current", [] },
+                    { "previous", [ previousTE ] },
+                },
             };
 
             PerformSubscriptionTest(

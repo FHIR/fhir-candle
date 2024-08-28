@@ -4,79 +4,115 @@
 // </copyright>
 
 using FhirCandle.Extensions;
+using FhirCandle.Utils;
 
 namespace FhirCandle.Models;
 
-/// <summary>A provider configuration.</summary>
+/// <summary>
+/// A provider configuration.
+/// </summary>
 public class TenantConfiguration
 {
-    /// <summary>Values that represent supported FHIR versions.</summary>
-    public enum SupportedFhirVersions : int
+    /// <summary>
+    /// Gets or sets the supported FHIR versions.
+    /// </summary>
+    public static readonly List<FhirReleases.FhirSequenceCodes> SupportedFhirVersions = [
+        FhirReleases.FhirSequenceCodes.R4,
+        FhirReleases.FhirSequenceCodes.R4B,
+        FhirReleases.FhirSequenceCodes.R5
+    ];
+
+    /// <summary>
+    /// Information about the FHIR package.
+    /// </summary>
+    public readonly record struct FhirPackageInfo
     {
-        [FhirLiteral("R4")]
-        R4,
+        /// <summary>
+        /// Gets the identifier.
+        /// </summary>
+        public string Id { get; init; }
 
-        [FhirLiteral("R4B")]
-        R4B,
+        /// <summary>
+        /// Gets the version.
+        /// </summary>
+        public string Version { get; init; }
 
-        [FhirLiteral("R5")]
-        R5,
+        /// <summary>
+        /// Gets the registry.
+        /// </summary>
+        public string Registry { get; init; }
     }
 
-    /// <summary>Information about the FHIR package.</summary>
-    /// <param name="Id">      The identifier.</param>
-    /// <param name="Version"> The version.</param>
-    /// <param name="Registry">The registry.</param>
-    public readonly record struct FhirPackageInfo(
-        string Id,
-        string Version,
-        string Registry);
+    /// <summary>
+    /// Gets or sets the FHIR version.
+    /// </summary>
+    public required FhirReleases.FhirSequenceCodes FhirVersion { get; set; }
 
-    /// <summary>Gets or sets the version.</summary>
-    public required SupportedFhirVersions FhirVersion { get; set; } = SupportedFhirVersions.R5;
+    /// <summary>
+    /// Gets or sets the supported resources.
+    /// </summary>
+    public IEnumerable<string> SupportedResources { get; set; } = [];
 
-    /// <summary>Gets or sets the supported resources.</summary>
-    public IEnumerable<string> SupportedResources { get; set; } = Array.Empty<string>();
-
-    /// <summary>Gets or sets the supported MIME formats.</summary>
-    public IEnumerable<string> SupportedFormats { get; set; } = new string[]
-    {
+    /// <summary>
+    /// Gets or sets the supported MIME formats.
+    /// </summary>
+    public IEnumerable<string> SupportedFormats { get; set; } = [
         "application/fhir+json",
-        "application/fhir+xml",
-    };
+        "application/fhir+xml"
+    ];
 
-    /// <summary>Gets or sets route controller name.</summary>
+    /// <summary>
+    /// Gets or sets the route controller name.
+    /// </summary>
     public required string ControllerName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the absolute base url of this store.
+    /// Gets or sets the absolute base URL of this store.
     /// </summary>
     public required string BaseUrl { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the FHIR packages.</summary>
-    public Dictionary<string, FhirPackageInfo> FhirPackages { get; } = new();
+    /// <summary>
+    /// Gets the FHIR packages.
+    /// </summary>
+    public Dictionary<string, FhirPackageInfo> FhirPackages { get; } = [];
 
-    /// <summary>Gets or sets the pathname of the load directory.</summary>
+    /// <summary>
+    /// Gets or sets the load directory path.
+    /// </summary>
     public System.IO.DirectoryInfo? LoadDirectory { get; set; } = null;
 
-    /// <summary>Gets or sets the protect loaded content.</summary>
+    /// <summary>
+    /// Gets or sets a value indicating whether to protect loaded content.
+    /// </summary>
     public bool ProtectLoadedContent { get; set; } = false;
 
-    /// <summary>Gets or sets the number of maximum resources.</summary>
+    /// <summary>
+    /// Gets or sets the maximum resource count.
+    /// </summary>
     public int MaxResourceCount { get; set; } = 0;
 
-    /// <summary>Gets or sets the max allowed subscription expiration minutes.</summary>
+    /// <summary>
+    /// Gets or sets the maximum allowed subscription expiration minutes.
+    /// </summary>
     public int MaxSubscriptionExpirationMinutes { get; set; } = 30;
 
-    /// <summary>Gets or sets a value indicating whether the smart required.</summary>
+    /// <summary>
+    /// Gets or sets a value indicating whether SMART is required.
+    /// </summary>
     public bool SmartRequired { get; set; } = false;
 
-    /// <summary>Gets or sets a value indicating whether smart is allowed.</summary>
+    /// <summary>
+    /// Gets or sets a value indicating whether SMART is allowed.
+    /// </summary>
     public bool SmartAllowed { get; set; } = false;
 
-    /// <summary>Gets or sets a value indicating whether we allow existing identifier.</summary>
+    /// <summary>
+    /// Gets or sets a value indicating whether to allow existing identifier.
+    /// </summary>
     public bool AllowExistingId { get; set; } = true;
 
-    /// <summary>Gets or sets a value indicating whether we allow create as update.</summary>
+    /// <summary>
+    /// Gets or sets a value indicating whether to allow create as update.
+    /// </summary>
     public bool AllowCreateAsUpdate { get; set; } = true;
 }

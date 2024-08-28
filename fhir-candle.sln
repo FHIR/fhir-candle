@@ -21,14 +21,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		.editorconfig = .editorconfig
 		.gitignore = .gitignore
-		.github\workflows\argo-subscriptions.yml = .github\workflows\argo-subscriptions.yml
-		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
 		CONTRIBUTING.MD = CONTRIBUTING.MD
 		Dockerfile = Dockerfile
 		fhir-candle.props = fhir-candle.props
-		.github\workflows\ghcr-docker.yml = .github\workflows\ghcr-docker.yml
 		LICENSE = LICENSE
-		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
 		README.md = README.md
 		THIRDPARTYNOTICES.md = THIRDPARTYNOTICES.md
 	EndProjectSection
@@ -40,6 +36,21 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Ui.R5", "src\FhirCandle.Ui.R5\FhirCandle.Ui.R5.csproj", "{D6F90C51-D9A6-48E8-AAE8-F200C83E3F5F}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Ui.Common", "src\FhirCandle.Ui.Common\FhirCandle.Ui.Common.csproj", "{2276D057-68A6-4639-A821-0C028D8449D0}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".deployments", ".deployments", "{C08AFD85-C98F-4DEA-8915-AEE3CF5A7C15}"
+	ProjectSection(SolutionItems) = preProject
+		.deployments\k8-argo-run-ris.yaml = .deployments\k8-argo-run-ris.yaml
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{1AAC7962-65B4-42CD-AD5F-3EE8BD3149D0}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{22C11CB9-2408-4056-B41E-87DD07AECF94}"
+	ProjectSection(SolutionItems) = preProject
+		.github\workflows\argo-subscriptions.yml = .github\workflows\argo-subscriptions.yml
+		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
+		.github\workflows\ghcr-docker.yml = .github\workflows\ghcr-docker.yml
+		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -90,6 +101,11 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{C08AFD85-C98F-4DEA-8915-AEE3CF5A7C15} = {8B6BFF93-0260-40D3-BF26-175BC295D77B}
+		{1AAC7962-65B4-42CD-AD5F-3EE8BD3149D0} = {8B6BFF93-0260-40D3-BF26-175BC295D77B}
+		{22C11CB9-2408-4056-B41E-87DD07AECF94} = {1AAC7962-65B4-42CD-AD5F-3EE8BD3149D0}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {2F9896CC-1A33-4A99-95F9-8D13DF291779}

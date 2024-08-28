@@ -19,7 +19,7 @@ else
         @foreach (ParsedSubscription sub in _store!.CurrentSubscriptions)
         {
             <FluentGridItem Style="min-width: var(--field-container-min-width);">
-                <FluentCounterBadge Count="@sub.GeneratedEvents.Count()" Appearance="Appearance.Accent" BottomPosition="97" HorizontalPosition="97" Max="999">
+                <FluentCounterBadge Count="@sub.GeneratedEvents.Count()" Appearance="Appearance.Accent" VerticalPosition="97" HorizontalPosition="97" Max="999">
                 <FluentCard>
                     <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                         <FluentLabel Typo="Typography.Body">Subscription</FluentLabel>
