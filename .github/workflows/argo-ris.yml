@@ -1,10 +1,9 @@
 name: Restart Deployment
 on:
-  workflow_dispatch:
-    inputs:
-      deployment_name:
-        description: 'Restart subscriptions-ri for argo.run'
-        required: true
+  push:
+    branches:
+    - main
+
 jobs:
   restart_deployment:
     runs-on: ubuntu-latest
