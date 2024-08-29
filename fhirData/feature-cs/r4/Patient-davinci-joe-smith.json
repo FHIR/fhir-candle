@@ -1,0 +1,44 @@
+{
+  "resourceType": "Patient",
+  "id": "davinci-joe-smith",
+  "meta": {
+    "profile": [
+      "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-subscriber"
+    ],
+    "tag": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-ActReason",
+        "code": "HTEST",
+        "display": "test health data"
+      }
+    ]
+  },
+  "extension": [
+    {
+      "url": "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/extension-militaryStatus",
+      "valueCodeableConcept": {
+        "coding": [
+          {
+            "system": "https://codesystem.x12.org/005010/584",
+            "code": "RU"
+          }
+        ]
+      }
+    }
+  ],
+  "identifier": [
+    {
+      "system": "http://example.org/MIN",
+      "value": "12345678901"
+    }
+  ],
+  "name": [
+    {
+      "family": "SMITH",
+      "given": [
+        "JOE"
+      ]
+    }
+  ],
+  "gender": "male"
+}

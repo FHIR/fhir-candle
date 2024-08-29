@@ -1,0 +1,38 @@
+{
+  "resourceType": "Patient",
+  "id": "davinci-jesse-smith",
+  "meta": {
+    "profile": [
+      "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-beneficiary"
+    ],
+    "tag": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-ActReason",
+        "code": "HTEST",
+        "display": "test health data"
+      }
+    ]
+  },
+  "identifier": [
+    {
+      "system": "http://example.org/MIN",
+      "value": "12345678902"
+    }
+  ],
+  "name": [
+    {
+      "family": "SMITH",
+      "given": [
+        "JESSE"
+      ]
+    }
+  ],
+  "gender": "female",
+  "birthDate": "1947-01-18",
+  "address": [
+    {
+      "country": "US"
+    }
+  ],
+  "multipleBirthInteger": 1
+}

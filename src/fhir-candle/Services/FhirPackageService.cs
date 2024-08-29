@@ -429,11 +429,17 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 return;
             }
 
-            latestRecs.Append((pr, server));
+            latestRecs.Add((pr, server));
         });
 
-        await System.Threading.Tasks.Task.WhenAll(tasks);
+        Task t = System.Threading.Tasks.Task.WhenAll(tasks);
 
+        try
+        {
+            await t.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        catch { }
+        
         if (latestRecs.Count == 0)
         {
             return (PackageReference.None, null);
