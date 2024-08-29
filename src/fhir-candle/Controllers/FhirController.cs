@@ -3,6 +3,8 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using fhir.candle.Services;
 using Fhir.Metrics;
@@ -13,6 +15,7 @@ using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Net.Http.Headers;
+
 
 namespace fhir.candle.Controllers;
 

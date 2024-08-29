@@ -646,6 +646,78 @@ public class CandleConfig
         },
     };
 
+    [ConfigOption(
+        ArgName = "--otel-otlp-endpoint",
+        EnvName = "OTEL_EXPORTER_OTLP_ENDPOINT",
+        Description = "Enables OpenTelemetry and sends traces, metrics, and logs via OLTP to the specified endpoint")]
+    public string? OpenTelemetryEndpoint { get; set; } = null;
+
+    private static ConfigurationOption OpenTelemetryEndpointParameter { get; } = new()
+    {
+        Name = "OpenTelemetryProtocolEndpoint",
+        EnvVarName = "OTEL_EXPORTER_OTLP_ENDPOINT",
+        DefaultValue = string.Empty,
+        CliOption = new System.CommandLine.Option<string>("--otel-otlp-endpoint", "Enables OpenTelemetry and sends traces, metrics, and logs via OLTP to the specified endpoint")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+            IsRequired = false,
+        },
+    };
+
+    [ConfigOption(
+        ArgName = "--otel-otlp-traces-endpoint",
+        EnvName = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        Description = "Enables OpenTelemetry and sends traces via OLTP to the specified endpoint")]
+    public string? OpenTelemetryTracesEndpoint { get; set; } = null;
+
+    private static ConfigurationOption OpenTelemetryTracesEndpointParameter { get; } = new()
+    {
+        Name = "OpenTelemetryProtocolTracesEndpoint",
+        EnvVarName = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        DefaultValue = string.Empty,
+        CliOption = new System.CommandLine.Option<string>("--otel-otlp-traces-endpoint", "Enables OpenTelemetry and sends traces via OLTP to the specified endpoint")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+            IsRequired = false,
+        },
+    };
+
+    [ConfigOption(
+        ArgName = "--otel-otlp-metrics-endpoint",
+        EnvName = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        Description = "Enables OpenTelemetry and sends metrics via OLTP to the specified endpoint")]
+    public string? OpenTelemetryMetricsEndpoint { get; set; } = null;
+
+    private static ConfigurationOption OpenTelemetryMetricsEndpointParameter { get; } = new()
+    {
+        Name = "OpenTelemetryProtocolMetricsEndpoint",
+        EnvVarName = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        DefaultValue = string.Empty,
+        CliOption = new System.CommandLine.Option<string>("--otel-otlp-metrics-endpoint", "Enables OpenTelemetry and sends metrics via OLTP to the specified endpoint")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+            IsRequired = false,
+        },
+    };
+
+    [ConfigOption(
+        ArgName = "--otel-otlp-logs-endpoint",
+        EnvName = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        Description = "Enables OpenTelemetry and sends logs via OLTP to the specified endpoint")]
+    public string? OpenTelemetryLogsEndpoint { get; set; } = null;
+
+    private static ConfigurationOption OpenTelemetryLogsEndpointParameter { get; } = new()
+    {
+        Name = "OpenTelemetryProtocolLogsEndpoint",
+        EnvVarName = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        DefaultValue = string.Empty,
+        CliOption = new System.CommandLine.Option<string>("--otel-otlp-logs-endpoint", "Enables OpenTelemetry and sends logs via OLTP to the specified endpoint")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+            IsRequired = false,
+        },
+    };
+
     /// <summary>(Immutable) Options for controlling the operation.</summary>
     private static readonly ConfigurationOption[] _options =
     [
@@ -680,6 +752,10 @@ public class CandleConfig
         SmtpUserParameter,
         SmtpPasswordParameter,
         FhirPathLabUrlParameter,
+        OpenTelemetryEndpointParameter,
+        OpenTelemetryTracesEndpointParameter,
+        OpenTelemetryMetricsEndpointParameter,
+        OpenTelemetryLogsEndpointParameter,
     ];
 
     /// <summary>Parses the given parse result.</summary>
@@ -788,6 +864,18 @@ public class CandleConfig
                     break;
                 case "FhirPathLabUrl":
                     FhirPathLabUrl = GetOpt(parseResult, opt.CliOption, FhirPathLabUrl);
+                    break;
+                case "OpenTelemetryProtocolEndpoint":
+                    OpenTelemetryEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryEndpoint);
+                    break;
+                case "OpenTelemetryProtocolTracesEndpoint":
+                    OpenTelemetryTracesEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryTracesEndpoint);
+                    break;
+                case "OpenTelemetryProtocolMetricsEndpoint":
+                    OpenTelemetryMetricsEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryMetricsEndpoint);
+                    break;
+                case "OpenTelemetryProtocolLogsEndpoint":
+                    OpenTelemetryLogsEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryLogsEndpoint);
                     break;
             }
         }

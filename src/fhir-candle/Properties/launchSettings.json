@@ -8,7 +8,7 @@
   "profiles": {
     "candle": {
       "commandName": "Project",
-      "commandLineArgs": " --r4 r4 --disable-ui",
+      "commandLineArgs": "--r4 r4 --otel-otlp-endpoint http://localhost:4317",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {
