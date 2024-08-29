@@ -177,39 +177,8 @@ public static partial class Program
 
             builder.Services.AddCors();
 
-            // setup OpenTelemetry if it is enable
-            if (!string.IsNullOrEmpty(config.OpenTelemetryEndpoint))
-            {
-                builder.Logging.AddOpenTelemetry(options =>
-                {
-                    options
-                        .SetResourceBuilder(
-                            ResourceBuilder.CreateDefault()
-                                .AddService("fhir-candle"))
-                        .AddConsoleExporter()
-                        .AddOtlpExporter(exporterOptions =>
-                        {
-                            exporterOptions.Endpoint = new Uri(config.OpenTelemetryEndpoint);
-                        });
-                });
-
-                builder.Services.AddOpenTelemetry()
-                    .ConfigureResource(resource => resource.AddService("fhir-candle"))
-                    .WithTracing(tracing => tracing
-                        .AddAspNetCoreInstrumentation()
-                        .AddConsoleExporter()
-                        .AddOtlpExporter(exporterOptions =>
-                        {
-                            exporterOptions.Endpoint = new Uri(config.OpenTelemetryEndpoint);
-                        }))
-                    .WithMetrics(metrics => metrics
-                        .AddAspNetCoreInstrumentation()
-                        .AddConsoleExporter()
-                        .AddOtlpExporter(exporterOptions =>
-                        {
-                            exporterOptions.Endpoint = new Uri(config.OpenTelemetryEndpoint);
-                        }));
-            }
+            // setup open telemetry if necessary
+            ConfigureOpenTelemetry(config, builder);
 
             // add our configuration
             builder.Services.AddSingleton(config);
@@ -323,6 +292,91 @@ public static partial class Program
         }
     }
 
+    /// <summary>
+    /// Configures OpenTelemetry for the application.
+    /// </summary>
+    /// <param name="config">The CandleConfig object containing the configuration settings.</param>
+    /// <param name="builder">The WebApplicationBuilder used to configure the application.</param>
+    private static void ConfigureOpenTelemetry(CandleConfig config, WebApplicationBuilder builder)
+    {
+        string? traceEndpoint = !string.IsNullOrEmpty(config.OpenTelemetryTracesEndpoint)
+            ? config.OpenTelemetryTracesEndpoint
+            : !string.IsNullOrEmpty(config.OpenTelemetryEndpoint)
+            ? config.OpenTelemetryEndpoint
+            : null;
+
+        string? metricsEndpoint = !string.IsNullOrEmpty(config.OpenTelemetryMetricsEndpoint)
+            ? config.OpenTelemetryMetricsEndpoint
+            : !string.IsNullOrEmpty(config.OpenTelemetryEndpoint)
+            ? config.OpenTelemetryEndpoint
+            : null;
+
+        string? logsEndpoint = !string.IsNullOrEmpty(config.OpenTelemetryLogsEndpoint)
+            ? config.OpenTelemetryLogsEndpoint
+            : !string.IsNullOrEmpty(config.OpenTelemetryEndpoint)
+            ? config.OpenTelemetryEndpoint
+            : null;
+
+        if (logsEndpoint != null)
+        {
+            builder.Logging.AddOpenTelemetry(options =>
+            {
+                options
+                    .SetResourceBuilder(
+                        ResourceBuilder.CreateDefault()
+                            .AddService("fhir-candle"))
+                    .AddConsoleExporter()
+                    .AddOtlpExporter(exporterOptions =>
+                    {
+                        exporterOptions.Endpoint = new Uri(logsEndpoint);
+                    });
+            });
+        }
+
+        if ((traceEndpoint != null) && (metricsEndpoint != null))
+        {
+            builder.Services.AddOpenTelemetry()
+                .ConfigureResource(resource => resource.AddService("fhir-candle"))
+                .WithTracing(tracing => tracing
+                    .AddAspNetCoreInstrumentation()
+                    .AddConsoleExporter()
+                    .AddOtlpExporter(exporterOptions =>
+                    {
+                        exporterOptions.Endpoint = new Uri(traceEndpoint);
+                    }))
+                .WithMetrics(metrics => metrics
+                    .AddAspNetCoreInstrumentation()
+                    .AddConsoleExporter()
+                    .AddOtlpExporter(exporterOptions =>
+                    {
+                        exporterOptions.Endpoint = new Uri(metricsEndpoint);
+                    }));
+        }
+        else if (traceEndpoint != null)
+        {
+            builder.Services.AddOpenTelemetry()
+                .ConfigureResource(resource => resource.AddService("fhir-candle"))
+                .WithTracing(tracing => tracing
+                    .AddAspNetCoreInstrumentation()
+                    .AddConsoleExporter()
+                    .AddOtlpExporter(exporterOptions =>
+                    {
+                        exporterOptions.Endpoint = new Uri(traceEndpoint);
+                    }));
+        }
+        else if (metricsEndpoint != null)
+        {
+            builder.Services.AddOpenTelemetry()
+                .ConfigureResource(resource => resource.AddService("fhir-candle"))
+                .WithMetrics(metrics => metrics
+                    .AddAspNetCoreInstrumentation()
+                    .AddConsoleExporter()
+                    .AddOtlpExporter(exporterOptions =>
+                    {
+                        exporterOptions.Endpoint = new Uri(metricsEndpoint);
+                    }));
+        }
+    }
 
     /// <summary>After server start.</summary>
     /// <param name="app">   The application.</param>
