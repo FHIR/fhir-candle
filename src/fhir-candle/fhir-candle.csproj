@@ -16,7 +16,7 @@
     <PackageOutputPath>..\..\nupkg</PackageOutputPath>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/GinoCanessa/fhir-candle</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/FHIR/fhir-candle</PackageProjectUrl>
     <PackageTags>fhir;server;</PackageTags>
 
     <!--<StaticWebAssetBasePath>ui</StaticWebAssetBasePath>-->

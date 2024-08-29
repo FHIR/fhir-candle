@@ -5362,7 +5362,7 @@ public partial class VersionedFhirStore : IFhirStore
             Implementation = new()
             {
                 Description = "fhir-candle: A FHIR Server for testing and development",
-                Url = "https://github.com/GinoCanessa/fhir-candle",
+                Url = "https://github.com/FHIR/fhir-candle",
             },
             FhirVersion = CommonToFirelyVersion(_config.FhirVersion),
             Format = _config.SupportedFormats,
