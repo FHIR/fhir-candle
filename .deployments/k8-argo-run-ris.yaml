@@ -495,3 +495,109 @@ spec:
   - protocol: TCP
     port: 80
     targetPort: 5826
+
+---
+# Create a service account for GH workflow rollouts
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-actions-deployer
+  namespace: subscriptions-ri
+---
+# Establish a secret for the service account
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-actions-token
+  namespace: subscriptions-ri
+  annotations:
+    kubernetes.io/service-account.name: github-actions-deployer
+type: kubernetes.io/service-account-token
+---
+# Set the role for the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: subscriptions-ri
+  name: deployment-restarter
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+# Bind the role to the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-actions-deployer-binding
+  namespace: subscriptions-ri
+subjects:
+- kind: ServiceAccount
+  name: github-actions-deployer
+  namespace: subscriptions-ri
+roleRef:
+  kind: Role
+  name: deployment-restarter
+  apiGroup: rbac.authorization.k8s.io
+
+# To use the rollout serivce - commands to run:
+#
+# 1. Apply the YAML file:
+# kubectl apply -f k8-argo-run-ris.yml
+#
+# 2. Retrieve the token, certificate, and server information:
+# KUBE_TOKEN=$(kubectl get secret github-actions-token -n subscriptions-ri -o jsonpath='{.data.token}' | base64 --decode)
+# KUBE_CERTIFICATE=$(kubectl get secret github-actions-token -n subscriptions-ri -o jsonpath='{.data.ca\.crt}')
+# KUBE_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+#
+# 3. Create a JSON object with the Kubernetes configuration:
+# KUBE_CONFIG=$(echo '{
+#   "KUBE_TOKEN": "'$KUBE_TOKEN'",
+#   "KUBE_CERTIFICATE": "'$KUBE_CERTIFICATE'",
+#   "KUBE_SERVER": "'$KUBE_SERVER'"
+# }' | jq -c .)
+#
+# 4. Display the JSON object to be added as a GitHub secret:
+# echo "Add this JSON object as a secret named KUBE_CONFIG in your GitHub repository:"
+# echo $KUBE_CONFIG
+#
+# 5. Add the JSON object as a secret to your GitHub repository:
+#    - Go to your GitHub repository
+#    - Navigate to Settings > Secrets and variables > Actions
+#    - Add a new repository secret:
+#      - Name: KUBE_CONFIG
+#      - Value: [Paste the JSON object from step 4]
+#
+# 6. Create a GitHub Actions workflow file in your repository:
+#    Create a file at .github/workflows/restart-deployment.yml with the following content:
+#
+# name: Restart Deployment
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       deployment_name:
+#         description: 'Name of the deployment to restart'
+#         required: true
+# jobs:
+#   restart_deployment:
+#     runs-on: ubuntu-latest
+#     steps:
+#     - name: Configure Kubectl
+#       env:
+#         KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+#       run: |
+#         mkdir -p $HOME/.kube
+#         KUBE_TOKEN=$(echo $KUBE_CONFIG | jq -r .KUBE_TOKEN)
+#         KUBE_CERTIFICATE=$(echo $KUBE_CONFIG | jq -r .KUBE_CERTIFICATE)
+#         KUBE_SERVER=$(echo $KUBE_CONFIG | jq -r .KUBE_SERVER)
+#         echo "$KUBE_CERTIFICATE" | base64 --decode > $HOME/.kube/ca.crt
+#         kubectl config set-cluster argocluster-doks --server="$KUBE_SERVER" --certificate-authority=$HOME/.kube/ca.crt
+#         kubectl config set-credentials github-actions-deployer --token="$KUBE_TOKEN"
+#         kubectl config set-context argo --cluster=argocluster-doks --user=github-actions-deployer --namespace=subscriptions-ri
+#         kubectl config use-context argo
+#     - name: Restart Deployment
+#       run: |
+#         kubectl rollout restart deployment/subscriptions-ri -n subscriptions-ri

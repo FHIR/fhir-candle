@@ -1,0 +1,27 @@
+name: Restart Deployment
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_name:
+        description: 'Restart subscriptions-ri for argo.run'
+        required: true
+jobs:
+  restart_deployment:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Configure Kubectl
+      env:
+        KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+      run: |
+        mkdir -p $HOME/.kube
+        KUBE_TOKEN=$(echo $KUBE_CONFIG | jq -r .KUBE_TOKEN)
+        KUBE_CERTIFICATE=$(echo $KUBE_CONFIG | jq -r .KUBE_CERTIFICATE)
+        KUBE_SERVER=$(echo $KUBE_CONFIG | jq -r .KUBE_SERVER)
+        echo "$KUBE_CERTIFICATE" | base64 --decode > $HOME/.kube/ca.crt
+        kubectl config set-cluster argocluster-doks --server="$KUBE_SERVER" --certificate-authority=$HOME/.kube/ca.crt
+        kubectl config set-credentials github-actions-deployer --token="$KUBE_TOKEN"
+        kubectl config set-context argo --cluster=argocluster-doks --user=github-actions-deployer --namespace=subscriptions-ri
+        kubectl config use-context argo
+    - name: Restart Deployment
+      run: |
+        kubectl rollout restart deployment/subscriptions-ri -n subscriptions-ri
