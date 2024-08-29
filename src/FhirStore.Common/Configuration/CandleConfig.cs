@@ -646,6 +646,25 @@ public class CandleConfig
         },
     };
 
+
+    [ConfigOption(
+        ArgName = "--otel-otlp-endpoint",
+        EnvName = "OTEL_EXPORTER_OTLP_ENDPOINT",
+        Description = "Enables OpenTelemetry and sends via OLTP to the specified endpoint")]
+    public string? OpenTelemetryEndpoint { get; set; } = null;
+
+    private static ConfigurationOption OpenTelemetryEndpointParameter { get; } = new()
+    {
+        Name = "OpenTelemetryProtocolEndpoint",
+        EnvVarName = "OTEL_EXPORTER_OTLP_ENDPOINT",
+        DefaultValue = string.Empty,
+        CliOption = new System.CommandLine.Option<string>("--otel-otlp-endpoint", "Enables OpenTelemetry and sends via OLTP to the specified endpoint")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+            IsRequired = false,
+        },
+    };
+
     /// <summary>(Immutable) Options for controlling the operation.</summary>
     private static readonly ConfigurationOption[] _options =
     [
@@ -680,6 +699,7 @@ public class CandleConfig
         SmtpUserParameter,
         SmtpPasswordParameter,
         FhirPathLabUrlParameter,
+        OpenTelemetryEndpointParameter,
     ];
 
     /// <summary>Parses the given parse result.</summary>
@@ -788,6 +808,9 @@ public class CandleConfig
                     break;
                 case "FhirPathLabUrl":
                     FhirPathLabUrl = GetOpt(parseResult, opt.CliOption, FhirPathLabUrl);
+                    break;
+                case "OpenTelemetryProtocolEndpoint":
+                    OpenTelemetryEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryEndpoint);
                     break;
             }
         }

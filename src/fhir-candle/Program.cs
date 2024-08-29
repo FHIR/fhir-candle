@@ -3,19 +3,24 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
-using SCL = System.CommandLine; // this is present to disambiguate Option from System.CommandLine and Microsoft.FluentUI.AspNetCore.Components
+using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using fhir.candle.Services;
+using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Utils;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.FluentUI.AspNetCore.Components;
-using System.CommandLine.Parsing;
-using System.CommandLine;
-using FhirCandle.Configuration;
-using System.Reflection;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using SCL = System.CommandLine; // this is present to disambiguate Option from System.CommandLine and Microsoft.FluentUI.AspNetCore.Components
+
 
 namespace fhir.candle;
 
@@ -168,12 +173,43 @@ public static partial class Program
             }
 
             StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
-
-            //builder.WebHost.UseWebRoot("wwwroot");
-
             builder.WebHost.UseStaticWebAssets();
 
             builder.Services.AddCors();
+
+            // setup OpenTelemetry if it is enable
+            if (!string.IsNullOrEmpty(config.OpenTelemetryEndpoint))
+            {
+                builder.Logging.AddOpenTelemetry(options =>
+                {
+                    options
+                        .SetResourceBuilder(
+                            ResourceBuilder.CreateDefault()
+                                .AddService("fhir-candle"))
+                        .AddConsoleExporter()
+                        .AddOtlpExporter(exporterOptions =>
+                        {
+                            exporterOptions.Endpoint = new Uri(config.OpenTelemetryEndpoint);
+                        });
+                });
+
+                builder.Services.AddOpenTelemetry()
+                    .ConfigureResource(resource => resource.AddService("fhir-candle"))
+                    .WithTracing(tracing => tracing
+                        .AddAspNetCoreInstrumentation()
+                        .AddConsoleExporter()
+                        .AddOtlpExporter(exporterOptions =>
+                        {
+                            exporterOptions.Endpoint = new Uri(config.OpenTelemetryEndpoint);
+                        }))
+                    .WithMetrics(metrics => metrics
+                        .AddAspNetCoreInstrumentation()
+                        .AddConsoleExporter()
+                        .AddOtlpExporter(exporterOptions =>
+                        {
+                            exporterOptions.Endpoint = new Uri(config.OpenTelemetryEndpoint);
+                        }));
+            }
 
             // add our configuration
             builder.Services.AddSingleton(config);
