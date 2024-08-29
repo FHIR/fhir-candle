@@ -385,7 +385,7 @@ public class CandleConfig
     [ConfigOption(
         ArgName = "--smart-required",
         EnvName = "Smart_Required_Tenants",
-        Description = "Tenants that require SMART on FHIR support.")]
+        Description = "Tenants that require SMART on FHIR support, * for all.")]
     public string[] SmartRequiredTenants = [];
 
     /// <summary>Gets the smart required tenants option.</summary>
@@ -394,7 +394,7 @@ public class CandleConfig
         Name = "SmartRequiredTenants",
         EnvVarName = "Smart_Required_Tenants",
         DefaultValue = Array.Empty<string>(),
-        CliOption = new System.CommandLine.Option<string[]>("--smart-required", "Tenants that require SMART on FHIR support.")
+        CliOption = new System.CommandLine.Option<string[]>("--smart-required", "Tenants that require SMART on FHIR support, * for all.")
         {
             Arity = System.CommandLine.ArgumentArity.ZeroOrMore,
             IsRequired = false,
@@ -405,7 +405,7 @@ public class CandleConfig
     [ConfigOption(
         ArgName = "--smart-optional",
         EnvName = "Smart_Optional_Tenants",
-        Description = "Tenants that support SMART on FHIR but do not require it.")]
+        Description = "Tenants that support SMART on FHIR but do not require it, * for all.")]
     public string[] SmartOptionalTenants = [];
 
     /// <summary>Gets the smart optional tenants option.</summary>
@@ -414,7 +414,7 @@ public class CandleConfig
         Name = "SmartOptionalTenants",
         EnvVarName = "Smart_Optional_Tenants",
         DefaultValue = Array.Empty<string>(),
-        CliOption = new System.CommandLine.Option<string[]>("--smart-optional", "Tenants that support SMART on FHIR but do not require it.")
+        CliOption = new System.CommandLine.Option<string[]>("--smart-optional", "Tenants that support SMART on FHIR but do not require it, * for all.")
         {
             Arity = System.CommandLine.ArgumentArity.ZeroOrMore,
             IsRequired = false,
@@ -791,16 +791,16 @@ public class CandleConfig
                     UseOfficialRegistries = GetOpt(parseResult, opt.CliOption, UseOfficialRegistries);
                     break;
                 case "AdditionalFhirRegistryUrls":
-                    AdditionalFhirRegistryUrls = GetOptArray(parseResult, opt.CliOption, AdditionalFhirRegistryUrls);
+                    AdditionalFhirRegistryUrls = GetOptArray(parseResult, opt.CliOption, AdditionalFhirRegistryUrls, ',');
                     break;
                 case "AdditionalNpmRegistryUrls":
-                    AdditionalNpmRegistryUrls = GetOptArray(parseResult, opt.CliOption, AdditionalNpmRegistryUrls);
+                    AdditionalNpmRegistryUrls = GetOptArray(parseResult, opt.CliOption, AdditionalNpmRegistryUrls, ',');
                     break;
                 case "FhirPackages":
-                    PublishedPackages = GetOptArray(parseResult, opt.CliOption, PublishedPackages);
+                    PublishedPackages = GetOptArray(parseResult, opt.CliOption, PublishedPackages, ',');
                     break;
                 case "FhirCiPackages":
-                    CiPackages = GetOptArray(parseResult, opt.CliOption, CiPackages);
+                    CiPackages = GetOptArray(parseResult, opt.CliOption, CiPackages, ',');
                     break;
                 case "LoadExamples":
                     LoadPackageExamples = GetOpt(parseResult, opt.CliOption, LoadPackageExamples);
@@ -818,19 +818,19 @@ public class CandleConfig
                     ProtectLoadedContent = GetOpt(parseResult, opt.CliOption, ProtectLoadedContent);
                     break;
                 case "TenantsR4":
-                    TenantsR4 = GetOptArray(parseResult, opt.CliOption, TenantsR4);
+                    TenantsR4 = GetOptArray(parseResult, opt.CliOption, TenantsR4, ',');
                     break;
                 case "TenantsR4B":
-                    TenantsR4B = GetOptArray(parseResult, opt.CliOption, TenantsR4B);
+                    TenantsR4B = GetOptArray(parseResult, opt.CliOption, TenantsR4B, ',');
                     break;
                 case "TenantsR5":
-                    TenantsR5 = GetOptArray(parseResult, opt.CliOption, TenantsR5);
+                    TenantsR5 = GetOptArray(parseResult, opt.CliOption, TenantsR5, ',');
                     break;
                 case "SmartRequiredTenants":
-                    SmartRequiredTenants = GetOptArray(parseResult, opt.CliOption, SmartRequiredTenants);
+                    SmartRequiredTenants = GetOptArray(parseResult, opt.CliOption, SmartRequiredTenants, ',');
                     break;
                 case "SmartOptionalTenants":
-                    SmartOptionalTenants = GetOptArray(parseResult, opt.CliOption, SmartOptionalTenants);
+                    SmartOptionalTenants = GetOptArray(parseResult, opt.CliOption, SmartOptionalTenants, ',');
                     break;
                 case "CreateExistingId":
                     AllowExistingId = GetOpt(parseResult, opt.CliOption, AllowExistingId);
@@ -915,14 +915,16 @@ public class CandleConfig
     /// <summary>Gets option array.</summary>
     /// <exception cref="Exception">Thrown when an exception error condition occurs.</exception>
     /// <typeparam name="T">Generic type parameter.</typeparam>
-    /// <param name="parseResult"> The parse result.</param>
-    /// <param name="opt">         The option.</param>
-    /// <param name="defaultValue">The default value.</param>
+    /// <param name="parseResult">    The parse result.</param>
+    /// <param name="opt">            The option.</param>
+    /// <param name="defaultValue">   The default value.</param>
+    /// <param name="singleSplitChar">(Optional) The single split character.</param>
     /// <returns>An array of t.</returns>
     internal T[] GetOptArray<T>(
         System.CommandLine.Parsing.ParseResult parseResult,
         System.CommandLine.Option opt,
-        T[] defaultValue)
+        T[] defaultValue,
+        char? singleSplitChar = null)
     {
         if (!parseResult.HasOption(opt))
         {
@@ -940,6 +942,24 @@ public class CandleConfig
 
         if (parsed is T[] array)
         {
+            if ((array.Length == 1) &&
+                (singleSplitChar != null) &&
+                (array is string[] sA))
+            {
+                string[] splitValues = sA.First().Split(singleSplitChar.Value);
+
+                values.Clear();
+                foreach (string v in splitValues)
+                {
+                    if (v is T tV)
+                    {
+                        values.Add(tV);
+                    }
+                }
+
+                return [.. values];
+            }
+
             return array;
         }
         else if (parsed is IEnumerator genericEnumerator)
@@ -974,6 +994,22 @@ public class CandleConfig
         if (values.Count == 0)
         {
             return defaultValue;
+        }
+
+        if ((values.Count == 1) &&
+            (singleSplitChar != null) &&
+            (values is List<string> stringValues))
+        {
+            string[] splitValues = stringValues.First().Split(singleSplitChar.Value);
+
+            values.Clear();
+            foreach (string v in splitValues)
+            {
+                if (v is T tV)
+                {
+                    values.Add(tV);
+                }
+            }
         }
 
         return [.. values];

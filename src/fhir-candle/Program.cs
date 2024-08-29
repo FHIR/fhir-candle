@@ -431,6 +431,9 @@ public static partial class Program
         HashSet<string> smartRequired = config.SmartRequiredTenants.ToHashSet();
         HashSet<string> smartOptional = config.SmartOptionalTenants.ToHashSet();
 
+        bool allRequired = smartRequired.Contains("*");
+        bool allOptional = smartOptional.Contains("*");
+
         Dictionary<string, TenantConfiguration> tenants = new();
 
         foreach (string tenant in config.TenantsR4)
@@ -443,8 +446,8 @@ public static partial class Program
                 ProtectLoadedContent = config.ProtectLoadedContent,
                 MaxResourceCount = config.MaxResourceCount,
                 MaxSubscriptionExpirationMinutes = config.MaxSubscriptionExpirationMinutes,
-                SmartRequired = smartRequired.Contains(tenant),
-                SmartAllowed = smartOptional.Contains(tenant),
+                SmartRequired = allRequired || smartRequired.Contains(tenant),
+                SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
             });
@@ -460,8 +463,8 @@ public static partial class Program
                 ProtectLoadedContent = config.ProtectLoadedContent,
                 MaxResourceCount = config.MaxResourceCount,
                 MaxSubscriptionExpirationMinutes = config.MaxSubscriptionExpirationMinutes,
-                SmartRequired = smartRequired.Contains(tenant),
-                SmartAllowed = smartOptional.Contains(tenant),
+                SmartRequired = allRequired || smartRequired.Contains(tenant),
+                SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
             });
@@ -477,8 +480,8 @@ public static partial class Program
                 ProtectLoadedContent = config.ProtectLoadedContent,
                 MaxResourceCount = config.MaxResourceCount,
                 MaxSubscriptionExpirationMinutes = config.MaxSubscriptionExpirationMinutes,
-                SmartRequired = smartRequired.Contains(tenant),
-                SmartAllowed = smartOptional.Contains(tenant),
+                SmartRequired = allRequired || smartRequired.Contains(tenant),
+                SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
             });
