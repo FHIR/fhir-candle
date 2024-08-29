@@ -1,0 +1,17 @@
+{
+  "resourceType" : "PractitionerRole",
+  "id" : "SurgicalPractitionerRoleExample",
+  "meta" : {
+    "profile" : [
+      "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-practitionerrole"
+    ]
+  },
+  "practitioner" : {
+    "reference" : "Practitioner/davinci-susan-watson"
+  },
+  "location" : [
+    {
+      "reference" : "Location/davinci-example-location"
+    }
+  ]
+}

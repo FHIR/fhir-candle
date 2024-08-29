@@ -1,0 +1,36 @@
+{
+  "resourceType" : "Practitioner",
+  "id" : "davinci-susan-watson",
+  "meta" : {
+    "profile" : [
+      "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-practitioner"
+    ],
+    "tag": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-ActReason",
+        "code": "HTEST",
+        "display": "test health data"
+      }
+    ]
+  },
+  "identifier" : [
+    {
+      "system" : "http://hl7.org/fhir/sid/us-npi",
+      "value" : "987654321"
+    }
+  ],
+  "name" : [
+    {
+      "family" : "WATSON",
+      "given" : [
+        "SUSAN"
+      ]
+    }
+  ],
+  "telecom" : [
+    {
+      "system" : "phone",
+      "value" : "4029993456"
+    }
+  ]
+}
