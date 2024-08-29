@@ -1,12 +1,14 @@
 name: Restart Deployment
 on:
-  push:
-    branches:
-    - main
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Publish on GitHub Container Registry']
+    types: [completed]
 
 jobs:
   restart_deployment:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
     - name: Configure Kubectl
       env:

@@ -1,4 +1,4 @@
-name: Create and publish a Docker image on GitHub Container Registry
+name: Publish on GitHub Container Registry
 # Basics from https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
 on:
   push:
