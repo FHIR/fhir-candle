@@ -1,8 +1,8 @@
 # fhir-candle
 [![Tests](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml)
 [![Publish dotnet tool](https://img.shields.io/nuget/v/fhir-candle.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml)
-[![Publish Docker image on GitHub CR](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml)
-[![Deploy to subscriptions.argo.run](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/argo-subscriptions.yml)
+[![Publish Docker image to ghcr.io](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml)
+[![Deploy to `argo.run`](https://github.com/FHIR/fhir-candle/actions/workflows/argo-ris.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/argo-ris.yml)
 
 When you need a small FHIR.
 
@@ -46,7 +46,7 @@ For more information, please see the [Security Readme](SECURITY.MD).
 
 # Documentation
 
-## Get Started
+## Get Started with .Net
 
 [Install .NET 8 or newer](https://get.dot.net) and run this command:
 
@@ -61,7 +61,28 @@ Start a FHIR server and open the browser by running:
 fhir-candle -o
 ```
 
-### Cloning this repository
+## Get Started with Docker
+
+[Install Docker](https://docs.docker.com/engine/install/) and run these commands:
+
+```
+docker pull ghcr.io/fhir/fhir-candle:latest
+docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest
+```
+
+This will run the docker image with the default configuration, mapping port 5826 from the container to port 8080 in the host.
+Once running, you can access http://localhost:8080/ in the browser to access the fhir-candle's UI or access the default endpoints:
+* http://localhost:8080/fhir/r4/ for FHIR R4
+* http://localhost:8080/fhir/r4b/ for FHIR R4B
+* http://localhost:8080/fhir/r5/ for FHIR R5
+
+Note that additional arguments can be passed directly via the `docker run` command. For example, to run the server with only an R4 endpoint named 'test':
+```
+docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest --r4 test
+```
+
+
+## Get Started via cloning this repository
 
 To run the default server from the command line:
 ```
