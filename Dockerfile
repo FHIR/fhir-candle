@@ -3,23 +3,22 @@ WORKDIR /app
 
 # Copy everything else and build
 COPY . ./
-RUN dotnet restore
 
 # Build with platform-specific .Net RID
 RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --arch linux-x64; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0 --arch linux-x64; \
     elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --arch linux-arm64; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0 --arch linux-arm64; \
     elif [ "$TARGETPLATFORM" = "windows/x64" ]; then \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --arch win-x64; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0 --arch win-x64; \
     elif [ "$TARGETPLATFORM" = "windows/arm64" ]; then \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --arch win-arm64; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0 --arch win-arm64; \
     elif [ "$TARGETPLATFORM" = "darwin/x64" ]; then \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --arch osx-x64; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0 --arch osx-x64; \
     elif [ "$TARGETPLATFORM" = "darwin/arm64" ]; then \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --arch osx-arm64; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0 --arch osx-arm64; \
     else \
-        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out; \
+        dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0; \
     fi;
 #RUN dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out
 
