@@ -4,6 +4,7 @@
 // </copyright>
 
 using System.CommandLine;
+using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Reflection;
@@ -42,14 +43,73 @@ public static partial class Program
             .AddEnvironmentVariables()
             .Build();
 
+        //Dictionary<string, SCL.Option> options = BuildCliOptions(typeof(CandleConfig), envConfig: envConfig);
+        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        List<string> envArgs = [];
+
+        // build our root command
         SCL.RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (SCL.Option option in BuildCliOptions(typeof(CandleConfig), envConfig: envConfig))
+        SCL.RootCommand envCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
+        foreach (ConfigurationOption co in configurationOptions)
         {
             // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(option);
-        }
-        rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, context.GetCancellationToken()));
+            rootCommand.AddGlobalOption(co.CliOption);
+            envCommand.AddGlobalOption(co.CliOption);
 
+            if (string.IsNullOrEmpty(co.EnvVarName))
+            {
+                continue;
+            }
+
+            IConfigurationSection section = envConfig.GetSection(co.EnvVarName);
+
+            if (!section.Exists())
+            {
+                continue;
+            }
+
+            string? value = section.Value ?? null;
+
+            if (value == null)
+            {
+                value = string.Join(',', section.GetChildren().Select(c => c.Value));
+            }
+
+            if (string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+
+            if (value.Contains(' '))
+            {
+                value = $"\"{value}\"";
+            }
+
+            if (co.CliOption.Aliases.Any())
+            {
+                envArgs.Add(co.CliOption.Aliases.First());
+                envArgs.Add(value);
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(co.CliOption.Name))
+            {
+                envArgs.Add(co.CliOption.Name);
+                envArgs.Add(value);
+                continue;
+            }
+        }
+
+        // build a parser for our environment arguments
+        SCL.Parsing.Parser envParser = new CommandLineBuilder(envCommand).UseDefaults().Build();
+
+        // attempt a parse
+        SCL.Parsing.ParseResult envParseResult = envParser.Parse(string.Join(' ', envArgs));
+
+        // set our command handler
+        rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, envParseResult, context.GetCancellationToken()));
+
+        // run whatever the caller requested
         return await rootCommand.InvokeAsync(args);
     }
 
@@ -60,11 +120,12 @@ public static partial class Program
     /// <param name="excludeFromType">The type to exclude from the command line options.</param>
     /// <param name="envConfig">The environment configuration.</param>
     /// <returns>An enumerable collection of command line options.</returns>
-    private static IEnumerable<SCL.Option> BuildCliOptions(
+    private static Dictionary<string, SCL.Option> BuildCliOptions(
         Type forType,
         Type? excludeFromType = null,
         IConfiguration? envConfig = null)
     {
+        Dictionary<string, SCL.Option> options = [];
         HashSet<string> inheritedPropNames = [];
 
         if (excludeFromType != null)
@@ -102,22 +163,27 @@ public static partial class Program
                 opt.CliOption.SetDefaultValue(opt.DefaultValue);
             }
 
-            yield return opt.CliOption;
+            options[opt.Name] = opt.CliOption;
         }
+
+        return options;
     }
 
     /// <summary>Executes the server operation.</summary>
     /// <param name="config">           The configuration.</param>
     /// <param name="cancellationToken">A token that allows processing to be cancelled.</param>
     /// <returns>An asynchronous result that yields an int.</returns>
-    public static async Task<int> RunServer(SCL.Parsing.ParseResult pr, CancellationToken? cancellationToken = null)
+    public static async Task<int> RunServer(
+        SCL.Parsing.ParseResult pr,
+        SCL.Parsing.ParseResult envPR,
+        CancellationToken? cancellationToken = null)
     { 
         try
         {
             CandleConfig config = new();
 
             // parse the arguments into the configuration object
-            config.Parse(pr);
+            config.Parse(pr, envPR);
 
             if (string.IsNullOrEmpty(config.PublicUrl))
             {
