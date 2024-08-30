@@ -1,11 +1,17 @@
 ﻿FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-#RUN echo "I am running on $BUILDPLATFORM, building for $TARGETPLATFORM" > /log
+ARG TARGETARCH
+
 WORKDIR /app
 
 # Copy everything else and build
 COPY . ./
+
+RUN dotnet restore -a $TARGETARCH src/fhir-candle/fhir-candle.csproj
+#RUN dotnet build  -a $TARGETARCH src/fhir-candle/fhir-candle.csproj -c Release -o out
+RUN dotnet publish -a $TARGETARCH src/fhir-candle/fhir-candle.csproj -c Release -o out
+
 #
 ## Build with platform-specific .Net RID
 #RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
@@ -34,8 +40,9 @@ COPY . ./
     #fi;
 
 #RUN dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out --framework net8.0;
-RUN dotnet restore src/fhir-candle/fhir-candle.csproj
-RUN dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out
+#RUN dotnet restore src/fhir-candle/fhir-candle.csproj
+#RUN dotnet publish src/fhir-candle/fhir-candle.csproj -c Release -o out
+
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
