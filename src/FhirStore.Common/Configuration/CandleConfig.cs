@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 
 #if NETSTANDARD2_0
 using FhirCandle.Polyfill;
+using Microsoft.Extensions.Configuration;
 #endif
 
 namespace FhirCandle.Configuration;
@@ -385,7 +386,7 @@ public class CandleConfig
     [ConfigOption(
         ArgName = "--smart-required",
         EnvName = "Smart_Required_Tenants",
-        Description = "Tenants that require SMART on FHIR support.")]
+        Description = "Tenants that require SMART on FHIR support, * for all.")]
     public string[] SmartRequiredTenants = [];
 
     /// <summary>Gets the smart required tenants option.</summary>
@@ -394,7 +395,7 @@ public class CandleConfig
         Name = "SmartRequiredTenants",
         EnvVarName = "Smart_Required_Tenants",
         DefaultValue = Array.Empty<string>(),
-        CliOption = new System.CommandLine.Option<string[]>("--smart-required", "Tenants that require SMART on FHIR support.")
+        CliOption = new System.CommandLine.Option<string[]>("--smart-required", "Tenants that require SMART on FHIR support, * for all.")
         {
             Arity = System.CommandLine.ArgumentArity.ZeroOrMore,
             IsRequired = false,
@@ -405,7 +406,7 @@ public class CandleConfig
     [ConfigOption(
         ArgName = "--smart-optional",
         EnvName = "Smart_Optional_Tenants",
-        Description = "Tenants that support SMART on FHIR but do not require it.")]
+        Description = "Tenants that support SMART on FHIR but do not require it, * for all.")]
     public string[] SmartOptionalTenants = [];
 
     /// <summary>Gets the smart optional tenants option.</summary>
@@ -414,7 +415,7 @@ public class CandleConfig
         Name = "SmartOptionalTenants",
         EnvVarName = "Smart_Optional_Tenants",
         DefaultValue = Array.Empty<string>(),
-        CliOption = new System.CommandLine.Option<string[]>("--smart-optional", "Tenants that support SMART on FHIR but do not require it.")
+        CliOption = new System.CommandLine.Option<string[]>("--smart-optional", "Tenants that support SMART on FHIR but do not require it, * for all.")
         {
             Arity = System.CommandLine.ArgumentArity.ZeroOrMore,
             IsRequired = false,
@@ -759,123 +760,126 @@ public class CandleConfig
     ];
 
     /// <summary>Parses the given parse result.</summary>
-    /// <param name="parseResult">The parse result.</param>
-    public virtual void Parse(System.CommandLine.Parsing.ParseResult parseResult)
+    /// <param name="pr">   The parse result.</param>
+    /// <param name="envPR">The environment parse result.</param>
+    public virtual void Parse(
+        System.CommandLine.Parsing.ParseResult pr,
+        System.CommandLine.Parsing.ParseResult envPR)
     {
         foreach (ConfigurationOption opt in _options)
         {
             switch (opt.Name)
             {
                 case "PublicUrl":
-                    PublicUrl = GetOpt(parseResult, opt.CliOption, PublicUrl);
+                    PublicUrl = GetOpt(pr, envPR, opt.CliOption, PublicUrl);
                     break;
                 case "ListenPort":
-                    ListenPort = GetOpt(parseResult, opt.CliOption, ListenPort);
+                    ListenPort = GetOpt(pr, envPR, opt.CliOption, ListenPort);
                     break;
                 case "OpenBrowser":
-                    OpenBrowser = GetOpt(parseResult, opt.CliOption, OpenBrowser);
+                    OpenBrowser = GetOpt(pr, envPR, opt.CliOption, OpenBrowser);
                     break;
                 case "MaxResources":
-                    MaxResourceCount = GetOpt(parseResult, opt.CliOption, MaxResourceCount);
+                    MaxResourceCount = GetOpt(pr, envPR, opt.CliOption, MaxResourceCount);
                     break;
                 case "DisableUi":
-                    DisableUi = GetOpt(parseResult, opt.CliOption, DisableUi);
+                    DisableUi = GetOpt(pr, envPR, opt.CliOption, DisableUi);
                     break;
                 case "FhirPackageCacheDirectory":
                     {
-                        string? dir = GetOpt(parseResult, opt.CliOption, FhirCacheDirectory);
+                        string? dir = GetOpt(pr, envPR, opt.CliOption, FhirCacheDirectory);
                         FhirCacheDirectory = string.IsNullOrEmpty(dir) ? null : dir;
                     }
                     break;
                 case "UseOfficialRegistries":
-                    UseOfficialRegistries = GetOpt(parseResult, opt.CliOption, UseOfficialRegistries);
+                    UseOfficialRegistries = GetOpt(pr, envPR, opt.CliOption, UseOfficialRegistries);
                     break;
                 case "AdditionalFhirRegistryUrls":
-                    AdditionalFhirRegistryUrls = GetOptArray(parseResult, opt.CliOption, AdditionalFhirRegistryUrls);
+                    AdditionalFhirRegistryUrls = GetOptArray(pr, envPR, opt.CliOption, AdditionalFhirRegistryUrls, ',');
                     break;
                 case "AdditionalNpmRegistryUrls":
-                    AdditionalNpmRegistryUrls = GetOptArray(parseResult, opt.CliOption, AdditionalNpmRegistryUrls);
+                    AdditionalNpmRegistryUrls = GetOptArray(pr, envPR, opt.CliOption, AdditionalNpmRegistryUrls, ',');
                     break;
                 case "FhirPackages":
-                    PublishedPackages = GetOptArray(parseResult, opt.CliOption, PublishedPackages);
+                    PublishedPackages = GetOptArray(pr, envPR, opt.CliOption, PublishedPackages, ',');
                     break;
                 case "FhirCiPackages":
-                    CiPackages = GetOptArray(parseResult, opt.CliOption, CiPackages);
+                    CiPackages = GetOptArray(pr, envPR, opt.CliOption, CiPackages, ',');
                     break;
                 case "LoadExamples":
-                    LoadPackageExamples = GetOpt(parseResult, opt.CliOption, LoadPackageExamples);
+                    LoadPackageExamples = GetOpt(pr, envPR, opt.CliOption, LoadPackageExamples);
                     break;
                 case "ReferenceImplementation":
-                    ReferenceImplementation = GetOpt(parseResult, opt.CliOption, ReferenceImplementation);
+                    ReferenceImplementation = GetOpt(pr, envPR, opt.CliOption, ReferenceImplementation);
                     break;
                 case "FhirSourceDirectory":
                     {
-                        string? dir = GetOpt(parseResult, opt.CliOption, SourceDirectory);
+                        string? dir = GetOpt(pr, envPR, opt.CliOption, SourceDirectory);
                         SourceDirectory = string.IsNullOrEmpty(dir) ? null : dir;
                     }
                     break;
                 case "ProtectLoadedContent":
-                    ProtectLoadedContent = GetOpt(parseResult, opt.CliOption, ProtectLoadedContent);
+                    ProtectLoadedContent = GetOpt(pr, envPR, opt.CliOption, ProtectLoadedContent);
                     break;
                 case "TenantsR4":
-                    TenantsR4 = GetOptArray(parseResult, opt.CliOption, TenantsR4);
+                    TenantsR4 = GetOptArray(pr, envPR, opt.CliOption, TenantsR4, ',');
                     break;
                 case "TenantsR4B":
-                    TenantsR4B = GetOptArray(parseResult, opt.CliOption, TenantsR4B);
+                    TenantsR4B = GetOptArray(pr, envPR, opt.CliOption, TenantsR4B, ',');
                     break;
                 case "TenantsR5":
-                    TenantsR5 = GetOptArray(parseResult, opt.CliOption, TenantsR5);
+                    TenantsR5 = GetOptArray(pr, envPR, opt.CliOption, TenantsR5, ',');
                     break;
                 case "SmartRequiredTenants":
-                    SmartRequiredTenants = GetOptArray(parseResult, opt.CliOption, SmartRequiredTenants);
+                    SmartRequiredTenants = GetOptArray(pr, envPR, opt.CliOption, SmartRequiredTenants, ',');
                     break;
                 case "SmartOptionalTenants":
-                    SmartOptionalTenants = GetOptArray(parseResult, opt.CliOption, SmartOptionalTenants);
+                    SmartOptionalTenants = GetOptArray(pr, envPR, opt.CliOption, SmartOptionalTenants, ',');
                     break;
                 case "CreateExistingId":
-                    AllowExistingId = GetOpt(parseResult, opt.CliOption, AllowExistingId);
+                    AllowExistingId = GetOpt(pr, envPR, opt.CliOption, AllowExistingId);
                     break;
                 case "CreateAsUpdate":
-                    AllowCreateAsUpdate = GetOpt(parseResult, opt.CliOption, AllowCreateAsUpdate);
+                    AllowCreateAsUpdate = GetOpt(pr, envPR, opt.CliOption, AllowCreateAsUpdate);
                     break;
                 case "MaxSubscriptionMinutes":
-                    MaxSubscriptionExpirationMinutes = GetOpt(parseResult, opt.CliOption, MaxSubscriptionExpirationMinutes);
+                    MaxSubscriptionExpirationMinutes = GetOpt(pr, envPR, opt.CliOption, MaxSubscriptionExpirationMinutes);
                     break;
                 case "ZulipEmail":
-                    ZulipEmail = GetOpt(parseResult, opt.CliOption, ZulipEmail);
+                    ZulipEmail = GetOpt(pr, envPR, opt.CliOption, ZulipEmail);
                     break;
                 case "ZulipKey":
-                    ZulipKey = GetOpt(parseResult, opt.CliOption, ZulipKey);
+                    ZulipKey = GetOpt(pr, envPR, opt.CliOption, ZulipKey);
                     break;
                 case "ZulipUrl":
-                    ZulipUrl = GetOpt(parseResult, opt.CliOption, ZulipUrl);
+                    ZulipUrl = GetOpt(pr, envPR, opt.CliOption, ZulipUrl);
                     break;
                 case "SmtpHost":
-                    SmtpHost = GetOpt(parseResult, opt.CliOption, SmtpHost);
+                    SmtpHost = GetOpt(pr, envPR, opt.CliOption, SmtpHost);
                     break;
                 case "SmtpPort":
-                    SmtpPort = GetOpt(parseResult, opt.CliOption, SmtpPort);
+                    SmtpPort = GetOpt(pr, envPR, opt.CliOption, SmtpPort);
                     break;
                 case "SmtpUser":
-                    SmtpUser = GetOpt(parseResult, opt.CliOption, SmtpUser);
+                    SmtpUser = GetOpt(pr, envPR, opt.CliOption, SmtpUser);
                     break;
                 case "SmtpPassword":
-                    SmtpPassword = GetOpt(parseResult, opt.CliOption, SmtpPassword);
+                    SmtpPassword = GetOpt(pr, envPR, opt.CliOption, SmtpPassword);
                     break;
                 case "FhirPathLabUrl":
-                    FhirPathLabUrl = GetOpt(parseResult, opt.CliOption, FhirPathLabUrl);
+                    FhirPathLabUrl = GetOpt(pr, envPR, opt.CliOption, FhirPathLabUrl);
                     break;
                 case "OpenTelemetryProtocolEndpoint":
-                    OpenTelemetryEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryEndpoint);
+                    OpenTelemetryEndpoint = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryEndpoint);
                     break;
                 case "OpenTelemetryProtocolTracesEndpoint":
-                    OpenTelemetryTracesEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryTracesEndpoint);
+                    OpenTelemetryTracesEndpoint = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryTracesEndpoint);
                     break;
                 case "OpenTelemetryProtocolMetricsEndpoint":
-                    OpenTelemetryMetricsEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryMetricsEndpoint);
+                    OpenTelemetryMetricsEndpoint = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryMetricsEndpoint);
                     break;
                 case "OpenTelemetryProtocolLogsEndpoint":
-                    OpenTelemetryLogsEndpoint = GetOpt(parseResult, opt.CliOption, OpenTelemetryLogsEndpoint);
+                    OpenTelemetryLogsEndpoint = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryLogsEndpoint);
                     break;
             }
         }
@@ -893,15 +897,22 @@ public class CandleConfig
     /// <returns>The option.</returns>
     internal T GetOpt<T>(
         System.CommandLine.Parsing.ParseResult parseResult,
+        System.CommandLine.Parsing.ParseResult envParseResult,
         System.CommandLine.Option opt,
         T defaultValue)
     {
-        if (!parseResult.HasOption(opt))
+        ParseResult? pr = parseResult.HasOption(opt)
+            ? parseResult
+            : envParseResult.HasOption(opt)
+            ? envParseResult
+            : null;
+
+        if (pr == null)
         {
             return defaultValue;
         }
 
-        object? parsed = parseResult.GetValueForOption(opt);
+        object? parsed = pr.GetValueForOption(opt);
 
         if ((parsed != null) &&
             (parsed is T typed))
@@ -915,21 +926,30 @@ public class CandleConfig
     /// <summary>Gets option array.</summary>
     /// <exception cref="Exception">Thrown when an exception error condition occurs.</exception>
     /// <typeparam name="T">Generic type parameter.</typeparam>
-    /// <param name="parseResult"> The parse result.</param>
-    /// <param name="opt">         The option.</param>
-    /// <param name="defaultValue">The default value.</param>
+    /// <param name="parseResult">    The parse result.</param>
+    /// <param name="opt">            The option.</param>
+    /// <param name="defaultValue">   The default value.</param>
+    /// <param name="singleSplitChar">(Optional) The single split character.</param>
     /// <returns>An array of t.</returns>
     internal T[] GetOptArray<T>(
         System.CommandLine.Parsing.ParseResult parseResult,
+        System.CommandLine.Parsing.ParseResult envParseResult,
         System.CommandLine.Option opt,
-        T[] defaultValue)
+        T[] defaultValue,
+        char? singleSplitChar = null)
     {
-        if (!parseResult.HasOption(opt))
+        ParseResult? pr = parseResult.HasOption(opt)
+            ? parseResult
+            : envParseResult.HasOption(opt)
+            ? envParseResult
+            : null;
+
+        if (pr == null)
         {
             return defaultValue;
         }
 
-        object? parsed = parseResult.GetValueForOption(opt);
+        object? parsed = pr.GetValueForOption(opt);
 
         if (parsed == null)
         {
@@ -940,6 +960,24 @@ public class CandleConfig
 
         if (parsed is T[] array)
         {
+            if ((array.Length == 1) &&
+                (singleSplitChar != null) &&
+                (array is string[] sA))
+            {
+                string[] splitValues = sA.First().Split(singleSplitChar.Value);
+
+                values.Clear();
+                foreach (string v in splitValues)
+                {
+                    if (v is T tV)
+                    {
+                        values.Add(tV);
+                    }
+                }
+
+                return [.. values];
+            }
+
             return array;
         }
         else if (parsed is IEnumerator genericEnumerator)
@@ -976,6 +1014,22 @@ public class CandleConfig
             return defaultValue;
         }
 
+        if ((values.Count == 1) &&
+            (singleSplitChar != null) &&
+            (values is List<string> stringValues))
+        {
+            string[] splitValues = stringValues.First().Split(singleSplitChar.Value);
+
+            values.Clear();
+            foreach (string v in splitValues)
+            {
+                if (v is T tV)
+                {
+                    values.Add(tV);
+                }
+            }
+        }
+
         return [.. values];
     }
 
@@ -988,15 +1042,22 @@ public class CandleConfig
     /// <returns>The option hash.</returns>
     internal HashSet<T> GetOptHash<T>(
         System.CommandLine.Parsing.ParseResult parseResult,
+        System.CommandLine.Parsing.ParseResult envParseResult,
         System.CommandLine.Option opt,
         HashSet<T> defaultValue)
     {
-        if (!parseResult.HasOption(opt))
+        ParseResult? pr = parseResult.HasOption(opt)
+            ? parseResult
+            : envParseResult.HasOption(opt)
+            ? envParseResult
+            : null;
+
+        if (pr == null)
         {
             return defaultValue;
         }
 
-        object? parsed = parseResult.GetValueForOption(opt);
+        object? parsed = pr.GetValueForOption(opt);
 
         if (parsed == null)
         {
