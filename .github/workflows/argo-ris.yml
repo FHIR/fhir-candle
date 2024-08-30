@@ -4,6 +4,8 @@ on:
   workflow_run:
     workflows: ['Publish on GitHub Container Registry']
     types: [completed]
+    branches:
+    - main
 
 jobs:
   restart_deployment:
