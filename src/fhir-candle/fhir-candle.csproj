@@ -115,7 +115,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="bin\Release\net7.0\publish\wwwroot\**\*.*" Pack="true" PackagePath="staticwebassets\%(RecursiveDir)%(FileName)%(Extension)">
+    <None Include="bin\Release\net8.0\publish\wwwroot\**\*.*" Pack="true" PackagePath="staticwebassets\%(RecursiveDir)%(FileName)%(Extension)">
       <Link>wwwroot\_content\%(RecursiveDir)%(FileName)%(Extension)</Link>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <IncludeInPackage>true</IncludeInPackage>

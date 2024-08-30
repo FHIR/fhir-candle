@@ -27,13 +27,13 @@
 		</None>
 	</ItemGroup>
 
-	<!-- Polyfill to allow newer language compiler features when targeting NetStandard builds -->
+	<!-- Polyfill to allow newer language compiler features when targeting NetStandard builds --><!--
 	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
 		<PackageReference Include="PolySharp" Version="1.14.1">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
-	</ItemGroup>
+	</ItemGroup>-->
 
 </Project>
