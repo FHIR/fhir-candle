@@ -19,11 +19,10 @@ jobs:
       with:
         dotnet-version: '8'
 
-        # Note that we need to pack twice because of an issue with staticwebassets.
     - name: Build and Publish
       run: |
         dotnet restore
         dotnet pack -c Release ./src/fhir-candle/fhir-candle.csproj
-        rm ./nupkg/*.nupkg
-        dotnet pack -c Release ./src/fhir-candle/fhir-candle.csproj
+        mv ./src/fhir-candle/bin/Release/net8.0/publish/wwwroot ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets
+        7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets/
         dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.GINOC_NUGET }} --source https://api.nuget.org/v3/index.json
