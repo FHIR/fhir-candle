@@ -1,6 +1,8 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using Hl7.Fhir.Utility;
 
+@inject IHttpContextAccessor HttpContextAccessor
+
 @implements IDisposable
 
 <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="0.75fr 0.5fr 1fr 2fr">

@@ -13,6 +13,7 @@ using FhirCandle.Storage;
 using Hl7.Fhir.Rest;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Net.Http.Headers;
 
@@ -72,7 +73,7 @@ public class FhirController : ControllerBase
     /// <param name="request">   The request.</param>
     /// <param name="allowNonFhirReturn"></param>
     /// <returns>The mime type.</returns>
-    private string GetMimeType(string? queryParam, HttpRequest request, bool allowNonFhirReturn = false)
+    private string getMimeType(string? queryParam, HttpRequest request, bool allowNonFhirReturn = false)
     {
         if (!string.IsNullOrEmpty(queryParam))
         {
@@ -108,6 +109,26 @@ public class FhirController : ControllerBase
         }
 
         return "application/fhir+json";
+    }
+
+    private static FhirRequestContext.ForwardedInfo? getForwardedInfo(HttpRequest request)
+    {
+        if (request.Headers.TryGetValue("Forwarded", out StringValues forwarded))
+        {
+            return new FhirRequestContext.ForwardedInfo(forwarded.ToString());
+        }
+
+        string? forwardedFor = request.Headers.TryGetValue("X-Forwarded-For", out StringValues ff) ? ff.ToString() : null;
+        string? forwardedHost = request.Headers.TryGetValue("X-Forwarded-Host", out StringValues fh) ? fh.ToString() : null;
+        string? forwardedProto = request.Headers.TryGetValue("X-Forwarded-Proto", out StringValues fp) ? fp.ToString() : null;
+        string? forwardedPrefix = request.Headers.TryGetValue("X-Forwarded-Prefix", out StringValues fpr) ? fpr.ToString() : null;
+
+        if ((forwardedFor != null) || (forwardedHost != null) || (forwardedProto != null) || (forwardedPrefix != null))
+        {
+            return new FhirRequestContext.ForwardedInfo(forwardedFor, forwardedHost, forwardedProto, forwardedPrefix);
+        }
+
+        return null;
     }
 
     /// <summary>Adds a body.</summary>
@@ -273,8 +294,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.SystemCapabilities,
         };
@@ -334,8 +356,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.TypeOperation,
             OperationName = "$" + opName,
@@ -400,8 +423,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.InstanceRead,
             ResourceType = resourceName,
@@ -469,8 +493,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
             Interaction = Common.StoreInteractionCodes.InstanceOperation,
@@ -546,8 +571,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.InstanceOperation,
                 ResourceType = resourceName,
@@ -639,8 +665,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = queryString,
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
                 Interaction = Common.StoreInteractionCodes.TypeSearch,
@@ -719,8 +746,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
                 Interaction = Common.StoreInteractionCodes.TypeOperation,
@@ -801,8 +829,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = queryString,
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
                 Interaction = Common.StoreInteractionCodes.SystemSearch,
@@ -871,8 +900,9 @@ public class FhirController : ControllerBase
                     UrlPath = Request.Path,
                     UrlQuery = Request.QueryString.ToString(),
                     RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                    Forwarded = getForwardedInfo(Request),
                     Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                    DestinationFormat = GetMimeType(format, Request),
+                    DestinationFormat = getMimeType(format, Request),
                     SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                     Interaction = Common.StoreInteractionCodes.SystemOperation,
                     OperationName = "$" + opName,
@@ -939,8 +969,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.SystemOperation,
                 OperationName = "$" + opName,
@@ -1015,8 +1046,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.TypeCreate,
                 ResourceType = resourceName,
@@ -1096,8 +1128,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.InstanceUpdate,
                 ResourceType = resourceName,
@@ -1172,8 +1205,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.InstanceDelete,
             ResourceType = resourceName,
@@ -1232,8 +1266,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.TypeSearch,
             ResourceType = resourceName,
@@ -1295,8 +1330,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
             Interaction = Common.StoreInteractionCodes.TypeDeleteConditional,
@@ -1362,8 +1398,9 @@ public class FhirController : ControllerBase
                 UrlPath = Request.Path,
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
                 Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-                DestinationFormat = GetMimeType(format, Request),
+                DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.SystemBundle,
                 SourceFormat = Request.ContentType ?? string.Empty,
@@ -1420,8 +1457,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
             Interaction = Common.StoreInteractionCodes.SystemSearch,
@@ -1475,8 +1513,9 @@ public class FhirController : ControllerBase
             UrlPath = Request.Path,
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
-            DestinationFormat = GetMimeType(format, Request),
+            DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
             Interaction = Common.StoreInteractionCodes.SystemDeleteConditional,

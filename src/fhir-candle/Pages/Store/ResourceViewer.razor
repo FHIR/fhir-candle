@@ -13,6 +13,7 @@
 @inject IFhirStoreManager StoreManager
 @inject ISmartAuthManager AuthManager
 @inject ProtectedLocalStorage BrowserStore
+@inject IHttpContextAccessor HttpContextAccessor
 
 @implements IDisposable
 
@@ -182,7 +183,7 @@
         if (ResourceType.Equals("CapabilityStatement", StringComparison.Ordinal) &&
             Id.Equals("metadata", StringComparison.Ordinal))
         {
-            FhirRequestContext ctx = new FhirRequestContext(_store, "GET", $"{_store.Config.BaseUrl}/metadata")
+            FhirRequestContext ctx = new FhirRequestContext(_store, "GET", $"{_store.Config.BaseUrl}/metadata", HttpContextAccessor.HttpContext?.Request.Host.ToString())
             {
                 DestinationFormat = $"application/fhir+{_resourceFormatCode}",
                 SerializePretty = true,
@@ -192,7 +193,7 @@
         }
         else
         {
-            FhirRequestContext ctx = new FhirRequestContext(_store, "GET", $"{_store.Config.BaseUrl}/{ResourceType}/{Id}")
+            FhirRequestContext ctx = new FhirRequestContext(_store, "GET", $"{_store.Config.BaseUrl}/{ResourceType}/{Id}", HttpContextAccessor.HttpContext?.Request.Host.ToString())
             {
                 DestinationFormat = $"application/fhir+{_resourceFormatCode}",
                 SerializePretty = true,

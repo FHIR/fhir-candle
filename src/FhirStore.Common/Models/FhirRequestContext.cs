@@ -17,6 +17,98 @@ namespace FhirCandle.Models;
 /// <summary>A FHIR request context.</summary>
 public record class FhirRequestContext
 {
+    /// <summary>
+    /// Information that may be added by reverse proxy servers that would otherwise be altered or
+    /// lost when proxy servers are involved in the path of the request.
+    /// </summary>
+    public record class ForwardedInfo
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ForwardedInfo"/> class.
+        /// </summary>
+        public ForwardedInfo() { }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ForwardedInfo"/> class using the forwarded header value.
+        /// </summary>
+        /// <param name="forwardedHeaderValue">The forwarded header value.</param>
+        public ForwardedInfo(string forwardedHeaderValue)
+        {
+            string[] directives = forwardedHeaderValue.Split(';', StringSplitOptions.TrimEntries);
+
+            foreach (string directive in directives)
+            {
+                string[] kvp = directive.Split('=');
+
+                if (kvp.Length != 2)
+                {
+                    continue;
+                }
+
+                switch (kvp[0].ToLowerInvariant())
+                {
+                    case "by":
+                        By = kvp[1];
+                        break;
+
+                    case "for":
+                        For = kvp[1].Split(',', StringSplitOptions.TrimEntries).ToArray();
+                        break;
+
+                    case "host":
+                        Host = kvp[1];
+                        break;
+
+                    case "proto":
+                        Protocol = kvp[1];
+                        break;
+
+                    case "prefix":
+                        Prefix = kvp[1];
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ForwardedInfo"/> class using the X-Forwarded-* header values.
+        /// </summary>
+        /// <param name="XFor">     The x-forwarded-for value.</param>
+        /// <param name="XHost">    The x-forwarded-host value.</param>
+        /// <param name="XProtocol">The x-forwarded-protocol value.</param>
+        /// <param name="XPrefix">  The x-forwarded-prefix value.</param>
+        public ForwardedInfo(string? XFor, string? XHost, string? XProtocol, string? XPrefix)
+        {
+            For = XFor?.Split(',', StringSplitOptions.TrimEntries);
+            Host = XHost;
+            Protocol = XProtocol;
+            Prefix = XPrefix;
+        }
+
+        /// <summary>
+        /// Gets or sets the interface where the request came in to the proxy server.
+        /// </summary>
+        public string? By { get; init; } = null;
+
+        /// <summary>
+        /// Gets or sets the client that initiated the request and subsequent proxies in a chain of proxies. The identifier has the same possible values as the by directive.
+        /// </summary>
+        public string[]? For { get; init; } = null;
+
+        /// <summary>
+        /// Gets or sets the Host request header field as received by the proxy.
+        /// </summary>
+        public string? Host { get; init; } = null;
+
+        /// <summary>
+        /// Gets or sets the protocol used to make the request (typically "http" or "https").
+        /// </summary>
+        public string? Protocol { get; init; } = null;
+
+        /// <summary>Gets or initializes the prefix.</summary>
+        public string? Prefix { get; init; } = null;
+    }
+
     private string? _url = null;
     private string _httpMethod = string.Empty;
     private IFhirStore _store = null!;
@@ -29,6 +121,7 @@ public record class FhirRequestContext
     private string _operationName = string.Empty;
     private string _compartmentType = string.Empty;
     private string _version = string.Empty;
+    private ForwardedInfo? _forwarded = null;
 
     /// <summary>Initializes a new instance of the <see cref="FhirRequestContext"/> class.</summary>
     public FhirRequestContext() { }
@@ -101,8 +194,9 @@ public record class FhirRequestContext
         IfNoneExist = other.IfNoneExist;
         _errorMessage = other.ErrorMessage;
         RequestHeaders = other.RequestHeaders.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        Forwarded = other.Forwarded == null ? null : other.Forwarded with { };
 
-        // make sure to read interaction before other 'parseable' properties
+        // make sure to read interaction before other HTTP properties that can be parsed
         Interaction = other.Interaction;
         UrlPath = other.UrlPath;
         UrlQuery = other.UrlQuery;
@@ -117,8 +211,8 @@ public record class FhirRequestContext
     public required string TenantName { get; init; }
 
     /// <summary>Gets or sets the store.</summary>
-    public required IFhirStore Store 
-    { 
+    public required IFhirStore Store
+    {
         get => _store;
         init
         {
@@ -128,8 +222,8 @@ public record class FhirRequestContext
     }
 
     /// <summary>Gets or initializes the HTTP method.</summary>
-    public required string HttpMethod 
-    { 
+    public required string HttpMethod
+    {
         get => _httpMethod;
         init
         {
@@ -139,8 +233,8 @@ public record class FhirRequestContext
     }
 
     /// <summary>Gets or initializes the URL of the document.</summary>
-    public required string Url 
-    { 
+    public required string Url
+    {
         get => _url ?? string.Empty;
         init
         {
@@ -160,7 +254,7 @@ public record class FhirRequestContext
 
     /// <summary>Gets or initializes source object.</summary>
     public object? SourceObject { get; init; }
-    
+
     /// <summary>Gets or initializes destination format (default to fhir+json).</summary>
     public string DestinationFormat { get; init; } = "application/fhir+json";
 
@@ -194,6 +288,38 @@ public record class FhirRequestContext
     /// <summary>Gets or initializes the request headers.</summary>
     public Dictionary<string, StringValues> RequestHeaders { get; init; } = new Dictionary<string, StringValues>();
 
+    /// <summary>
+    /// Represents the forwarded information of a FHIR request.
+    /// </summary>
+    public ForwardedInfo? Forwarded
+    {
+        get => _forwarded;
+        init => _forwarded = value;
+    }
+
+    /// <summary>Gets a base URL to use when processing this request, if specified.</summary>
+    public string? RequestBaseUrl(string baseUrl)
+    {
+        if (_forwarded == null)
+        {
+            return null;
+        }
+
+        string[] baseComponents = baseUrl.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        string proto = _forwarded.Protocol ?? baseComponents[0];
+        string? host = _forwarded.Host ?? (baseComponents.Length > 1 ? baseComponents[1] : null);
+
+        if (host == null)
+        {
+            return null;
+        }
+
+        string prefix = _forwarded.Prefix ?? $"/fhir/{TenantName}";
+
+        return $"{proto}://{host}{prefix}";
+    }
+
     /// <summary>Gets the type of the resource.</summary>
     public string ResourceType { get => _resourceType; init => _resourceType = value; }
 
@@ -209,7 +335,7 @@ public record class FhirRequestContext
     /// <summary>Get the version.</summary>
     public string Version { get => _version; init => _version = value; }
 
-    /// <summary>Gets or intializes the interaction.</summary>
+    /// <summary>Gets or initializes the interaction.</summary>
     public StoreInteractionCodes? Interaction { get => _interaction; init => _interaction = value; }
 
     /// <summary>Query if this object is authorized.</summary>

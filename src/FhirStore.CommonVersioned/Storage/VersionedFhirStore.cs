@@ -30,6 +30,7 @@ using static Hl7.Fhir.Model.VerificationResult;
 using System.Linq;
 using Hl7.Fhir.Utility;
 using System.Diagnostics.CodeAnalysis;
+using System.Resources;
 
 namespace FhirCandle.Storage;
 
@@ -328,6 +329,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         CheckLoadedOperations();
         DiscoverInteractionHooks();
+
+        // generate our initial capability statement
+        _ = GenerateCapabilities(new FhirRequestContext(this, "GET", _config.BaseUrl + "/metadata"));
 
         // create a timer to check max resource count if we are monitoring that
         _maxResourceCount = config.MaxResourceCount;
@@ -1453,7 +1457,7 @@ public partial class VersionedFhirStore : IFhirStore
                                 Id = r.Id,
                                 ETag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"",
                                 LastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
-                                Location = $"{_config.BaseUrl}/{resourceType}/{r.Id}",
+                                Location = $"{getBaseUrl(ctx)}/{resourceType}/{r.Id}",
                                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.OK,
                                     $"Created {resourceType}/{r.Id}"),
@@ -1551,7 +1555,7 @@ public partial class VersionedFhirStore : IFhirStore
             Id = stored.Id,
             ETag = string.IsNullOrEmpty(stored.Meta?.VersionId) ? string.Empty : $"W/\"{stored.Meta.VersionId}\"",
             LastModified = stored.Meta?.LastUpdated == null ? string.Empty : stored.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
-            Location = $"{_config.BaseUrl}/{resourceType}/{stored.Id}",
+            Location = $"{getBaseUrl(ctx)}/{resourceType}/{stored.Id}",
             Outcome = SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.Created,
                 $"Created {resourceType}/{stored.Id}"),
@@ -2046,7 +2050,7 @@ public partial class VersionedFhirStore : IFhirStore
             Id = r.Id,
             ETag = eTag,
             LastModified = lastModified,
-            Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{_config.BaseUrl}/{r.TypeName}/{r.Id}",
+            Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{getBaseUrl(ctx)}/{r.TypeName}/{r.Id}",
             Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Read {r.TypeName}/{r.Id}"),
             StatusCode = HttpStatusCode.OK,
         };
@@ -2417,7 +2421,7 @@ public partial class VersionedFhirStore : IFhirStore
             Id = resource.Id,
             ETag = string.IsNullOrEmpty(resource.Meta?.VersionId) ? string.Empty : $"W/\"{resource.Meta.VersionId}\"",
             LastModified = resource.Meta?.LastUpdated == null ? string.Empty : resource.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
-            Location = $"{_config.BaseUrl}/{resourceType}/{resource.Id}",
+            Location = $"{getBaseUrl(ctx)}/{resourceType}/{resource.Id}",
             Outcome = outcome,
             StatusCode = sc,
         };
@@ -4333,7 +4337,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        string selfLink = $"{_config.BaseUrl}/{ctx.ResourceType}";
+        string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
         string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
         string selfResultParams = resultParameters.GetAppliedQueryString();
 
@@ -4378,19 +4382,19 @@ public partial class VersionedFhirStore : IFhirStore
             else
             {
                 // add the matched result to the bundle
-                bundle.AddSearchEntry(resource, $"{_config.BaseUrl}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
 
                 // track we have added this id
                 addedIds.Add(relativeUrl);
             }
 
             // add any included resources
-            AddInclusions(bundle, resource, resultParameters, addedIds);
+            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
 
             // check for include:iterate directives
 
             // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, addedIds);
+            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks?.Any() ?? false)
@@ -4556,7 +4560,7 @@ public partial class VersionedFhirStore : IFhirStore
         // filter parameters from use across all performed searches
         IEnumerable<ParsedSearchParameter> filteredParameters = allParameters.SelectMany(e => e.Select(p => p)).DistinctBy(p => p.Name);
 
-        string selfLink = $"{_config.BaseUrl}";
+        string selfLink = $"{getBaseUrl(ctx)}";
         string selfSearchParams = string.Join('&', filteredParameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
         string selfResultParams = resultParameters.GetAppliedQueryString();
 
@@ -4603,19 +4607,19 @@ public partial class VersionedFhirStore : IFhirStore
             else
             {
                 // add the matched result to the bundle
-                bundle.AddSearchEntry(resource, $"{_config.BaseUrl}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
 
                 // track we have added this id
                 addedIds.Add(relativeUrl);
             }
 
             // add any included resources
-            AddInclusions(bundle, resource, resultParameters, addedIds);
+            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
 
             // check for include:iterate directives
 
             // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, addedIds);
+            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks?.Any() ?? false)
@@ -4734,11 +4738,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="bundle">          The bundle.</param>
     /// <param name="resource">        [out] The resource.</param>
     /// <param name="resultParameters">Options for controlling the result.</param>
+    /// <param name="rootUrl">         URL of the root.</param>
     /// <param name="addedIds">        List of identifiers for the added.</param>
     private void AddReverseInclusions(
         Bundle bundle,
         Resource resource,
         ParsedResultParameters resultParameters,
+        string rootUrl,
         HashSet<string> addedIds)
     {
         if (!resultParameters.ReverseInclusions.Any())
@@ -4751,7 +4757,7 @@ public partial class VersionedFhirStore : IFhirStore
         foreach (Resource inclusion in reverseInclusions)
         {
             // add the matched result to the bundle
-            bundle.AddSearchEntry(inclusion, $"{_config.BaseUrl}/{resource.TypeName}/{resource.Id}", Bundle.SearchEntryMode.Include);
+            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{resource.TypeName}/{resource.Id}", Bundle.SearchEntryMode.Include);
         }
     }
 
@@ -4909,11 +4915,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="bundle">          The bundle.</param>
     /// <param name="resource">        [out] The resource.</param>
     /// <param name="resultParameters">Options for controlling the result.</param>
+    /// <param name="rootUrl">         URL of the root.</param>
     /// <param name="addedIds">        List of identifiers for the added.</param>
     private void AddInclusions(
         Bundle bundle,
         Resource resource,
         ParsedResultParameters resultParameters,
+        string rootUrl,
         HashSet<string> addedIds)
     {
         // check for include directives
@@ -4935,7 +4943,7 @@ public partial class VersionedFhirStore : IFhirStore
         foreach (Resource inclusion in inclusions)
         {
             // add the matched result to the bundle
-            bundle.AddSearchEntry(inclusion, $"{_config.BaseUrl}/{resource.TypeName}/{resource.Id}", Bundle.SearchEntryMode.Include);
+            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{resource.TypeName}/{resource.Id}", Bundle.SearchEntryMode.Include);
         }
     }
 
@@ -4994,17 +5002,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        Hl7.Fhir.Model.Resource? r;
-
-        if (_capabilitiesAreStale)
-        {
-            r = UpdateCapabilities();
-        }
-        else
-        {
-            // bypass read to avoid instance read hooks (firing meta hooks)
-            r = (Resource)((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)_store["CapabilityStatement"])[_capabilityStatementId].DeepCopy();
-        }
+        Hl7.Fhir.Model.Resource? r = GetCapabilities(ctx);
 
         if (hooks?.Any() ?? false)
         {
@@ -5063,7 +5061,7 @@ public partial class VersionedFhirStore : IFhirStore
                 OperationOutcome.IssueType.Success),
             ETag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"",
             LastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
-            Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{_config.BaseUrl}/{r.TypeName}/{r.Id}",
+            Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{getBaseUrl(ctx)}/{r.TypeName}/{r.Id}",
             StatusCode = HttpStatusCode.OK,
         };
 
@@ -5110,17 +5108,7 @@ public partial class VersionedFhirStore : IFhirStore
         string? inputRawValue, 
         out FeatureQueryResponse response)
     {
-        CapabilityStatement cs;
-        
-        if (_capabilitiesAreStale)
-        {
-            cs = UpdateCapabilities();
-        }
-        else
-        {
-            // bypass read to avoid instance read hooks (firing meta hooks)
-            cs = (CapabilityStatement)((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)_store["CapabilityStatement"])[_capabilityStatementId];
-        }
+        CapabilityStatement cs = GetCapabilities(null);
         
         switch (featureName)
         {
@@ -5343,13 +5331,45 @@ public partial class VersionedFhirStore : IFhirStore
         }
     }
 
-    /// <summary>Updates the current capabilities of this store.</summary>
-    private CapabilityStatement UpdateCapabilities()
+    private static string fhirUrlToSmart(string url)
     {
+        if (url.Contains("/fhir/"))
+        {
+            return url.Replace("/fhir/", "/_smart/");
+        }
+
+        if (url.EndsWith("/fhir"))
+        {
+            return url[..^5] + "/_smart";
+        }
+
+        return url.EndsWith('/') ? url + "_smart" : url + "/_smart";
+    }
+
+    private CapabilityStatement GetCapabilities(FhirRequestContext? ctx)
+    {
+        if (_capabilitiesAreStale || (ctx?.Forwarded != null))
+        {
+            return GenerateCapabilities(ctx);
+        }
+
+        // bypass read to avoid instance read hooks (firing meta hooks)
+        return (CapabilityStatement)((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)_store["CapabilityStatement"])[_capabilityStatementId].DeepCopy();
+    }
+
+    /// <summary>Updates the current capabilities of this store.</summary>
+    /// <param name="ctx">  The request context.</param>
+    /// <param name="store">(Optional) The store.</param>
+    /// <returns>The capability statement.</returns>
+    private CapabilityStatement GenerateCapabilities(FhirRequestContext? ctx)
+    {
+        string root = getBaseUrl(ctx);
+        string smartRoot = fhirUrlToSmart(root);
+
         CapabilityStatement cs = new()
         {
             Id = _capabilityStatementId,
-            Url = $"{_config.BaseUrl}/CapabilityStatement/{_capabilityStatementId}",
+            Url = $"{root}/CapabilityStatement/{_capabilityStatementId}",
             Name = "Capabilities" + _config.FhirVersion,
             Status = PublicationStatus.Active,
             Date = DateTimeOffset.Now.ToFhirDateTime(),
@@ -5414,10 +5434,10 @@ public partial class VersionedFhirStore : IFhirStore
                 Url = "http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris",
                 Extension = new()
                 {
-                    new Extension("token", new FhirUri($"{_config.BaseUrl.Replace("/fhir/", "/_smart/")}/token")),
-                    new Extension("authorize", new FhirUri($"{_config.BaseUrl.Replace("/fhir/", "/_smart/")}/authorize")),
-                    new Extension("register", new FhirUri($"{_config.BaseUrl.Replace("/fhir/", "/_smart/")}/register")),
-                    new Extension("manage", new FhirUri($"{_config.BaseUrl.Replace("/fhir/", "/")}/clients")),
+                    new Extension("token", new FhirUri($"{smartRoot}/token")),
+                    new Extension("authorize", new FhirUri($"{smartRoot}/authorize")),
+                    new Extension("register", new FhirUri($"{smartRoot}/register")),
+                    new Extension("manage", new FhirUri($"{smartRoot}/clients")),
                 }
             };
 
@@ -5490,15 +5510,18 @@ public partial class VersionedFhirStore : IFhirStore
         cs.Rest.Add(restComponent);
 
         // update our current capabilities
-        _store["CapabilityStatement"].InstanceUpdate(
-            cs, 
-            true,
-            string.Empty,
-            string.Empty,
-            _protectedResources,
-            out _,
-            out _);
-        _capabilitiesAreStale = false;
+        if (root == _config.BaseUrl)
+        {
+            _store["CapabilityStatement"].InstanceUpdate(
+                cs,
+                true,
+                string.Empty,
+                string.Empty,
+                _protectedResources,
+                out _,
+                out _);
+            _capabilitiesAreStale = false;
+        }
 
         return cs;
     }
@@ -5695,7 +5718,7 @@ public partial class VersionedFhirStore : IFhirStore
                 Store = ctx.Store,
                 Authorization = ctx.Authorization,
                 RequestHeaders = ctx.RequestHeaders,
-
+                Forwarded = ctx.Forwarded,
                 HttpMethod = entry.Request.Method?.ToString() ?? string.Empty,
                 Url = entry.Request.Url,
                 IfMatch = entry.Request.IfMatch ?? string.Empty,
@@ -5841,6 +5864,11 @@ public partial class VersionedFhirStore : IFhirStore
                 ResourceType = resourceType,
             });
         }
+    }
+
+    private string getBaseUrl(FhirRequestContext? ctx)
+    {
+        return ctx?.RequestBaseUrl(_config.BaseUrl) ?? _config.BaseUrl;
     }
 
     /// <summary>

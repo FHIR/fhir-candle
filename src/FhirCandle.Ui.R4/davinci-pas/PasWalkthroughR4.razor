@@ -2,6 +2,7 @@
 @using System.Diagnostics.CodeAnalysis;
 
 @inject IJSRuntime JS
+@inject IHttpContextAccessor HttpContextAccessor
 
 @*
 <MudTimeline TimelineOrientation="TimelineOrientation.Vertical" TimelinePosition="TimelinePosition.Start">
@@ -789,7 +790,7 @@
     {
         List<ResourceInfo> patients = new();
 
-        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", "Patient"), out FhirResponseContext opResponse) &&
+        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", "Patient", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out FhirResponseContext opResponse) &&
             (opResponse.Resource != null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle patientBundle))
         {
@@ -828,7 +829,7 @@
         List<ResourceInfo> coverages = new();
         string query;
 
-        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", $"Encounter?patient={_patient.Id}"), out FhirResponseContext opResponse) &&
+        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", $"Encounter?patient={_patient.Id}", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out FhirResponseContext opResponse) &&
             (opResponse.Resource != null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle encounterBundle))
         {
@@ -847,7 +848,7 @@
             }
         }
 
-        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", $"Coverage?patient={_patient.Id}"), out opResponse) &&
+        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", $"Coverage?patient={_patient.Id}", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out opResponse) &&
             (opResponse.Resource != null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle coverageBundle))
         {
@@ -868,7 +869,7 @@
 
         query = $"?patient={_patient.Id}&_type={string.Join(',', _allowedPatientRequestTypes)}";
 
-        if (ProviderStore.SystemSearch(new FhirRequestContext(ProviderStore, "GET", query), out opResponse) &&
+        if (ProviderStore.SystemSearch(new FhirRequestContext(ProviderStore, "GET", query, HttpContextAccessor.HttpContext?.Request.Host.ToString()), out opResponse) &&
             (opResponse.Resource != null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle patientBundle))
         {
@@ -887,7 +888,7 @@
             }
         }
 
-        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", "Organization"), out opResponse) &&
+        if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", "Organization", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out opResponse) &&
             (opResponse.Resource != null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle relatedBundle))
         {

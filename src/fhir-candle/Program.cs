@@ -267,6 +267,7 @@ public static partial class Program
             builder.Services.AddSingleton<ISmartAuthManager, SmartAuthManager>();
             builder.Services.AddHostedService<ISmartAuthManager>(sp => sp.GetRequiredService<ISmartAuthManager>());
 
+            builder.Services.AddHttpContextAccessor();
             builder.Services.AddControllers();
             builder.Services.AddHttpClient();
 
