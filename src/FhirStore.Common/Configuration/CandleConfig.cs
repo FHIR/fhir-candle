@@ -666,6 +666,24 @@ public class CandleConfig
     };
 
     [ConfigOption(
+    ArgName = "--otel-otlp-protocol",
+    EnvName = "OTEL_EXPORTER_OTLP_PROTOCOL",
+    Description = "Specifies the OTLP transport protocol to be used for all telemetry data. Valid values are 'grpc' and 'http/protobuf'.")]
+    public string OpenTelemetryProtocol { get; set; } = "grpc";
+
+    private static ConfigurationOption OpenTelemetryProtocolParameter { get; } = new()
+    {
+        Name = "OpenTelemetryProtocol",
+        EnvVarName = "OTEL_EXPORTER_OTLP_PROTOCOL",
+        DefaultValue = "grpc",
+        CliOption = new System.CommandLine.Option<string>("--otel-otlp-protocol", "Specifies the OTLP transport protocol to be used for all telemetry data. Valid values are 'grpc' and 'http/protobuf'. ")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+            IsRequired = false,
+        },
+    };
+
+    [ConfigOption(
         ArgName = "--otel-otlp-traces-endpoint",
         EnvName = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
         Description = "Enables OpenTelemetry and sends traces via OLTP to the specified endpoint")]
@@ -754,6 +772,7 @@ public class CandleConfig
         SmtpPasswordParameter,
         FhirPathLabUrlParameter,
         OpenTelemetryEndpointParameter,
+        OpenTelemetryProtocolParameter,
         OpenTelemetryTracesEndpointParameter,
         OpenTelemetryMetricsEndpointParameter,
         OpenTelemetryLogsEndpointParameter,
@@ -871,6 +890,9 @@ public class CandleConfig
                     break;
                 case "OpenTelemetryProtocolEndpoint":
                     OpenTelemetryEndpoint = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryEndpoint);
+                    break;
+                case "OpenTelemetryProtocol":
+                    OpenTelemetryProtocol = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryProtocol);
                     break;
                 case "OpenTelemetryProtocolTracesEndpoint":
                     OpenTelemetryTracesEndpoint = GetOpt(pr, envPR, opt.CliOption, OpenTelemetryTracesEndpoint);
