@@ -20,6 +20,7 @@ using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using static Org.BouncyCastle.Math.EC.ECCurve;
 using SCL = System.CommandLine; // this is present to disambiguate Option from System.CommandLine and Microsoft.FluentUI.AspNetCore.Components
 
 
@@ -358,6 +359,31 @@ public static partial class Program
         }
     }
 
+    private static string? getTelemetryUrl(string? granular, string? general, string relative, OpenTelemetry.Exporter.OtlpExportProtocol protocol)
+    {
+        if (!string.IsNullOrEmpty(granular))
+        {
+            return granular;
+        }
+
+        if (!string.IsNullOrEmpty(general))
+        {
+            if (protocol != OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf)
+            {
+                return general;
+            }
+
+            if (general.EndsWith('/'))
+            {
+                return general + relative;
+            }
+
+            return general + "/" + relative;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Configures OpenTelemetry for the application.
     /// </summary>
@@ -365,23 +391,31 @@ public static partial class Program
     /// <param name="builder">The WebApplicationBuilder used to configure the application.</param>
     private static void ConfigureOpenTelemetry(CandleConfig config, WebApplicationBuilder builder)
     {
-        string? traceEndpoint = !string.IsNullOrEmpty(config.OpenTelemetryTracesEndpoint)
-            ? config.OpenTelemetryTracesEndpoint
-            : !string.IsNullOrEmpty(config.OpenTelemetryEndpoint)
-            ? config.OpenTelemetryEndpoint
-            : null;
+        OpenTelemetry.Exporter.OtlpExportProtocol protocol = config.OpenTelemetryProtocol.ToLowerInvariant() switch
+        {
+            "grpc" => OpenTelemetry.Exporter.OtlpExportProtocol.Grpc,
+            "http/protobuf" => OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf,
+            "protobuf" => OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf,
+            _ => OpenTelemetry.Exporter.OtlpExportProtocol.Grpc,
+        };
 
-        string? metricsEndpoint = !string.IsNullOrEmpty(config.OpenTelemetryMetricsEndpoint)
-            ? config.OpenTelemetryMetricsEndpoint
-            : !string.IsNullOrEmpty(config.OpenTelemetryEndpoint)
-            ? config.OpenTelemetryEndpoint
-            : null;
+        string? traceEndpoint = getTelemetryUrl(
+            config.OpenTelemetryTracesEndpoint,
+            config.OpenTelemetryEndpoint,
+            "v1/traces",
+            protocol);
 
-        string? logsEndpoint = !string.IsNullOrEmpty(config.OpenTelemetryLogsEndpoint)
-            ? config.OpenTelemetryLogsEndpoint
-            : !string.IsNullOrEmpty(config.OpenTelemetryEndpoint)
-            ? config.OpenTelemetryEndpoint
-            : null;
+        string? metricsEndpoint = getTelemetryUrl(
+            config.OpenTelemetryMetricsEndpoint,
+            config.OpenTelemetryEndpoint,
+            "v1/metrics",
+            protocol);
+
+        string? logsEndpoint = getTelemetryUrl(
+            config.OpenTelemetryLogsEndpoint,
+            config.OpenTelemetryEndpoint,
+            "v1/logs",
+            protocol);
 
         if (logsEndpoint != null)
         {
@@ -395,6 +429,7 @@ public static partial class Program
                     .AddOtlpExporter(exporterOptions =>
                     {
                         exporterOptions.Endpoint = new Uri(logsEndpoint);
+                        exporterOptions.Protocol = protocol;
                     });
             });
         }
@@ -409,6 +444,7 @@ public static partial class Program
                     .AddOtlpExporter(exporterOptions =>
                     {
                         exporterOptions.Endpoint = new Uri(traceEndpoint);
+                        exporterOptions.Protocol = protocol;
                     }))
                 .WithMetrics(metrics => metrics
                     .AddAspNetCoreInstrumentation()
@@ -416,6 +452,7 @@ public static partial class Program
                     .AddOtlpExporter(exporterOptions =>
                     {
                         exporterOptions.Endpoint = new Uri(metricsEndpoint);
+                        exporterOptions.Protocol = protocol;
                     }));
         }
         else if (traceEndpoint != null)
@@ -428,6 +465,7 @@ public static partial class Program
                     .AddOtlpExporter(exporterOptions =>
                     {
                         exporterOptions.Endpoint = new Uri(traceEndpoint);
+                        exporterOptions.Protocol = protocol;
                     }));
         }
         else if (metricsEndpoint != null)
@@ -440,6 +478,7 @@ public static partial class Program
                     .AddOtlpExporter(exporterOptions =>
                     {
                         exporterOptions.Endpoint = new Uri(metricsEndpoint);
+                        exporterOptions.Protocol = protocol;
                     }));
         }
     }
