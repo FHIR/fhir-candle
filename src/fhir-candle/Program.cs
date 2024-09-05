@@ -374,12 +374,22 @@ public static partial class Program
                 return general;
             }
 
-            if (general.EndsWith('/'))
+            if (general.EndsWith("v1/"))
             {
                 return general + relative;
             }
 
-            return general + "/" + relative;
+            if (general.EndsWith("v1"))
+            {
+                return general + "/" + relative;
+            }
+
+            if (general.EndsWith('/'))
+            {
+                return general + "v1/" + relative;
+            }
+
+            return general + "/v1/" + relative;
         }
 
         return null;
@@ -403,19 +413,19 @@ public static partial class Program
         string? traceEndpoint = getTelemetryUrl(
             config.OpenTelemetryTracesEndpoint,
             config.OpenTelemetryEndpoint,
-            "v1/traces",
+            "traces",
             protocol);
 
         string? metricsEndpoint = getTelemetryUrl(
             config.OpenTelemetryMetricsEndpoint,
             config.OpenTelemetryEndpoint,
-            "v1/metrics",
+            "metrics",
             protocol);
 
         string? logsEndpoint = getTelemetryUrl(
             config.OpenTelemetryLogsEndpoint,
             config.OpenTelemetryEndpoint,
-            "v1/logs",
+            "logs",
             protocol);
 
         if (logsEndpoint != null)
