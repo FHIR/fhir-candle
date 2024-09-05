@@ -316,7 +316,7 @@ namespace fhir.candle._ForPackages
                         BuildDate = ciBuildDate,
                         BuildDateIso = ciBuildDate,
                         FhirVersion = ciFhirVersion,
-                        RepositoryUrl = "HL7/fhir/branches/master/qa.json"
+                        RepositoryUrl = $"HL7/fhir/branches/{ciBranchRec.Name}/qa.json"
                     });
                 }
             }
