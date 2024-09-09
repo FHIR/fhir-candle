@@ -8,13 +8,11 @@
   "profiles": {
     "candle": {
       "commandName": "Project",
-      "commandLineArgs": "--r4 r4 --smart-optional r4",
+      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source ~/fhirData",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
-        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
     "candle-test-data": {
