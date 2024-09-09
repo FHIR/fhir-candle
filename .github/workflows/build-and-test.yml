@@ -1,7 +1,6 @@
 name: Tests
 # Basics from https://learn.microsoft.com/en-us/dotnet/devops/dotnet-test-github-action
 on:
-  push:
   pull_request:
     branches: [ main ]
     paths:
@@ -21,11 +20,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Setup .NET Core
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: dotnet restore
@@ -34,4 +29,4 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     
     - name: Test
-      run: dotnet test --no-restore --verbosity normal
+      run: dotnet test --configuration Release --no-restore --verbosity normal

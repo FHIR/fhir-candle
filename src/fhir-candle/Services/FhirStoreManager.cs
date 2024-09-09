@@ -147,7 +147,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
 
         _isInitialized = true;
 
-        // make sure the package service has been initalized
+        // make sure the package service has been initialized
         _packageService.Init();
 
         _logger.LogInformation("FhirStoreManager <<< Creating FHIR tenants...");
@@ -196,6 +196,8 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
             LoadRequestedPackages(supplemental, _serverConfig.LoadPackageExamples == true).Wait();
         }
 
+        bool loadedContent = false;
+
         // sort through RI info
         if (!string.IsNullOrEmpty(_serverConfig.ReferenceImplementation))
         {
@@ -205,6 +207,41 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                 : Path.Combine(_serverConfig.SourceDirectory, _serverConfig.ReferenceImplementation);
 
             LoadRiContents(supplemental);
+
+            loadedContent = true;
+        }
+
+        if (!loadedContent && (!string.IsNullOrEmpty(_serverConfig.SourceDirectory)))
+        {
+            // look for a package supplemental directory
+            string supplementalRoot = Program.FindRelativeDir(string.Empty, _serverConfig.SourceDirectory, false);
+
+            if ((!string.IsNullOrEmpty(supplementalRoot)) &&
+                Directory.Exists(supplementalRoot))
+            {
+                loadContents(supplementalRoot);
+                loadedContent = true;
+            }
+        }
+        else if (!loadedContent)
+        {
+            // look for a package supplemental directory
+            string supplementalRoot = Program.FindRelativeDir(string.Empty, "fhirData", false);
+
+            if ((!string.IsNullOrEmpty(supplementalRoot)) &&
+                Directory.Exists(supplementalRoot))
+            {
+                // only allow the root load if the directory does NOT have any subfolders
+                if (Directory.GetDirectories(supplementalRoot).Length == 0)
+                {
+                    loadContents(supplementalRoot, true);
+                }
+                else
+                {
+                    loadContents(supplementalRoot, false);
+                }
+                loadedContent = true;
+            }
         }
 
         // load packages
@@ -357,9 +394,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
         }
     }
 
-    /// <summary>Loads ri contents.</summary>
-    /// <param name="dir">The dir.</param>
-    public void LoadRiContents(string dir)
+    private void loadContents(string dir, bool allowRootLoad = true)
     {
         if (string.IsNullOrEmpty(dir) ||
             !Directory.Exists(dir))
@@ -367,7 +402,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
             return;
         }
 
-        _logger.LogInformation("FhirStoreManager <<< Loading RI contents...");
+        _logger.LogInformation($"FhirStoreManager <<< Loading contents of {Path.GetFullPath(dir)}...");
 
         // loop over controllers to see where we can add this
         foreach ((string tenantName, TenantConfiguration config) in _tenants)
@@ -391,7 +426,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                             Path.Combine(dir, tenantName),
                             true);
                     }
-                    else
+                    else if (allowRootLoad)
                     {
                         _storesByController[tenantName].LoadPackage(
                             string.Empty,
@@ -417,7 +452,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                             Path.Combine(dir, tenantName),
                             true);
                     }
-                    else
+                    else if (allowRootLoad)
                     {
                         _storesByController[tenantName].LoadPackage(
                             string.Empty,
@@ -443,7 +478,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                             Path.Combine(dir, tenantName),
                             true);
                     }
-                    else
+                    else if (allowRootLoad)
                     {
                         _storesByController[tenantName].LoadPackage(
                             string.Empty,
@@ -456,6 +491,13 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                     break;
             }
         }
+    }
+
+    /// <summary>Loads ri contents.</summary>
+    /// <param name="dir">The dir.</param>
+    public void LoadRiContents(string dir)
+    {
+        loadContents(dir);
     }
 
     /// <summary>Loads requested packages.</summary>

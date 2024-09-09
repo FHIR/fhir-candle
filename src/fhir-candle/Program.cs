@@ -655,7 +655,20 @@ public static partial class Program
         string dirName,
         bool throwIfNotFound = true)
     {
-        string currentDir = string.IsNullOrEmpty(startDir) ? Path.GetDirectoryName(AppContext.BaseDirectory) ?? string.Empty : startDir;
+        if (dirName.Contains('~'))
+        {
+            // we have a relative path from the user directory
+            dirName = dirName.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        }
+
+        if (Directory.Exists(dirName))
+        {
+            return Path.GetFullPath(dirName);
+        }
+
+        string currentDir = string.IsNullOrEmpty(startDir)
+            ? Path.GetDirectoryName(AppContext.BaseDirectory) ?? string.Empty
+            : startDir;
         string testDir = Path.Combine(currentDir, dirName);
 
         while (!Directory.Exists(testDir))
