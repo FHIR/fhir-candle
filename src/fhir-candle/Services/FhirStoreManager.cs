@@ -223,6 +223,26 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                 loadedContent = true;
             }
         }
+        else if (!loadedContent)
+        {
+            // look for a package supplemental directory
+            string supplementalRoot = Program.FindRelativeDir(string.Empty, "fhirData", false);
+
+            if ((!string.IsNullOrEmpty(supplementalRoot)) &&
+                Directory.Exists(supplementalRoot))
+            {
+                // only allow the root load if the directory does NOT have any subfolders
+                if (Directory.GetDirectories(supplementalRoot).Length == 0)
+                {
+                    loadContents(supplementalRoot, true);
+                }
+                else
+                {
+                    loadContents(supplementalRoot, false);
+                }
+                loadedContent = true;
+            }
+        }
 
         // load packages
         LoadPackagePages();
@@ -374,7 +394,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
         }
     }
 
-    private void loadContents(string dir)
+    private void loadContents(string dir, bool allowRootLoad = true)
     {
         if (string.IsNullOrEmpty(dir) ||
             !Directory.Exists(dir))
@@ -406,7 +426,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                             Path.Combine(dir, tenantName),
                             true);
                     }
-                    else
+                    else if (allowRootLoad)
                     {
                         _storesByController[tenantName].LoadPackage(
                             string.Empty,
@@ -432,7 +452,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                             Path.Combine(dir, tenantName),
                             true);
                     }
-                    else
+                    else if (allowRootLoad)
                     {
                         _storesByController[tenantName].LoadPackage(
                             string.Empty,
@@ -458,7 +478,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                             Path.Combine(dir, tenantName),
                             true);
                     }
-                    else
+                    else if (allowRootLoad)
                     {
                         _storesByController[tenantName].LoadPackage(
                             string.Empty,
