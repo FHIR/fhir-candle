@@ -63,7 +63,7 @@ public class OpTestIfFhir : IFhirOperation
     /// <summary>Gets the supported resources.</summary>
     public HashSet<string> SupportedResources => new();
 
-    /// <summary>Executes the Subscription/$events operation.</summary>
+    /// <summary>Executes the $test-if-fhir operation.</summary>
     /// <param name="ctx">          The context.</param>
     /// <param name="store">        The store.</param>
     /// <param name="resourceStore">The resource store.</param>
