@@ -41,6 +41,7 @@ body {
     --type-ramp-plus-6-font-size: 2.2rem;
     --type-ramp-plus-6-line-height: 2.6rem;
     --body-font: "Segoe UI Variable", "Segoe UI", sans-serif;
+    --font-monospace: "Cascadia Code", Consolas, "Courier New", "Liberation Mono", SFMono-Regular, Menlo, Monaco, monospace;
     font-family: var(--body-font);
     font-size: var(--type-ramp-base-font-size);
     line-height: var(--type-ramp-base-line-height);

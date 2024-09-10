@@ -21,6 +21,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		.editorconfig = .editorconfig
 		.gitignore = .gitignore
+		changelog.md = changelog.md
 		CONTRIBUTING.MD = CONTRIBUTING.MD
 		Dockerfile = Dockerfile
 		fhir-candle.props = fhir-candle.props
@@ -46,8 +47,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{1AAC
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{22C11CB9-2408-4056-B41E-87DD07AECF94}"
 	ProjectSection(SolutionItems) = preProject
-		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
 		.github\workflows\argo-ris.yml = .github\workflows\argo-ris.yml
+		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
 		.github\workflows\ghcr-docker.yml = .github\workflows\ghcr-docker.yml
 		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
 	EndProjectSection
