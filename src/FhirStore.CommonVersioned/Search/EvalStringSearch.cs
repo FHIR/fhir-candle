@@ -34,7 +34,7 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (sp.Values[i].StartsWith(value, StringComparison.OrdinalIgnoreCase))
+            if (value.StartsWith(sp.Values[i], StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -63,7 +63,7 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (sp.Values[i].Contains(value, StringComparison.OrdinalIgnoreCase))
+            if (value.Contains(sp.Values[i], StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -92,7 +92,7 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (sp.Values[i].Equals(value, StringComparison.Ordinal))
+            if (value.Equals(sp.Values[i], StringComparison.Ordinal))
             {
                 return true;
             }
