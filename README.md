@@ -159,8 +159,6 @@ docker run --rm --name jaeger -p 4317:4317 -p 4318:4318 -p 5778:5778 -p 16686:16
 Note: items are unsorted within their priorities
 
 ## High priority
-* Composite search parameter support
-* Reverse chaining (`_has`)
 * Feature/module definitions for selective loading
     Build interfaces for Hosted Services, etc.
     Add module tag to Operation, etc.
@@ -170,15 +168,12 @@ Note: items are unsorted within their priorities
 * Save/restore points
 * Versioned Resource support
 * Resource display / edit in UI
-* Subscription RI scenario/walkthrough
 * Resource editor design improvements
 * Add loading packages/profiles to CapabilityStatement
 
 ## Mid Priority
 * SMART support
 * Transaction support
-* Proxy header support
-* Conditional interaction support (e.g., `conditional-update`, `if-match`)
 * OpenAPI generation
 * Compartments
 * Contained resources
