@@ -419,27 +419,18 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
     private async ValueTask<(PackageReference, IPackageServer?)> ResolveLatest(string name)
     {
-        ConcurrentBag<(PackageReference pr, IPackageServer server)> latestRecs = new();
+        List<(PackageReference pr, IPackageServer server)> latestRecs = new();
 
-        IEnumerable<System.Threading.Tasks.Task> tasks = _packageClients.Select(async server =>
+        foreach (IPackageServer server in _packageClients)
         {
             PackageReference pr = await server.GetLatest(name);
             if (pr == PackageReference.None)
             {
-                return;
+                continue;
             }
-
             latestRecs.Add((pr, server));
-        });
-
-        Task t = System.Threading.Tasks.Task.WhenAll(tasks);
-
-        try
-        {
-            await t.WaitAsync(TimeSpan.FromSeconds(30));
         }
-        catch { }
-        
+
         if (latestRecs.Count == 0)
         {
             return (PackageReference.None, null);

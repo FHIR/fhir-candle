@@ -14,7 +14,7 @@
 		<Company>FHIR Foundation Project</Company>
         <Copyright>Copyright 2022-2024</Copyright>
 		<RepositoryType>git</RepositoryType>
-		<RepositoryUrl>https://github.com/GinoCanessa/fhir-candle</RepositoryUrl>
+		<RepositoryUrl>https://github.com/FHIR/fhir-candle</RepositoryUrl>
 		<NeutralLanguage>en</NeutralLanguage>
 	</PropertyGroup>
 
