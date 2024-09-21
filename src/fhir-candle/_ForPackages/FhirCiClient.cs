@@ -829,7 +829,7 @@ namespace fhir.candle._ForPackages
             {
                 if (url.StartsWith("HL7/fhir/", StringComparison.OrdinalIgnoreCase))
                 {
-                    url = "https://build.fhir.org/" + url;
+                    url = "https://build.fhir.org/" + url.Substring(9);
                 }
                 else
                 {

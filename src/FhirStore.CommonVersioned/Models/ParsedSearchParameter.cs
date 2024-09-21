@@ -1040,16 +1040,16 @@ public class ParsedSearchParameter
                     null,
                     null);
 
-                int contintuationStart = colonIndex + 1 + revResourceName.Length + revLinkParamName.Length + 2;
+                int continuationStart = colonIndex + 1 + revResourceName.Length + revLinkParamName.Length + 2;
 
-                if (contintuationStart >= key.Length)
+                if (continuationStart >= key.Length)
                 {
                     Console.WriteLine($"Unable to parse _has parameter: {key}");
                     return null;
                 }
 
                 SearchKeyParseResult? reverseLinkFilter = TryParseKey(
-                    key.Substring(contintuationStart),
+                    key.Substring(continuationStart),
                     store,
                     (IVersionedResourceStore)store[revResourceName],
                     revResourceName);
