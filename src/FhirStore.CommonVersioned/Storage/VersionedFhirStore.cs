@@ -2030,19 +2030,17 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (!string.IsNullOrEmpty(ctx.IfNoneMatch))
         {
-            if (ctx.IfNoneMatch.Equals(eTag, StringComparison.Ordinal))
+            if ( _config.SupportNotChanged && ctx.IfNoneMatch.Equals(eTag, StringComparison.Ordinal) )
             {
-                // Removed to prevent errors from browser
-                // response = new()
-                // {
-                //     Outcome = SerializationUtils.BuildOutcomeForRequest(
-                //         HttpStatusCode.NotModified,
-                //         $"Read {ctx.ResourceType}/{ctx.Id} found version: {eTag}, equals If-None-Match: {ctx.IfNoneMatch}"),
-                //     StatusCode = HttpStatusCode.NotModified,
-                // };
-                //
-                // return false;
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.NotModified,
+                        $"Read {ctx.ResourceType}/{ctx.Id} found version: {eTag}, equals If-None-Match: {ctx.IfNoneMatch}"),
+                    StatusCode = HttpStatusCode.NotModified,
+                };
 
+                return false;
             }
         }
 
@@ -3439,6 +3437,22 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        switch (ctx.Interaction)
+        {
+            case Common.StoreInteractionCodes.CompartmentSearch:
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.NotFound,
+                        $"Compartment operations are not supported."),
+                    StatusCode = HttpStatusCode.NotFound,
+                };
+                return false;
+            default:
+                break;
+        }
+
+
         IFhirOperation op = _operations[ctx.OperationName];
 
         if (!op.AllowResourceLevel)
@@ -3666,6 +3680,21 @@ public partial class VersionedFhirStore : IFhirStore
                 StatusCode = HttpStatusCode.NotFound,
             };
             return false;
+        }
+
+        switch (ctx.Interaction)
+        {
+            case Common.StoreInteractionCodes.CompartmentOperation:
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.NotFound,
+                        $"Compartment operations are not supported."),
+                    StatusCode = HttpStatusCode.NotFound,
+                };
+                return false;
+            default:
+                break;
         }
 
         IFhirOperation op = _operations[ctx.OperationName];
@@ -4402,27 +4431,24 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        // reduce based on compartment
+        // Reduce based on compartment
         if (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)
         {
             results = results?.Where(result =>
+            {
+                return compartmentParameters.Any(compartmentParam =>
                 {
-                    bool inCompartment = false;
-                    foreach( var compartmentParam in compartmentParameters )
-                    {
-                        IEnumerable<ParsedSearchParameter> theParam = ParsedSearchParameter.Parse(
-                            $"_id={result.Id}",
-                            this,
-                            _store[ctx.ResourceType],
-                            ctx.ResourceType);
-                        IEnumerable<ParsedSearchParameter> compartmentParams = theParam.Append(compartmentParam);
-                        var matchingResources = _store[ctx.ResourceType].TypeSearch(compartmentParams);
-                        var found = matchingResources.Any();
-                        inCompartment |= inCompartment ||found;
-                    }
-                    return inCompartment;
-                }
-            );
+                    var theParam = ParsedSearchParameter.Parse(
+                        $"_id={result.Id}",
+                        this,
+                        _store[ctx.ResourceType],
+                        ctx.ResourceType);
+                    var compartmentParams = theParam.Append(compartmentParam);
+                    var matchingResources = _store[ctx.ResourceType]
+                        .TypeSearch(compartmentParams);
+                    return matchingResources.Any();
+                });
+            });
         }
 
         string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
