@@ -15,6 +15,15 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
+    "wgm": {
+      "commandName": "Project",
+      "commandLineArgs": "--disable-ui --r4 r4 --fhir-source C:\\git\\202501-WGM\\search_candle",
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5826",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
     "candle-test-data": {
       "commandName": "Project",
       "commandLineArgs": "--fhir-source src/fhir-candle.Tests/data",

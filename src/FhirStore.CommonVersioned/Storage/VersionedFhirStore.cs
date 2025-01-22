@@ -327,6 +327,10 @@ public partial class VersionedFhirStore : IFhirStore
             _loadReprocess = null;
         }
 
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+
         CheckLoadedOperations();
         DiscoverInteractionHooks();
 
