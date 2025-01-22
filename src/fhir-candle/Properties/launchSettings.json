@@ -8,7 +8,7 @@
   "profiles": {
     "candle": {
       "commandName": "Project",
-      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source ~/fhirData",
+      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source ~/fhirData --load-package hl7.fhir.r4.core",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {
