@@ -10,13 +10,11 @@ using FhirCandle.Storage;
 using FhirCandle.Utils;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
-using FluentAssertions;
+using Shouldly;
 using System.Net;
 using System.Text.Json;
 using Xunit.Abstractions;
-using candleR5::FhirCandle.Models;
 using candleR5::FhirCandle.Storage;
-using Hl7.Fhir.Model;
 using fhircandle.Tests.Models;
 
 namespace fhir.candle.Tests;
@@ -83,12 +81,12 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.Created, response.SerializedOutcome);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
-        response.ETag.Should().Be("W/\"1\"");
-        response.Location.Should().Contain("SearchParameter/");
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, response.SerializedOutcome);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.Location.ShouldContain("SearchParameter/");
 
         ctx = new()
         {
@@ -108,12 +106,12 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK, response.SerializedOutcome);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
-        response.ETag.Should().Be("W/\"1\"");
-        response.Location.Should().EndWith("SearchParameter/Patient-multiplebirth");
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, response.SerializedOutcome);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.Location.ShouldEndWith("SearchParameter/Patient-multiplebirth");
         //_testOutputHelper.WriteLine(bundle);
     }
 
@@ -143,19 +141,19 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out FhirResponseContext response);
 
-        success.Should().Be(true);
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
+        success.ShouldBe(true);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
 
         MinimalCapabilities? capabilities = JsonSerializer.Deserialize<MinimalCapabilities>(response.SerializedResource);
 
-        capabilities.Should().NotBeNull();
-        capabilities!.Rest.Should().NotBeNullOrEmpty();
+        capabilities.ShouldNotBeNull();
+        capabilities!.Rest.ShouldNotBeNullOrEmpty();
 
         MinimalCapabilities.MinimalRest rest = capabilities!.Rest!.First();
-        rest.Mode.Should().Be("server");
-        rest.Resources.Should().NotBeNullOrEmpty();
+        rest.Mode.ShouldBe("server");
+        rest.Resources.ShouldNotBeNullOrEmpty();
 
         int spCount = 0;
         foreach (MinimalCapabilities.MinimalResource r in rest.Resources!)
@@ -187,8 +185,8 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out response);
 
-        success.Should().Be(true);
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        success.ShouldBe(true);
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
 
         ctx = new()
         {
@@ -207,19 +205,19 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out response);
 
-        success.Should().Be(true);
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
+        success.ShouldBe(true);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
 
         capabilities = JsonSerializer.Deserialize<MinimalCapabilities>(response.SerializedResource);
 
-        capabilities.Should().NotBeNull();
-        capabilities!.Rest.Should().NotBeNullOrEmpty();
+        capabilities.ShouldNotBeNull();
+        capabilities!.Rest.ShouldNotBeNullOrEmpty();
 
         rest = capabilities!.Rest!.First();
-        rest.Mode.Should().Be("server");
-        rest.Resources.Should().NotBeNullOrEmpty();
+        rest.Mode.ShouldBe("server");
+        rest.Resources.ShouldNotBeNullOrEmpty();
 
         foreach (MinimalCapabilities.MinimalResource r in rest.Resources!)
         {
@@ -228,7 +226,7 @@ public class FhirStoreTestsR5: IDisposable
                 continue;
             }
 
-            (r.SearchParams?.Count() ?? 0).Should().Be(spCount + 1);
+            (r.SearchParams?.Count() ?? 0).ShouldBe(spCount + 1);
             break;
         }
     }
@@ -254,11 +252,11 @@ public class FhirStoreTestsR5: IDisposable
             out lastModified,
             out location);
 
-        serializedResource.Should().NotBeNullOrEmpty();
-        serializedOutcome.Should().NotBeNullOrEmpty();
-        eTag.Should().Be("W/\"1\"");
-        lastModified.Should().NotBeNullOrEmpty();
-        location.Should().EndWith("SubscriptionTopic/encounter-create-interaction");
+        serializedResource.ShouldNotBeNullOrEmpty();
+        serializedOutcome.ShouldNotBeNullOrEmpty();
+        eTag.ShouldBe("W/\"1\"");
+        lastModified.ShouldNotBeNullOrEmpty();
+        location.ShouldEndWith("SubscriptionTopic/encounter-create-interaction");
 
         FhirRequestContext ctx = new()
         {
@@ -278,12 +276,12 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK, serializedOutcome);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
-        response.ETag.Should().Be("W/\"1\"");
-        response.Location.Should().EndWith("SubscriptionTopic/encounter-create-interaction");
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, serializedOutcome);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.Location.ShouldEndWith("SubscriptionTopic/encounter-create-interaction");
         //_testOutputHelper.WriteLine(bundle);
     }
 
@@ -348,12 +346,12 @@ public class FhirStoreTestsR5: IDisposable
             "notification-event",
             false);
 
-        notification.Should().NotBeEmpty();
+        notification.ShouldNotBeEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(notification);
 
-        results.Should().NotBeNull();
-        results!.Entries.Should().HaveCount(1);
+        results.ShouldNotBeNull();
+        results!.Entries.ShouldHaveCount(1);
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -420,19 +418,19 @@ public class FhirStoreTestsR5: IDisposable
             "notification-event",
             false);
 
-        notification.Should().NotBeEmpty();
+        notification.ShouldNotBeEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(notification);
 
-        results.Should().NotBeNull();
+        results.ShouldNotBeNull();
 
-        results!.Entries.Should().NotBeEmpty();
-        results!.Entries!.First().Resource.Should().NotBeNull();
+        results!.Entries.ShouldNotBeEmpty();
+        results!.Entries!.First().Resource.ShouldNotBeNull();
 
         MinimalStatus? status = JsonSerializer.Deserialize<MinimalStatus>(results!.Entries!.First().Resource!.ToString() ?? string.Empty);
 
-        status.Should().NotBeNull();
-        status!.EventsSinceSubscriptionStart.Should().Be("1");
+        status.ShouldNotBeNull();
+        status!.EventsSinceSubscriptionStart.ShouldBe("1");
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -499,12 +497,12 @@ public class FhirStoreTestsR5: IDisposable
             "notification-event",
             false);
 
-        notification.Should().NotBeEmpty();
+        notification.ShouldNotBeEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(notification);
 
-        results.Should().NotBeNull();
-        results!.Entries.Should().HaveCount(1);
+        results.ShouldNotBeNull();
+        results!.Entries.ShouldHaveCount(1);
 
         encounterJson = encounterJson.Replace("in-progress", "completed");
 
@@ -525,19 +523,19 @@ public class FhirStoreTestsR5: IDisposable
             "notification-event",
             false);
 
-        notification.Should().NotBeEmpty();
+        notification.ShouldNotBeEmpty();
 
         results = JsonSerializer.Deserialize<MinimalBundle>(notification);
 
-        results.Should().NotBeNull();
+        results.ShouldNotBeNull();
 
-        results!.Entries.Should().NotBeEmpty();
-        results!.Entries!.First().Resource.Should().NotBeNull();
+        results!.Entries.ShouldNotBeEmpty();
+        results!.Entries!.First().Resource.ShouldNotBeNull();
 
         MinimalStatus? status = JsonSerializer.Deserialize<MinimalStatus>(results!.Entries!.First().Resource!.ToString() ?? string.Empty);
 
-        status.Should().NotBeNull();
-        status!.EventsSinceSubscriptionStart.Should().Be("1");
+        status.ShouldNotBeNull();
+        status!.EventsSinceSubscriptionStart.ShouldBe("1");
 
 
         //_testOutputHelper.WriteLine(bundle);
@@ -605,12 +603,12 @@ public class FhirStoreTestsR5: IDisposable
             "notification-event",
             false);
 
-        notification.Should().NotBeEmpty();
+        notification.ShouldNotBeEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(notification);
 
-        results.Should().NotBeNull();
-        results!.Entries.Should().HaveCount(1);
+        results.ShouldNotBeNull();
+        results!.Entries.ShouldHaveCount(1);
 
         encounterJson = encounterJson.Replace("in-progress", "completed");
 
@@ -631,19 +629,19 @@ public class FhirStoreTestsR5: IDisposable
             "notification-event",
             false);
 
-        notification.Should().NotBeEmpty();
+        notification.ShouldNotBeEmpty();
 
         results = JsonSerializer.Deserialize<MinimalBundle>(notification);
 
-        results.Should().NotBeNull();
+        results.ShouldNotBeNull();
 
-        results!.Entries.Should().NotBeEmpty();
-        results!.Entries!.First().Resource.Should().NotBeNull();
+        results!.Entries.ShouldNotBeEmpty();
+        results!.Entries!.First().Resource.ShouldNotBeNull();
 
         MinimalStatus? status = JsonSerializer.Deserialize<MinimalStatus>(results!.Entries!.First().Resource!.ToString() ?? string.Empty);
 
-        status.Should().NotBeNull();
-        status!.EventsSinceSubscriptionStart.Should().Be("1");
+        status.ShouldNotBeNull();
+        status!.EventsSinceSubscriptionStart.ShouldBe("1");
 
 
         //_testOutputHelper.WriteLine(bundle);
@@ -685,9 +683,9 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        response.Location.Should().Contain(resourceType);
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.Location.ShouldContain(resourceType);
 
         serializedResource = response.SerializedResource;
         serializedOutcome = response.SerializedOutcome;
@@ -736,9 +734,9 @@ public class FhirStoreTestsR5: IDisposable
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.Location.Should().Contain(resourceType);
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Location.ShouldContain(resourceType);
 
         serializedResource = response.SerializedResource;
         serializedOutcome = response.SerializedOutcome;

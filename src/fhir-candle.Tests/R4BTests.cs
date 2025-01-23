@@ -10,13 +10,11 @@ using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
 using fhir.candle.Tests.Models;
-using FluentAssertions;
+using Shouldly;
 using System.Text.Json;
 using Xunit.Abstractions;
-using candleR4B::FhirCandle.Models;
 using candleR4B::FhirCandle.Storage;
 using fhir.candle.Tests.Extensions;
-using System.CommandLine;
 using System.Net;
 
 namespace fhir.candle.Tests;
@@ -112,7 +110,7 @@ public class R4BTestsPatientLooped : IClassFixture<R4BTests>
 
         for (int i = 0; i < loopCount; i++)
         {
-            _fixture._store.TypeSearch(ctx, out _).Should().BeTrue();
+            _fixture._store.TypeSearch(ctx, out _).ShouldBeTrue();
         }
     }
 }
@@ -197,26 +195,26 @@ public class R4BTestsObservation : IClassFixture<R4BTests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
 
-        results.Should().NotBeNull();
-        results!.Total.Should().Be(matchCount);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
         if (entryCount != null)
         {
-            results!.Entries.Should().HaveCount((int)entryCount);
+            results!.Entries.ShouldHaveCount((int)entryCount);
         }
 
-        results!.Links.Should().NotBeNullOrEmpty();
+        results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.Should().NotBeNullOrEmpty();
-        selfLink.Should().StartWith(_fixture._config.BaseUrl + "/Observation?");
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Observation?");
         foreach (string searchPart in search.Split('&'))
         {
-            selfLink.Should().Contain(searchPart);
+            selfLink.ShouldContain(searchPart);
         }
 
         //_testOutputHelper.WriteLine(bundle);
@@ -301,26 +299,26 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
 
-        results.Should().NotBeNull();
-        results!.Total.Should().Be(matchCount);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
         if (entryCount != null)
         {
-            results!.Entries.Should().HaveCount((int)entryCount);
+            results!.Entries.ShouldHaveCount((int)entryCount);
         }
 
-        results!.Links.Should().NotBeNullOrEmpty();
+        results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.Should().NotBeNullOrEmpty();
-        selfLink.Should().StartWith(_fixture._config.BaseUrl + "/Patient?");
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Patient?");
         foreach (string searchPart in search.Split('&'))
         {
-            selfLink.Should().Contain(searchPart);
+            selfLink.ShouldContain(searchPart);
         }
 
         //_testOutputHelper.WriteLine(bundle);
@@ -363,24 +361,24 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
             out Hl7.Fhir.Model.Resource? r,
             out _);
 
-        sc.Should().Be(HttpStatusCode.OK);
-        r.Should().NotBeNull();
-        r!.TypeName.Should().Be("SubscriptionTopic");
+        sc.ShouldBe(HttpStatusCode.OK);
+        r.ShouldNotBeNull();
+        r!.TypeName.ShouldBe("SubscriptionTopic");
         candleR4B.FhirCandle.Subscriptions.TopicConverter converter = new candleR4B.FhirCandle.Subscriptions.TopicConverter();
 
         bool success = converter.TryParse(r, out ParsedSubscriptionTopic s);
 
-        success.Should().BeTrue();
-        s.Should().NotBeNull();
-        s.Id.Should().Be("encounter-complete");
-        s.Url.Should().Be("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
-        s.ResourceTriggers.Should().HaveCount(1);
-        s.ResourceTriggers.Keys.Should().Contain("Encounter");
-        s.EventTriggers.Should().BeEmpty();
-        s.AllowedFilters.Should().NotBeEmpty();
-        s.AllowedFilters.Keys.Should().Contain("Encounter");
-        s.NotificationShapes.Should().NotBeEmpty();
-        s.NotificationShapes.Keys.Should().Contain("Encounter");
+        success.ShouldBeTrue();
+        s.ShouldNotBeNull();
+        s.Id.ShouldBe("encounter-complete");
+        s.Url.ShouldBe("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
+        s.ResourceTriggers.ShouldHaveCount(1);
+        s.ResourceTriggers.Keys.ShouldContain("Encounter");
+        s.EventTriggers.ShouldBeEmpty();
+        s.AllowedFilters.ShouldNotBeEmpty();
+        s.AllowedFilters.Keys.ShouldContain("Encounter");
+        s.NotificationShapes.ShouldNotBeEmpty();
+        s.NotificationShapes.Keys.ShouldContain("Encounter");
     }
 
     [Theory]
@@ -393,26 +391,26 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
             out Hl7.Fhir.Model.Resource? r,
             out _);
 
-        sc.Should().Be(HttpStatusCode.OK);
-        r.Should().NotBeNull();
-        r!.TypeName.Should().Be("Subscription");
+        sc.ShouldBe(HttpStatusCode.OK);
+        r.ShouldNotBeNull();
+        r!.TypeName.ShouldBe("Subscription");
         candleR4B.FhirCandle.Subscriptions.SubscriptionConverter converter = new candleR4B.FhirCandle.Subscriptions.SubscriptionConverter(10);
 
         bool success = converter.TryParse(r, out ParsedSubscription s);
 
-        success.Should().BeTrue();
-        s.Should().NotBeNull();
-        s.Id.Should().Be("db4ce0bb-fa9c-4092-9f75-34772dc85590");
-        s.TopicUrl.Should().Be("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
-        s.Filters.Should().HaveCount(1);
-        s.Filters.Keys.Should().Contain("Encounter");
-        s.ChannelCode.Should().Be("rest-hook");
-        s.Endpoint.Should().Be("https://subscriptions.argo.run/fhir/r4b/$subscription-hook");
-        s.HeartbeatSeconds.Should().Be(120);
-        s.TimeoutSeconds.Should().BeNull();
-        s.ContentType.Should().Be("application/fhir+json");
-        s.ContentLevel.Should().Be("id-only");
-        s.CurrentStatus.Should().Be("active");
+        success.ShouldBeTrue();
+        s.ShouldNotBeNull();
+        s.Id.ShouldBe("db4ce0bb-fa9c-4092-9f75-34772dc85590");
+        s.TopicUrl.ShouldBe("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
+        s.Filters.ShouldHaveCount(1);
+        s.Filters.Keys.ShouldContain("Encounter");
+        s.ChannelCode.ShouldBe("rest-hook");
+        s.Endpoint.ShouldBe("https://subscriptions.argo.run/fhir/r4b/$subscription-hook");
+        s.HeartbeatSeconds.ShouldBe(120);
+        s.TimeoutSeconds.ShouldBeNull();
+        s.ContentType.ShouldBe("application/fhir+json");
+        s.ContentLevel.ShouldBe("id-only");
+        s.CurrentStatus.ShouldBe("active");
     }
 
     [Theory]
@@ -425,20 +423,20 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
             out Hl7.Fhir.Model.Resource? r,
             out _);
 
-        sc.Should().Be(HttpStatusCode.OK);
-        r.Should().NotBeNull();
-        r!.TypeName.Should().Be("Bundle");
+        sc.ShouldBe(HttpStatusCode.OK);
+        r.ShouldNotBeNull();
+        r!.TypeName.ShouldBe("Bundle");
 
         ParsedSubscriptionStatus? s = ((VersionedFhirStore)_fixture._store).ParseNotificationBundle((Hl7.Fhir.Model.Bundle)r);
 
-        s.Should().NotBeNull();
-        s!.BundleId.Should().Be("24dd1ba8-d569-418f-96d8-e304433f9424");
-        s.SubscriptionReference.Should().Be("https://subscriptions.argo.run/fhir/r4b/Subscription/db4ce0bb-fa9c-4092-9f75-34772dc85590");
-        s.SubscriptionTopicCanonical.Should().Be("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
-        s.Status.Should().Be("active");
-        s.NotificationType.Should().Be(ParsedSubscription.NotificationTypeCodes.Handshake);
-        s.NotificationEvents.Should().BeEmpty();
-        s.Errors.Should().BeEmpty();
+        s.ShouldNotBeNull();
+        s!.BundleId.ShouldBe("24dd1ba8-d569-418f-96d8-e304433f9424");
+        s.SubscriptionReference.ShouldBe("https://subscriptions.argo.run/fhir/r4b/Subscription/db4ce0bb-fa9c-4092-9f75-34772dc85590");
+        s.SubscriptionTopicCanonical.ShouldBe("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
+        s.Status.ShouldBe("active");
+        s.NotificationType.ShouldBe(ParsedSubscription.NotificationTypeCodes.Handshake);
+        s.NotificationEvents.ShouldBeEmpty();
+        s.Errors.ShouldBeEmpty();
     }
 
     /// <summary>Tests an encounter subscription with no filters.</summary>
@@ -535,16 +533,16 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
         {
             rs.TestCreateAgainstSubscriptions(current);
 
-            subscription.NotificationErrors.Should().BeEmpty("Create test should not have errors");
+            subscription.NotificationErrors.ShouldBeEmpty("Create test should not have errors");
 
             if (createResult)
             {
-                subscription.GeneratedEvents.Should().NotBeEmpty("Create test should have generated event");
-                subscription.GeneratedEvents.Should().HaveCount(1);
+                subscription.GeneratedEvents.ShouldNotBeEmpty("Create test should have generated event");
+                subscription.GeneratedEvents.ShouldHaveCount(1);
             }
             else
             {
-                subscription.GeneratedEvents.Should().BeEmpty("Create test should NOT have generated event");
+                subscription.GeneratedEvents.ShouldBeEmpty("Create test should NOT have generated event");
             }
 
             subscription.ClearEvents();
@@ -555,16 +553,16 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
         {
             rs.TestUpdateAgainstSubscriptions(current, previous);
 
-            subscription.NotificationErrors.Should().BeEmpty("Update test should not have errors");
+            subscription.NotificationErrors.ShouldBeEmpty("Update test should not have errors");
 
             if (updateResult)
             {
-                subscription.GeneratedEvents.Should().NotBeEmpty("Update test should have generated event");
-                subscription.GeneratedEvents.Should().HaveCount(1);
+                subscription.GeneratedEvents.ShouldNotBeEmpty("Update test should have generated event");
+                subscription.GeneratedEvents.ShouldHaveCount(1);
             }
             else
             {
-                subscription.GeneratedEvents.Should().BeEmpty("Update test should NOT have generated event");
+                subscription.GeneratedEvents.ShouldBeEmpty("Update test should NOT have generated event");
             }
 
             subscription.ClearEvents();
@@ -574,16 +572,16 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
         if (onDelete)
         {
             rs.TestDeleteAgainstSubscriptions(previous);
-            subscription.NotificationErrors.Should().BeEmpty("Delete test should not have errors");
+            subscription.NotificationErrors.ShouldBeEmpty("Delete test should not have errors");
 
             if (deleteResult)
             {
-                subscription.GeneratedEvents.Should().NotBeEmpty("Delete test should have generated event");
-                subscription.GeneratedEvents.Should().HaveCount(1);
+                subscription.GeneratedEvents.ShouldNotBeEmpty("Delete test should have generated event");
+                subscription.GeneratedEvents.ShouldHaveCount(1);
             }
             else
             {
-                subscription.GeneratedEvents.Should().BeEmpty("Delete test should NOT have generated event");
+                subscription.GeneratedEvents.ShouldBeEmpty("Delete test should NOT have generated event");
             }
 
             subscription.ClearEvents();

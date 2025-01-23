@@ -7,16 +7,14 @@ extern alias candleR4;
 extern alias candleR4B;
 extern alias candleR5;
 
+using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
 using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
-using FluentAssertions;
-using Hl7.Fhir.Model;
 using Hl7.Fhir.Rest;
-using Org.BouncyCastle.Utilities.Collections;
+using Shouldly;
 using System.Net;
-using System.Security.AccessControl;
 using System.Text.Json;
 using System.Xml.Linq;
 using Xunit.Abstractions;
@@ -182,22 +180,22 @@ public class MetadataJson : IClassFixture<FhirStoreTests>
             ctx,
             out FhirResponseContext? response);
 
-        success.Should().Be(true);
-        response.Should().NotBeNull();
-        response!.StatusCode.Should().Be(HttpStatusCode.OK);
-        response!.SerializedResource.Should().NotBeNullOrEmpty();
-        response!.SerializedOutcome.Should().NotBeNullOrEmpty();
+        success.ShouldBe(true);
+        response.ShouldNotBeNull();
+        response!.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response!.SerializedResource.ShouldNotBeNullOrEmpty();
+        response!.SerializedOutcome.ShouldNotBeNullOrEmpty();
 
         MinimalCapabilities? capabilities = JsonSerializer.Deserialize<MinimalCapabilities>(response!.SerializedResource);
 
-        capabilities.Should().NotBeNull();
-        capabilities!.Rest.Should().NotBeNullOrEmpty();
+        capabilities.ShouldNotBeNull();
+        capabilities!.Rest.ShouldNotBeNullOrEmpty();
 
         MinimalCapabilities.MinimalRest rest = capabilities!.Rest!.First();
-        rest.Mode.Should().Be("server");
-        rest.Resources.Should().NotBeNullOrEmpty();
+        rest.Mode.ShouldBe("server");
+        rest.Resources.ShouldNotBeNullOrEmpty();
         int resourceCount = rest.Resources!.Count();
-        resourceCount.Should().Be(_fixture._expectedRestResources[version]);
+        resourceCount.ShouldBe(_fixture._expectedRestResources[version]);
     }
 }
 
@@ -241,19 +239,19 @@ public class MetadataXml : IClassFixture<FhirStoreTests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().Be(true);
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
+        success.ShouldBe(true);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
 
         using (MemoryStream ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(response.SerializedResource)))
         {
             XElement parsed = XElement.Load(ms);
 
-            parsed.Should().NotBeNull();
+            parsed.ShouldNotBeNull();
 
             int resourceCount = parsed.Descendants("{http://hl7.org/fhir}resource").Count();
-            resourceCount.Should().Be(_fixture._expectedRestResources[version]);
+            resourceCount.ShouldBe(_fixture._expectedRestResources[version]);
         }
     }
 }
@@ -305,15 +303,15 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        response.Location.Should().Contain(_resourceType);
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.Location.ShouldContain(_resourceType);
 
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
-        response.ETag.Should().Be("W/\"1\"");
-        response.LastModified.Should().NotBeNullOrEmpty();
-        response.Location.Should().EndWith(_resourceType + "/" + _id);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.LastModified.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldEndWith(_resourceType + "/" + _id);
 
         ctx = new()
         {
@@ -333,12 +331,12 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
             ctx,
             out response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
-        response.ETag.Should().Be("W/\"1\"");
-        response.Location.Should().EndWith(_resourceType + "/" + _id);
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.Location.ShouldEndWith(_resourceType + "/" + _id);
 
         ctx = new()
         {
@@ -357,15 +355,15 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
             ctx,
             out response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.Location.Should().Contain(_resourceType);
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Location.ShouldContain(_resourceType);
 
-        response.SerializedResource.Should().NotBeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
-        response.ETag.Should().Be("W/\"2\"");
-        response.LastModified.Should().NotBeNullOrEmpty();
-        response.Location.Should().EndWith(_resourceType + "/" + _id);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"2\"");
+        response.LastModified.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldEndWith(_resourceType + "/" + _id);
 
         ctx = new()
         {
@@ -383,9 +381,9 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
             ctx,
             out response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.Location.Should().BeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Location.ShouldBeNullOrEmpty();
 
         ctx = new()
         {
@@ -401,10 +399,10 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
 
         success = fhirStore.InstanceRead(ctx, out response);
 
-        success.Should().BeFalse();
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        response.SerializedResource.Should().BeNullOrEmpty();
-        response.SerializedOutcome.Should().NotBeNullOrEmpty();
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        response.SerializedResource.ShouldBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
     }
 }
 
@@ -455,8 +453,8 @@ public class TestResourceWrongLocation: IClassFixture<FhirStoreTests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeFalse();
-        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
     }
 }
 
@@ -506,8 +504,8 @@ public class TestResourceInvalidElement : IClassFixture<FhirStoreTests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeFalse();
-        response.StatusCode?.IsSuccessful().Should().BeFalse();
+        success.ShouldBeFalse();
+        response.StatusCode?.IsSuccessful().ShouldBeFalse();
     }
 }
 
@@ -638,7 +636,7 @@ public class TestBundleRequestParsing : IClassFixture<FhirStoreTests>
                 Authorization = null,
             };
 
-            ctx?.Interaction.Should().Be(expected);
+            ctx?.Interaction.ShouldBe(expected);
         }
     }
 }
