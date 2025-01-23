@@ -16,7 +16,7 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
     <FluentLabel Typo="Typography.H6">@ResourceType Resources</FluentLabel>
 
-    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="@ColSizes">
+    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="@ColSizes" ShowHover="true">
         <TemplateColumn Title="Id" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdFilter)" Tooltip="true">
             <ColumnOptions>
                 <div class="search-box">

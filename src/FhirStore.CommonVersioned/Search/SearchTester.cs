@@ -63,8 +63,9 @@ public class SearchTester
 
         if (fpContext == null)
         {
-            fpContext = new FhirEvaluationContext(rootNode.ToScopedNode())
+            fpContext = new FhirEvaluationContext()
             {
+                Resource = rootNode,
                 TerminologyService = FhirStore.Terminology,
                 ElementResolver = FhirStore.Resolve,
             };
@@ -209,8 +210,9 @@ public class SearchTester
                         continue;
                     }
 
-                    FhirEvaluationContext chainedContext = new FhirEvaluationContext(resolved.ToScopedNode())
+                    FhirEvaluationContext chainedContext = new FhirEvaluationContext()
                     {
+                        Resource = resolved,
                         TerminologyService = FhirStore.Terminology,
                         ElementResolver = FhirStore.Resolve,
                     };

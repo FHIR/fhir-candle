@@ -20,39 +20,33 @@ namespace FhirCandle.Serialization;
 /// <summary>Serialization utilities.</summary>
 public static class SerializationUtils
 {
-    /// <summary>The JSON parser.</summary>
-    private static FhirJsonPocoDeserializer _jsonParser = new(new FhirJsonPocoDeserializerSettings()
+    private static JsonSerializerOptions _jsonParseOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoDeserializerSettings()
     {
         DisableBase64Decoding = false,
     });
 
-    /// <summary>The JSON parser lenient.</summary>
-    private static FhirJsonPocoDeserializer _jsonParserLenient = new(new FhirJsonPocoDeserializerSettings()
+    private static JsonSerializerOptions _jsonParseLinientOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoDeserializerSettings()
     {
         DisableBase64Decoding = false,
         Validator = null,
     });
 
-    /// <summary>The JSON serializer for full resources.</summary>
-    private static FhirJsonPocoSerializer _jsonSerializerFull = new(new FhirJsonPocoSerializerSettings()
+    private static JsonSerializerOptions _jsonSerializerFullOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
     {
         SummaryFilter = null,
     });
 
-    /// <summary>The JSON serializer for summary=data.</summary>
-    private static FhirJsonPocoSerializer _jsonSerializerData = new(new FhirJsonPocoSerializerSettings()
-    {
-        SummaryFilter = SerializationFilter.ForText(),
-    });
-
-    /// <summary>The JSON serializer for summary=text.</summary>
-    private static FhirJsonPocoSerializer _jsonSerializerText = new(new FhirJsonPocoSerializerSettings()
+    private static JsonSerializerOptions _jsonSerializerDataOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
     {
         SummaryFilter = SerializationFilter.ForData(),
     });
 
-    /// <summary>The JSON serializer for summary=true.</summary>
-    private static FhirJsonPocoSerializer _jsonSerializerSummary = new(new FhirJsonPocoSerializerSettings()
+    private static JsonSerializerOptions _jsonSerializerTextOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
+    {
+        SummaryFilter = SerializationFilter.ForText(),
+    });
+
+    private static JsonSerializerOptions _jsonSerializerSummaryOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
     {
         SummaryFilter = SerializationFilter.ForSummary(),
     });
@@ -190,21 +184,20 @@ public static class SerializationUtils
             case "application/fhir+json":
                 try
                 {
-                    Resource parsed = lenient 
-                        ? _jsonParserLenient.DeserializeResource(content)
-                        : _jsonParser.DeserializeResource(content);
-                    if (parsed is TResource)
-                    {
-                        resource = (TResource)parsed;
-                        exMessage = string.Empty;
-                        return HttpStatusCode.OK;
-                    }
-                    else
+                    TResource? r = lenient
+                        ? JsonSerializer.Deserialize<TResource>(content, _jsonParseLinientOptions)
+                        : JsonSerializer.Deserialize<TResource>(content, _jsonParseOptions);
+
+                    if (r == null)
                     {
                         resource = null;
                         exMessage = string.Empty;
                         return HttpStatusCode.UnprocessableEntity;
                     }
+
+                    resource = r;
+                    exMessage = string.Empty;
+                    return HttpStatusCode.OK;
                 }
                 catch (Exception ex)
                 {
@@ -282,11 +275,12 @@ public static class SerializationUtils
     /// <param name="pretty">     If the output should be 'pretty' formatted.</param>
     /// <param name="summaryType">(Optional) Type of the summary.</param>
     /// <returns>A string.</returns>
-    public static string SerializeFhir(
-        Resource instance,
+    public static string SerializeFhir<TResource>(
+        TResource instance,
         string format,
         bool pretty,
         string summaryFlag = "")
+        where TResource : Resource
     {
         // TODO: Need to add support for count
 
@@ -382,13 +376,13 @@ public static class SerializationUtils
                                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                                 }))
                                 {
-                                    _jsonSerializerFull.Serialize(instance, writer);
+                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerFullOptions);
                                     writer.Flush();
                                     return encoding.GetString(ms.ToArray());
                                 }
                             }
 
-                            return _jsonSerializerFull.SerializeToString(instance);
+                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerFullOptions);
 
                         case "true":
                             if (pretty || (encoding != System.Text.Encoding.UTF8))
@@ -401,13 +395,13 @@ public static class SerializationUtils
                                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                                 }))
                                 {
-                                    _jsonSerializerSummary.Serialize(instance, writer);
+                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerSummaryOptions);
                                     writer.Flush();
                                     return encoding.GetString(ms.ToArray());
                                 }
                             }
 
-                            return _jsonSerializerSummary.SerializeToString(instance);
+                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerSummaryOptions);
 
                         case "text":
                             if (pretty || (encoding != System.Text.Encoding.UTF8))
@@ -420,13 +414,14 @@ public static class SerializationUtils
                                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                                 }))
                                 {
-                                    _jsonSerializerText.Serialize(instance, writer);
+                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerTextOptions);
                                     writer.Flush();
                                     return encoding.GetString(ms.ToArray());
                                 }
                             }
 
-                            return _jsonSerializerText.SerializeToString(instance);
+                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerTextOptions);
+                            //return _jsonSerializerText.SerializeToString(instance);
 
                         case "data":
                             if (pretty || (encoding != System.Text.Encoding.UTF8))
@@ -439,13 +434,13 @@ public static class SerializationUtils
                                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                                 }))
                                 {
-                                    _jsonSerializerData.Serialize(instance, writer);
+                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerDataOptions);
                                     writer.Flush();
                                     return encoding.GetString(ms.ToArray());
                                 }
                             }
 
-                            return _jsonSerializerData.SerializeToString(instance);
+                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerDataOptions);
                     }
                 }
                 //return instance.ToJson(_jsonSerializerSettings);

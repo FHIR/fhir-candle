@@ -1445,8 +1445,9 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             ITypedElement currentTE = current.ToTypedElement();
 
-            FhirEvaluationContext fpContext = new FhirEvaluationContext(currentTE.ToScopedNode())
+            FhirEvaluationContext fpContext = new FhirEvaluationContext()
             {
+                Resource = currentTE,
                 TerminologyService = _store.Terminology,
                 ElementResolver = _store.Resolve,
                 Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
@@ -1491,8 +1492,9 @@ public class ResourceStore<T> : IVersionedResourceStore
             ITypedElement currentTE = current.ToTypedElement();
             ITypedElement previousTE = previous.ToTypedElement();
 
-            FhirEvaluationContext fpContext = new FhirEvaluationContext(currentTE.ToScopedNode())
+            FhirEvaluationContext fpContext = new FhirEvaluationContext()
             {
+                Resource = currentTE,
                 TerminologyService = _store.Terminology,
                 ElementResolver = _store.Resolve,
                 Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
@@ -1537,8 +1539,9 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             ITypedElement previousTE = previous.ToTypedElement();
 
-            FhirEvaluationContext fpContext = new FhirEvaluationContext(previousTE.ToScopedNode())
+            FhirEvaluationContext fpContext = new FhirEvaluationContext()
             {
+                Resource = previousTE,
                 TerminologyService = _store.Terminology,
                 ElementResolver = _store.Resolve,
                 Environment = new Dictionary<string, IEnumerable<ITypedElement>>()

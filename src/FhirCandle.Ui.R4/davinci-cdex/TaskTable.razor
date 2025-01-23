@@ -5,7 +5,7 @@
 
 @implements IDisposable
 
-<FluentDataGrid Items="@FilteredItems" GridTemplateColumns="0.75fr 0.5fr 1fr 2fr">
+<FluentDataGrid Items="@FilteredItems" GridTemplateColumns="0.75fr 0.5fr 1fr 2fr" ShowHover="true">
     <PropertyColumn Title="Id" Property="@(t => t.Id)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdFilter)" Tooltip="true"  IsDefaultSortColumn="true">
         <ColumnOptions>
             <div class="search-box">

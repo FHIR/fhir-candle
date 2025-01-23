@@ -188,15 +188,15 @@ ul {
     margin-left: 32px;
 }
 
-fluent-data-grid {
-    width: 100%;
+.fluent-data-grid {
+    width: 100% !important;
 }
 
-fluent-data-grid fluent-data-grid-row:not(.highlighted-row):not(:first-child):nth-child(2n+1) {
+.fluent-data-grid-row:not(.highlighted-row):not(:first-child):nth-child(2n+1) {
     background-color: var(--neutral-fill-secondary-rest);
 }
 
-fluent-data-grid fluent-data-grid-row:not(:first-child):hover {
+.fluent-data-grid-row:not(:first-child):hover {
     background-color: var(--accent-base-color) !important;
     /*background-color: var(--neutral-fill-hover) !important;*/
 }

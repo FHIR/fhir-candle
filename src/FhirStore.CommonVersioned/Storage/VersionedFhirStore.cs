@@ -256,8 +256,10 @@ public partial class VersionedFhirStore : IFhirStore
         }
         
         // check for a load directory
-        if (config.LoadDirectory != null)
+        if ((config.LoadDirectory != null) && (!_loadedSupplements.Contains(config.LoadDirectory.FullName)))
         {
+            _loadedSupplements.Add(config.LoadDirectory.FullName);
+
             _hasProtected = config.ProtectLoadedContent;
             _loadReprocess = new();
             _loadState = LoadStateCodes.Read;
@@ -670,6 +672,10 @@ public partial class VersionedFhirStore : IFhirStore
                 }
             }
         }
+
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
 
         CheckLoadedOperations();
         DiscoverInteractionHooks();
@@ -4789,8 +4795,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (fpContext == null)
         {
-            fpContext = new FhirEvaluationContext(focusTE.ToScopedNode())
+            fpContext = new FhirEvaluationContext()
             {
+                Resource = focusTE,
                 TerminologyService = _terminology,
                 ElementResolver = Resolve,
             };
@@ -4936,8 +4943,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         ITypedElement resourceTE = resource.ToTypedElement();
 
-        FhirEvaluationContext fpContext = new FhirEvaluationContext(resourceTE.ToScopedNode())
-        { 
+        FhirEvaluationContext fpContext = new FhirEvaluationContext()
+        {
+            Resource = resourceTE,
             TerminologyService = _terminology,
             ElementResolver = Resolve,
         };

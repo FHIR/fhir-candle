@@ -13,7 +13,7 @@
 
     <FluentSwitch Label="Hide Empty Resources" @bind-Value="HideEmptyResources"></FluentSwitch>
 
-    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="1fr 1fr">
+    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="1fr 1fr" ShowHover="true">
 @*         <PropertyColumn Title="Resource Name" Property="@(ri => ri.ResourceName)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(ResourceNameFilter)" Tooltip="true"  IsDefaultSortColumn="true">
             <ColumnOptions>
                 <div class="search-box">
