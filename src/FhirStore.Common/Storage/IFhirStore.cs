@@ -83,7 +83,8 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     bool PerformInteraction(
         FhirRequestContext ctx,
         out FhirResponseContext response,
-        bool serializeReturn);
+        bool serializeReturn,
+        bool forceAllowExistingId = false);
 
     /// <summary>Gets the metadata for this store.</summary>
     /// <param name="ctx">     The request context.</param>
@@ -107,7 +108,8 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     /// <returns>True if it succeeds, false if it fails.</returns>
     bool InstanceCreate(
         FhirRequestContext ctx,
-        out FhirResponseContext response);
+        out FhirResponseContext response,
+        bool forceAllowExistingId = false);
 
     /// <summary>Instance update.</summary>
     /// <param name="ctx">     The request context.</param>

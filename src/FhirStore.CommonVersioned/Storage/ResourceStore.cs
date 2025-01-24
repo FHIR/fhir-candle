@@ -645,13 +645,25 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        if (source is IHasIdentifier hasId)
+        if (source is IIdentifiable<List<Identifier>> sil)
         {
-            foreach(Identifier i in hasId.Identifier)
+            foreach (Identifier i in sil.Identifier)
             {
                 _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
             }
         }
+        else if (source is IIdentifiable<Identifier> si)
+        {
+            _ = _identifierToId.TryAdd(GetIdentifierKey(si.Identifier), source.Id);
+        }
+
+        //if (source is IHasIdentifier hasId)
+        //{
+        //    foreach(Identifier i in hasId.Identifier)
+        //    {
+        //        _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
+        //    }
+        //}
 
         TestCreateAgainstSubscriptions((T)source);
 
