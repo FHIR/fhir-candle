@@ -1,7 +1,34 @@
 * Work in Progress
     * Added commit log
-    * Updated `Microsoft.IdentityModel.Tokens` to `8.0.2`
     * Added CSS fonts for monospace content.
+    * Removed `FluentAssertions` (`6.12.0`) and replaced with `Shouldly` (`4.3.0`) due to license changes.
+    * Changed FHIR JSON serialization and parsing to System.Text.Json versions.
+    * Updated NuGet dependencies
+        * Updated `BlazorMonaco` from `3.2.0` to `3.3.0`
+        * Updated `Firely.Fhir.Packages` from `4.7.0` to `4.9.0`
+        * Updated `Hl7.Fhir.R4` from `5.9.1` to `5.11.2`
+        * Updated `Hl7.Fhir.R4B` from `5.9.1` to `5.11.2`
+        * Updated `Hl7.Fhir.R5` from `5.9.1` to `5.11.2`
+        * Updated `MailKit` from `4.7.1.1` to `4.9.0`
+        * Updated `Microsoft.AspNetCore.Components.Web` from `8.0.8` to `8.0.12`
+        * Updated `Microsoft.Extensions.Hosting.Abstractions` from `8.0.0` to `9.0.1`
+        * Updated `Microsoft.FluentUI.AspNetCore.Components` from `4.9.3` to `4.11.3`
+        * Updated `Microsoft.FluentUI.AspNetCore.Components.Emoji` from `4.6.0` to `4.11.3`
+        * Updated `Microsoft.FluentUI.AspNetCore.Components.Icons` from `4.9.3` to `4.11.3`
+        * Updated `Microsoft.IdentityModel.Tokens` from `8.0.2` to `8.3.1`
+        * Updated `Microsoft.NET.Test.Sdk` from `17.10.0` to `17.12.0`
+        * Updated `OpenTelemetry` from `1.9.0` to `1.11.0`
+        * Updated `OpenTelemetry.Exporter.Console` from `1.9.0` to `1.11.0`
+        * Updated `OpenTelemetry.Exporter.OpenTelemetryProtocol` from `1.9.0` to `1.11.0`
+        * Updated `OpenTelemetry.Extensions.Hosting` from `1.9.0` to `1.11.0`
+        * Updated `OpenTelemetry.Instrumentation.AspNetCore` from `1.9.0` to `1.11.0`
+        * Updated `System.IdentityModel.Tokens.Jwt` from `8.0.2` to `8.3.1`
+        * Updated `xunit` from `2.9.0` to `2.9.3`
+        * Updated `xunit.runner.visualstudio` from `2.8.2` to `3.0.1`
+    * Added initial support for `transaction` Bundle processing.
+    * Added support for processing `batch` and `transaction` bundles in pre-loaded content (instead of storing them).
+    * Fixed issue causing the same folder content to be loaded twice in certain combinations of command line arguments.
+    * Added GC collection after the initial content load to reduce memory usage.
 
 * v2024.910 - [PR 14](https://github.com/FHIR/fhir-candle/commit/70a8b38a40649160b3711e9a5a7ad4307e8e9d9a)
     * [f220fcc](https://github.com/FHIR/fhir-candle/commit/f220fccc24647311d43fb7807d910cc1613f7f27) Fix: Inverted string search test in some combinations.
