@@ -1766,10 +1766,12 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// </returns>
     public IEnumerable<string> GetSearchRevIncludes() => _supportedRevIncludes;
 
-    /// <summary>Performs a type search in this resource store.</summary>
-    /// <param name="query">The query.</param>
+    /// <summary>
+    /// Performs a type search in this resource store.
+    /// </summary>
+    /// <param name="parameters">The search parameters.</param>
     /// <returns>
-    /// An enumerator that allows foreach to be used to process type search in this collection.
+    /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
     public IEnumerable<Resource> TypeSearch(IEnumerable<ParsedSearchParameter> parameters)
     {

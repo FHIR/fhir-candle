@@ -38,13 +38,14 @@ public class SearchTester
     //    }
     //}
 
-    /// <summary>Tests a resource against parsed search parameters for matching.</summary>
+    /// <summary>
+    /// Tests a resource against parsed search parameters for matching.
+    /// </summary>
     /// <exception cref="ArgumentNullException">Thrown when one or more required arguments are null.</exception>
-    /// <param name="rootNode">         The resource.</param>
-    /// <param name="searchParameters"> Options for controlling the search.</param>
-    /// <param name="appliedParameters">[out] Options for controlling the applied.</param>
-    /// <param name="ignoredParameters">[out] Options for controlling the ignored.</param>
-    /// <param name="fpContext">        (Optional) The context.</param>
+    /// <param name="rootNode">The resource.</param>
+    /// <param name="searchParameters">Options for controlling the search.</param>
+    /// <param name="fpContext">(Optional) The context.</param>
+    /// <param name="resultParameters">(Optional) The result parameters.</param>
     /// <returns>True if the test passes, false if the test fails.</returns>
     public bool TestForMatch(
         ITypedElement rootNode,
@@ -61,18 +62,16 @@ public class SearchTester
             return true;
         }
 
-        if (fpContext == null)
+        fpContext ??= new FhirEvaluationContext()
         {
-            fpContext = new FhirEvaluationContext()
-            {
-                Resource = rootNode,
-                TerminologyService = FhirStore.Terminology,
-                ElementResolver = FhirStore.Resolve,
-            };
-        }
+            Resource = rootNode,
+            TerminologyService = FhirStore.Terminology,
+            ElementResolver = FhirStore.Resolve,
+        };
 
         foreach (ParsedSearchParameter sp in searchParameters)
         {
+            // skip if this is ignored and not a sort element
             if (sp.IgnoredParameter)
             {
                 continue;
@@ -164,7 +163,6 @@ public class SearchTester
                 return false;
             }
 
-
             // check for unsupported modifiers
             if ((!string.IsNullOrEmpty(sp.ModifierLiteral)) &&
                 (!IsModifierValidForType(sp.Modifier, sp.ParamType)))
@@ -176,10 +174,10 @@ public class SearchTester
 
             if (!extracted.Any())
             {
+                // check if we are looking for missing values - successful match
                 if ((sp.Modifier == SearchModifierCodes.Missing) &&
                     sp.Values.Any(v => v.StartsWith("t", StringComparison.OrdinalIgnoreCase)))
                 {
-                    // successful match
                     continue;
                 }
 

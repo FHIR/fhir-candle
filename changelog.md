@@ -29,6 +29,7 @@
     * Added support for processing `batch` and `transaction` bundles in pre-loaded content (instead of storing them).
     * Fixed issue causing the same folder content to be loaded twice in certain combinations of command line arguments.
     * Added GC collection after the initial content load to reduce memory usage.
+    * Added support for `_sort` in search.
 
 * v2024.910 - [PR 14](https://github.com/FHIR/fhir-candle/commit/70a8b38a40649160b3711e9a5a7ad4307e8e9d9a)
     * [f220fcc](https://github.com/FHIR/fhir-candle/commit/f220fccc24647311d43fb7807d910cc1613f7f27) Fix: Inverted string search test in some combinations.

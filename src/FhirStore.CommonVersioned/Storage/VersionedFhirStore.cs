@@ -2759,15 +2759,15 @@ public partial class VersionedFhirStore : IFhirStore
                     }
                     else if (string.IsNullOrEmpty(includes))
                     {
-                        resultParameters = new(reverseIncludes, this);
+                        resultParameters = new(reverseIncludes, this, rs, resourceName);
                     }
                     else if (string.IsNullOrEmpty(reverseIncludes))
                     {
-                        resultParameters = new(includes, this);
+                        resultParameters = new(includes, this, rs, resourceName);
                     }
                     else
                     {
-                        resultParameters = new(includes + "&" + reverseIncludes, this);
+                        resultParameters = new(includes + "&" + reverseIncludes, this, rs, resourceName);
                     }
                 }
 
@@ -4364,9 +4364,6 @@ public partial class VersionedFhirStore : IFhirStore
         // execute search
         IEnumerable<Resource>? results = _store[ctx.ResourceType].TypeSearch(parameters);
 
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this);
-
         // null results indicates failure
         if (results == null)
         {
@@ -4380,6 +4377,13 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return false;
         }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            ctx.UrlQuery,
+            this,
+            _store[ctx.ResourceType],
+            ctx.ResourceType);
 
         string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
         string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
@@ -4410,11 +4414,14 @@ public partial class VersionedFhirStore : IFhirStore
             },
         };
 
-        // TODO: check for a sort and apply to results
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+            ? null
+            : new(this, resultParameters.SortRequests);
 
         HashSet<string> addedIds = new();
 
-        foreach (Resource resource in results)
+        foreach (Resource resource in (comparer == null ? results : results.OrderBy(r => r, comparer)))
         {
             string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
@@ -4566,8 +4573,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        List<IEnumerable<ParsedSearchParameter>> allParameters = new();
-        List<IEnumerable<Resource>> allResults = new();
+        List <(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
 
         foreach (string resourceType in resourceTypes)
         {
@@ -4594,19 +4600,18 @@ public partial class VersionedFhirStore : IFhirStore
                 return false;
             }
 
-            allParameters.Add(parameters);
-            allResults.Add(results);
+            // parse search result parameters
+            ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this, _store[resourceType], resourceType);
+
+            byResource.Add((resourceType, parameters, results, resultParameters));
         }
 
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this);
-
         // filter parameters from use across all performed searches
-        IEnumerable<ParsedSearchParameter> filteredParameters = allParameters.SelectMany(e => e.Select(p => p)).DistinctBy(p => p.Name);
+        IEnumerable<ParsedSearchParameter> filteredParameters = byResource.SelectMany(br => br.searchParams.Select(p => p)).DistinctBy(p => p.Name);
 
         string selfLink = $"{getBaseUrl(ctx)}";
         string selfSearchParams = string.Join('&', filteredParameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
-        string selfResultParams = resultParameters.GetAppliedQueryString();
+        string selfResultParams = string.Join('&', byResource.SelectMany(br => br.resultParameters.GetAppliedQueryString().Split('&')).Distinct());
 
         if (!string.IsNullOrEmpty(selfSearchParams))
         {
@@ -4637,7 +4642,14 @@ public partial class VersionedFhirStore : IFhirStore
         HashSet<string> addedIds = new();
         int resultCount = 0;
 
-        foreach (Resource resource in allResults.SelectMany(e => e.Select(r => r)))
+        ParsedResultParameters.SortRequest[] sortRequests = byResource.SelectMany(br => br.resultParameters.SortRequests).DistinctBy(sr => sr.RequestLiteral).ToArray();
+
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = sortRequests.Length == 0
+            ? null
+            : new(this, sortRequests);
+
+        foreach (Resource resource in (comparer == null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
         {
             resultCount++;
 
@@ -4657,13 +4669,16 @@ public partial class VersionedFhirStore : IFhirStore
                 addedIds.Add(relativeUrl);
             }
 
+            ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
+                ?? byResource.First().resultParameters;
+
             // add any included resources
-            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+            AddInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
 
             // check for include:iterate directives
 
             // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+            AddReverseInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks?.Any() ?? false)

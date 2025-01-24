@@ -919,7 +919,7 @@ public class ParsedSearchParameter
                 continue;
             }
 
-            SearchKeyParseResult? parseResult = TryParseKey(key, store, resourceStore, resourceType);
+            SearchKeyParseResult? parseResult = tryParseKey(key, store, resourceStore, resourceType);
 
             if (parseResult == null)
             {
@@ -966,7 +966,7 @@ public class ParsedSearchParameter
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="resourceType"> Type of the resource.</param>
     /// <returns>A SearchKeyParseResult?</returns>
-    private static SearchKeyParseResult? TryParseKey(
+    private static SearchKeyParseResult? tryParseKey(
         string key,
         IFhirStore store,
         IVersionedResourceStore resourceStore,
@@ -1048,7 +1048,7 @@ public class ParsedSearchParameter
                     return null;
                 }
 
-                SearchKeyParseResult? reverseLinkFilter = TryParseKey(
+                SearchKeyParseResult? reverseLinkFilter = tryParseKey(
                     key.Substring(continuationStart),
                     store,
                     (IVersionedResourceStore)store[revResourceName],
@@ -1144,7 +1144,7 @@ public class ParsedSearchParameter
                     return null;
                 }
 
-                SearchKeyParseResult? reverseLinkFilter = TryParseKey(
+                SearchKeyParseResult? reverseLinkFilter = tryParseKey(
                     key.Substring(contintuationStart),
                     store,
                     (IVersionedResourceStore)store[revResourceName],
@@ -1220,7 +1220,7 @@ public class ParsedSearchParameter
             if ((modifierCode == SearchModifierCodes.ResourceType) &&
                 store.ContainsKey(modifierLiteral))
             {
-                SearchKeyParseResult? res = TryParseKey(
+                SearchKeyParseResult? res = tryParseKey(
                     chainedKey, 
                     store, 
                     (IVersionedResourceStore)store[modifierLiteral],
@@ -1239,7 +1239,7 @@ public class ParsedSearchParameter
 
                     if (store.ContainsKey(rtName))
                     {
-                        SearchKeyParseResult? res = TryParseKey(
+                        SearchKeyParseResult? res = tryParseKey(
                             chainedKey, 
                             store, 
                             (IVersionedResourceStore)store[rtName],

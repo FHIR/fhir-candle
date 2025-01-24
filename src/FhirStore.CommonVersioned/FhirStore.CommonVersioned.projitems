@@ -26,6 +26,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Search\EvalStringSearch.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Search\EvalTokenSearch.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Search\EvalUriSearch.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)search\FhirSortComparer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Search\SearchDefinitions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Search\SearchTester.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Serialization\SerializationUtils.cs" />
