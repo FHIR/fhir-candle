@@ -16,7 +16,6 @@
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Smart\" />
-	  <Folder Include="Extensions\" />
 	</ItemGroup>
 	<Import Project="..\FhirStore.CommonVersioned\FhirStore.CommonVersioned.projitems" Label="Shared" />
 </Project>

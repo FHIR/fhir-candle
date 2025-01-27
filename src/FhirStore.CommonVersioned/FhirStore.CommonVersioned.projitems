@@ -10,8 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Client\CandleClient.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)extensions\DictionaryExtensions.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Extensions\SearchParamDefinitionExtensions.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CSharpExtensions\DictionaryExtensions.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CSharpExtensions\SearchParamDefinitionExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ExecutableSubscriptionInfo.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedResultParameter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedSearchParameter.cs" />
