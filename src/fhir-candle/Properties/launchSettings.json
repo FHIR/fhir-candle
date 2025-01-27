@@ -26,7 +26,7 @@
     },
     "smart": {
       "commandName": "Project",
-      "commandLineArgs": "--reference-implementation smart -m 1000 --r4 smart --smart-required smart --smart-optional open --r4 open",
+      "commandLineArgs": "--reference-implementation smart -m 1000 --r4 smart --smart-required smart --smart-optional open --r4 open --load-package hl7.fhir.r4.core",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {

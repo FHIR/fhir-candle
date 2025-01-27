@@ -558,14 +558,14 @@ public record class FhirRequestContext
                                     {
                                         _id = pathComponents[1];
                                         _interaction = StoreInteractionCodes.InstanceReadHistory;
-                                    
+
                                         return true;
                                     }
 
                                     if (pathComponents[2].Equals("*", StringComparison.Ordinal))
                                     {
+                                        _compartmentType = pathComponents[0];
                                         _id = pathComponents[1];
-                                        _compartmentType = pathComponents[2];
                                         _interaction = StoreInteractionCodes.CompartmentSearch;
 
                                         return true;
@@ -573,8 +573,9 @@ public record class FhirRequestContext
 
                                     if (_store.Keys.Contains(pathComponents[2]))
                                     {
+                                        _compartmentType = pathComponents[0];
                                         _id = pathComponents[1];
-                                        _compartmentType = pathComponents[2];
+                                        _resourceType = pathComponents[2];
                                         _interaction = StoreInteractionCodes.CompartmentTypeSearch;
 
                                         return true;

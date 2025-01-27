@@ -97,6 +97,11 @@ public class TenantConfiguration
     public int MaxSubscriptionExpirationMinutes { get; set; } = 30;
 
     /// <summary>
+    /// Whether or not to check for changed resources and send NotModified if not changed.
+    /// </summary>
+    public bool SupportNotChanged { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets a value indicating whether SMART is required.
     /// </summary>
     public bool SmartRequired { get; set; } = false;

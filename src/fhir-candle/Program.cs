@@ -178,7 +178,7 @@ public static partial class Program
         SCL.Parsing.ParseResult pr,
         SCL.Parsing.ParseResult envPR,
         CancellationToken? cancellationToken = null)
-    { 
+    {
         try
         {
             CandleConfig config = new();
@@ -560,6 +560,7 @@ public static partial class Program
                 ControllerName = tenant,
                 BaseUrl = config.PublicUrl + "/fhir/" + tenant,
                 ProtectLoadedContent = config.ProtectLoadedContent,
+                SupportNotChanged = config.SupportNotChanged,
                 MaxResourceCount = config.MaxResourceCount,
                 MaxSubscriptionExpirationMinutes = config.MaxSubscriptionExpirationMinutes,
                 SmartRequired = allRequired || smartRequired.Contains(tenant),
