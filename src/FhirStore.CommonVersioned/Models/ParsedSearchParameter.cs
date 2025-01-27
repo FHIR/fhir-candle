@@ -20,7 +20,7 @@ using System.Runtime.Versioning;
 namespace FhirCandle.Models;
 
 /// <summary>A parsed search parameter.</summary>
-public class ParsedSearchParameter
+public class ParsedSearchParameter : ICloneable
 {
     /// <summary>(Immutable) Options for controlling all resource.</summary>
     internal static readonly Dictionary<string, ModelInfo.SearchParamDefinition> _allResourceParameters = new()
@@ -142,6 +142,39 @@ public class ParsedSearchParameter
 
     /// <summary>Gets or sets the compiled expression.</summary>
     public required CompiledExpression? CompiledExpression { get; set; }
+
+    public required string? RequestedKeyLiteral { get; set; }
+    public required string? RequestedValueLiteral { get; set; }
+
+    [SetsRequiredMembers]
+    public ParsedSearchParameter(ParsedSearchParameter other)
+    {
+        ResourceType = other.ResourceType;
+        Name = other.Name;
+        Values = other.Values.Select(v => v).ToArray();
+        IgnoredValueFlags = other.IgnoredValueFlags.Select(v => v).ToArray();
+        IgnoredParameter = other.IgnoredParameter;
+        ChainedParameters = other.ChainedParameters?.DeepCopy();
+        ReverseChainedParameterLink = ReverseChainedParameterLink == null ? null : new ParsedSearchParameter(ReverseChainedParameterLink);
+        ReverseChainedParameterFilter = ReverseChainedParameterFilter == null ? null : new ParsedSearchParameter(ReverseChainedParameterFilter);
+        CompositeComponents = other.CompositeComponents?.Select(c => new ParsedSearchParameter(c)).ToArray();
+        ValueDateStarts = other.ValueDateStarts?.Select(v => v).ToArray();
+        ValueDateEnds = other.ValueDateEnds?.Select(v => v).ToArray();
+        ValueInts = other.ValueInts?.Select(v => v).ToArray();
+        ValueDecimals = other.ValueDecimals?.Select(v => v).ToArray();
+        ValueFhirCodes = other.ValueFhirCodes?.Select(v => v).ToArray();
+        ValueFhirCodeTypes = other.ValueFhirCodeTypes?.Select(v => v).ToArray();
+        ValueBools = other.ValueBools?.Select(v => v).ToArray();
+        ValueReferences = other.ValueReferences?.Select(v => v with { }).ToArray();
+        Prefixes = other.Prefixes.Select(v => v).ToArray();
+        ParamType = other.ParamType;
+        ModifierLiteral = other.ModifierLiteral;
+        Modifier = other.Modifier;
+        SelectExpression = other.SelectExpression;
+        CompiledExpression = other.CompiledExpression;
+        RequestedKeyLiteral = other.RequestedKeyLiteral;
+        RequestedValueLiteral = other.RequestedValueLiteral;
+    }
 
     /// <summary>
     /// Initializes a new instance of the FhirCandle.Models.ParsedSearchParameter class.
@@ -295,7 +328,9 @@ public class ParsedSearchParameter
         VersionedFhirStore store,
         IVersionedResourceStore resourceStore,
         SearchKeyParseResult parseResult,
-        string value)
+        string value,
+        string? requestKeyLiteral,
+        string? requestValueLiteral)
     {
         Name = parseResult.SearchParameterName;
         ResourceType = parseResult.ResourceType;
@@ -310,20 +345,26 @@ public class ParsedSearchParameter
                 store,
                 (IVersionedResourceStore)((IFhirStore)store)[parseResult.ReverseLinkKey.ResourceType],
                 parseResult.ReverseLinkKey,
-                string.Empty);
+                string.Empty,
+                null,
+                null);
             ReverseChainedParameterLink.IgnoredParameter = false;
 
             ReverseChainedParameterFilter = new ParsedSearchParameter(
                 store,
                 (IVersionedResourceStore)((IFhirStore)store)[parseResult.ReverseLinkFilter.ResourceType],
                 parseResult.ReverseLinkFilter,
-                value);
+                value,
+                null,
+                null);
 
             ParamType = SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
             Values = Array.Empty<string>();
             IgnoredParameter = false;
+            RequestedKeyLiteral = requestKeyLiteral;
+            RequestedValueLiteral = requestValueLiteral;
             return;
         }
 
@@ -389,7 +430,9 @@ public class ParsedSearchParameter
                         store,
                         (IVersionedResourceStore)((IFhirStore)store)[ck.ResourceType],
                         ck,
-                        value));
+                        value,
+                        requestKeyLiteral,
+                        requestValueLiteral));
             }
 
             // when chaining, we do not want to parse the value - it is handled at the last link in the chain
@@ -432,6 +475,11 @@ public class ParsedSearchParameter
         if (IgnoredParameter)
         {
             return string.Empty;
+        }
+
+        if ((RequestedKeyLiteral != null) && (RequestedValueLiteral != null))
+        {
+            return $"{RequestedKeyLiteral}={RequestedValueLiteral}";
         }
 
         System.Text.StringBuilder sb = new();
@@ -923,7 +971,13 @@ public class ParsedSearchParameter
 
             if (parseResult == null)
             {
-                Console.WriteLine($"Failed to parse search parameter: {key}");
+                if (ParsedResultParameters.SearchResultParameters.Contains(key))
+                {
+                    // ignore this parameter
+                    continue;
+                }
+
+                Console.WriteLine($"Search Parameter {key} is not a known search parameter.");
                 continue;
             }
 
@@ -931,7 +985,9 @@ public class ParsedSearchParameter
                 store,
                 resourceStore,
                 parseResult,
-                query[key] ?? string.Empty);
+                query[key] ?? string.Empty,
+                key,
+                query[key]);
 
             continue;
         }
@@ -1432,4 +1488,6 @@ public class ParsedSearchParameter
 
         return true;
     }
+
+    public object Clone() => new ParsedSearchParameter(this);
 }

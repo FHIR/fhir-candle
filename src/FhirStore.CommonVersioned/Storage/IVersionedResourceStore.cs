@@ -79,7 +79,14 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
-    IEnumerable<Hl7.Fhir.Model.Resource>? TypeSearch(IEnumerable<ParsedSearchParameter> parameters);
+    IEnumerable<Hl7.Fhir.Model.Resource>? TypeSearch(IEnumerable<ParsedSearchParameter> parameters, bool isNestedSearch = false);
+
+    /// <summary>
+    /// Tests for the presence of any resources matching the given search parameter.
+    /// </summary>
+    /// <param name="sps">The search parameters to test against.</param>
+    /// <returns>True if any resources match all requested search parameters, false otherwise.</returns>
+    bool TestForAny(ParsedSearchParameter link, ParsedSearchParameter filter);
 
     /// <summary>Adds a search parameter definition.</summary>
     /// <param name="spDefinition">The sp definition.</param>

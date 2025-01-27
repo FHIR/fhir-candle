@@ -57,6 +57,11 @@ public class ParsedResultParameters
     /// </summary>
     public SortRequest[] SortRequests { get; set; } = [];
 
+    /// <summary>
+    /// Gets or sets the maximum number of results to return.
+    /// </summary>
+    public long? MaxResults { get; set; } = null;
+
     /// <summary>The applied query string.</summary>
     private string _appliedQueryString = string.Empty;
 
@@ -212,6 +217,14 @@ public class ParsedResultParameters
                     break;
 
                 case "_maxresults":
+                    {
+                        if (long.TryParse(value, out long maxResults) &&
+                            (maxResults >= 0))
+                        {
+                            MaxResults = maxResults;
+                            applied.Add(key + "=" + value);
+                        }
+                    }
                     break;
 
                 case "_revinclude":

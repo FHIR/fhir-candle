@@ -1773,20 +1773,128 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
-    public IEnumerable<Resource> TypeSearch(IEnumerable<ParsedSearchParameter> parameters)
+    public IEnumerable<Resource> TypeSearch(IEnumerable<ParsedSearchParameter> parameters, bool isNestedSearch = false)
     {
-        lock (_lockObject)
+        Dictionary<string, Resource[]> reverseChainCache = [];
+
+        if (isNestedSearch)
         {
             foreach (T resource in _resourceStore.Values)
             {
                 ITypedElement r = resource.ToTypedElement();
 
-                if (_searchTester.TestForMatch(r, parameters))
+                if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
                 {
                     yield return resource;
                 }
             }
         }
+        else
+        {
+            lock (_lockObject)
+            {
+                foreach (T resource in _resourceStore.Values)
+                {
+                    ITypedElement r = resource.ToTypedElement();
+
+                    if (_searchTester.TestForMatch(r, parameters))
+                    {
+                        yield return resource;
+                    }
+                }
+            }
+        }
+    }
+
+    public bool TestForAny(ParsedSearchParameter link, ParsedSearchParameter filter)
+    {
+        IEnumerable<T>? source = null;
+
+        switch (filter.Name)
+        {
+            case "_id":
+            case "id":
+                {
+                    foreach (ParsedSearchParameter.SegmentedReference valueRef in filter.ValueReferences ?? [])
+                    {
+                        if (!string.IsNullOrEmpty(valueRef.Id))
+                        {
+                            if (_resourceStore.TryGetValue(valueRef.Id, out T? res))
+                            {
+                                source = new T[] { res };
+                                break;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(valueRef.Url))
+                        {
+                            if (_conformanceUrlToId.TryGetValue(valueRef.Url, out string? id) &&
+                                _resourceStore.TryGetValue(id, out T? res))
+                            {
+                                source = new T[] { res };
+                                break;
+                            }
+                        }
+                    }
+
+                    foreach (string valueString in filter.Values ?? [])
+                    {
+                        if (_resourceStore.TryGetValue(valueString, out T? res))
+                        {
+                            source = new T[] { res };
+                            break;
+                        }
+                        else if (valueString.Contains('/') && _resourceStore.TryGetValue(valueString.Split('/')[1], out res))
+                        {
+                            source = new T[] { res };
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            case "identifier":
+                {
+                    foreach (Hl7.Fhir.ElementModel.Types.Code valueCode in filter.ValueFhirCodes ?? [])
+                    {
+                        if (_identifierToId.TryGetValue(valueCode.System + "|" + valueCode.Value, out string? id) &&
+                            _resourceStore.TryGetValue(id, out T? res))
+                        {
+                            source = new T[] { res };
+                            break;
+                        }
+                    }
+                }
+                break;
+        }
+
+        if (source == null)
+        {
+            foreach (T resource in _resourceStore.Values)
+            {
+                ITypedElement r = resource.ToTypedElement();
+
+                if (_searchTester.TestForMatch(r, [link, filter]))
+                {
+                    return true;
+                }
+            }
+        }
+        else
+        {
+            foreach (T resource in source)
+            {
+                ITypedElement r = resource.ToTypedElement();
+
+                if (_searchTester.TestForMatch(r, [link]))
+                {
+                    return true;
+                }
+            }
+        }
+
+
+        return false;
     }
 
     /// <summary>Registers that an instance has been created.</summary>

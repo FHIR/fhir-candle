@@ -17,17 +17,23 @@ public static class EvalReferenceSearch
     /// <returns>True if it succeeds, false if it fails.</returns>
     private static bool CompareRefsCommon(Hl7.Fhir.Model.ResourceReference r, ParsedSearchParameter.SegmentedReference s)
     {
-        if (s.Url.Equals(r.Reference, StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(s.ResourceType) &&
+            !string.IsNullOrEmpty(s.Id) &&
+            (r.Reference == s.ResourceType + "/" + s.Id))
         {
             return true;
         }
-
         if (string.IsNullOrEmpty(s.ResourceType) &&
             (!string.IsNullOrEmpty(s.Id)) &&
             r.Reference.EndsWith("/" + s.Id, StringComparison.Ordinal))
         {
             // TODO: check resource versions
 
+            return true;
+        }
+
+        if (s.Url.Equals(r.Reference, StringComparison.Ordinal))
+        {
             return true;
         }
 

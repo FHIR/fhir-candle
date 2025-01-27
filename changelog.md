@@ -25,11 +25,17 @@
         * Updated `System.IdentityModel.Tokens.Jwt` from `8.0.2` to `8.3.1`
         * Updated `xunit` from `2.9.0` to `2.9.3`
         * Updated `xunit.runner.visualstudio` from `2.8.2` to `3.0.1`
-    * Added initial support for `transaction` Bundle processing.
+    * Added initial support for `transaction` Bundle processing (note: rollback is NOT implemented).
     * Added support for processing `batch` and `transaction` bundles in pre-loaded content (instead of storing them).
     * Fixed issue causing the same folder content to be loaded twice in certain combinations of command line arguments.
     * Added GC collection after the initial content load to reduce memory usage.
     * Added support for `_sort` in search.
+    * Merged [PR 20](https://github.com/FHIR/fhir-candle/commit/d8d7645e1b11ac918361238537f10135cc9ce5ab)
+        * Initial fix for [Issue #18](https://github.com/FHIR/fhir-candle/issues/18) via configuration option.
+        * Initial support for compartment searches.
+    * Additional fix for [Issue #18](https://github.com/FHIR/fhir-candle/issues/18)
+        * Modified FHIR Controller to not return a body when returning a `304` status.
+    * Added initial support for reverse chaining.
 
 * v2024.910 - [PR 14](https://github.com/FHIR/fhir-candle/commit/70a8b38a40649160b3711e9a5a7ad4307e8e9d9a)
     * [f220fcc](https://github.com/FHIR/fhir-candle/commit/f220fccc24647311d43fb7807d910cc1613f7f27) Fix: Inverted string search test in some combinations.

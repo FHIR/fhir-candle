@@ -2637,7 +2637,6 @@ public partial class VersionedFhirStore : IFhirStore
             List<ExecutableSubscriptionInfo.CompiledQueryTrigger> queryTriggers = new();
             ParsedResultParameters? resultParameters = null;
 
-
             string[] keys = new string[3] { resourceName, "*", "Resource" };
 
             foreach (string key in keys)
@@ -4328,6 +4327,17 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
+
+    internal Resource[] DoNestedTypeSearch(string resourceType, IEnumerable<ParsedSearchParameter> parameters)
+    {
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? ivrs))
+        {
+            return [];
+        }
+
+        return ivrs.TypeSearch(parameters, true)!.ToArray();
+    }
+
     /// <summary>Executes the type search operation.</summary>
     /// <param name="resourceType">Type of the resource.</param>
     /// <param name="queryString"> The query string.</param>
@@ -4477,7 +4487,7 @@ public partial class VersionedFhirStore : IFhirStore
         // Reduce based on compartment
         if (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)
         {
-            results = results?.Where(result =>
+            results = results.Where(result =>
             {
                 return compartmentParameters.Any(compartmentParam =>
                 {
@@ -4489,7 +4499,7 @@ public partial class VersionedFhirStore : IFhirStore
                     var compartmentParams = theParam.Append(compartmentParam);
                     var matchingResources = _store[ctx.ResourceType]
                         .TypeSearch(compartmentParams);
-                    return matchingResources.Any();
+                    return matchingResources?.Any() ?? false;
                 });
             });
         }
@@ -4536,9 +4546,18 @@ public partial class VersionedFhirStore : IFhirStore
             : new(this, resultParameters.SortRequests);
 
         HashSet<string> addedIds = new();
+        int resultCount = 0;
 
         foreach (Resource resource in (comparer == null ? results : results.OrderBy(r => r, comparer)))
         {
+            if ((resultParameters.MaxResults != null) &&
+                (resultCount >= resultParameters.MaxResults))
+            {
+                break;
+            }
+
+            resultCount++;
+
             string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
             if (addedIds.Contains(relativeUrl))
@@ -4563,6 +4582,8 @@ public partial class VersionedFhirStore : IFhirStore
             // add any reverse included resources
             AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
+
+        bundle.Total = resultCount;
 
         if (hooks?.Any() ?? false)
         {
@@ -4767,6 +4788,15 @@ public partial class VersionedFhirStore : IFhirStore
 
         foreach (Resource resource in (comparer == null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
         {
+            ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
+                ?? byResource.First().resultParameters;
+
+            if ((rpForResource.MaxResults != null) &&
+                (resultCount >= rpForResource.MaxResults))
+            {
+                break;
+            }
+
             resultCount++;
 
             string relativeUrl = $"{resource.TypeName}/{resource.Id}";
@@ -4784,9 +4814,6 @@ public partial class VersionedFhirStore : IFhirStore
                 // track we have added this id
                 addedIds.Add(relativeUrl);
             }
-
-            ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
-                ?? byResource.First().resultParameters;
 
             // add any included resources
             AddInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
