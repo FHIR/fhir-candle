@@ -282,39 +282,39 @@ public class CandleConfig
         },
     };
 
-    [ConfigOption(
-        ArgName = "--source-repository",
-        EnvName = "Source_Repository",
-        Description = "A GitHub repository to load as a source of configuration and data.")]
-    public string? SourceRepository { get; set; } = null;
-    public static ConfigurationOption SourceRepositoryParameter { get; } = new()
-    {
-        Name = "SourceRepository",
-        EnvVarName = "Source_Repository",
-        DefaultValue = string.Empty,
-        CliOption = new System.CommandLine.Option<string?>("--source-repository", "A GitHub repository to load as a source of configuration and data.")
-        {
-            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
-            IsRequired = false,
-        },
-    };
+    //[ConfigOption(
+    //    ArgName = "--source-repository",
+    //    EnvName = "Source_Repository",
+    //    Description = "A GitHub repository to load as a source of configuration and data.")]
+    //public string? SourceRepository { get; set; } = null;
+    //public static ConfigurationOption SourceRepositoryParameter { get; } = new()
+    //{
+    //    Name = "SourceRepository",
+    //    EnvVarName = "Source_Repository",
+    //    DefaultValue = string.Empty,
+    //    CliOption = new System.CommandLine.Option<string?>("--source-repository", "A GitHub repository to load as a source of configuration and data.")
+    //    {
+    //        Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+    //        IsRequired = false,
+    //    },
+    //};
 
-    [ConfigOption(
-        ArgName = "--source-repository-path",
-        EnvName = "Source_Repository_Path",
-        Description = "A path within the GitHub repository to load as a source of configuration and data.")]
-    public string? SourceRepositoryPath { get; set; } = null;
-    public static ConfigurationOption SourceRepositoryPathParameter { get; } = new()
-    {
-        Name = "SourceRepositoryPath",
-        EnvVarName = "Source_Repository_Path",
-        DefaultValue = string.Empty,
-        CliOption = new System.CommandLine.Option<string?>("--source-repository-path", "A path within the GitHub repository to load as a source of configuration and data.")
-        {
-            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
-            IsRequired = false,
-        },
-    };
+    //[ConfigOption(
+    //    ArgName = "--source-repository-path",
+    //    EnvName = "Source_Repository_Path",
+    //    Description = "A path within the GitHub repository to load as a source of configuration and data.")]
+    //public string? SourceRepositoryPath { get; set; } = null;
+    //public static ConfigurationOption SourceRepositoryPathParameter { get; } = new()
+    //{
+    //    Name = "SourceRepositoryPath",
+    //    EnvVarName = "Source_Repository_Path",
+    //    DefaultValue = string.Empty,
+    //    CliOption = new System.CommandLine.Option<string?>("--source-repository-path", "A path within the GitHub repository to load as a source of configuration and data.")
+    //    {
+    //        Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+    //        IsRequired = false,
+    //    },
+    //};
 
     /// <summary>Gets or sets the pathname of the FHIR source directory.</summary>
     [ConfigOption(
@@ -794,8 +794,8 @@ public class CandleConfig
         CiPackagesParameter,
         LoadPackageExamplesParameter,
         ReferenceImplementationParameter,
-        SourceRepositoryParameter,
-        SourceRepositoryPathParameter,
+        //SourceRepositoryParameter,
+        //SourceRepositoryPathParameter,
         SourceDirectoryParameter,
         ProtectLoadedContentParameter,
         TenantsR4Parameter,
@@ -874,12 +874,12 @@ public class CandleConfig
                 case "ReferenceImplementation":
                     ReferenceImplementation = GetOpt(pr, envPR, opt.CliOption, ReferenceImplementation);
                     break;
-                case "SourceRepository":
-                    SourceRepository = GetOpt(pr, envPR, opt.CliOption, SourceRepository);
-                    break;
-                case "SourceRepositoryPath":
-                    SourceRepositoryPath = GetOpt(pr, envPR, opt.CliOption, SourceRepositoryPath);
-                    break;
+                //case "SourceRepository":
+                //    SourceRepository = GetOpt(pr, envPR, opt.CliOption, SourceRepository);
+                //    break;
+                //case "SourceRepositoryPath":
+                //    SourceRepositoryPath = GetOpt(pr, envPR, opt.CliOption, SourceRepositoryPath);
+                //    break;
                 case "FhirSourceDirectory":
                     {
                         string? dir = GetOpt(pr, envPR, opt.CliOption, SourceDirectory);
