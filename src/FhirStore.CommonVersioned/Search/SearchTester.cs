@@ -20,36 +20,20 @@ public class SearchTester
     /// <summary>Gets or sets the store.</summary>
     public required VersionedFhirStore FhirStore { get; init; }
 
-    // Build a hashset of ids that pass reverse chaining criteria
-    //public HashSet<string> BuildReverseChainIds(IEnumerable<ParsedSearchParameter> searchParameters)
-    //{
-    //    HashSet<string> reverseChainIds = new();
-
-    //    // loop over search parameters to build reverse chain parameters
-    //    foreach (ParsedSearchParameter sp in searchParameters)
-    //    {
-    //        // for reverse chaining, we nest the search instead of evaluating it here
-    //        if (sp.ReverseChainedParameterLink == null)
-    //        {
-    //            continue;
-    //        }
-
-    //        // 
-    //    }
-    //}
-
-    /// <summary>Tests a resource against parsed search parameters for matching.</summary>
+    /// <summary>
+    /// Tests a resource against parsed search parameters for matching.
+    /// </summary>
     /// <exception cref="ArgumentNullException">Thrown when one or more required arguments are null.</exception>
-    /// <param name="rootNode">         The resource.</param>
-    /// <param name="searchParameters"> Options for controlling the search.</param>
-    /// <param name="appliedParameters">[out] Options for controlling the applied.</param>
-    /// <param name="ignoredParameters">[out] Options for controlling the ignored.</param>
-    /// <param name="fpContext">        (Optional) The context.</param>
+    /// <param name="rootNode">The resource.</param>
+    /// <param name="searchParameters">Options for controlling the search.</param>
+    /// <param name="fpContext">(Optional) The context.</param>
+    /// <param name="resultParameters">(Optional) The result parameters.</param>
     /// <returns>True if the test passes, false if the test fails.</returns>
     public bool TestForMatch(
         ITypedElement rootNode,
         IEnumerable<ParsedSearchParameter> searchParameters,
-        FhirEvaluationContext? fpContext = null)
+        FhirEvaluationContext? fpContext = null,
+        Dictionary<string, Resource[]>? reverseChainCache = null)
     {
         if (rootNode == null)
         {
@@ -61,77 +45,60 @@ public class SearchTester
             return true;
         }
 
-        if (fpContext == null)
+        fpContext ??= new FhirEvaluationContext()
         {
-            fpContext = new FhirEvaluationContext(rootNode.ToScopedNode())
-            {
-                TerminologyService = FhirStore.Terminology,
-                ElementResolver = FhirStore.Resolve,
-            };
-        }
+            Resource = rootNode,
+            TerminologyService = FhirStore.Terminology,
+            ElementResolver = FhirStore.Resolve,
+        };
 
         foreach (ParsedSearchParameter sp in searchParameters)
         {
+            // skip if this is ignored and not a sort element
             if (sp.IgnoredParameter)
             {
                 continue;
             }
 
             // TODO: finish reverse chaining
-            //    // for reverse chaining, we nest the search instead of evaluating it here
-            //    if (sp.ReverseChainedParameterLink != null)
-            //    {
-            //        continue;
-            //        //// loop over any extracted values and check the resource store for matches
-            //        //foreach (ITypedElement node in extracted)
-            //        //{
-            //        //    if ((node == null) ||
-            //        //        (node.InstanceType != "Reference"))
-            //        //    {
-            //        //        continue;
-            //        //    }
+            // for reverse chaining, we nest the search instead of evaluating it here
+            if ((sp.ReverseChainedParameterLink != null) && (sp.ReverseChainedParameterFilter != null))
+            {
+                reverseChainCache ??= [];
 
-            //        //    ResourceReference r = node.ToPoco<ResourceReference>();
+                string rcKey = sp.ReverseChainedParameterLink.ResourceType + "." + sp.ReverseChainedParameterLink.Name;
 
-            //        //    ITypedElement? resolved = FhirStore.Resolve(r.Reference);
+                if (!reverseChainCache.TryGetValue(rcKey, out Resource[]? reverseChainMatches))
+                {
+                    reverseChainMatches = FhirStore.DoNestedTypeSearch(sp.ReverseChainedParameterLink.ResourceType, [sp.ReverseChainedParameterFilter]);
+                    reverseChainCache[rcKey] = reverseChainMatches;
+                }
 
-            //        //    if (resolved == null)
-            //        //    {
-            //        //        continue;
-            //        //    }
+                // extract the ID from this node
+                string id = rootNode.Children("id").ToFhirValues().FirstOrDefault()?.ToString() ?? string.Empty;
 
-            //        //    FhirEvaluationContext chainedContext = new FhirEvaluationContext(resolved.ToScopedNode());
-            //        //    chainedContext.ElementResolver = FhirStore.Resolve;
+                ParsedSearchParameter qualifiedLink = new ParsedSearchParameter(sp.ReverseChainedParameterLink);
+                qualifiedLink.Values = [ rootNode.InstanceType! + "/" + id ];
+                qualifiedLink.ValueReferences = [ new(rootNode.InstanceType!, id, string.Empty, string.Empty, string.Empty) ];
+                qualifiedLink.IgnoredValueFlags = [ false ];
+                qualifiedLink.IgnoredParameter = false;
 
-            //        //    string rt = resolved.InstanceType.ToString();
+                //Console.WriteLine($"Reverse chaining testing" +
+                //    $" resource {sp.ReverseChainedParameterLink.ResourceType}.{sp.ReverseChainedParameterLink.ParamType}={rootNode.InstanceType!}/{id} and" +
+                //    $" {sp.ReverseChainedParameterFilter.ResourceType}.{sp.ReverseChainedParameterFilter.Name}={sp.ReverseChainedParameterFilter.Values.FirstOrDefault()}");
 
-            //        //    if (sp.ChainedParameters.ContainsKey(rt))
-            //        //    {
-            //        //        found = TestForMatch(resolved, new[] { sp.ChainedParameters[rt] }, chainedContext);
-            //        //    }
-            //        //    else if (sp.ChainedParameters.ContainsKey("Resource"))
-            //        //    {
-            //        //        found = TestForMatch(resolved, new[] { sp.ChainedParameters["Resource"] }, chainedContext);
-            //        //    }
+                foreach (Resource reverseChainResource in reverseChainMatches)
+                {
+                    // test to see if this matches
+                    if (!TestForMatch(reverseChainResource.ToTypedElement(), [qualifiedLink]))
+                    {
+                        return false;
+                    }
+                }
 
-            //        //    if (found)
-            //        //    {
-            //        //        break;
-            //        //    }
-
-            //        //    //foreach (ParsedSearchParameter chained in sp.ChainedParameters)
-            //        //    //{
-            //        //    //    TestForMatch(resolved, new[] { chained }, chainedContext);
-            //        //    //}
-            //        //}
-
-            //        //if (!found)
-            //        //{
-            //        //    return false;
-            //        //}
-
-            //        //continue;
-            //    }
+                // matched all reverse chain resources
+                continue;
+            }
 
             if (sp.CompiledExpression == null)
             {
@@ -163,7 +130,6 @@ public class SearchTester
                 return false;
             }
 
-
             // check for unsupported modifiers
             if ((!string.IsNullOrEmpty(sp.ModifierLiteral)) &&
                 (!IsModifierValidForType(sp.Modifier, sp.ParamType)))
@@ -175,10 +141,10 @@ public class SearchTester
 
             if (!extracted.Any())
             {
+                // check if we are looking for missing values - successful match
                 if ((sp.Modifier == SearchModifierCodes.Missing) &&
                     sp.Values.Any(v => v.StartsWith("t", StringComparison.OrdinalIgnoreCase)))
                 {
-                    // successful match
                     continue;
                 }
 
@@ -209,8 +175,9 @@ public class SearchTester
                         continue;
                     }
 
-                    FhirEvaluationContext chainedContext = new FhirEvaluationContext(resolved.ToScopedNode())
+                    FhirEvaluationContext chainedContext = new FhirEvaluationContext()
                     {
+                        Resource = resolved,
                         TerminologyService = FhirStore.Terminology,
                         ElementResolver = FhirStore.Resolve,
                     };

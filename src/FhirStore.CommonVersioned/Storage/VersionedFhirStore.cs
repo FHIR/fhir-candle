@@ -21,13 +21,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
-using System.Xml.Linq;
 using FhirCandle.Interactions;
-using Hl7.Fhir.Language.Debugging;
-using System.Security.AccessControl;
-using System.Reflection.Metadata;
-using static Hl7.Fhir.Model.VerificationResult;
-using System.Linq;
 using Hl7.Fhir.Utility;
 using System.Diagnostics.CodeAnalysis;
 using System.Resources;
@@ -258,8 +252,10 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // check for a load directory
-        if (config.LoadDirectory != null)
+        if ((config.LoadDirectory != null) && (!_loadedSupplements.Contains(config.LoadDirectory.FullName)))
         {
+            _loadedSupplements.Add(config.LoadDirectory.FullName);
+
             _hasProtected = config.ProtectLoadedContent;
             _loadReprocess = new();
             _loadState = LoadStateCodes.Read;
@@ -268,30 +264,68 @@ public partial class VersionedFhirStore : IFhirStore
 
             foreach (FileInfo file in config.LoadDirectory.GetFiles("*.*", SearchOption.AllDirectories))
             {
+                Resource? r = null;
+
                 switch (file.Extension.ToLowerInvariant())
                 {
                     case ".json":
                         {
-                            success = TryInstanceUpdate(
+                            HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
                                 File.ReadAllText(file.FullName),
                                 "application/fhir+json",
+                                out r,
                                 out _,
-                                out _);
+                                _loadState == LoadStateCodes.Read);
+
+                            success = sc.IsSuccessful() && (r != null);
                         }
                         break;
 
                     case ".xml":
                         {
-                            success = TryInstanceUpdate(
+                            HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
                                 File.ReadAllText(file.FullName),
                                 "application/fhir+xml",
+                                out r,
                                 out _,
-                                out _);
+                                _loadState == LoadStateCodes.Read);
+
+                            success = sc.IsSuccessful() && (r != null);
                         }
                         break;
 
                     default:
                         continue;
+                }
+
+                // if we have a resource, process it
+                if (success)
+                {
+                    // check to see if this is a bundle so that process it instead of storing it
+                    if ((r is Bundle bundle) &&
+                        ((bundle.Type == Bundle.BundleType.Batch) ||
+                         (bundle.Type == Bundle.BundleType.Transaction)))
+                    {
+                        success = DoProcessBundle(
+                            new FhirRequestContext()
+                            {
+                                TenantName = _config.ControllerName,
+                                Store = this,
+                                HttpMethod = "POST",
+                                Url = _config.BaseUrl + "/Bundle",
+                                UrlPath = "/Bundle",
+                                Authorization = null,
+                                Interaction = Common.StoreInteractionCodes.SystemBundle,
+                                SourceObject = bundle,
+                            },
+                            bundle,
+                            out FhirResponseContext response);
+                    }
+                    else
+                    {
+                        // do an update/create
+                        success = TryInstanceUpdate(r, out _, out _);
+                    }
                 }
 
                 if (success)
@@ -328,6 +362,10 @@ public partial class VersionedFhirStore : IFhirStore
             _loadState = LoadStateCodes.None;
             _loadReprocess = null;
         }
+
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
 
         CheckLoadedOperations();
         DiscoverInteractionHooks();
@@ -668,6 +706,10 @@ public partial class VersionedFhirStore : IFhirStore
                 }
             }
         }
+
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
 
         CheckLoadedOperations();
         DiscoverInteractionHooks();
@@ -1069,7 +1111,8 @@ public partial class VersionedFhirStore : IFhirStore
     public bool PerformInteraction(
         FhirRequestContext ctx,
         out FhirResponseContext response,
-        bool serializeReturn = true)
+        bool serializeReturn = true,
+        bool forceAllowExistingId = false)
     {
         switch (ctx.Interaction)
         {
@@ -1127,11 +1170,11 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     if (serializeReturn || (ctx.SourceObject == null) || (ctx.SourceObject is not Resource r))
                     {
-                        return InstanceCreate(ctx, out response);
+                        return InstanceCreate(ctx, out response, forceAllowExistingId);
                     }
                     else
                     {
-                        return DoInstanceCreate(ctx, r, out response);
+                        return DoInstanceCreate(ctx, r, out response, forceAllowExistingId);
                     }
                 }
 
@@ -1310,7 +1353,8 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool InstanceCreate(
         FhirRequestContext ctx,
-        out FhirResponseContext response)
+        out FhirResponseContext response,
+        bool forceAllowExistingId = false)
     {
         Resource? r;
 
@@ -1347,7 +1391,8 @@ public partial class VersionedFhirStore : IFhirStore
         bool success = DoInstanceCreate(
             ctx,
             r!,
-            out response);
+            out response,
+            forceAllowExistingId);
 
         string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
         string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
@@ -1370,7 +1415,8 @@ public partial class VersionedFhirStore : IFhirStore
     internal bool DoInstanceCreate(
         FhirRequestContext ctx,
         Resource content,
-        out FhirResponseContext response)
+        out FhirResponseContext response,
+        bool forceExistingId = false)
     {
         string resourceType = string.IsNullOrEmpty(ctx.ResourceType) ? content.TypeName : ctx.ResourceType;
 
@@ -1496,7 +1542,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // create the resource
-        Resource? stored = _store[resourceType].InstanceCreate(ctx, content, _config.AllowExistingId);
+        Resource? stored = _store[resourceType].InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId);
 
         Resource? sForHook = null;
 
@@ -1661,10 +1707,10 @@ public partial class VersionedFhirStore : IFhirStore
 
         switch (requestBundle.Type)
         {
-            // case Bundle.BundleType.Transaction:
-            //    responseBundle.Type = Bundle.BundleType.TransactionResponse;
-            //    ProcessTransaction(requestBundle, responseBundle);
-            //    break;
+            case Bundle.BundleType.Transaction:
+                responseBundle.Type = Bundle.BundleType.TransactionResponse;
+                ProcessTransaction(ctx, requestBundle, responseBundle);
+                break;
 
             case Bundle.BundleType.Batch:
                 responseBundle.Type = Bundle.BundleType.BatchResponse;
@@ -2591,7 +2637,6 @@ public partial class VersionedFhirStore : IFhirStore
             List<ExecutableSubscriptionInfo.CompiledQueryTrigger> queryTriggers = new();
             ParsedResultParameters? resultParameters = null;
 
-
             string[] keys = new string[3] { resourceName, "*", "Resource" };
 
             foreach (string key in keys)
@@ -2716,15 +2761,15 @@ public partial class VersionedFhirStore : IFhirStore
                     }
                     else if (string.IsNullOrEmpty(includes))
                     {
-                        resultParameters = new(reverseIncludes, this);
+                        resultParameters = new(reverseIncludes, this, rs, resourceName);
                     }
                     else if (string.IsNullOrEmpty(reverseIncludes))
                     {
-                        resultParameters = new(includes, this);
+                        resultParameters = new(includes, this, rs, resourceName);
                     }
                     else
                     {
-                        resultParameters = new(includes + "&" + reverseIncludes, this);
+                        resultParameters = new(includes + "&" + reverseIncludes, this, rs, resourceName);
                     }
                 }
 
@@ -4282,6 +4327,17 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
+
+    internal Resource[] DoNestedTypeSearch(string resourceType, IEnumerable<ParsedSearchParameter> parameters)
+    {
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? ivrs))
+        {
+            return [];
+        }
+
+        return ivrs.TypeSearch(parameters, true)!.ToArray();
+    }
+
     /// <summary>Executes the type search operation.</summary>
     /// <param name="resourceType">Type of the resource.</param>
     /// <param name="queryString"> The query string.</param>
@@ -4413,9 +4469,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         // execute search
         IEnumerable<Resource>? results = _store[ctx.ResourceType].TypeSearch(parameters);
-
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this);
+        _ = results?.ToArray();
 
         // null results indicates failure
         if (results == null)
@@ -4434,7 +4488,7 @@ public partial class VersionedFhirStore : IFhirStore
         // Reduce based on compartment
         if (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)
         {
-            results = results?.Where(result =>
+            results = results.Where(result =>
             {
                 return compartmentParameters.Any(compartmentParam =>
                 {
@@ -4446,10 +4500,17 @@ public partial class VersionedFhirStore : IFhirStore
                     var compartmentParams = theParam.Append(compartmentParam);
                     var matchingResources = _store[ctx.ResourceType]
                         .TypeSearch(compartmentParams);
-                    return matchingResources.Any();
+                    return matchingResources?.Any() ?? false;
                 });
             });
         }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            ctx.UrlQuery,
+            this,
+            _store[ctx.ResourceType],
+            ctx.ResourceType);
 
         string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
         string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
@@ -4480,12 +4541,24 @@ public partial class VersionedFhirStore : IFhirStore
             },
         };
 
-        // TODO: check for a sort and apply to results
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+            ? null
+            : new(this, resultParameters.SortRequests);
 
         HashSet<string> addedIds = new();
+        int resultCount = 0;
 
-        foreach (Resource resource in results)
+        foreach (Resource resource in (comparer == null ? results : results.OrderBy(r => r, comparer)))
         {
+            if ((resultParameters.MaxResults != null) &&
+                (resultCount >= resultParameters.MaxResults))
+            {
+                break;
+            }
+
+            resultCount++;
+
             string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
             if (addedIds.Contains(relativeUrl))
@@ -4505,11 +4578,13 @@ public partial class VersionedFhirStore : IFhirStore
             // add any included resources
             AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
 
-            // check for include:iterate directives
+            // TODO: check for include:iterate directives
 
             // add any reverse included resources
             AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
+
+        bundle.Total = resultCount;
 
         if (hooks?.Any() ?? false)
         {
@@ -4636,8 +4711,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        List<IEnumerable<ParsedSearchParameter>> allParameters = new();
-        List<IEnumerable<Resource>> allResults = new();
+        List <(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
 
         foreach (string resourceType in resourceTypes)
         {
@@ -4664,19 +4738,18 @@ public partial class VersionedFhirStore : IFhirStore
                 return false;
             }
 
-            allParameters.Add(parameters);
-            allResults.Add(results);
+            // parse search result parameters
+            ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this, _store[resourceType], resourceType);
+
+            byResource.Add((resourceType, parameters, results, resultParameters));
         }
 
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this);
-
         // filter parameters from use across all performed searches
-        IEnumerable<ParsedSearchParameter> filteredParameters = allParameters.SelectMany(e => e.Select(p => p)).DistinctBy(p => p.Name);
+        IEnumerable<ParsedSearchParameter> filteredParameters = byResource.SelectMany(br => br.searchParams.Select(p => p)).DistinctBy(p => p.Name);
 
         string selfLink = $"{getBaseUrl(ctx)}";
         string selfSearchParams = string.Join('&', filteredParameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
-        string selfResultParams = resultParameters.GetAppliedQueryString();
+        string selfResultParams = string.Join('&', byResource.SelectMany(br => br.resultParameters.GetAppliedQueryString().Split('&')).Distinct());
 
         if (!string.IsNullOrEmpty(selfSearchParams))
         {
@@ -4707,8 +4780,24 @@ public partial class VersionedFhirStore : IFhirStore
         HashSet<string> addedIds = new();
         int resultCount = 0;
 
-        foreach (Resource resource in allResults.SelectMany(e => e.Select(r => r)))
+        ParsedResultParameters.SortRequest[] sortRequests = byResource.SelectMany(br => br.resultParameters.SortRequests).DistinctBy(sr => sr.RequestLiteral).ToArray();
+
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = sortRequests.Length == 0
+            ? null
+            : new(this, sortRequests);
+
+        foreach (Resource resource in (comparer == null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
         {
+            ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
+                ?? byResource.First().resultParameters;
+
+            if ((rpForResource.MaxResults != null) &&
+                (resultCount >= rpForResource.MaxResults))
+            {
+                break;
+            }
+
             resultCount++;
 
             string relativeUrl = $"{resource.TypeName}/{resource.Id}";
@@ -4728,12 +4817,12 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             // add any included resources
-            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+            AddInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
 
             // check for include:iterate directives
 
             // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+            AddReverseInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks?.Any() ?? false)
@@ -4899,8 +4988,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (fpContext == null)
         {
-            fpContext = new FhirEvaluationContext(focusTE.ToScopedNode())
+            fpContext = new FhirEvaluationContext()
             {
+                Resource = focusTE,
                 TerminologyService = _terminology,
                 ElementResolver = Resolve,
             };
@@ -5046,8 +5136,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         ITypedElement resourceTE = resource.ToTypedElement();
 
-        FhirEvaluationContext fpContext = new FhirEvaluationContext(resourceTE.ToScopedNode())
+        FhirEvaluationContext fpContext = new FhirEvaluationContext()
         {
+            Resource = resourceTE,
             TerminologyService = _terminology,
             ElementResolver = Resolve,
         };
@@ -5666,11 +5757,129 @@ public partial class VersionedFhirStore : IFhirStore
         public string LocalReference { get; set; } = string.Empty;
     }
 
-    private void FindTransactionReferences(
-        string fullUrl,
+    private record class TransactionResourceIdLookupRec
+    {
+        public required string FullUrl { get; init; }
+        public required string? OriginalId { get; init; }
+        public required string Id { get; init; }
+
+        public required string ResourceType { get; init; }
+        public required List<string> Identifiers { get; init; }
+    }
+
+    private static int _identifierCount = 0;
+    private static HashSet<string> _identifiers = [];
+
+    private List<TransactionResourceIdLookupRec> buildTransactionResourceLookup(Bundle bundle)
+    {
+        if (bundle.Type != Bundle.BundleType.Transaction)
+        {
+            return [];
+        }
+
+        _identifierCount = 0;
+        _identifiers = [];
+
+        List<TransactionResourceIdLookupRec> lookupRecs = [];
+
+        foreach (Bundle.EntryComponent entry in bundle.Entry)
+        {
+            List<string> identifiers;
+
+            // only need to process POS entries that have resources
+            if ((entry.Request == null) ||
+                (entry.Request.Method == null) ||
+                (entry.Request.Method != Bundle.HTTPVerb.POST) ||
+                (entry.Resource == null))
+            {
+                continue;
+            }
+
+            if (entry.Resource is IIdentifiable<List<Identifier>> irl)
+            {
+                identifiers = irl.Identifier.Select(i => i.System + "|" + i.Value).ToList();
+
+                foreach (string id in identifiers)
+                {
+                    if (_identifiers.Add(id))
+                    {
+                        _identifierCount++;
+                    }
+                }
+            }
+            else if (entry.Resource is IIdentifiable<Identifier> ir)
+            {
+                identifiers = [ir.Identifier.System + "|" + ir.Identifier.Value];
+
+                if (_identifiers.Add(identifiers[0]))
+                {
+                    _identifierCount++;
+                }
+            }
+            else
+            {
+                identifiers = [];
+            }
+
+            lookupRecs.Add(new()
+            {
+                OriginalId = entry.Resource.Id,
+                FullUrl = entry.FullUrl,
+                Id = Guid.NewGuid().ToString(),
+                ResourceType = entry.Resource.TypeName,
+                Identifiers = identifiers,
+            });
+        }
+
+        return lookupRecs;
+    }
+
+    private void fixTransactionBundleReferences(Bundle bundle, List<TransactionResourceIdLookupRec> transactionIdRecs)
+    {
+        if (bundle.Type != Bundle.BundleType.Transaction)
+        {
+            return;
+        }
+
+        // build lookups we need for fixing references
+        ILookup<string, TransactionResourceIdLookupRec> fullUrlLookup = transactionIdRecs.ToLookup(r => r.FullUrl);
+        ILookup<string, TransactionResourceIdLookupRec> originalIdLookup = transactionIdRecs.Where(r => !string.IsNullOrEmpty(r.OriginalId)).ToLookup(r => r.OriginalId!);
+        ILookup<string, TransactionResourceIdLookupRec> identifierLookup = transactionIdRecs
+            .SelectMany(r => r.Identifiers.Select(i => (i, r)))
+            .ToLookup(r => r.i, r => r.r);
+
+        // iterate across the bundle entries
+        foreach (Bundle.EntryComponent entry in bundle.Entry)
+        {
+            if (entry.Request == null)
+            {
+                continue;
+            }
+
+            // check the URL to see if there is a reference to fix
+            string idSegment = entry.Request.Url.Split('/')[^1].Split('?')[0];
+            if (originalIdLookup.Contains(idSegment))
+            {
+                entry.Request.Url = entry.Request.Url.Replace(idSegment, originalIdLookup[idSegment].First().Id);
+            }
+
+            // if there is no resource, there is nothing else to check on this entry
+            if (entry.Resource == null)
+            {
+                continue;
+            }
+
+            // fix the references in this resource
+            fixTransactionEntryReferencesRecurse(entry.FullUrl, entry.Resource, fullUrlLookup, originalIdLookup, identifierLookup, true);
+        }
+    }
+
+    private void fixTransactionEntryReferencesRecurse(
+        string entryFullUrl,
         object o,
-        List<TransactionReferenceInfo> references,
-        List<TransactionResourceInfo> resources,
+        ILookup<string, TransactionResourceIdLookupRec> fullUrlLookup,
+        ILookup<string, TransactionResourceIdLookupRec> originalIdLookup,
+        ILookup<string, TransactionResourceIdLookupRec> identifierLookup,
         bool isRoot = false)
     {
         if (o == null)
@@ -5680,27 +5889,32 @@ public partial class VersionedFhirStore : IFhirStore
 
         switch (o)
         {
-            case null:
-            case Hl7.Fhir.Model.PrimitiveType:
+            case XHtml narrative:
+                {
+                    // TODO: we are supposed to replace all id's here.. this will NOT be performant...
+                }
+                return;
+
+            case PrimitiveType pt:
                 return;
 
             case Hl7.Fhir.Model.Resource resource:
                 {
-                    resources.Add(new()
+                    // check if we are the root and there is an entry for this url
+                    if (isRoot && fullUrlLookup.Contains(entryFullUrl))
                     {
-                        FullUrl = fullUrl,
-                        OriginalId = ((Hl7.Fhir.Model.Resource)o).Id,
-                        NewId = Guid.NewGuid().ToString(),
-                        IsRoot = isRoot,
-                    });
+                        resource.Id = fullUrlLookup[entryFullUrl].First().Id;
+                    }
 
+                    // iterate across all the child elements of the resource
                     foreach (Base child in resource.Children)
                     {
-                        FindTransactionReferences(
-                            fullUrl,
+                        fixTransactionEntryReferencesRecurse(
+                            entryFullUrl, 
                             child,
-                            references,
-                            resources,
+                            fullUrlLookup,
+                            originalIdLookup,
+                            identifierLookup,
                             false);
                     }
 
@@ -5709,31 +5923,127 @@ public partial class VersionedFhirStore : IFhirStore
 
             case Hl7.Fhir.Model.ResourceReference rr:
                 {
-                    string rl = ((Hl7.Fhir.Model.ResourceReference)o).Reference ?? string.Empty;
-                    string frag;
+                    TransactionResourceIdLookupRec? match = null;
 
-                    if (rl.Contains('#'))
+                    // if we have a literal reference, see if we have it indexed
+                    if (!string.IsNullOrEmpty(rr.Reference))
                     {
-                        rl = rl.Substring(0, rl.IndexOf('#'));
-                        frag = rl.Substring(rl.IndexOf('#') + 1);
+                        match = fullUrlLookup[rr.Reference].FirstOrDefault();
+                        if (match != null)
+                        {
+                            rr.Reference = match.ResourceType + "/" + match.Id;
+                            return;
+                        }
+
+                        match = originalIdLookup[rr.Reference].FirstOrDefault();
+                        if (match != null)
+                        {
+                            rr.Reference = match.ResourceType + "/" + match.Id;
+                            return;
+                        }
+
+                        match = identifierLookup[rr.Reference].FirstOrDefault();
+                        if (match != null)
+                        {
+                            rr.Reference = match.ResourceType + "/" + match.Id;
+                            return;
+                        }
                     }
-                    else
+
+                    // check for invalid search-style references
+                    if (!string.IsNullOrEmpty(rr.Reference) && rr.Reference.Contains('?'))
                     {
-                        frag = string.Empty;
+                        string resourceType = rr.Reference.Split('?')[0];
+                        string[] queryParams = rr.Reference.Split('?')[1].Split('&');
+
+                        // iterate across the query parameters
+                        foreach (string queryParam in queryParams)
+                        {
+                            string[] kvp = queryParam.Split('=');
+                            if (kvp.Length != 2)
+                            {
+                                continue;
+                            }
+
+                            if (kvp[0] != "identifier")
+                            {
+                                continue;
+                            }
+
+                            match = identifierLookup[kvp[1]].FirstOrDefault();
+                            if (match != null)
+                            {
+                                rr.Reference = match.ResourceType + "/" + match.Id;
+                                rr.Type = match.ResourceType;
+                                return;
+                            }
+
+                            // fix this reference
+                            string[] identifierComponents = kvp[1].Split('|');
+
+                            if (identifierComponents.Length == 2)
+                            {
+                                rr.Identifier = new()
+                                {
+                                    System = identifierComponents[0],
+                                    Value = identifierComponents[1],
+                                };
+                                rr.Type = resourceType;
+                            }
+                            else
+                            {
+                                rr.Identifier = new()
+                                {
+                                    Value = kvp[0],
+                                };
+                                rr.Type = resourceType;
+                            }
+
+                            rr.Reference = null;
+                        }
                     }
 
-                    string system = ((Hl7.Fhir.Model.ResourceReference)o).Identifier?.System ?? string.Empty;
-                    string value = ((Hl7.Fhir.Model.ResourceReference)o).Identifier?.Value ?? string.Empty;
-
-                    references.Add(new()
+                    // check for a specified identifier
+                    if (rr.Identifier != null)
                     {
-                        FullUrl = fullUrl,
-                        ReferenceLiteral = rl,
-                        ReferenceLiteralFragment = frag,
-                        IdentifierSystem = system,
-                        IdentifierValue = value,
-                        LocalReference = Guid.NewGuid().ToString(),
-                    });
+                        match = identifierLookup[rr.Identifier.System + "|" + rr.Identifier.Value].FirstOrDefault();
+                        if (match != null)
+                        {
+                            rr.Reference = match.ResourceType + "/" + match.Id;
+                            return;
+                        }
+                    }
+
+                    // check for a fragment reference literal
+                    if (!string.IsNullOrEmpty(rr.Reference) && rr.Reference.Contains('#'))
+                    {
+                        string[] parts = rr.Reference.Split('#');
+                        if (parts.Length == 2)
+                        {
+                            match = fullUrlLookup[parts[0]].FirstOrDefault();
+                            if (match != null)
+                            {
+                                rr.Reference = match.ResourceType + "/" + match.Id + "#" + parts[1];
+                                return;
+                            }
+                            match = originalIdLookup[parts[0]].FirstOrDefault();
+                            if (match != null)
+                            {
+                                rr.Reference = match.ResourceType + "/" + match.Id + "#" + parts[1];
+                                return;
+                            }
+                            match = identifierLookup[parts[0]].FirstOrDefault();
+                            if (match != null)
+                            {
+                                rr.Reference = match.ResourceType + "/" + match.Id + "#" + parts[1];
+                                return;
+                            }
+                        }
+                    }
+
+                    //// TODO: this should probably promote to an OperationOutcome and fail the transaction
+                    //// log a warning
+                    //Console.WriteLine($"fixTransactionEntryReferencesRecurse <<< {entryFullUrl} contains unreconcilable reference! literal: {rr.Reference}, identifier: {rr.Identifier}");
 
                     return;
                 }
@@ -5741,11 +6051,12 @@ public partial class VersionedFhirStore : IFhirStore
             case Hl7.Fhir.Model.Base b:
                 foreach (Base child in b.Children)
                 {
-                    FindTransactionReferences(
-                        fullUrl,
+                    fixTransactionEntryReferencesRecurse(
+                        entryFullUrl,
                         child,
-                        references,
-                        resources,
+                        fullUrlLookup,
+                        originalIdLookup,
+                        identifierLookup,
                         false);
                 }
                 break;
@@ -5756,42 +6067,169 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="transaction">The transaction.</param>
     /// <param name="response">   The response.</param>
     private void ProcessTransaction(
+        FhirRequestContext ctx,
         Bundle transaction,
         Bundle response)
     {
-        List<TransactionReferenceInfo> references = new();
-        List<TransactionResourceInfo> resources = new();
+        // build our list of id mappings
+        List<TransactionResourceIdLookupRec> idRecs = buildTransactionResourceLookup(transaction);
 
-        foreach (Bundle.EntryComponent entry in transaction.Entry)
+        // fix all the references
+        fixTransactionBundleReferences(transaction, idRecs);
+
+        // batch needs to process in order of DELETE, POST, PUT/PATCH, GET/HEAD
+        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request?.Method == Bundle.HTTPVerb.DELETE))
         {
-            FindTransactionReferences(entry.FullUrl, entry.Resource, references, resources, true);
+            processEntry(entry);
         }
 
-        Dictionary<string, string> knownResources = new();
-
-        foreach (TransactionResourceInfo ri in resources)
+        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request?.Method == Bundle.HTTPVerb.POST))
         {
-            Console.WriteLine($"ProcessTransaction <<< {ri.FullUrl} {ri.OriginalId} {ri.NewId} {ri.IsRoot}");
-            knownResources.Add(ri.OriginalId, ri.NewId);
+            processEntry(entry);
         }
 
-        foreach (TransactionReferenceInfo i in references)
+        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => (e.Request?.Method == Bundle.HTTPVerb.PUT) || (e.Request?.Method == Bundle.HTTPVerb.PATCH)))
         {
-            if (string.IsNullOrEmpty(i.ReferenceLiteral))
+            processEntry(entry);
+        }
+
+        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => (e.Request?.Method == Bundle.HTTPVerb.GET) || (e.Request?.Method == Bundle.HTTPVerb.HEAD)))
+        {
+            processEntry(entry);
+        }
+
+        // check for entries without a request
+        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request == null))
+        {
+            response.Entry.Add(new Bundle.EntryComponent()
             {
-                continue;
+                FullUrl = entry.FullUrl,
+                Response = new Bundle.ResponseComponent()
+                {
+                    Status = HttpStatusCode.BadRequest.ToString(),
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.BadRequest,
+                        "Entry is missing a request",
+                        OperationOutcome.IssueType.Required),
+                },
+            });
+        }
+
+        //// TODO: finish implementing transaction support
+        //throw new NotImplementedException("Transaction support is not complete!");
+
+        return;
+
+        void processEntry(Bundle.EntryComponent entry)
+        {
+            bool opSuccess;
+            FhirResponseContext opResponse;
+
+            FhirRequestContext entryCtx = new()
+            {
+                TenantName = ctx.TenantName,
+                Store = ctx.Store,
+                Authorization = ctx.Authorization,
+                RequestHeaders = ctx.RequestHeaders,
+                Forwarded = ctx.Forwarded,
+                HttpMethod = entry.Request.Method?.ToString() ?? string.Empty,
+                Url = entry.Request.Url,
+                IfMatch = entry.Request.IfMatch ?? string.Empty,
+                IfModifiedSince = entry.Request.IfModifiedSince?.ToFhirDateTime() ?? string.Empty,
+                IfNoneMatch = entry.Request.IfNoneMatch ?? string.Empty,
+                IfNoneExist = entry.Request.IfNoneExist ?? string.Empty,
+
+                SourceObject = entry.Resource,
+            };
+
+            if (entryCtx.Interaction == null)
+            {
+                response.Entry.Add(new Bundle.EntryComponent()
+                {
+                    FullUrl = entry.FullUrl,
+                    Response = new Bundle.ResponseComponent()
+                    {
+                        Status = HttpStatusCode.InternalServerError.ToString(),
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.NotImplemented,
+                            $"Request could not be parsed to known interaction: {entry.Request.Method} {entry.Request.Url}",
+                            OperationOutcome.IssueType.NotSupported),
+                    },
+                });
+
+                return;
             }
 
-            Console.WriteLine($"ProcessTransaction <<< {i.FullUrl} contains {i.ReferenceLiteral}");
-
-            if (!knownResources.ContainsKey(i.ReferenceLiteral))
+            // check authorization on individual requests within a bundle if we are not in loading state
+            if ((_loadState == LoadStateCodes.None) &&
+                (!ctx.IsAuthorized()))
             {
-                Console.WriteLine($"ProcessTransaction <<< {i.FullUrl} contains unknown reference literal: {i.ReferenceLiteral}");
-            }
-        }
+                response.Entry.Add(new Bundle.EntryComponent()
+                {
+                    FullUrl = entry.FullUrl,
+                    Response = new Bundle.ResponseComponent()
+                    {
+                        Status = HttpStatusCode.Unauthorized.ToString(),
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.Unauthorized,
+                            $"Unauthorized request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
+                            OperationOutcome.IssueType.Forbidden),
+                    },
+                });
 
-        // TODO: finish implementing transaction support
-        throw new NotImplementedException("Transaction support is not complete!");
+                return;
+            }
+
+            // attempt the request specified (transactions have id's already created, so treat them as such)
+            opSuccess = PerformInteraction(entryCtx, out opResponse, serializeReturn: false, forceAllowExistingId: true);
+            if (opSuccess)
+            {
+                response.Entry.Add(new Bundle.EntryComponent()
+                {
+                    FullUrl = entry.FullUrl,
+                    Resource = (Resource?)opResponse.Resource,
+                    Response = new Bundle.ResponseComponent()
+                    {
+                        Status = (opResponse.StatusCode ?? HttpStatusCode.OK).ToString(),
+                        Outcome = (Resource?)opResponse.Outcome,
+                        Etag = opResponse.ETag ?? string.Empty,
+                        LastModified = ((Resource?)opResponse.Resource)?.Meta?.LastUpdated ?? null,
+                        Location = opResponse.Location ?? string.Empty,
+                    },
+                });
+            }
+            else
+            {
+                if ((opResponse.Outcome == null) || (opResponse.Outcome is not OperationOutcome oo))
+                {
+                    oo = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.NotImplemented,
+                            $"Unsupported request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
+                            OperationOutcome.IssueType.NotSupported);
+                }
+                else
+                {
+                    oo.Issue.Add(new OperationOutcome.IssueComponent()
+                    {
+                        Severity = OperationOutcome.IssueSeverity.Error,
+                        Code = OperationOutcome.IssueType.NotSupported,
+                        Diagnostics = $"Unsupported request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
+                    });
+                }
+
+                response.Entry.Add(new Bundle.EntryComponent()
+                {
+                    FullUrl = entry.FullUrl,
+                    Response = new Bundle.ResponseComponent()
+                    {
+                        Status = (opResponse.StatusCode ?? HttpStatusCode.InternalServerError).ToString(),
+                        Outcome = oo,
+                    },
+                });
+            }
+
+            return;
+        }
     }
 
     /// <summary>Process a batch request.</summary>

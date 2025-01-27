@@ -6,6 +6,7 @@
 using FhirCandle.Extensions;
 using FhirCandle.Storage;
 using Hl7.Fhir.Model;
+using Hl7.FhirPath;
 
 namespace FhirCandle.Models;
 
@@ -38,6 +39,29 @@ public class ParsedResultParameters
     /// <summary>Gets or sets the reverse inclusion search parameter definitions, keyed by resource.</summary>
     public Dictionary<string, List<ModelInfo.SearchParamDefinition>> ReverseInclusions { get; set; } = new();
 
+    /// <summary>
+    /// Represents a request to sort search results by a specific search parameter.
+    /// </summary>
+    /// <param name="SearchParameterCode">The code of the search parameter to sort by.</param>
+    /// <param name="Ascending">Indicates whether the sorting should be in ascending order.</param>
+    public record class SortRequest(
+        string RequestLiteral,
+        string SearchParameterCode,
+        string? Modifier,
+        bool Ascending,
+        string SelectExpression,
+        CompiledExpression Compiled);
+
+    /// <summary>
+    /// Gets or sets the array of sort requests.
+    /// </summary>
+    public SortRequest[] SortRequests { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the maximum number of results to return.
+    /// </summary>
+    public long? MaxResults { get; set; } = null;
+
     /// <summary>The applied query string.</summary>
     private string _appliedQueryString = string.Empty;
 
@@ -46,9 +70,13 @@ public class ParsedResultParameters
     /// </summary>
     /// <param name="queryString">The query string.</param>
     /// <param name="store">      The FHIR store.</param>
-    public ParsedResultParameters(string queryString, VersionedFhirStore store)
+    public ParsedResultParameters(
+        string queryString,
+        VersionedFhirStore store,
+        IVersionedResourceStore resourceStore,
+        string resourceType)
     {
-        Parse(queryString, store);
+        parse(queryString, store, resourceStore, resourceType);
     }
 
     /// <summary>Gets applied query string.</summary>
@@ -61,7 +89,11 @@ public class ParsedResultParameters
     /// <summary>Enumerates parse in this collection.</summary>
     /// <param name="queryString">The query string.</param>
     /// <param name="store">      The FHIR store.</param>
-    private void Parse(string queryString, VersionedFhirStore store)
+    private void parse(
+        string queryString,
+        VersionedFhirStore store,
+        IVersionedResourceStore resourceStore,
+        string resourceType)
     {
         if (string.IsNullOrWhiteSpace(queryString))
         {
@@ -185,6 +217,14 @@ public class ParsedResultParameters
                     break;
 
                 case "_maxresults":
+                    {
+                        if (long.TryParse(value, out long maxResults) &&
+                            (maxResults >= 0))
+                        {
+                            MaxResults = maxResults;
+                            applied.Add(key + "=" + value);
+                        }
+                    }
                     break;
 
                 case "_revinclude":
@@ -245,6 +285,62 @@ public class ParsedResultParameters
                     break;
 
                 case "_sort":
+                    {
+                        List<SortRequest> sr = [];
+
+                        foreach (string val in value.Split(','))
+                        {
+                            string[] components = val.Split(':');
+
+                            string name;
+                            bool ascending;
+
+                            if (components[0].StartsWith('-'))
+                            {
+                                name = components[0][1..];
+                                ascending = false;
+                            }
+                            else
+                            {
+                                name = components[0];
+                                ascending = true;
+                            }
+
+                            string? modifier = components.Length > 1 ? components[1] : null;
+
+                            if (!resourceStore.TryGetSearchParamDefinition(name, out ModelInfo.SearchParamDefinition? spDefinition))
+                            {
+                                continue;
+                            }
+
+                            // do not sort on composite search parameters
+                            if ((spDefinition.Component != null) && (spDefinition.Component.Any()))
+                            {
+                                continue;
+                            }
+
+                            string selectExpression = spDefinition.Expression ?? string.Empty;
+                            CompiledExpression? compiled = store.GetCompiledSearchParameter(spDefinition.Resource ?? resourceType, name, selectExpression);
+
+                            if (compiled == null)
+                            {
+                                continue;
+                            }
+
+                            sr.Add(
+                                new SortRequest(
+                                    val,
+                                    name,
+                                    modifier,
+                                    ascending,
+                                    selectExpression,
+                                    compiled));
+                        }
+
+                        SortRequests = sr.ToArray();
+
+                        applied.Add(key + "=" + string.Join(',', sr.Select(r => r.RequestLiteral)));
+                    }
                     break;
 
                 case "_summary":

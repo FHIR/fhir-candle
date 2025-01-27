@@ -19,7 +19,7 @@ else
         @foreach (KeyValuePair<string, List<ParsedSubscriptionStatus>> kvp in _store!.ReceivedNotifications.AsEnumerable())
         {
             <FluentGridItem Style="min-width: var(--field-container-min-width);">
-                <FluentCounterBadge Count="@kvp.Value.Count()" Appearance="Appearance.Accent" BottomPosition="97" HorizontalPosition="97" Max="999">
+                <FluentCounterBadge Count="@kvp.Value.Count()" Appearance="Appearance.Accent" VerticalPosition="97" HorizontalPosition="97" Max="999">
                     <FluentCard>
                         <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                             <FluentTextField Label="Subscription" ReadOnly="true" Value="@kvp.Key"/>

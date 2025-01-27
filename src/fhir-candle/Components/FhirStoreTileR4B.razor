@@ -16,7 +16,7 @@
             Based on loaded packages, this server also implements the following pages:
         </FluentLabel>
 
-        <FluentDataGrid Items="@RiPages">
+        <FluentDataGrid Items="@RiPages" ShowHover="true">
             <PropertyColumn Title="Directive" Property="@(p => p.ContentFor)" Sortable="true" Tooltip="true" IsDefaultSortColumn="true">
             </PropertyColumn>
 

@@ -198,6 +198,12 @@ public class FhirController : ControllerBase
             Response.StatusCode = (int)opResponse.StatusCode;
         }
 
+        // check for not modified (no body)
+        if (Response.StatusCode == (int)HttpStatusCode.NotModified)
+        {
+            return;
+        }
+
         switch (prefer)
         {
             case "return=minimal":

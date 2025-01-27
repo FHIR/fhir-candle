@@ -4,21 +4,14 @@
 // </copyright>
 
 
-using fhir.candle.Models;
-using fhir.candle.Pages.Subscriptions;
 using fhir.candle.Services;
 using fhir.candle.Tests.Extensions;
 using FhirCandle.Models;
 using FhirCandle.Smart;
-using FhirCandle.Storage;
 using FhirCandle.Utils;
-using FluentAssertions;
 using Microsoft.IdentityModel.Tokens;
-using Org.BouncyCastle.Asn1.Ocsp;
-using System.Text.Json;
-using System.Xml.Linq;
+using Shouldly;
 using Xunit.Abstractions;
-using static System.Formats.Asn1.AsnWriter;
 
 namespace fhir.candle.Tests;
 
@@ -43,31 +36,31 @@ public class AuthTests : IClassFixture<AuthTestFixture>
     [Fact]
     public void TestSmartConfig()
     {
-        _fixture.Should().NotBeNull();
-        _fixture.AuthR4.Should().NotBeNull();
-        _fixture.AuthR4.SmartConfigurationByTenant.Should().NotBeNullOrEmpty();
+        _fixture.ShouldNotBeNull();
+        _fixture.AuthR4.ShouldNotBeNull();
+        _fixture.AuthR4.SmartConfigurationByTenant.ShouldNotBeNullOrEmpty();
 
         FhirStore.Smart.SmartWellKnown smartWellKnown = _fixture.AuthR4.SmartConfigurationByTenant[_fixture.ConfigR4.ControllerName];
 
-        smartWellKnown.Should().NotBeNull();
-        smartWellKnown.GrantTypes.Should().NotBeNullOrEmpty();
-        smartWellKnown.GrantTypes.Should().Contain("authorization_code");
-        smartWellKnown.AuthorizationEndpoint.Should().NotBeNullOrEmpty();
-        smartWellKnown.TokenEndpoint.Should().NotBeNullOrEmpty();
-        smartWellKnown.TokenEndpointAuthMethods.Should().NotBeNullOrEmpty();
-        smartWellKnown.SupportedScopes.Should().NotBeNullOrEmpty();
-        smartWellKnown.SupportedScopes.Should().Contain("launch");
-        smartWellKnown.SupportedScopes.Should().Contain("launch/patient");
-        smartWellKnown.SupportedResponseTypes.Should().NotBeNullOrEmpty();
-        smartWellKnown.SupportedResponseTypes.Should().Contain("code");
-        smartWellKnown.SupportedResponseTypes.Should().Contain("id_token");
-        smartWellKnown.Capabilities.Should().NotBeNullOrEmpty();
-        smartWellKnown.Capabilities.Should().Contain("launch-standalone");
-        smartWellKnown.Capabilities.Should().Contain("client-public");
-        smartWellKnown.Capabilities.Should().Contain("permission-v1");
-        smartWellKnown.Capabilities.Should().Contain("permission-v2");
-        smartWellKnown.SupportedChallengeMethods.Should().NotBeNullOrEmpty();
-        smartWellKnown.SupportedChallengeMethods.Should().Contain("S256");
+        smartWellKnown.ShouldNotBeNull();
+        smartWellKnown.GrantTypes.ShouldNotBeNullOrEmpty();
+        smartWellKnown.GrantTypes.ShouldContain("authorization_code");
+        smartWellKnown.AuthorizationEndpoint.ShouldNotBeNullOrEmpty();
+        smartWellKnown.TokenEndpoint.ShouldNotBeNullOrEmpty();
+        smartWellKnown.TokenEndpointAuthMethods.ShouldNotBeNullOrEmpty();
+        smartWellKnown.SupportedScopes.ShouldNotBeNullOrEmpty();
+        smartWellKnown.SupportedScopes.ShouldContain("launch");
+        smartWellKnown.SupportedScopes.ShouldContain("launch/patient");
+        smartWellKnown.SupportedResponseTypes.ShouldNotBeNullOrEmpty();
+        smartWellKnown.SupportedResponseTypes.ShouldContain("code");
+        smartWellKnown.SupportedResponseTypes.ShouldContain("id_token");
+        smartWellKnown.Capabilities.ShouldNotBeNullOrEmpty();
+        smartWellKnown.Capabilities.ShouldContain("launch-standalone");
+        smartWellKnown.Capabilities.ShouldContain("client-public");
+        smartWellKnown.Capabilities.ShouldContain("permission-v1");
+        smartWellKnown.Capabilities.ShouldContain("permission-v2");
+        smartWellKnown.SupportedChallengeMethods.ShouldNotBeNullOrEmpty();
+        smartWellKnown.SupportedChallengeMethods.ShouldContain("S256");
     }
 
     /// <summary>Tests smart authorize.</summary>
@@ -105,7 +98,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
                 out string redirectDestination,
                 out string _);
 
-        success.Should().Be(expectSuccess);
+        success.ShouldBe(expectSuccess);
         
         // stop testing if we failed, regardless of expectation
         if (!success)
@@ -113,17 +106,18 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             return;
         }
 
-        redirectDestination.Should().NotBeNullOrEmpty();
+        redirectDestination.ShouldNotBeNullOrEmpty();
 
         string key = redirectDestination.Substring(redirectDestination.IndexOf("key=") + 4);
-        key.Should().NotBeNullOrEmpty();
+        key.ShouldNotBeNull();
+        key.ShouldNotBeEmpty();
 
-        _fixture.AuthR4.TryGetAuthorization(_fixture.Name, key, out AuthorizationInfo authInfo).Should().BeTrue();
-        authInfo.Should().NotBeNull();
-        authInfo.Tenant.Should().Be(_fixture.Name);
-        authInfo.Expires.Should().BeAfter(DateTimeOffset.UtcNow);
-        authInfo.RequestParameters.Should().NotBeNull();
-        authInfo.Scopes.Should().NotBeNullOrEmpty();
+        _fixture.AuthR4.TryGetAuthorization(_fixture.Name, key, out AuthorizationInfo authInfo).ShouldBeTrue();
+        authInfo.ShouldNotBeNull();
+        authInfo.Tenant.ShouldBe(_fixture.Name);
+        authInfo.Expires.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
+        authInfo.RequestParameters.ShouldNotBeNull();
+        authInfo.Scopes.ShouldNotBeNullOrEmpty();
     }
 
     /// <summary>Tests token request.</summary>
@@ -148,21 +142,21 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             string.Empty,
             string.Empty,
             out string redirectDestination,
-            out string authKey).Should().BeTrue();
+            out string authKey).ShouldBeTrue();
 
-        redirectDestination.Should().NotBeNullOrEmpty();
+        redirectDestination.ShouldNotBeNullOrEmpty();
 
         string queryAuthKey = redirectDestination.Substring(redirectDestination.IndexOf("key=") + 4);
-        authKey.Should().NotBeNullOrEmpty();
-        queryAuthKey.Should().NotBeNullOrEmpty();
-        authKey.Should().BeEquivalentTo(queryAuthKey);
+        authKey.ShouldNotBeNullOrEmpty();
+        queryAuthKey.ShouldNotBeNullOrEmpty();
+        authKey.ShouldBeEquivalentTo(queryAuthKey);
 
         _fixture.AuthR4.TryGetAuthorization(
             _fixture.Name,
             authKey,
-            out AuthorizationInfo auth).Should().BeTrue();
+            out AuthorizationInfo auth).ShouldBeTrue();
 
-        auth.Should().NotBeNull();
+        auth.ShouldNotBeNull();
 
         // get the redirect
 
@@ -177,7 +171,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         }
 
         // update auth
-        _fixture.AuthR4.TryUpdateAuth(_fixture.Name, authKey, auth).Should().BeTrue();
+        _fixture.AuthR4.TryUpdateAuth(_fixture.Name, authKey, auth).ShouldBeTrue();
 
         // try to exchange the auth code for a token
         _fixture.AuthR4.TryCreateSmartResponse(
@@ -186,16 +180,16 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             "clientId",
             string.Empty,
             string.Empty,
-            out AuthorizationInfo.SmartResponse response).Should().BeTrue();
+            out AuthorizationInfo.SmartResponse response).ShouldBeTrue();
 
-        response.Should().NotBeNull();
+        response.ShouldNotBeNull();
 
         if (response == null)
         {
             return;
         }
 
-        response.AccessToken.Should().NotBeNullOrEmpty();
+        response.AccessToken.ShouldNotBeNullOrEmpty();
     }
 
     /// <summary>Tests a dynamic client registration and token request with an invalid token.</summary>
@@ -224,7 +218,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
                     out clientId,
                     out messages);
 
-            success.Should().BeTrue("client registration should pass\n" + string.Join("\n", messages));
+            success.ShouldBeTrue("client registration should pass\n" + string.Join("\n", messages));
         }
         else
         {
@@ -239,7 +233,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             return;
         }
 
-        clientId.Should().Be(clientRegistration.ClientName);
+        clientId.ShouldBe(clientRegistration.ClientName);
 
         // try to get a token for this client
         string clientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -255,11 +249,12 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             out AuthorizationInfo.SmartResponse response,
             out messages);
 
-        success.Should().BeFalse("submitting with an invalid assertion should fail");
-        messages.Should().NotBeNullOrEmpty();
-        messages.Count().Should().Be(2, "found:\n" + string.Join("\n", messages) + "\n");
-        messages.Where(m => m.Contains("IDX10214: Audience validation failed")).Should().NotBeNullOrEmpty("found:\n" + string.Join("\n", messages) + "\n");
-        messages.Where(m => m.Contains("IDX10223: Lifetime validation failed")).Should().NotBeNullOrEmpty("found:\n" + string.Join("\n", messages) + "\n");
+        success.ShouldBeFalse("submitting with an invalid assertion should fail");
+        messages.ShouldNotBeNull();
+        messages.ShouldNotBeEmpty();
+        messages.Count().ShouldBe(2, "found:\n" + string.Join("\n", messages) + "\n");
+        messages.Where(m => m.Contains("IDX10214: Audience validation failed")).ShouldNotBeNullOrEmpty("found:\n" + string.Join("\n", messages) + "\n");
+        messages.Where(m => m.Contains("IDX10223: Lifetime validation failed")).ShouldNotBeNullOrEmpty("found:\n" + string.Join("\n", messages) + "\n");
     }
 
 
@@ -289,7 +284,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
                     out clientId,
                     out messages);
 
-            success.Should().BeTrue("client registration should pass\n" + string.Join("\n", messages));
+            success.ShouldBeTrue("client registration should pass\n" + string.Join("\n", messages));
         }
         else
         {
@@ -304,7 +299,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             return;
         }
 
-        clientId.Should().Be(clientRegistration.ClientName);
+        clientId.ShouldBe(clientRegistration.ClientName);
 
         // build a client assertion
         string clientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -312,7 +307,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
 
         JsonWebKey? signingKey = privateKeySet.Keys.Where(wk => wk.KeyOps.Contains("sign")).FirstOrDefault();
 
-        signingKey.Should().NotBeNull("there should be a 'sign' capable key in the private set");
+        signingKey.ShouldNotBeNull("there should be a 'sign' capable key in the private set");
         if (signingKey == null)
         {
             return;
@@ -326,7 +321,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             DateTime.UtcNow.AddMinutes(10),
             signingKey);
 
-        clientAssertion.Should().NotBeNullOrEmpty();
+        clientAssertion.ShouldNotBeNullOrEmpty();
 
         success = _fixture.AuthR4.TryClientAssertionExchange(
             _fixture.Name,
@@ -337,9 +332,9 @@ public class AuthTests : IClassFixture<AuthTestFixture>
             out AuthorizationInfo.SmartResponse response,
             out messages);
 
-        success.Should().BeTrue("should be a valid client assertion!\n" + string.Join('\n', messages) + "\n");
-        response.Should().NotBeNull();
-        response.AccessToken.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue("should be a valid client assertion!\n" + string.Join('\n', messages) + "\n");
+        response.ShouldNotBeNull();
+        response.AccessToken.ShouldNotBeNullOrEmpty();
     }
 }
 

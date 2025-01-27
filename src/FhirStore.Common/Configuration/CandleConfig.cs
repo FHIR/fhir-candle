@@ -282,6 +282,40 @@ public class CandleConfig
         },
     };
 
+    //[ConfigOption(
+    //    ArgName = "--source-repository",
+    //    EnvName = "Source_Repository",
+    //    Description = "A GitHub repository to load as a source of configuration and data.")]
+    //public string? SourceRepository { get; set; } = null;
+    //public static ConfigurationOption SourceRepositoryParameter { get; } = new()
+    //{
+    //    Name = "SourceRepository",
+    //    EnvVarName = "Source_Repository",
+    //    DefaultValue = string.Empty,
+    //    CliOption = new System.CommandLine.Option<string?>("--source-repository", "A GitHub repository to load as a source of configuration and data.")
+    //    {
+    //        Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+    //        IsRequired = false,
+    //    },
+    //};
+
+    //[ConfigOption(
+    //    ArgName = "--source-repository-path",
+    //    EnvName = "Source_Repository_Path",
+    //    Description = "A path within the GitHub repository to load as a source of configuration and data.")]
+    //public string? SourceRepositoryPath { get; set; } = null;
+    //public static ConfigurationOption SourceRepositoryPathParameter { get; } = new()
+    //{
+    //    Name = "SourceRepositoryPath",
+    //    EnvVarName = "Source_Repository_Path",
+    //    DefaultValue = string.Empty,
+    //    CliOption = new System.CommandLine.Option<string?>("--source-repository-path", "A path within the GitHub repository to load as a source of configuration and data.")
+    //    {
+    //        Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
+    //        IsRequired = false,
+    //    },
+    //};
+
     /// <summary>Gets or sets the pathname of the FHIR source directory.</summary>
     [ConfigOption(
         ArgName = "--fhir-source",
@@ -322,14 +356,14 @@ public class CandleConfig
         },
     };
 
-    /// <summary>The fourth tenants r.</summary>
+    /// <summary>The FHIR R4 tenants.</summary>
     [ConfigOption(
         ArgName = "--r4",
         EnvName = "Tenants_R4",
         Description = "FHIR R4 Tenants to create. Can be specified multiple times.")]
     public string[] TenantsR4 = [];
 
-    /// <summary>Gets the tenants r 4 option.</summary>
+    /// <summary>Gets the FHIR R4 tenants parameter.</summary>
     private static ConfigurationOption TenantsR4Parameter { get; } = new()
     {
         Name = "TenantsR4",
@@ -342,14 +376,14 @@ public class CandleConfig
         },
     };
 
-    /// <summary>The tenants r 4 b.</summary>
+    /// <summary>The FHIR R4B tenants.</summary>
     [ConfigOption(
         ArgName = "--r4b",
         EnvName = "Tenants_R4B",
         Description = "FHIR R4B Tenants to create. Can be specified multiple times.")]
     public string[] TenantsR4B = [];
 
-    /// <summary>Gets the tenants r 4 b option.</summary>
+    /// <summary>Gets the FHIR R4B tenants parameter.</summary>
     private static ConfigurationOption TenantsR4BParameter { get; } = new()
     {
         Name = "TenantsR4B",
@@ -362,14 +396,14 @@ public class CandleConfig
         },
     };
 
-    /// <summary>The fifth tenants r.</summary>
+    /// <summary>The FHIR R5 tenants.</summary>
     [ConfigOption(
         ArgName = "--r5",
         EnvName = "Tenants_R5",
         Description = "FHIR R5 Tenants to create. Can be specified multiple times.")]
     public string[] TenantsR5 = [];
 
-    /// <summary>Gets the tenants r 5 option.</summary>
+    /// <summary>Gets the FHIR R4 tenants parameter.</summary>
     private static ConfigurationOption TenantsR5Parameter { get; } = new()
     {
         Name = "TenantsR5",
@@ -382,12 +416,12 @@ public class CandleConfig
         },
     };
 
-    /// <summary>The smart required tenants.</summary>
+    /// <summary>The tenants that will require SMART authorization.</summary>
     [ConfigOption(
         ArgName = "--support-not-changed",
         EnvName = "Support_Not_Changed",
         Description = "When enabled, the server will support checking if the resource is changed.")]
-    public bool SupportNotChanged = false;
+    public bool SupportNotChanged = true;
 
     /// <summary>The smart required tenants.</summary>
     [ConfigOption(
@@ -396,7 +430,7 @@ public class CandleConfig
         Description = "Tenants that require SMART on FHIR support, * for all.")]
     public string[] SmartRequiredTenants = [];
 
-    /// <summary>Gets the smart required tenants option.</summary>
+    /// <summary>Gets the tenants that will require SMART authorization parameter.</summary>
     private static ConfigurationOption SmartRequiredTenantsParameter { get; } = new()
     {
         Name = "SmartRequiredTenants",
@@ -409,14 +443,14 @@ public class CandleConfig
         },
     };
 
-    /// <summary>The smart optional tenants.</summary>
+    /// <summary>The tenants that allow SMART authorization.</summary>
     [ConfigOption(
         ArgName = "--smart-optional",
         EnvName = "Smart_Optional_Tenants",
         Description = "Tenants that support SMART on FHIR but do not require it, * for all.")]
     public string[] SmartOptionalTenants = [];
 
-    /// <summary>Gets the smart optional tenants option.</summary>
+    /// <summary>Gets the tenants that allo SMART authorization parameter.</summary>
     private static ConfigurationOption SmartOptionalTenantsParameter { get; } = new()
     {
         Name = "SmartOptionalTenants",
@@ -760,6 +794,8 @@ public class CandleConfig
         CiPackagesParameter,
         LoadPackageExamplesParameter,
         ReferenceImplementationParameter,
+        //SourceRepositoryParameter,
+        //SourceRepositoryPathParameter,
         SourceDirectoryParameter,
         ProtectLoadedContentParameter,
         TenantsR4Parameter,
@@ -838,6 +874,12 @@ public class CandleConfig
                 case "ReferenceImplementation":
                     ReferenceImplementation = GetOpt(pr, envPR, opt.CliOption, ReferenceImplementation);
                     break;
+                //case "SourceRepository":
+                //    SourceRepository = GetOpt(pr, envPR, opt.CliOption, SourceRepository);
+                //    break;
+                //case "SourceRepositoryPath":
+                //    SourceRepositoryPath = GetOpt(pr, envPR, opt.CliOption, SourceRepositoryPath);
+                //    break;
                 case "FhirSourceDirectory":
                     {
                         string? dir = GetOpt(pr, envPR, opt.CliOption, SourceDirectory);

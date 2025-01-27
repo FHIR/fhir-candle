@@ -10,12 +10,11 @@ using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
 using fhir.candle.Tests.Models;
-using FluentAssertions;
 using System.Text.Json;
 using Xunit.Abstractions;
-using candleR5::FhirCandle.Models;
 using candleR5::FhirCandle.Storage;
 using fhir.candle.Tests.Extensions;
+using Shouldly;
 using System.Net;
 
 namespace fhir.candle.Tests;
@@ -123,7 +122,7 @@ public class R5TestsPatientLooped : IClassFixture<R5Tests>
 
         for (int i = 0; i < loopCount; i++)
         {
-            _fixture._store.TypeSearch(ctx, out _).Should().BeTrue();
+            _fixture._store.TypeSearch(ctx, out _).ShouldBeTrue();
         }
     }
 }
@@ -174,26 +173,26 @@ public class R5TestsEncounter : IClassFixture<R5Tests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
 
-        results.Should().NotBeNull();
-        results!.Total.Should().Be(matchCount);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
         if (entryCount != null)
         {
-            results!.Entries.Should().HaveCount((int)entryCount);
+            results!.Entries.ShouldHaveCount((int)entryCount);
         }
 
-        results!.Links.Should().NotBeNullOrEmpty();
+        results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.Should().NotBeNullOrEmpty();
-        selfLink.Should().StartWith(_fixture._config.BaseUrl + "/Encounter?");
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Encounter?");
         foreach (string searchPart in search.Split('&'))
         {
-            selfLink.Should().Contain(searchPart);
+            selfLink.ShouldContain(searchPart);
         }
 
         //_testOutputHelper.WriteLine(bundle);
@@ -281,26 +280,26 @@ public class R5TestsObservation : IClassFixture<R5Tests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
 
-        results.Should().NotBeNull();
-        results!.Total.Should().Be(matchCount);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
         if (entryCount != null)
         {
-            results!.Entries.Should().HaveCount((int)entryCount);
+            results!.Entries.ShouldHaveCount((int)entryCount);
         }
 
-        results!.Links.Should().NotBeNullOrEmpty();
+        results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.Should().NotBeNullOrEmpty();
-        selfLink.Should().StartWith(_fixture._config.BaseUrl + "/Observation?");
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Observation?");
         foreach (string searchPart in search.Split('&'))
         {
-            selfLink.Should().Contain(searchPart);
+            selfLink.ShouldContain(searchPart);
         }
 
         //_testOutputHelper.WriteLine(bundle);
@@ -365,7 +364,8 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData("_id=example&name=peter", 1)]
     [InlineData("_id=example&name=not-present", 0)]
     [InlineData("_id=example&_profile:missing=false", 0)]
-    //[InlineData("_has:Observation:patient:code=http://loinc.org|9272-6", 1, 2)]
+    [InlineData("_has:Observation:patient:_id=blood-pressure", 1)]
+    [InlineData("_has:Observation:subject:_id=blood-pressure", 1)]
     public void PatientSearch(string search, int matchCount, int? entryCount = null)
     {
         //_testOutputHelper.WriteLine($"Running with {jsons.Length} files");
@@ -386,26 +386,26 @@ public class R5TestsPatient : IClassFixture<R5Tests>
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
 
-        results.Should().NotBeNull();
-        results!.Total.Should().Be(matchCount);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
         if (entryCount != null)
         {
-            results!.Entries.Should().HaveCount((int)entryCount);
+            results!.Entries.ShouldHaveCount((int)entryCount);
         }
 
-        results!.Links.Should().NotBeNullOrEmpty();
+        results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.Should().NotBeNullOrEmpty();
-        selfLink.Should().StartWith(_fixture._config.BaseUrl + "/Patient?");
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Patient?");
         foreach (string searchPart in search.Split('&'))
         {
-            selfLink.Should().Contain(searchPart);
+            selfLink.ShouldContain(searchPart);
         }
 
         //_testOutputHelper.WriteLine(bundle);
@@ -447,21 +447,21 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
             out Hl7.Fhir.Model.Resource? r,
             out _);
 
-        sc.Should().Be(HttpStatusCode.OK);
-        r.Should().NotBeNull();
-        r!.TypeName.Should().Be("SubscriptionTopic");
+        sc.ShouldBe(HttpStatusCode.OK);
+        r.ShouldNotBeNull();
+        r!.TypeName.ShouldBe("SubscriptionTopic");
         candleR5.FhirCandle.Subscriptions.TopicConverter converter = new candleR5.FhirCandle.Subscriptions.TopicConverter();
 
         bool success = converter.TryParse(r, out ParsedSubscriptionTopic s);
 
-        success.Should().BeTrue();
-        s.Should().NotBeNull();
-        s.Id.Should().Be("encounter-complete");
-        s.Url.Should().Be("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
-        s.ResourceTriggers.Should().HaveCount(1);
-        s.EventTriggers.Should().BeEmpty();
-        s.AllowedFilters.Should().NotBeEmpty();
-        s.NotificationShapes.Should().NotBeEmpty();
+        success.ShouldBeTrue();
+        s.ShouldNotBeNull();
+        s.Id.ShouldBe("encounter-complete");
+        s.Url.ShouldBe("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
+        s.ResourceTriggers.ShouldHaveCount(1);
+        s.EventTriggers.ShouldBeEmpty();
+        s.AllowedFilters.ShouldNotBeEmpty();
+        s.NotificationShapes.ShouldNotBeEmpty();
     }
 
     [Theory]
@@ -474,25 +474,25 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
             out Hl7.Fhir.Model.Resource? r,
             out _);
 
-        sc.Should().Be(HttpStatusCode.OK);
-        r.Should().NotBeNull();
-        r!.TypeName.Should().Be("Subscription");
+        sc.ShouldBe(HttpStatusCode.OK);
+        r.ShouldNotBeNull();
+        r!.TypeName.ShouldBe("Subscription");
         candleR5.FhirCandle.Subscriptions.SubscriptionConverter converter = new candleR5.FhirCandle.Subscriptions.SubscriptionConverter(10);
 
         bool success = converter.TryParse(r, out ParsedSubscription s);
 
-        success.Should().BeTrue();
-        s.Should().NotBeNull();
-        s.Id.Should().Be("e1f461cb-f41c-470e-aa75-d5223b2c943a");
-        s.TopicUrl.Should().Be("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
-        s.Filters.Should().HaveCount(1);
-        s.ChannelCode.Should().Be("rest-hook");
-        s.Endpoint.Should().Be("https://subscriptions.argo.run/fhir/r5/$subscription-hook");
-        s.HeartbeatSeconds.Should().Be(120);
-        s.TimeoutSeconds.Should().Be(0);
-        s.ContentType.Should().Be("application/fhir+json");
-        s.ContentLevel.Should().Be("id-only");
-        s.CurrentStatus.Should().Be("active");
+        success.ShouldBeTrue();
+        s.ShouldNotBeNull();
+        s.Id.ShouldBe("e1f461cb-f41c-470e-aa75-d5223b2c943a");
+        s.TopicUrl.ShouldBe("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
+        s.Filters.ShouldHaveCount(1);
+        s.ChannelCode.ShouldBe("rest-hook");
+        s.Endpoint.ShouldBe("https://subscriptions.argo.run/fhir/r5/$subscription-hook");
+        s.HeartbeatSeconds.ShouldBe(120);
+        s.TimeoutSeconds.ShouldBe(0);
+        s.ContentType.ShouldBe("application/fhir+json");
+        s.ContentLevel.ShouldBe("id-only");
+        s.CurrentStatus.ShouldBe("active");
     }
 
     [Theory]
@@ -505,20 +505,20 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
             out Hl7.Fhir.Model.Resource? r,
             out _);
 
-        sc.Should().Be(HttpStatusCode.OK);
-        r.Should().NotBeNull();
-        r!.TypeName.Should().Be("Bundle");
+        sc.ShouldBe(HttpStatusCode.OK);
+        r.ShouldNotBeNull();
+        r!.TypeName.ShouldBe("Bundle");
 
         ParsedSubscriptionStatus? s = ((VersionedFhirStore)_fixture._store).ParseNotificationBundle((Hl7.Fhir.Model.Bundle)r);
 
-        s.Should().NotBeNull();
-        s!.BundleId.Should().Be("1d2910b6-ccd4-402d-bde3-912d2b4e439f");
-        s.SubscriptionReference.Should().Be("https://subscriptions.argo.run/fhir/r5/Subscription/e1f461cb-f41c-470e-aa75-d5223b2c943a");
-        s.SubscriptionTopicCanonical.Should().Be("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
-        s.Status.Should().Be("active");
-        s.NotificationType.Should().Be(ParsedSubscription.NotificationTypeCodes.Handshake);
-        s.NotificationEvents.Should().BeEmpty();
-        s.Errors.Should().BeEmpty();
+        s.ShouldNotBeNull();
+        s!.BundleId.ShouldBe("1d2910b6-ccd4-402d-bde3-912d2b4e439f");
+        s.SubscriptionReference.ShouldBe("https://subscriptions.argo.run/fhir/r5/Subscription/e1f461cb-f41c-470e-aa75-d5223b2c943a");
+        s.SubscriptionTopicCanonical.ShouldBe("http://example.org/FHIR/SubscriptionTopic/encounter-complete");
+        s.Status.ShouldBe("active");
+        s.NotificationType.ShouldBe(ParsedSubscription.NotificationTypeCodes.Handshake);
+        s.NotificationEvents.ShouldBeEmpty();
+        s.Errors.ShouldBeEmpty();
     }
 
     /// <summary>Tests an encounter subscription with no filters.</summary>
@@ -615,16 +615,16 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
         {
             rs.TestCreateAgainstSubscriptions(current);
 
-            subscription.NotificationErrors.Should().BeEmpty("Create test should not have errors");
+            subscription.NotificationErrors.ShouldBeEmpty("Create test should not have errors");
 
             if (createResult)
             {
-                subscription.GeneratedEvents.Should().NotBeEmpty("Create test should have generated event");
-                subscription.GeneratedEvents.Should().HaveCount(1);
+                subscription.GeneratedEvents.ShouldNotBeEmpty("Create test should have generated event");
+                subscription.GeneratedEvents.ShouldHaveCount(1);
             }
             else
             {
-                subscription.GeneratedEvents.Should().BeEmpty("Create test should NOT have generated event");
+                subscription.GeneratedEvents.ShouldBeEmpty("Create test should NOT have generated event");
             }
 
             subscription.ClearEvents();
@@ -635,16 +635,16 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
         {
             rs.TestUpdateAgainstSubscriptions(current, previous);
 
-            subscription.NotificationErrors.Should().BeEmpty("Update test should not have errors");
+            subscription.NotificationErrors.ShouldBeEmpty("Update test should not have errors");
 
             if (updateResult)
             {
-                subscription.GeneratedEvents.Should().NotBeEmpty("Update test should have generated event");
-                subscription.GeneratedEvents.Should().HaveCount(1);
+                subscription.GeneratedEvents.ShouldNotBeEmpty("Update test should have generated event");
+                subscription.GeneratedEvents.ShouldHaveCount(1);
             }
             else
             {
-                subscription.GeneratedEvents.Should().BeEmpty("Update test should NOT have generated event");
+                subscription.GeneratedEvents.ShouldBeEmpty("Update test should NOT have generated event");
             }
 
             subscription.ClearEvents();
@@ -654,16 +654,16 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
         if (onDelete)
         {
             rs.TestDeleteAgainstSubscriptions(previous);
-            subscription.NotificationErrors.Should().BeEmpty("Delete test should not have errors");
+            subscription.NotificationErrors.ShouldBeEmpty("Delete test should not have errors");
 
             if (deleteResult)
             {
-                subscription.GeneratedEvents.Should().NotBeEmpty("Delete test should have generated event");
-                subscription.GeneratedEvents.Should().HaveCount(1);
+                subscription.GeneratedEvents.ShouldNotBeEmpty("Delete test should have generated event");
+                subscription.GeneratedEvents.ShouldHaveCount(1);
             }
             else
             {
-                subscription.GeneratedEvents.Should().BeEmpty("Delete test should NOT have generated event");
+                subscription.GeneratedEvents.ShouldBeEmpty("Delete test should NOT have generated event");
             }
 
             subscription.ClearEvents();

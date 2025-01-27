@@ -9,35 +9,23 @@
     <Import_RootNamespace>FhirCandle</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(MSBuildThisFileDirectory)Client\CandleClient.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Extensions\SearchParamDefinitionExtensions.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Models\ExecutableSubscriptionInfo.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedResultParameter.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Models\ParsedSearchParameter.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Interactions\IFhirInteractionHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Operations\IFhirOperation.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Operations\OpFeatureQuery.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Operations\OpIsFhir.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Operations\OpSubscriptionHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalDateSearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalNumberSearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalQuantitySearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalReferenceSearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalStringSearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalTokenSearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\EvalUriSearch.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\SearchDefinitions.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Search\SearchTester.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Serialization\SerializationUtils.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Storage\IVersionedResourceStore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Storage\ResourceStore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Storage\StoreTerminologyService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Storage\VersionedFhirStore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Operations\OpSubscriptionStatus.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Operations\OpSubscriptionEvents.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Client\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CSharpExtensions\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Interactions\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Operations\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Serialization\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Storage\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Search\*.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="$(MSBuildThisFileDirectory)Client\" />
+    <Folder Include="$(MSBuildThisFileDirectory)CSharpExtensions\" />
     <Folder Include="$(MSBuildThisFileDirectory)Interactions\" />
-    <Folder Include="$(MSBuildThisFileDirectory)Subscriptions\" />
+    <Folder Include="$(MSBuildThisFileDirectory)Models\" />
+    <Folder Include="$(MSBuildThisFileDirectory)Operations\" />
+    <Folder Include="$(MSBuildThisFileDirectory)Serialization\" />
+    <Folder Include="$(MSBuildThisFileDirectory)Storage\" />
+    <Folder Include="$(MSBuildThisFileDirectory)Search\" />
   </ItemGroup>
 </Project>
