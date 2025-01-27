@@ -279,6 +279,8 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     [InlineData("_id=example&name=peter", 1)]
     [InlineData("_id=example&name=not-present", 0)]
     [InlineData("_id=example&_profile:missing=false", 0)]
+    [InlineData("_has:Observation:patient:_id=blood-pressure", 1)]
+    [InlineData("_has:Observation:subject:_id=blood-pressure", 1)]
     public void PatientSearch(string search, int matchCount, int? entryCount = null)
     {
         //_testOutputHelper.WriteLine($"Running with {jsons.Length} files");

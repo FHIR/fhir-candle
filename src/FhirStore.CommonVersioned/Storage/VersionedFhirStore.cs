@@ -4469,6 +4469,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         // execute search
         IEnumerable<Resource>? results = _store[ctx.ResourceType].TypeSearch(parameters);
+        _ = results?.ToArray();
 
         // null results indicates failure
         if (results == null)

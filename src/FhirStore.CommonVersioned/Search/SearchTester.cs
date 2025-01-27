@@ -66,7 +66,7 @@ public class SearchTester
             {
                 reverseChainCache ??= [];
 
-                string rcKey = sp.ReverseChainedParameterLink.ResourceType + "." + sp.ReverseChainedParameterLink.ParamType;
+                string rcKey = sp.ReverseChainedParameterLink.ResourceType + "." + sp.ReverseChainedParameterLink.Name;
 
                 if (!reverseChainCache.TryGetValue(rcKey, out Resource[]? reverseChainMatches))
                 {

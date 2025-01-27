@@ -30,7 +30,7 @@ public class R4Tests
     internal readonly TenantConfiguration _config;
 
     /// <summary>(Immutable) The total number of patients.</summary>
-    internal const int _patientCount = 5;
+    internal const int _patientCount = 6;
 
     /// <summary>(Immutable) The number of patients coded as male.</summary>
     internal const int _patientsMale = 3;
@@ -261,8 +261,8 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData("name:exact=Peter", 1)]
     [InlineData("name:exact=peter", 0)]
     [InlineData("name:exact=Peterish", 0)]
-    [InlineData("_profile:missing=true", R4Tests._patientCount)]
-    [InlineData("_profile:missing=false", 0)]
+    [InlineData("_profile:missing=true", R4Tests._patientCount - 1)]
+    [InlineData("_profile:missing=false", 1)]
     [InlineData("multiplebirth=3", 1)]
     [InlineData("multiplebirth=le3", 1)]
     [InlineData("multiplebirth=lt3", 0)]
@@ -273,7 +273,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData("gender=male", R4Tests._patientsMale)]
     [InlineData("gender=female", R4Tests._patientsFemale)]
     [InlineData("gender=male,female", (R4Tests._patientsMale + R4Tests._patientsFemale))]
-    [InlineData("name-use=official", R4Tests._patientCount)]
+    [InlineData("name-use=official", R4Tests._patientCount - 1)]
     [InlineData("name-use=invalid-name-use", 0)]
     [InlineData("identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
     [InlineData("identifier=|12345", 1)]
@@ -281,8 +281,9 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData("identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|12345", 1)]
     [InlineData("identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|EXT|12345", 0)]
     [InlineData("identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|ABC", 0)]
-    [InlineData("active=true", R4Tests._patientCount)]
+    [InlineData("active=true", R4Tests._patientCount - 1)]
     [InlineData("active=false", 0)]
+    [InlineData("active:missing=true", 1)]
     [InlineData("active=garbage", 0)]
     [InlineData("telecom=phone|(03) 5555 6473", 1)]
     [InlineData("telecom=|(03) 5555 6473", 1)]
@@ -290,6 +291,8 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData("_id=example&name=peter", 1)]
     [InlineData("_id=example&name=not-present", 0)]
     [InlineData("_id=example&_profile:missing=false", 0)]
+    [InlineData("_has:Observation:patient:_id=blood-pressure", 1)]
+    [InlineData("_has:Observation:subject:_id=blood-pressure", 1)]
     public void PatientSearch(string search, int matchCount, int? entryCount = null)
     {
         //_testOutputHelper.WriteLine($"Running with {jsons.Length} files");
