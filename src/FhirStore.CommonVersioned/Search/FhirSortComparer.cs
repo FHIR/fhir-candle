@@ -104,11 +104,6 @@ public class FhirSortComparer : IComparer<Resource>
             if ((xValue is IFhirValueProvider xFvp) &&
                 (yValue is IFhirValueProvider yFvp))
             {
-                //if (xFvp.FhirValue.TypeName != yFvp.FhirValue.TypeName)
-                //{
-                //    continue;
-                //}
-
                 switch (xFvp.FhirValue)
                 {
                     case IComparable xIC:
@@ -256,53 +251,13 @@ public class FhirSortComparer : IComparer<Resource>
                         break;
 
                     default:
-                        if (false)
-                        {
-                            Console.Write("");
-                        }
+                        //if (false)
+                        //{
+                        //    Console.Write("");
+                        //}
                         break;
                 }
-
-
-                //if ((xFvp.FhirValue is IComparable xFvc) &&
-                //    (yFvp.FhirValue is IComparable yFvc))
-                //{
-                //    int result = xFvc.CompareTo(yFvc);
-                //    if (result != 0)
-                //    {
-                //        return sr.Ascending ? result : -result;
-                //    }
-
-                //    continue;
-                //}
-
-                //if ((xFvp.FhirValue is Period xPeriod) &&
-                //    (yFvp.FhirValue is Period yPeriod))
-                //{
-                //    int result = xPeriod.Start?.CompareTo(yPeriod.Start) ?? 0;
-                //    if (result != 0)
-                //    {
-                //        return sr.Ascending ? result : -result;
-                //    }
-
-                //    result = xPeriod.End?.CompareTo(yPeriod.End) ?? 0;
-                //    if (result != 0)
-                //    {
-                //        return sr.Ascending ? result : -result;
-                //    }
-                //}
             }
-
-            //if (xValue.Value == null)
-            //{
-            //    return sr.Ascending ? -1 : 1;
-            //}
-
-            //if (yValue.Value == null)
-            //{
-            //    return sr.Ascending ? 1 : -1;
-            //}
-
         }
 
         return 0;

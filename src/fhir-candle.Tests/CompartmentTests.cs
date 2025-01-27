@@ -124,7 +124,7 @@ public class AuthCompartmentTests: IDisposable
         result.GetType().ToString().ShouldBe("Hl7.Fhir.Model.Bundle");
 
         var bundle = result as Bundle;
-        return bundle;
+        return bundle!;
     }
 
     private void putResource(VersionedFhirStore versionedFhirStore, Resource resource)
@@ -135,7 +135,7 @@ public class AuthCompartmentTests: IDisposable
             Store = versionedFhirStore,
             HttpMethod = "PUT",
             SourceObject = resource,
-            Url = null,
+            Url = string.Empty,
             Authorization = null,
         };
         versionedFhirStore.InstanceUpdate(ctx, out FhirResponseContext opResponse);
