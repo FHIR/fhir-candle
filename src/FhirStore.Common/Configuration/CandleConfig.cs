@@ -421,7 +421,7 @@ public class CandleConfig
         ArgName = "--support-not-changed",
         EnvName = "Support_Not_Changed",
         Description = "When enabled, the server will support checking if the resource is changed.")]
-    public bool SupportNotChanged = false;
+    public bool SupportNotChanged = true;
 
     /// <summary>The smart required tenants.</summary>
     [ConfigOption(

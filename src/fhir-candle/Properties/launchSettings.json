@@ -17,7 +17,7 @@
     },
     "wgm": {
       "commandName": "Project",
-      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source C:\\git\\202501-WGM\\search_candle",
+      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source C:\\git\\202501-WGM\\search_candle_small",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {
