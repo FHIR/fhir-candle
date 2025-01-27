@@ -14,5 +14,8 @@
 	<ItemGroup>
 		<ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
 	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Smart\" />
+	</ItemGroup>
 	<Import Project="..\FhirStore.CommonVersioned\FhirStore.CommonVersioned.projitems" Label="Shared" />
 </Project>

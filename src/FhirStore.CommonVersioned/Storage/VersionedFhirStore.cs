@@ -23,6 +23,10 @@ using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
 using Hl7.Fhir.Utility;
+using System.Diagnostics.CodeAnalysis;
+using System.Resources;
+using System.Text;
+using ResourceType = System.Security.AccessControl.ResourceType;
 
 namespace FhirCandle.Storage;
 
@@ -73,7 +77,7 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>The subscription topic converter.</summary>
     internal static TopicConverter _topicConverter = new();
-    
+
     /// <summary>The subscription converter.</summary>
     internal static SubscriptionConverter _subscriptionConverter = null!;
 
@@ -246,7 +250,7 @@ public partial class VersionedFhirStore : IFhirStore
                 }
             }
         }
-        
+
         // check for a load directory
         if ((config.LoadDirectory != null) && (!_loadedSupplements.Contains(config.LoadDirectory.FullName)))
         {
@@ -458,7 +462,7 @@ public partial class VersionedFhirStore : IFhirStore
             // determine where this hook belongs
             foreach ((string resource, HashSet<Common.StoreInteractionCodes> interactions) in hook.InteractionsByResource)
             {
-                if (string.IsNullOrEmpty(resource) || 
+                if (string.IsNullOrEmpty(resource) ||
                     resource.Equals("*", StringComparison.Ordinal) ||
                     resource.Equals("Resource", StringComparison.Ordinal))
                 {
@@ -516,14 +520,14 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="packageSupplements">The package supplements.</param>
     /// <param name="includeExamples">    True to include, false to exclude the examples.</param>
     public void LoadPackage(
-        string directive, 
-        string directory, 
-        string packageSupplements, 
+        string directive,
+        string directory,
+        string packageSupplements,
         bool includeExamples)
     {
         _loadReprocess = new();
         _loadState = LoadStateCodes.Read;
-        
+
         bool success;
 
         DirectoryInfo di;
@@ -967,10 +971,10 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 r.Status = SubscriptionConverter.OffCode;
                 resourceStore.InstanceUpdate(
-                    r, 
-                    false, 
-                    string.Empty, 
-                    string.Empty, 
+                    r,
+                    false,
+                    string.Empty,
+                    string.Empty,
                     _protectedResources,
                     out _,
                     out _);
@@ -1033,7 +1037,7 @@ public partial class VersionedFhirStore : IFhirStore
             resource = null;
             return false;
         }
-        
+
         string[] components = uri.Split('/');
 
         if (components.Length < 2)
@@ -1545,7 +1549,7 @@ public partial class VersionedFhirStore : IFhirStore
         foreach (IFhirInteractionHook hook in hooks ?? [])
         {
             sForHook ??= (Resource?)stored?.DeepCopy();
-            
+
             if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
             {
                 _ = hook.DoInteractionHook(
@@ -1817,7 +1821,7 @@ public partial class VersionedFhirStore : IFhirStore
         foreach (IFhirInteractionHook hook in hooks ?? [])
         {
             sForHook ??= (Resource?)resource?.DeepCopy();
-            
+
             if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
             {
                 _ = hook.DoInteractionHook(
@@ -2072,7 +2076,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (!string.IsNullOrEmpty(ctx.IfNoneMatch))
         {
-            if (ctx.IfNoneMatch.Equals(eTag, StringComparison.Ordinal))
+            if ( _config.SupportNotChanged && ctx.IfNoneMatch.Equals(eTag, StringComparison.Ordinal) )
             {
                 response = new()
                 {
@@ -2083,7 +2087,6 @@ public partial class VersionedFhirStore : IFhirStore
                 };
 
                 return false;
-
             }
         }
 
@@ -3415,7 +3418,7 @@ public partial class VersionedFhirStore : IFhirStore
             ResourceType = r?.TypeName ?? string.Empty,
             Id = r?.Id ?? string.Empty,
             Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
-                opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError), 
+                opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
                 $"System-Level Operation {ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
             StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
         };
@@ -3479,6 +3482,22 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return false;
         }
+
+        switch (ctx.Interaction)
+        {
+            case Common.StoreInteractionCodes.CompartmentSearch:
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.NotFound,
+                        $"Compartment operations are not supported."),
+                    StatusCode = HttpStatusCode.NotFound,
+                };
+                return false;
+            default:
+                break;
+        }
+
 
         IFhirOperation op = _operations[ctx.OperationName];
 
@@ -3707,6 +3726,21 @@ public partial class VersionedFhirStore : IFhirStore
                 StatusCode = HttpStatusCode.NotFound,
             };
             return false;
+        }
+
+        switch (ctx.Interaction)
+        {
+            case Common.StoreInteractionCodes.CompartmentOperation:
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.NotFound,
+                        $"Compartment operations are not supported."),
+                    StatusCode = HttpStatusCode.NotFound,
+                };
+                return false;
+            default:
+                break;
         }
 
         IFhirOperation op = _operations[ctx.OperationName];
@@ -4173,8 +4207,8 @@ public partial class VersionedFhirStore : IFhirStore
 
         IEnumerable<IFhirInteractionHook> hooks = GetHooks(
             ctx.ResourceType,
-            new Common.StoreInteractionCodes[] 
-            { 
+            new Common.StoreInteractionCodes[]
+            {
                 Common.StoreInteractionCodes.TypeDeleteConditional,
                 Common.StoreInteractionCodes.TypeDeleteConditionalSingle,
                 Common.StoreInteractionCodes.TypeDeleteConditionalMultiple,
@@ -4304,6 +4338,68 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
+        IEnumerable<ParsedSearchParameter> compartmentParameters= [];
+
+        switch (ctx.Interaction)
+        {
+            case Common.StoreInteractionCodes.CompartmentTypeSearch:
+                if (_store.TryGetValue("CompartmentDefinition", out IVersionedResourceStore? value) && ctx.CompartmentType != null)
+                {
+                    var compartmentUrl = "http://hl7.org/fhir/CompartmentDefinition/" +
+                                         ctx.CompartmentType.ToLower();
+                    var resource = value.GetByCanonical(compartmentUrl);
+                    if (resource != null)
+                    {
+                        var compartmentDefinition = resource as CompartmentDefinition;
+                        // retrieve search params
+                        var compartmentSearchParam = compartmentDefinition!.Resource
+                            .Where(component => component.Code != null)
+                            .Where(component =>
+                                ModelInfo.FhirTypeNameToResourceType(ctx.ResourceType).Equals(component.Code))
+                            .Select(component => component.Param)
+                            .SelectMany(param => param);
+
+                        // create search string
+                        foreach (var param in compartmentSearchParam??[])
+                        {
+                            compartmentParameters = compartmentParameters.Concat(
+                                ParsedSearchParameter.Parse(
+                                    $"?{param}={ctx.CompartmentType}/{ctx.Id}",
+                                    this,
+                                    _store[ctx.ResourceType],
+                                    ctx.ResourceType)
+                                );
+
+                        }
+                    }
+                }
+                else
+                {
+                    response = new FhirResponseContext()
+                    {
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.NotFound,
+                            $"CompartmentDefinition {ctx.CompartmentType} is not supported",
+                            OperationOutcome.IssueType.NotSupported),
+                        StatusCode = HttpStatusCode.NotFound,
+                    };
+                    return false;
+                }
+
+                break;
+            case Common.StoreInteractionCodes.CompartmentOperation:
+            case Common.StoreInteractionCodes.CompartmentSearch:
+                response = new FhirResponseContext()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.NotImplemented,
+                        $"Compartment based operation ({ctx.Interaction}) is not supported",
+                        OperationOutcome.IssueType.Structure),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+        }
+
         if (string.IsNullOrEmpty(ctx.ResourceType))
         {
             response = new()
@@ -4338,11 +4434,11 @@ public partial class VersionedFhirStore : IFhirStore
                 if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
                 {
                     _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            null,
-                            out FhirResponseContext hr);
+                        ctx,
+                        this,
+                        _store[ctx.ResourceType],
+                        null,
+                        out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
                     if (hr.StatusCode != null)
@@ -4376,6 +4472,26 @@ public partial class VersionedFhirStore : IFhirStore
                 StatusCode = HttpStatusCode.InternalServerError,
             };
             return false;
+        }
+
+        // Reduce based on compartment
+        if (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)
+        {
+            results = results?.Where(result =>
+            {
+                return compartmentParameters.Any(compartmentParam =>
+                {
+                    var theParam = ParsedSearchParameter.Parse(
+                        $"_id={result.Id}",
+                        this,
+                        _store[ctx.ResourceType],
+                        ctx.ResourceType);
+                    var compartmentParams = theParam.Append(compartmentParam);
+                    var matchingResources = _store[ctx.ResourceType]
+                        .TypeSearch(compartmentParams);
+                    return matchingResources.Any();
+                });
+            });
         }
 
         // parse search result parameters
@@ -4918,7 +5034,7 @@ public partial class VersionedFhirStore : IFhirStore
 
                     continue;
                 }
-                
+
                 if (reference.Identifier != null)
                 {
                     // check if a type was specified
@@ -5135,24 +5251,24 @@ public partial class VersionedFhirStore : IFhirStore
         /// name: name of the feature (uri)
         /// </summary>
         public required string Name { get; init; }
-        
+
         /// <summary>
         /// name: present if provided, used to match responses to requests (uri)
         /// </summary>
         public required string? Context { get; init; }
-        
+
         /// <summary>
         /// processing-status: code from the server about processing the request (e.g., all-ok, not-supported, etc.)
         /// </summary>
         public required string ProcessingStatus { get; init; }
-        
+
         /// <summary>
         ///  value:
         ///     if provided in input: the value requested (datatype as defined by the feature) (even if processing fails) (if read from HTTP Query Parameter, default to fhir string type)
         ///     if not provided: the value of the feature (can have multiple repetitions) (uses datatype of feature)
         /// </summary>
         public required List<DataType> Value { get; init; }
-        
+
         /// <summary>
         /// matches:
         ///     only present if processing was successful (all-ok)
@@ -5166,16 +5282,16 @@ public partial class VersionedFhirStore : IFhirStore
         string featureName,
         string context,
         DataType? inputValue,
-        string? inputRawValue, 
+        string? inputRawValue,
         out FeatureQueryResponse response)
     {
         CapabilityStatement cs = GetCapabilities(null);
-        
+
         switch (featureName)
         {
             case "instantiates":
                 return TryTestCapabilityFeatureInstantiates(cs, featureName, context, inputValue, inputRawValue, out response);
-            
+
             case "read":
                 return TryTestCapabilityFeatureInteraction(cs, featureName, context, inputValue, inputRawValue, CapabilityStatement.TypeRestfulInteraction.Read, out response);
 
@@ -5184,7 +5300,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             case "update":
                 return TryTestCapabilityFeatureInteraction(cs, featureName, context, inputValue, inputRawValue, CapabilityStatement.TypeRestfulInteraction.Update, out response);
-            
+
             default:
                 response = new()
                 {
@@ -5217,7 +5333,7 @@ public partial class VersionedFhirStore : IFhirStore
             //     .Where(r => r.Interaction.Any(i => i.Code == interaction))
             //     .Select(r => (DataType)new Code(r.Type))
             //     .ToList();
-            
+
             response = new()
             {
                 Name = featureName,
@@ -5229,7 +5345,7 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return true;
         }
-        
+
         // check for specific context and no value
         if ((inputValue == null) &&
             string.IsNullOrEmpty(inputRawValue))
@@ -5245,7 +5361,7 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return true;
         }
-        
+
         // check for valid values
         bool? testValue = inputValue switch
         {
@@ -5254,12 +5370,12 @@ public partial class VersionedFhirStore : IFhirStore
             _ => null,
         };
 
-        testValue ??= string.IsNullOrEmpty(inputRawValue) 
-            ? null 
-            : bool.TryParse(inputRawValue, out bool bv) 
-                ? bv 
-                : null; 
-        
+        testValue ??= string.IsNullOrEmpty(inputRawValue)
+            ? null
+            : bool.TryParse(inputRawValue, out bool bv)
+                ? bv
+                : null;
+
         // check for invalid values
         if (testValue == null)
         {
@@ -5273,7 +5389,7 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return true;
         }
-        
+
         // check for no or 'all' context and value (tested above)
         if (string.IsNullOrEmpty(context) || (context == "*"))
         {
@@ -5287,7 +5403,7 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return true;
         }
-        
+
         // have context and value
         response = new()
         {
@@ -5299,13 +5415,13 @@ public partial class VersionedFhirStore : IFhirStore
         };
         return true;
     }
-    
+
     private bool TryTestCapabilityFeatureInstantiates(
-        CapabilityStatement cs, 
+        CapabilityStatement cs,
         string featureName,
-        string context, 
-        DataType? inputValue, 
-        string? inputRawValue, 
+        string context,
+        DataType? inputValue,
+        string? inputRawValue,
         out FeatureQueryResponse response)
     {
         // check for specific value request
@@ -5327,7 +5443,7 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return true;
         }
-        
+
         // check for enumeration request
         if (string.IsNullOrEmpty(inputRawValue) && (inputValue == null))
         {
@@ -5337,7 +5453,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 rValues = inputValue != null ? [inputValue] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [];
             }
-            
+
             response = new()
             {
                 Name = featureName,
@@ -5351,7 +5467,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         Canonical testCanonical = new Canonical(testValue);
-        
+
         List<DataType> responseValues = cs.Instantiates
             .Where(i => i.Equals(testValue, StringComparison.Ordinal))
             .Select(i => (DataType)new Canonical(i))
@@ -5365,7 +5481,7 @@ public partial class VersionedFhirStore : IFhirStore
             Matches = responseValues.Count != 0,
             ProcessingStatus = "all-ok",
         };
-        
+
         return true;
     }
 
@@ -5550,10 +5666,10 @@ public partial class VersionedFhirStore : IFhirStore
                         Documentation = string.IsNullOrEmpty(sp.Description) ? null : sp.Description,
                     }).ToList(),
                 Operation = _operations.Values
-                    .Where(o => 
-                        (o.AllowInstanceLevel || o.AllowResourceLevel) && 
-                        ((!o.SupportedResources.Any()) || 
-                          o.SupportedResources.Contains(resourceName) || 
+                    .Where(o =>
+                        (o.AllowInstanceLevel || o.AllowResourceLevel) &&
+                        ((!o.SupportedResources.Any()) ||
+                          o.SupportedResources.Contains(resourceName) ||
                           o.SupportedResources.Contains("Resource") ||
                           o.SupportedResources.Contains("DomainResource")))
                     .Select(o => new CapabilityStatement.OperationComponent()
