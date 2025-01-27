@@ -2,19 +2,16 @@ extern alias candleR4;
 extern alias coreR4;
 
 using System.Net;
-using candleR4::FhirCandle.Models;
 using candleR4::FhirCandle.Storage;
 using Hl7.Fhir.Model;
 using fhir.candle.Tests.Extensions;
 using FhirCandle.Utils;
-using FluentAssertions;
-using Hl7.Fhir.Introspection;
-using Hl7.Fhir.Specification;
 using Xunit.Abstractions;
 using FhirRequestContext = FhirCandle.Models.FhirRequestContext;
 using FhirResponseContext = FhirCandle.Models.FhirResponseContext;
 using Resource = Hl7.Fhir.Model.Resource;
 using TenantConfiguration = FhirCandle.Models.TenantConfiguration;
+using Shouldly;
 
 namespace fhir.candle.Tests;
 
@@ -49,7 +46,7 @@ public class AuthCompartmentTests: IDisposable
         // load compartment
         var jsonParser = new coreR4::Hl7.Fhir.Serialization.FhirJsonParser();
         var compartmentDefinition = jsonParser.Parse(json) as coreR4::Hl7.Fhir.Model.CompartmentDefinition;
-        compartmentDefinition.Should().NotBeNull();
+        compartmentDefinition.ShouldNotBeNull();
 
         string path = Path.GetRelativePath(Directory.GetCurrentDirectory(), "data/r4");
         DirectoryInfo? loadDirectory = null;
@@ -77,27 +74,27 @@ public class AuthCompartmentTests: IDisposable
 
         // all observations
         var searchAllBundle = SearchResource(versionedFhirStore, "Observation");
-        searchAllBundle.Should().NotBeNull();
-        searchAllBundle.Entry.Should().NotBeNullOrEmpty();
-        searchAllBundle.Entry.Count.Should().BeGreaterThan(0);
+        searchAllBundle.ShouldNotBeNull();
+        searchAllBundle.Entry.ShouldNotBeNullOrEmpty();
+        searchAllBundle.Entry.Count.ShouldBeGreaterThan(0);
         var searchAllBundleCount = searchAllBundle.Entry.Count;
 
         // all observations for patient example
         var searchBundle = SearchResource(versionedFhirStore, "Observation?subject=example");
-        searchBundle.Should().NotBeNull();
-        searchBundle.Entry.Should().NotBeNullOrEmpty();
-        searchBundle.Entry.Count.Should().BeGreaterThan(0);
+        searchBundle.ShouldNotBeNull();
+        searchBundle.Entry.ShouldNotBeNullOrEmpty();
+        searchBundle.Entry.Count.ShouldBeGreaterThan(0);
         var searchBundleCount = searchBundle.Entry.Count;
 
         // all observations for patient example using compartment
         var compartmentBundle = SearchResource(versionedFhirStore, "Patient/example/Observation");
-        compartmentBundle.Should().NotBeNull();
-        compartmentBundle.Entry.Should().NotBeNullOrEmpty();
-        compartmentBundle.Entry.Count.Should().BeGreaterThan(0);
+        compartmentBundle.ShouldNotBeNull();
+        compartmentBundle.Entry.ShouldNotBeNullOrEmpty();
+        compartmentBundle.Entry.Count.ShouldBeGreaterThan(0);
         var compartmentBundleCount = compartmentBundle.Entry.Count;
 
         // check if direct and compartment search returns equal numbers
-        compartmentBundleCount.Should().Be(searchBundleCount);
+        compartmentBundleCount.ShouldBe(searchBundleCount);
     }
 
     private Bundle SearchResource(VersionedFhirStore versionedFhirStore, String search )
@@ -118,13 +115,13 @@ public class AuthCompartmentTests: IDisposable
             ctx,
             out FhirResponseContext response);
 
-        success.Should().BeTrue();
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.SerializedResource.Should().NotBeNullOrEmpty();
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
 
-        response.Resource.Should().NotBeNull();
+        response.Resource.ShouldNotBeNull();
         var result = response.Resource;
-        result.GetType().ToString().Should().Be("Hl7.Fhir.Model.Bundle");
+        result.GetType().ToString().ShouldBe("Hl7.Fhir.Model.Bundle");
 
         var bundle = result as Bundle;
         return bundle;
