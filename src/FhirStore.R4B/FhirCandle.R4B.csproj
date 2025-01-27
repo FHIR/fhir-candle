@@ -13,7 +13,10 @@
 	<ItemGroup>
 		<PackageReference Include="Hl7.Fhir.R4B" Version="5.11.2" />
 	</ItemGroup>
-	<ItemGroup>
+  <ItemGroup>
+    <Folder Include="Extensions\" />
+  </ItemGroup>
+  <ItemGroup>
 		<ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
 	</ItemGroup>
 </Project>
