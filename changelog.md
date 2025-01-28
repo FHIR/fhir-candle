@@ -36,6 +36,7 @@
     * Additional fix for [Issue #18](https://github.com/FHIR/fhir-candle/issues/18)
         * Modified FHIR Controller to not return a body when returning a `304` status.
     * Added initial support for reverse chaining.
+    * Fixed issue with POSTed searches not reading parameters correctly.
 
 * v2024.910 - [PR 14](https://github.com/FHIR/fhir-candle/commit/70a8b38a40649160b3711e9a5a7ad4307e8e9d9a)
     * [f220fcc](https://github.com/FHIR/fhir-candle/commit/f220fccc24647311d43fb7807d910cc1613f7f27) Fix: Inverted string search test in some combinations.
