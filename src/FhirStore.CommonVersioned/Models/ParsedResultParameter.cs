@@ -58,6 +58,13 @@ public class ParsedResultParameters
     public SortRequest[] SortRequests { get; set; } = [];
 
     /// <summary>
+    /// The parameter _count is defined as an instruction to the server regarding how many resources
+    /// should be returned in a single page. Servers SHALL NOT return more resources in a single page than
+    /// requested, even if they don't support paging, but may return less than the client requested.
+    /// </summary>
+    public int? PageMatchCount { get; set; } = null;
+
+    /// <summary>
     /// Gets or sets the maximum number of results to return.
     /// </summary>
     public long? MaxResults { get; set; } = null;
@@ -122,6 +129,14 @@ public class ParsedResultParameters
                     break;
 
                 case "_count":
+                    {
+                        if (int.TryParse(value, out int count) &&
+                            (count >= 0))
+                        {
+                            PageMatchCount = count;
+                            applied.Add(key + "=" + value);
+                        }
+                    }
                     break;
 
                 case "_elements":
