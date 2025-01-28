@@ -4360,7 +4360,9 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) ? ctx.UrlQuery : ctx.SourceContent;
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
 
         IEnumerable<ParsedSearchParameter> compartmentParameters= [];
 
@@ -4672,7 +4674,9 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) ? ctx.UrlQuery : ctx.SourceContent;
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
 
         string[] resourceTypes = Array.Empty<string>();
 
