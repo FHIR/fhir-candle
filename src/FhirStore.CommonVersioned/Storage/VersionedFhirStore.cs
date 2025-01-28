@@ -156,6 +156,18 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>The terminology.</summary>
     private StoreTerminologyService _terminology = new();
 
+    // TODO: finish implementing paging...
+    //private record class PagedSearchContext
+    //{
+    //    public required Guid Id { get; init; }
+    //    public required FhirRequestContext Ctx { get; init; }
+    //    public required int Offet { get; init; }
+    //}
+
+    //private const int _pagedSearchCacheSize = 5;
+    //private PagedSearchContext?[] _pagedSearches = new PagedSearchContext?[] { null, null, null, null, null };
+    //private int _pagedSearchIndex = -1;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="VersionedFhirStore"/> class.
     /// </summary>
@@ -4348,6 +4360,10 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+
         IEnumerable<ParsedSearchParameter> compartmentParameters= [];
 
         switch (ctx.Interaction)
@@ -4462,14 +4478,13 @@ public partial class VersionedFhirStore : IFhirStore
 
         // parse search parameters
         IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
-            ctx.UrlQuery,
+            searchQueryParams,
             this,
             _store[ctx.ResourceType],
             ctx.ResourceType);
 
         // execute search
         IEnumerable<Resource>? results = _store[ctx.ResourceType].TypeSearch(parameters);
-        _ = results?.ToArray();
 
         // null results indicates failure
         if (results == null)
@@ -4507,7 +4522,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         // parse search result parameters
         ParsedResultParameters resultParameters = new ParsedResultParameters(
-            ctx.UrlQuery,
+            searchQueryParams,
             this,
             _store[ctx.ResourceType],
             ctx.ResourceType);
@@ -4551,8 +4566,8 @@ public partial class VersionedFhirStore : IFhirStore
 
         foreach (Resource resource in (comparer == null ? results : results.OrderBy(r => r, comparer)))
         {
-            if ((resultParameters.MaxResults != null) &&
-                (resultCount >= resultParameters.MaxResults))
+            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
             {
                 break;
             }
@@ -4659,10 +4674,14 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+
         string[] resourceTypes = Array.Empty<string>();
 
         // check for _type parameter
-        System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(ctx.UrlQuery);
+        System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(searchQueryParams);
 
         foreach (string key in query)
         {
@@ -4717,7 +4736,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             // parse search parameters
             IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
-                ctx.UrlQuery,
+                searchQueryParams,
                 this,
                 _store[resourceType],
                 resourceType);
@@ -4739,7 +4758,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             // parse search result parameters
-            ParsedResultParameters resultParameters = new ParsedResultParameters(ctx.UrlQuery, this, _store[resourceType], resourceType);
+            ParsedResultParameters resultParameters = new ParsedResultParameters(searchQueryParams, this, _store[resourceType], resourceType);
 
             byResource.Add((resourceType, parameters, results, resultParameters));
         }
@@ -4775,8 +4794,6 @@ public partial class VersionedFhirStore : IFhirStore
             },
         };
 
-        // TODO: check for a sort and apply to results
-
         HashSet<string> addedIds = new();
         int resultCount = 0;
 
@@ -4792,8 +4809,8 @@ public partial class VersionedFhirStore : IFhirStore
             ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
                 ?? byResource.First().resultParameters;
 
-            if ((rpForResource.MaxResults != null) &&
-                (resultCount >= rpForResource.MaxResults))
+            if (((rpForResource.MaxResults != null) && (resultCount >= rpForResource.MaxResults)) ||
+                ((rpForResource.PageMatchCount != null) && (resultCount >= rpForResource.PageMatchCount)))
             {
                 break;
             }

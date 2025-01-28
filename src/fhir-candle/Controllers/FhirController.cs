@@ -646,8 +646,17 @@ public class FhirController : ControllerBase
         try
         {
             // read the post body to process
-            using StreamReader reader = new StreamReader(Request.Body);
-            string content = await reader.ReadToEndAsync();
+            string content;
+            if (Request.HasFormContentType)
+            {
+                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
+            }
+            else
+            {
+                using StreamReader reader = new StreamReader(Request.Body);
+                content = await reader.ReadToEndAsync();
+            }
+
             string queryString = Request.QueryString.ToString();
 
             if (!string.IsNullOrEmpty(queryString))
@@ -810,8 +819,17 @@ public class FhirController : ControllerBase
         try
         {
             // read the post body to process
-            using StreamReader reader = new StreamReader(Request.Body);
-            string content = await reader.ReadToEndAsync();
+            string content;
+            if (Request.HasFormContentType)
+            {
+                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
+            }
+            else
+            {
+                using StreamReader reader = new StreamReader(Request.Body);
+                content = await reader.ReadToEndAsync();
+            }
+
             string queryString = Request.QueryString.ToString();
 
             if (!string.IsNullOrEmpty(queryString))
