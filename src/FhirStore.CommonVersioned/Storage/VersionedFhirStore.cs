@@ -383,7 +383,7 @@ public partial class VersionedFhirStore : IFhirStore
         DiscoverInteractionHooks();
 
         // generate our initial capability statement
-        _ = GenerateCapabilities(new FhirRequestContext(this, "GET", _config.BaseUrl + "/metadata"));
+        _ = generateCapabilities(new FhirRequestContext(this, "GET", _config.BaseUrl + "/metadata"));
 
         // create a timer to check max resource count if we are monitoring that
         _maxResourceCount = config.MaxResourceCount;
@@ -4360,7 +4360,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
             ? ctx.UrlQuery
             : ctx.SourceContent;
 
@@ -4674,7 +4674,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
             ? ctx.UrlQuery
             : ctx.SourceContent;
 
@@ -5572,7 +5572,7 @@ public partial class VersionedFhirStore : IFhirStore
     {
         if (_capabilitiesAreStale || (ctx?.Forwarded != null))
         {
-            return GenerateCapabilities(ctx);
+            return generateCapabilities(ctx);
         }
 
         // bypass read to avoid instance read hooks (firing meta hooks)
@@ -5581,9 +5581,8 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>Updates the current capabilities of this store.</summary>
     /// <param name="ctx">  The request context.</param>
-    /// <param name="store">(Optional) The store.</param>
     /// <returns>The capability statement.</returns>
-    private CapabilityStatement GenerateCapabilities(FhirRequestContext? ctx)
+    private CapabilityStatement generateCapabilities(FhirRequestContext? ctx)
     {
         string root = getBaseUrl(ctx);
         string smartRoot = fhirUrlToSmart(root);
@@ -5624,7 +5623,7 @@ public partial class VersionedFhirStore : IFhirStore
                 new() { Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.SearchSystem },
                 new() { Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.Transaction },
             },
-            //SearchParam = new(),      // currently, search parameters are expanded out to all-resource
+            //SearchParam = new(),      // search parameters are expanded out to each resource
             Operation = _operations.Values
                     .Where(o => o.AllowSystemLevel)
                     .Select(o => new CapabilityStatement.OperationComponent()
@@ -5688,19 +5687,19 @@ public partial class VersionedFhirStore : IFhirStore
                 Versioning = CapabilityStatement.ResourceVersionPolicy.NoVersion,
                 //ReadHistory = true,
                 UpdateCreate = true,
-                //ConditionalCreate = true,
-                ConditionalRead = CapabilityStatement.ConditionalReadStatus.NotSupported,
-                //ConditionalUpdate = true,
+                ConditionalCreate = true,
+                ConditionalRead = CapabilityStatement.ConditionalReadStatus.FullSupport,
+                ConditionalUpdate = true,
                 //ConditionalPatch = true,
                 ConditionalDelete = CapabilityStatement.ConditionalDeleteStatus.NotSupported,
-                ReferencePolicy = new CapabilityStatement.ReferenceHandlingPolicy?[]
-                {
+                ReferencePolicy =
+                [
                     CapabilityStatement.ReferenceHandlingPolicy.Literal,
-                    //CapabilityStatement.ReferenceHandlingPolicy.Logical,
+                    CapabilityStatement.ReferenceHandlingPolicy.Logical,
                     //CapabilityStatement.ReferenceHandlingPolicy.Resolves,
                     //CapabilityStatement.ReferenceHandlingPolicy.Enforced,
                     CapabilityStatement.ReferenceHandlingPolicy.Local,
-                },
+                ],
                 SearchInclude = resourceStore.GetSearchIncludes(),
                 SearchRevInclude = resourceStore.GetSearchRevIncludes(),
                 SearchParam = resourceStore.GetSearchParamDefinitions().Select(sp => new CapabilityStatement.SearchParamComponent()
@@ -5927,7 +5926,7 @@ public partial class VersionedFhirStore : IFhirStore
                     foreach (Base child in resource.Children)
                     {
                         fixTransactionEntryReferencesRecurse(
-                            entryFullUrl, 
+                            entryFullUrl,
                             child,
                             fullUrlLookup,
                             originalIdLookup,

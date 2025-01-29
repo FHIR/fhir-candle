@@ -225,6 +225,47 @@ public class R4TestsObservation : IClassFixture<R4Tests>
             selfLink.ShouldContain(searchPart);
         }
 
+
+        ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Observation/_search",
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = search,
+            SourceFormat = "application/x-www-form-urlencoded",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.TypeSearch(
+            ctx,
+            out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
+        if (entryCount != null)
+        {
+            results!.Entries.ShouldHaveCount((int)entryCount);
+        }
+
+        results!.Links.ShouldNotBeNullOrEmpty();
+        selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Observation?");
+        foreach (string searchPart in search.Split('&'))
+        {
+            selfLink.ShouldContain(searchPart);
+        }
+
+
         //_testOutputHelper.WriteLine(bundle);
     }
 }
@@ -336,6 +377,46 @@ public class R4TestsPatient : IClassFixture<R4Tests>
         }
 
         //_testOutputHelper.WriteLine(bundle);
+
+        ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Patient/_search",
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = search,
+            SourceFormat = "application/x-www-form-urlencoded",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.TypeSearch(
+            ctx,
+            out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
+        if (entryCount != null)
+        {
+            results!.Entries.ShouldHaveCount((int)entryCount);
+        }
+
+        results!.Links.ShouldNotBeNullOrEmpty();
+        selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Patient?");
+        foreach (string searchPart in search.Split('&'))
+        {
+            selfLink.ShouldContain(searchPart);
+        }
+
     }
 }
 
@@ -669,9 +750,9 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
     public void ParseTopic(string json)
     {
         HttpStatusCode sc = candleR4.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
-            json, 
-            "application/fhir+json", 
-            out Hl7.Fhir.Model.Resource? r, 
+            json,
+            "application/fhir+json",
+            out Hl7.Fhir.Model.Resource? r,
             out _);
 
         sc.ShouldBe(HttpStatusCode.OK);
@@ -767,11 +848,11 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
     [InlineData("(%previous.id.empty() or (%previous.status != 'finished')) and (%current.status = 'finished')", true, true, true, true, false, false)]
     [InlineData("(%previous.id.empty() | (%previous.status != 'finished')) and (%current.status = 'finished')", true, true, true, true, false, false)]
     public void TestSubEncounterNoFilters(
-        string fpCriteria, 
+        string fpCriteria,
         bool onCreate,
-        bool createResult, 
+        bool createResult,
         bool onUpdate,
-        bool updateResult, 
+        bool updateResult,
         bool onDelete,
         bool deleteResult)
     {
@@ -789,10 +870,10 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
             Url = topicUrl,
             ResourceTriggers = new()
             {
-                { 
-                    resourceType, 
+                {
+                    resourceType,
                     new List<ParsedSubscriptionTopic.ResourceTrigger>()
-                    { 
+                    {
                         new ParsedSubscriptionTopic.ResourceTrigger()
                         {
                             ResourceType = resourceType,

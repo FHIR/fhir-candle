@@ -85,10 +85,10 @@ public class ResourceStore<T> : IVersionedResourceStore
     private Dictionary<string, ExecutableSubscriptionInfo> _executableSubscriptions = new();
 
     /// <summary>The supported includes.</summary>
-    private string[] _supportedIncludes = Array.Empty<string>();
+    private string[] _supportedIncludes = [];
 
     /// <summary>The supported reverse includes.</summary>
-    private string[] _supportedRevIncludes = Array.Empty<string>();
+    private string[] _supportedRevIncludes = [];
 
     /// <summary>Gets the keys.</summary>
     /// <typeparam name="string">  Type of the string.</typeparam>
@@ -525,7 +525,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         ParsedSubscriptionTopic? parsedSubscriptionTopic = null;
         ParsedSubscription? parsedSubscription = null;
-        
+
         // perform any mandatory validation
         switch (source.TypeName)
         {
@@ -585,7 +585,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                                 source.Meta.Tag = new List<Coding>();
                             }
 
-                            if (!source.Meta.Tag.Any(c => 
+                            if (!source.Meta.Tag.Any(c =>
                                 c.System.Equals("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", StringComparison.Ordinal) &&
                                 c.Code.Equals("patient-supplied")))
                             {
@@ -701,8 +701,8 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="outcome">           [out] The outcome.</param>
     /// <returns>The updated resource, or null if it could not be performed.</returns>
     public Resource? InstanceUpdate(
-        Resource source, 
-        bool allowCreate, 
+        Resource source,
+        bool allowCreate,
         string ifMatch,
         string ifNoneMatch,
         HashSet<string> protectedResources,
@@ -1409,7 +1409,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                         {
                             additionalContext.AddRange(reverses);
                         }
-                    }    
+                    }
 
                     SubscriptionEvent subEvent = new()
                     {
@@ -1648,7 +1648,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         if (_searchParameters.TryGetValue(name, out ModelInfo.SearchParamDefinition? spd))
         {
-            if ((!string.IsNullOrEmpty(spd.Url)) && 
+            if ((!string.IsNullOrEmpty(spd.Url)) &&
                 _searchParamUrlsToNames.ContainsKey(spd.Url))
             {
                 _ = _searchParamUrlsToNames.Remove(spd.Url);
@@ -1757,7 +1757,11 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// An enumerator that allows foreach to be used to process the search includes in this
     /// collection.
     /// </returns>
-    public IEnumerable<string> GetSearchIncludes() => _supportedIncludes;
+    public IEnumerable<string> GetSearchIncludes() => _searchParameters.Values
+        .Where(sp => sp.Type == SearchParamType.Reference)
+        .Where(sp => sp.Name != null)
+        .Select(sp => this._resourceName + ":" + sp.Name!)
+        .Order();
 
     /// <summary>Gets the search reverse includes supported by this store.</summary>
     /// <returns>
