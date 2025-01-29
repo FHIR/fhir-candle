@@ -4360,7 +4360,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
             ? ctx.UrlQuery
             : ctx.SourceContent;
 
@@ -4674,7 +4674,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || ctx.SourceContent != "application/x-www-form-urlencoded"
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
             ? ctx.UrlQuery
             : ctx.SourceContent;
 
@@ -5927,7 +5927,7 @@ public partial class VersionedFhirStore : IFhirStore
                     foreach (Base child in resource.Children)
                     {
                         fixTransactionEntryReferencesRecurse(
-                            entryFullUrl, 
+                            entryFullUrl,
                             child,
                             fullUrlLookup,
                             originalIdLookup,

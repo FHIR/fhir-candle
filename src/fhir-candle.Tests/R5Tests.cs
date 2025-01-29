@@ -303,6 +303,46 @@ public class R5TestsObservation : IClassFixture<R5Tests>
         }
 
         //_testOutputHelper.WriteLine(bundle);
+
+
+        ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Observation/_search",
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = search,
+            SourceFormat = "application/x-www-form-urlencoded",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.TypeSearch(
+            ctx,
+            out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
+        if (entryCount != null)
+        {
+            results!.Entries.ShouldHaveCount((int)entryCount);
+        }
+
+        results!.Links.ShouldNotBeNullOrEmpty();
+        selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Observation?");
+        foreach (string searchPart in search.Split('&'))
+        {
+            selfLink.ShouldContain(searchPart);
+        }
     }
 }
 
@@ -409,6 +449,46 @@ public class R5TestsPatient : IClassFixture<R5Tests>
         }
 
         //_testOutputHelper.WriteLine(bundle);
+
+
+        ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Patient/_search",
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = search,
+            SourceFormat = "application/x-www-form-urlencoded",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.TypeSearch(
+            ctx,
+            out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
+        if (entryCount != null)
+        {
+            results!.Entries.ShouldHaveCount((int)entryCount);
+        }
+
+        results!.Links.ShouldNotBeNullOrEmpty();
+        selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Patient?");
+        foreach (string searchPart in search.Split('&'))
+        {
+            selfLink.ShouldContain(searchPart);
+        }
     }
 }
 
