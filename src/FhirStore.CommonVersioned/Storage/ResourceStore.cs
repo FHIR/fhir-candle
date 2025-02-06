@@ -1774,6 +1774,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// Performs a type search in this resource store.
     /// </summary>
     /// <param name="parameters">The search parameters.</param>
+    /// <param name="isNestedSearch">If this search has been triggered from inside another search request (for locking)</param>
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
