@@ -19,6 +19,7 @@ using Hl7.Fhir.Language.Debugging;
 using FhirCandle.Interactions;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using Hl7.Fhir.Utility;
 
 namespace FhirCandle.Storage;
 
@@ -679,6 +680,10 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         switch (source)
         {
+            case CompartmentDefinition cd:
+                _store.RegisterCompartmentDefinition(cd);
+                break;
+
             case SearchParameter sp:
                 SetExecutableSearchParameter(sp);
                 break;
@@ -916,6 +921,10 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         switch (source)
         {
+            case CompartmentDefinition cd:
+                _store.RegisterCompartmentDefinition(cd);
+                break;
+
             case SearchParameter sp:
                 SetExecutableSearchParameter(sp);
                 break;
@@ -986,6 +995,15 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         switch (previous?.TypeName)
         {
+            case "CompartmentDefinition":
+                {
+                    if ((previous is CompartmentDefinition cd) && (cd.Code != null))
+                    {
+                        _store.RemoveCompartmentDefinition(cd.Code.GetLiteral()!);
+                    }
+                }
+                break;
+
             case "SearchParameter":
                 RemoveExecutableSearchParameter((SearchParameter)(Resource)previous);
                 break;

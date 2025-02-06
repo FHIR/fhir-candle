@@ -132,6 +132,21 @@ public static class SerializationUtils
         };
     }
 
+    public static TResource DeserializeFhir<TResource>(
+        string content,
+        string format,
+        bool lenient = false)
+        where TResource : Resource
+    {
+        HttpStatusCode sc = TryDeserializeFhir<TResource>(content, format, out TResource? resource, out string exMessage, lenient);
+        if (sc.IsSuccessful())
+        {
+            return resource!;
+        }
+
+        throw new Exception($"Failed to deserialize content! status: {sc}:{sc.GetLiteral()}, {exMessage}");
+    }
+
     /// <summary>Try deserialize FHIR.</summary>
     /// <typeparam name="TResource">Type of the resource.</typeparam>
     /// <param name="content">  The content.</param>

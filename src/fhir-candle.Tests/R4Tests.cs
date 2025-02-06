@@ -416,8 +416,125 @@ public class R4TestsPatient : IClassFixture<R4Tests>
         {
             selfLink.ShouldContain(searchPart);
         }
-
     }
+
+    [Theory]
+    [InlineData("example", null, null, R4Tests._observationsWithSubjectExample)]
+    [InlineData("example", "Observation", null, R4Tests._observationsWithSubjectExample)]
+    [InlineData("example", "Observation", "_id=blood-pressure", 1)]
+    [InlineData("example", "Observation", "_id=656", 0)]
+    [InlineData("not-a-patient", null, null, 0)]
+    [InlineData("not-a-patient", "Observation", null, 0)]
+    [InlineData("not-a-patient", "Observation", "_id=blood-pressure", 0)]
+    public void PatientCompartmentSearch(string id, string? resourceType, string? search, int matchCount, int? entryCount = null)
+    {
+        FhirResponseContext response;
+        string getUrl;
+        string postUrl;
+
+        bool hasSearchParams = search != null;
+
+        if (resourceType == null)
+        {
+            getUrl = hasSearchParams
+                ? $"{_fixture._store.Config.BaseUrl}/Patient/{id}/*?{search}"
+                : $"{_fixture._store.Config.BaseUrl}/Patient/{id}/*";
+
+            postUrl = $"{_fixture._store.Config.BaseUrl}/Patient/{id}/_search";
+        }
+        else
+        {
+            getUrl = hasSearchParams
+                ? $"{_fixture._store.Config.BaseUrl}/Patient/{id}/{resourceType}?{search}"
+                : $"{_fixture._store.Config.BaseUrl}/Patient/{id}/{resourceType}";
+
+            postUrl = $"{_fixture._store.Config.BaseUrl}/Patient/{id}/{resourceType}/_search";
+        }
+
+        search ??= string.Empty;
+
+        //_testOutputHelper.WriteLine($"Running with {jsons.Length} files");
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "GET",
+            Url = getUrl,
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = resourceType == null
+            ? _fixture._store.CompartmentSearch(ctx, out response)
+            : _fixture._store.CompartmentTypeSearch(ctx, out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
+        if (entryCount != null)
+        {
+            results!.Entries.ShouldHaveCount((int)entryCount);
+        }
+
+        results!.Links.ShouldNotBeNullOrEmpty();
+        string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(getUrl);
+        foreach (string searchPart in search.Split('&'))
+        {
+            selfLink.ShouldContain(searchPart);
+        }
+
+        //_testOutputHelper.WriteLine(bundle);
+
+        ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = postUrl,
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = search,
+            SourceFormat = "application/x-www-form-urlencoded",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = resourceType == null
+            ? _fixture._store.CompartmentSearch(ctx, out response)
+            : _fixture._store.CompartmentTypeSearch(ctx, out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(matchCount);
+        if (entryCount != null)
+        {
+            results!.Entries.ShouldHaveCount((int)entryCount);
+        }
+
+        results!.Links.ShouldNotBeNullOrEmpty();
+        selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith(getUrl);
+        foreach (string searchPart in search.Split('&'))
+        {
+            selfLink.ShouldContain(searchPart);
+        }
+    }
+
 }
 
 /// <summary>A 4 test conditionals.</summary>

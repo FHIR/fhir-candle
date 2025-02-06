@@ -12,6 +12,7 @@ using FhirResponseContext = FhirCandle.Models.FhirResponseContext;
 using Resource = Hl7.Fhir.Model.Resource;
 using TenantConfiguration = FhirCandle.Models.TenantConfiguration;
 using Shouldly;
+using static FhirCandle.Storage.Common;
 
 namespace fhir.candle.Tests;
 
@@ -111,9 +112,14 @@ public class AuthCompartmentTests: IDisposable
             DestinationFormat = "application/fhir+json",
         };
 
-        bool success = versionedFhirStore.TypeSearch(
-            ctx,
-            out FhirResponseContext response);
+        FhirResponseContext response;
+
+        bool success = ctx.Interaction switch
+        {
+            StoreInteractionCodes.CompartmentSearch => versionedFhirStore.CompartmentSearch(ctx, out response),
+            StoreInteractionCodes.CompartmentTypeSearch => versionedFhirStore.CompartmentTypeSearch(ctx, out response),
+            _ => versionedFhirStore.TypeSearch(ctx, out response)
+        };
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.OK);

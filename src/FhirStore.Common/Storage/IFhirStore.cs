@@ -191,6 +191,22 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
         FhirRequestContext ctx,
         out FhirResponseContext response);
 
+    /// <summary>Compartment search.</summary>
+    /// <param name="ctx">     The request context.</param>
+    /// <param name="response">[out] The response data.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    bool CompartmentSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response);
+
+    /// <summary>Compartment search, restricted to a single resource type in the compartment.</summary>
+    /// <param name="ctx">     The request context.</param>
+    /// <param name="response">[out] The response data.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    bool CompartmentTypeSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response);
+
     /// <summary>
     /// Serialize one or more subscription events into the desired format and content level.
     /// </summary>
@@ -235,6 +251,18 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     /// <param name="id">    [out] The identifier.</param>
     /// <param name="status">The status.</param>
     void ChangeSubscriptionStatus(string id, string status);
+
+    /// <summary>
+    /// Registers a new compartment definition in the FHIR store.
+    /// </summary>
+    /// <param name="compartmentDefinition">The compartment definition to register.</param>
+    /// <returns>True if the compartment definition was successfully registered; otherwise, false.</returns>
+    bool RegisterCompartmentDefinition(object compartmentDefinition);
+
+    /// <summary>
+    /// Removes a compartment definition from the store.
+    /// </summary>
+    void RemoveCompartmentDefinition(string compartmentType);
 
     /// <summary>Supports resource.</summary>
     /// <param name="resourceName">Name of the resource.</param>

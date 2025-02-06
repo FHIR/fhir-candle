@@ -22,6 +22,8 @@ using System.Collections.Concurrent;
 using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
+using FhirCandle.Compartments;
+using Hl7.Fhir.Utility;
 
 namespace FhirCandle.Storage;
 
@@ -66,6 +68,11 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>(Immutable) The cache of compiled search parameter extraction functions.</summary>
     private readonly ConcurrentDictionary<string, CompiledExpression> _compiledSearchParameters = [];
+
+    /// <summary>
+    /// A dictionary that holds the parsed compartments.
+    /// </summary>
+    private readonly Dictionary<string, ParsedCompartment> _compartments = [];
 
     /// <summary>The sp lock object.</summary>
     private readonly object _spLockObject = new();
@@ -254,8 +261,14 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
+        // traverse compartment definitions
+        foreach (CompartmentDefinition cd in CoreCompartmentSource.GetCompartments())
+        {
+            _ = RegisterCompartmentDefinition(cd);
+        }
+
         // check for a load directory
-        if ((config.LoadDirectory != null) && (_loadedSupplements.Add(config.LoadDirectory.FullName)))
+        if ((config.LoadDirectory != null) && _loadedSupplements.Add(config.LoadDirectory.FullName))
         {
             _hasProtected = config.ProtectLoadedContent;
             _loadReprocess = new();
@@ -1214,8 +1227,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="interaction"> The interaction.</param>
     /// <returns>An array of i FHIR interaction hook.</returns>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private IFhirInteractionHook[] GetHooks(string resourceType, Common.StoreInteractionCodes interaction)
+    private IFhirInteractionHook[] GetHooks(string? resourceType, Common.StoreInteractionCodes interaction)
     {
+        if (string.IsNullOrEmpty(resourceType))
+        {
+            return [];
+        }
+
         if (!_hooksByInteractionByResource.TryGetValue(resourceType, out Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>? hooksByInteraction))
         {
             return [];
@@ -2409,6 +2427,59 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>
+    /// Registers a new compartment definition in the FHIR store.
+    /// </summary>
+    /// <param name="compartmentDefinition">The compartment definition to register.</param>
+    /// <returns>True if the compartment definition was successfully registered; otherwise, false.</returns>
+    /// <remarks>
+    /// This method attempts to parse the provided compartment definition and add it to the store.
+    /// If the compartment type is not supported or an error occurs during parsing, the method returns false.
+    /// </remarks>
+    public bool RegisterCompartmentDefinition(object compartmentDefinition)
+    {
+        try
+        {
+            if (compartmentDefinition is not CompartmentDefinition cd)
+            {
+                Console.WriteLine("CompartmentDefinition: resource is not a CompartmentDefinition");
+                return false;
+            }
+
+            // try to parse the definition
+            ParsedCompartment parsed = new(cd);
+
+            if (!_store.ContainsKey(parsed.CompartmentType))
+            {
+                Console.WriteLine($"CompartmentDefinition: resource type {parsed.CompartmentType} not supported for requested compartment {cd.Url}");
+                return false;
+            }
+
+            _compartments[parsed.CompartmentType] = parsed;
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error parsing CompartmentDefinition: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes a compartment definition from the store.
+    /// </summary>
+    /// <param name="compartmentType">The type of the compartment to remove.</param>
+    public void RemoveCompartmentDefinition(string compartmentType)
+    {
+        if (!_compartments.ContainsKey(compartmentType))
+        {
+            return;
+        }
+
+        _compartments.Remove(compartmentType);
+    }
+
+    /// <summary>
     /// Attempts to add an executable search parameter to a given resource.
     /// </summary>
     /// <param name="resourceType">Type of the resource.</param>
@@ -2869,7 +2940,6 @@ public partial class VersionedFhirStore : IFhirStore
             });
         }
     }
-
 
     /// <summary>
     /// Serialize one or more subscription events into the desired format and content level.
@@ -4299,7 +4369,6 @@ rs,
             return false;
         }
 
-
         switch (ctx.Interaction)
         {
             case Common.StoreInteractionCodes.CompartmentTypeSearch:
@@ -4366,7 +4435,7 @@ rs,
             {
                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
-                    "Resource type is required for type-delete interactions",
+                    "Resource type is required for type-search interactions",
                     OperationOutcome.IssueType.Structure),
                 StatusCode = HttpStatusCode.BadRequest,
             };
@@ -4545,11 +4614,569 @@ rs,
         {
             Resource = bundle,
             ResourceType = "Bundle",
-            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Type search successful"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
     }
+
+    /// <summary>Compartment search.</summary>
+    /// <param name="ctx">     The request context.</param>
+    /// <param name="response">[out] The response data.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    public bool CompartmentSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        bool success = DoCompartmentSearch(
+            ctx,
+            out response);
+
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+
+        response = response with
+        {
+            MimeType = ctx.DestinationFormat,
+            SerializedResource = sr,
+            SerializedOutcome = so,
+        };
+
+        return success;
+    }
+
+
+    /// <summary>Executes the compartment search operation.</summary>
+    /// <param name="ctx">The request and related context.</param>
+    /// <param name="response">[out] The response status, resource, outcome, and context.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    internal bool DoCompartmentSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+
+        // check to see if we have a compartment type
+        if (string.IsNullOrEmpty(ctx.CompartmentType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Compartment type is required for compartment search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        // check to see if the compartment resource is supported
+        if (!_store.TryGetValue(ctx.CompartmentType, out IVersionedResourceStore? compartmentRS))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment Resource type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if we have a compatible compartment definition
+        if (!_compartments.TryGetValue(ctx.CompartmentType, out ParsedCompartment? compartment))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        IFhirInteractionHook[] hooks = GetHooks(ctx.CompartmentType, Common.StoreInteractionCodes.CompartmentSearch);
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            {
+                continue;
+            }
+
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                compartmentRS,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+        }
+
+        List<Resource> results = [];
+        List<ParsedSearchParameter> appliedParameters = [];
+
+        // iterate across the compartment resources
+        foreach ((string resourceType, ParsedCompartment.IncludedResource ir) in compartment.IncludedResources)
+        {
+            // check to see if we support this resource type
+            if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
+            {
+                // skip
+                continue;
+            }
+
+            // parse the search parameters in the context of this resource
+            IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+                searchQueryParams,
+                this,
+                rs,
+                resourceType);
+
+            // parse the relevant compartment type parameters
+            ParsedSearchParameter[] compartmentFilters = ir.SearchParamCodes.Select(
+                code => ParsedSearchParameter.Parse(
+                $"?{code}={ctx.CompartmentType}/{ctx.Id}",
+                this,
+                rs,
+                resourceType).First()).ToArray();
+
+            // execute search - if there is only one compartment criteria, add it here
+            IEnumerable<Resource> compartmentResults = (compartmentFilters.Length == 1)
+                ? rs.TypeSearch([.. parameters, .. compartmentFilters])
+                : rs.TypeSearch(parameters);
+
+            if (compartmentFilters.Length == 1)
+            {
+                results.AddRange(compartmentResults);
+            }
+            else
+            {
+                // reduce based on compartment filters (OR)
+                results.AddRange(compartmentResults.Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf]))));
+            }
+
+            appliedParameters.AddRange(parameters.Where(p => !p.IgnoredParameter));
+        }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            searchQueryParams,
+            this,
+            compartmentRS,
+            ctx.CompartmentType);
+
+        string selfLink = $"{getBaseUrl(ctx)}/{ctx.CompartmentType}/{ctx.Id}/*";
+        string selfSearchParams = string.Join('&', appliedParameters.Select(p => p.GetAppliedQueryString()).Distinct());
+        string selfResultParams = resultParameters.GetAppliedQueryString();
+
+        if (!string.IsNullOrEmpty(selfSearchParams))
+        {
+            selfLink = selfLink + "?" + selfSearchParams;
+        }
+
+        if (!string.IsNullOrEmpty(selfResultParams))
+        {
+            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
+        }
+
+        // create our bundle for results
+        Bundle bundle = new Bundle
+        {
+            Type = Bundle.BundleType.Searchset,
+            Total = results.Count(),
+            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
+        };
+
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+            ? null
+            : new(this, resultParameters.SortRequests);
+
+        HashSet<string> addedIds = new();
+        int resultCount = 0;
+
+        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        {
+            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            {
+                break;
+            }
+
+            resultCount++;
+
+            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+            if (addedIds.Contains(relativeUrl))
+            {
+                // promote to match
+                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+            }
+            else
+            {
+                // add the matched result to the bundle
+                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                // track we have added this id
+                addedIds.Add(relativeUrl);
+            }
+
+            // add any included resources
+            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+            // TODO: check for include:iterate directives
+
+            // add any reverse included resources
+            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+        }
+
+        if (hooks.Length > 0)
+        {
+            foreach (IFhirInteractionHook hook in hooks)
+            {
+                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
+                {
+                    _ = hook.DoInteractionHook(
+                            ctx,
+                            this,
+                            compartmentRS,
+                            bundle,
+                            out FhirResponseContext hr);
+
+                    // check for the hook indicating processing is complete
+                    if (hr.StatusCode != null)
+                    {
+                        response = hr;
+                        return true;
+                    }
+
+                    // if the hook modified the resource, use that moving forward
+                    if ((hr.Resource != null) &&
+                        (hr.Resource is Bundle opBundle))
+                    {
+                        bundle = opBundle;
+                    }
+                }
+            }
+        }
+
+        response = new()
+        {
+            Resource = bundle,
+            ResourceType = "Bundle",
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Compartment search successful"),
+            StatusCode = HttpStatusCode.OK,
+        };
+        return true;
+    }
+
+    /// <summary>Compartment search, restricted to a single type.</summary>
+    /// <param name="ctx">     The request context.</param>
+    /// <param name="response">[out] The response data.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    public bool CompartmentTypeSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        bool success = DoCompartmentTypeSearch(
+            ctx,
+            out response);
+
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+
+        response = response with
+        {
+            MimeType = ctx.DestinationFormat,
+            SerializedResource = sr,
+            SerializedOutcome = so,
+        };
+
+        return success;
+    }
+
+    /// <summary>Executes the compartment type search operation.</summary>
+    /// <param name="ctx">The request and related context.</param>
+    /// <param name="response">[out] The response status, resource, outcome, and context.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    internal bool DoCompartmentTypeSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+
+        // check to see if we have a compartment type
+        if (string.IsNullOrEmpty(ctx.CompartmentType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Compartment type is required for compartment type search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        // check to see if the compartment resource is supported
+        if (!_store.TryGetValue(ctx.CompartmentType, out IVersionedResourceStore? compartmentRS))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment Resource type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if we have a compatible compartment definition
+        if (!_compartments.TryGetValue(ctx.CompartmentType, out ParsedCompartment? compartment))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if we have a resource type
+        if (string.IsNullOrEmpty(ctx.ResourceType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Resource type is required for compartment type search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        // get the resource store for the target search resource type
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Resource type: {ctx.ResourceType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if this resource is defined in this compartment
+        if (!compartment.IncludedResources.TryGetValue(ctx.ResourceType, out ParsedCompartment.IncludedResource? compartmentIR))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Resource type: {ctx.ResourceType} is not supported in compartment {ctx.CompartmentType}",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check for hooks to call before evaluating
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.CompartmentTypeSearch);
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            {
+                continue;
+            }
+
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+        }
+
+        // parse search parameters
+        IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+            searchQueryParams,
+            this,
+            rs,
+            ctx.ResourceType);
+
+        ParsedSearchParameter[] compartmentFilters = compartmentIR.SearchParamCodes.Select(
+            code => ParsedSearchParameter.Parse(
+            $"?{code}={ctx.CompartmentType}/{ctx.Id}",
+            this,
+            rs,
+            ctx.ResourceType).First()).ToArray();
+
+        // execute search - if there is only one compartment criteria, add it here
+        Resource[] results = (compartmentFilters.Length == 1)
+            ? rs.TypeSearch([..parameters, ..compartmentFilters]).ToArray()
+            : rs.TypeSearch(parameters).ToArray();
+
+        // reduce based on compartment filters if there was more than one
+        if (compartmentFilters.Length != 1)
+        {
+            // reduce based on compartment filters (OR)
+            results = results
+                .Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf])))
+                .ToArray();
+        }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            searchQueryParams,
+            this,
+            rs,
+            ctx.ResourceType);
+
+        string selfLink = $"{getBaseUrl(ctx)}/{ctx.CompartmentType}/{ctx.Id}/{ctx.ResourceType}";
+        string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
+        string selfResultParams = resultParameters.GetAppliedQueryString();
+
+        if (!string.IsNullOrEmpty(selfSearchParams))
+        {
+            selfLink = selfLink + "?" + selfSearchParams;
+        }
+
+        if (!string.IsNullOrEmpty(selfResultParams))
+        {
+            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
+        }
+
+        // create our bundle for results
+        Bundle bundle = new Bundle
+        {
+            Type = Bundle.BundleType.Searchset,
+            Total = results.Length,
+            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
+        };
+
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+            ? null
+            : new(this, resultParameters.SortRequests);
+
+        HashSet<string> addedIds = new();
+        int resultCount = 0;
+
+        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        {
+            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            {
+                break;
+            }
+
+            resultCount++;
+
+            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+            if (addedIds.Contains(relativeUrl))
+            {
+                // promote to match
+                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+            }
+            else
+            {
+                // add the matched result to the bundle
+                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                // track we have added this id
+                addedIds.Add(relativeUrl);
+            }
+
+            // add any included resources
+            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+            // TODO: check for include:iterate directives
+
+            // add any reverse included resources
+            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+        }
+
+        if (hooks.Length > 0)
+        {
+            foreach (IFhirInteractionHook hook in hooks)
+            {
+                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
+                {
+                    _ = hook.DoInteractionHook(
+                            ctx,
+                            this,
+                            rs,
+                            bundle,
+                            out FhirResponseContext hr);
+
+                    // check for the hook indicating processing is complete
+                    if (hr.StatusCode != null)
+                    {
+                        response = hr;
+                        return true;
+                    }
+
+                    // if the hook modified the resource, use that moving forward
+                    if ((hr.Resource != null) &&
+                        (hr.Resource is Bundle opBundle))
+                    {
+                        bundle = opBundle;
+                    }
+                }
+            }
+        }
+
+        response = new()
+        {
+            Resource = bundle,
+            ResourceType = "Bundle",
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Compartment type search successful"),
+            StatusCode = HttpStatusCode.OK,
+        };
+        return true;
+    }
+
+
 
     /// <summary>System search.</summary>
     /// <param name="ctx">     The request context.</param>
