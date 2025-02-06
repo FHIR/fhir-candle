@@ -17,6 +17,7 @@ using fhir.candle.Tests.Extensions;
 using Shouldly;
 using System.Net;
 using Hl7.FhirPath;
+using fhir.candle.Services;
 
 namespace fhir.candle.Tests;
 
@@ -28,6 +29,11 @@ public class R4Tests
 
     /// <summary>(Immutable) The configuration.</summary>
     internal readonly TenantConfiguration _config;
+
+    /// <summary>
+    /// (Immutable) The authorizations.
+    /// </summary>
+    internal readonly Dictionary<string, AuthorizationInfo> _authorizations;
 
     /// <summary>(Immutable) The total number of patients.</summary>
     internal const int _patientCount = 6;
@@ -70,6 +76,73 @@ public class R4Tests
 
         _store = new VersionedFhirStore();
         _store.Init(_config);
+
+        _authorizations = [];
+        _authorizations.Add("PatientExampleFull", new()
+            {
+                Tenant = _config.ControllerName,
+                RequestParameters = new()
+                {
+                    ResponseType = "code",
+                    ClientId = "client_id",
+                    Launch = "launch/patient",
+                    Scope = "fhirUser launch/patient patient/*.*",
+                    Audience = _config.BaseUrl,
+                },
+                RemoteIpAddress = "127.0.0.1",
+                LaunchPatient = "Patient/example",
+                Scopes = new()
+                    {
+                        { "fhirUser", true },
+                        { "launch/patient", true },
+                        { "patient/*.*", true },
+                    },
+                PatientScopes = ["*.*"],
+            });
+
+        _authorizations.Add("PatientExamplePatientOnly", new()
+        {
+            Tenant = _config.ControllerName,
+            RequestParameters = new()
+            {
+                ResponseType = "code",
+                ClientId = "client_id",
+                Launch = "launch/patient",
+                Scope = "fhirUser launch/patient patient/Patient.*",
+                Audience = _config.BaseUrl,
+            },
+            RemoteIpAddress = "127.0.0.1",
+            LaunchPatient = "Patient/example",
+            Scopes = new()
+                    {
+                        { "fhirUser", true },
+                        { "launch/patient", true },
+                        { "patient/Patient.*", true },
+                    },
+            PatientScopes = ["Patient.*"],
+        });
+
+        _authorizations.Add("PatientDoesNotExistFull", new()
+        {
+            Tenant = _config.ControllerName,
+            RequestParameters = new()
+            {
+                ResponseType = "code",
+                ClientId = "client_id",
+                Launch = "launch/patient",
+                Scope = "fhirUser launch/patient patient/*.*",
+                Audience = _config.BaseUrl,
+            },
+            RemoteIpAddress = "127.0.0.1",
+            LaunchPatient = "Patient/a-patient-that-does-not-exist",
+            Scopes = new()
+                    {
+                        { "fhirUser", true },
+                        { "launch/patient", true },
+                        { "patient/*.*", true },
+                    },
+            PatientScopes = ["*.*"],
+        });
     }
 }
 
@@ -137,55 +210,59 @@ public class R4TestsObservation : IClassFixture<R4Tests>
     }
 
     [Theory]
-    [InlineData("_id:not=example", (R4Tests._observationCount - 1))]
-    [InlineData("_id=AnIdThatDoesNotExist", 0)]
-    [InlineData("_id=example", 1)]
-    [InlineData("_id=example&_include=Observation:patient", 1, 2)]
-    [InlineData("code-value-quantity=http://loinc.org|29463-7$185|http://unitsofmeasure.org|[lb_av]", 1)]
-    [InlineData("code-value-quantity=http://loinc.org|29463-7,http://example.org|testing$185|http://unitsofmeasure.org|[lb_av]", 1)]
-    [InlineData("code-value-quantity=http://loinc.org|29463-7,urn:iso:std:iso:11073:10101|152584$185|http://unitsofmeasure.org|[lb_av],820|urn:iso:std:iso:11073:10101|265201", 2)]
-    [InlineData("value-quantity=185|http://unitsofmeasure.org|[lb_av]", 1)]
-    [InlineData("value-quantity=185|http://unitsofmeasure.org|lbs", 1)]
-    [InlineData("value-quantity=185||[lb_av]", 1)]
-    [InlineData("value-quantity=185||lbs", 1)]
-    [InlineData("value-quantity=185", 1)]
-    [InlineData("value-quantity=ge185|http://unitsofmeasure.org|[lb_av]", 1)]
-    [InlineData("value-quantity=ge185||[lb_av]", 1)]
-    [InlineData("value-quantity=ge185||lbs", 1)]
-    [InlineData("value-quantity=ge185", 2)]
-    [InlineData("value-quantity=gt185|http://unitsofmeasure.org|[lb_av]", 0)]
-    [InlineData("value-quantity=gt185||[lb_av]", 0)]
-    [InlineData("value-quantity=gt185||lbs", 0)]
-    [InlineData("value-quantity=84.1|http://unitsofmeasure.org|[kg]", 0)]       // TODO: test unit conversion
-    [InlineData("value-quantity=820|urn:iso:std:iso:11073:10101|265201", 1)]
-    [InlineData("value-quantity=820|urn:iso:std:iso:11073:10101|cL/s", 1)]
-    [InlineData("value-quantity=820|urn:iso:std:iso:11073:10101|cl/s", 1)]
-    [InlineData("value-quantity=820||265201", 1)]
-    [InlineData("value-quantity=820||cL/s", 1)]
-    [InlineData("subject=Patient/example", R4Tests._observationsWithSubjectExample)]
-    [InlineData("subject:Patient=Patient/example", R5Tests._observationsWithSubjectExample)]
-    [InlineData("subject:Device=Patient/example", 0)]
-    [InlineData("subject=Patient/UnknownPatientId", 0)]
-    [InlineData("subject=example", R4Tests._observationsWithSubjectExample)]
-    [InlineData("code=http://loinc.org|9272-6", 1)]
-    [InlineData("code=http://snomed.info/sct|169895004", 1)]
-    [InlineData("code=http://snomed.info/sct|9272-6", 0)]
-    [InlineData("_profile=http://hl7.org/fhir/StructureDefinition/vitalsigns", R4Tests._observationsVitalSigns)]
-    [InlineData("_profile:missing=true", (R4Tests._observationCount - R4Tests._observationsVitalSigns))]
-    [InlineData("_profile:missing=false", R4Tests._observationsVitalSigns)]
-    [InlineData("subject.name=peter", R4Tests._observationsWithSubjectExample)]
-    [InlineData("subject:Patient.name=peter", R4Tests._observationsWithSubjectExample)]
-    [InlineData("subject._id=example", R4Tests._observationsWithSubjectExample)]
-    [InlineData("subject:Patient._id=example", R4Tests._observationsWithSubjectExample)]
-    [InlineData("subject._id=example&_include=Observation:patient", R4Tests._observationsWithSubjectExample, R4Tests._observationsWithSubjectExample + 1)]
-    public void ObservationSearch(string search, int matchCount, int? entryCount = null)
+    [InlineData(null, "_id:not=example", (R4Tests._observationCount - 1))]
+    [InlineData(null, "_id=AnIdThatDoesNotExist", 0)]
+    [InlineData(null, "_id=example", 1)]
+    [InlineData(null, "_id=example&_include=Observation:patient", 1, 2)]
+    [InlineData(null, "code-value-quantity=http://loinc.org|29463-7$185|http://unitsofmeasure.org|[lb_av]", 1)]
+    [InlineData(null, "code-value-quantity=http://loinc.org|29463-7,http://example.org|testing$185|http://unitsofmeasure.org|[lb_av]", 1)]
+    [InlineData(null, "code-value-quantity=http://loinc.org|29463-7,urn:iso:std:iso:11073:10101|152584$185|http://unitsofmeasure.org|[lb_av],820|urn:iso:std:iso:11073:10101|265201", 2)]
+    [InlineData(null, "value-quantity=185|http://unitsofmeasure.org|[lb_av]", 1)]
+    [InlineData(null, "value-quantity=185|http://unitsofmeasure.org|lbs", 1)]
+    [InlineData(null, "value-quantity=185||[lb_av]", 1)]
+    [InlineData(null, "value-quantity=185||lbs", 1)]
+    [InlineData(null, "value-quantity=185", 1)]
+    [InlineData(null, "value-quantity=ge185|http://unitsofmeasure.org|[lb_av]", 1)]
+    [InlineData(null, "value-quantity=ge185||[lb_av]", 1)]
+    [InlineData(null, "value-quantity=ge185||lbs", 1)]
+    [InlineData(null, "value-quantity=ge185", 2)]
+    [InlineData(null, "value-quantity=gt185|http://unitsofmeasure.org|[lb_av]", 0)]
+    [InlineData(null, "value-quantity=gt185||[lb_av]", 0)]
+    [InlineData(null, "value-quantity=gt185||lbs", 0)]
+    [InlineData(null, "value-quantity=84.1|http://unitsofmeasure.org|[kg]", 0)]       // TODO: test unit conversion
+    [InlineData(null, "value-quantity=820|urn:iso:std:iso:11073:10101|265201", 1)]
+    [InlineData(null, "value-quantity=820|urn:iso:std:iso:11073:10101|cL/s", 1)]
+    [InlineData(null, "value-quantity=820|urn:iso:std:iso:11073:10101|cl/s", 1)]
+    [InlineData(null, "value-quantity=820||265201", 1)]
+    [InlineData(null, "value-quantity=820||cL/s", 1)]
+    [InlineData(null, "subject=Patient/example", R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "subject:Patient=Patient/example", R5Tests._observationsWithSubjectExample)]
+    [InlineData(null, "subject:Device=Patient/example", 0)]
+    [InlineData(null, "subject=Patient/UnknownPatientId", 0)]
+    [InlineData(null, "subject=example", R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "code=http://loinc.org|9272-6", 1)]
+    [InlineData(null, "code=http://snomed.info/sct|169895004", 1)]
+    [InlineData(null, "code=http://snomed.info/sct|9272-6", 0)]
+    [InlineData(null, "_profile=http://hl7.org/fhir/StructureDefinition/vitalsigns", R4Tests._observationsVitalSigns)]
+    [InlineData(null, "_profile:missing=true", (R4Tests._observationCount - R4Tests._observationsVitalSigns))]
+    [InlineData(null, "_profile:missing=false", R4Tests._observationsVitalSigns)]
+    [InlineData(null, "subject.name=peter", R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "subject:Patient.name=peter", R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "subject._id=example", R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "subject:Patient._id=example", R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "subject._id=example&_include=Observation:patient", R4Tests._observationsWithSubjectExample, R4Tests._observationsWithSubjectExample + 1)]
+    [InlineData("PatientExampleFull", "subject=Patient/example", R4Tests._observationsWithSubjectExample)]
+    [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
+    [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
+    public void ObservationSearch(string? authKey, string search, int matchCount, int? entryCount = null)
     {
-        //_testOutputHelper.WriteLine($"Running with {jsons.Length} files");
+        AuthorizationInfo? authInfo = null;
 
-        //coreR4.Hl7.Fhir.Model.Task t;
-        //t.Code.Coding.Any(c => c.System == "http://loinc.org" && c.Code == "29463-7");
-
-        //t.Code.Coding.SelectMany(cc => cc.Co)
+        if ((authKey != null) &&
+            !_fixture._authorizations.TryGetValue(authKey, out authInfo))
+        {
+            throw new InvalidOperationException($"Authorization key '{authKey}' not found");
+        }
 
         FhirRequestContext ctx = new()
         {
@@ -194,7 +271,7 @@ public class R4TestsObservation : IClassFixture<R4Tests>
             HttpMethod = "GET",
             Url = _fixture._store.Config.BaseUrl + "/Observation?" + search,
             Forwarded = null,
-            Authorization = null,
+            Authorization = authInfo,
             SourceFormat = "application/fhir+json",
             DestinationFormat = "application/fhir+json",
         };
@@ -233,7 +310,7 @@ public class R4TestsObservation : IClassFixture<R4Tests>
             HttpMethod = "POST",
             Url = _fixture._store.Config.BaseUrl + "/Observation/_search",
             Forwarded = null,
-            Authorization = null,
+            Authorization = authInfo,
             SourceContent = search,
             SourceFormat = "application/x-www-form-urlencoded",
             DestinationFormat = "application/fhir+json",
@@ -289,53 +366,97 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     }
 
     [Theory]
-    [InlineData("_id:not=example", (R4Tests._patientCount - 1))]
-    [InlineData("_id=AnIdThatDoesNotExist", 0)]
-    [InlineData("_id=example", 1)]
-    [InlineData("_id=example&_revinclude=Observation:patient", 1, (R4Tests._observationsWithSubjectExample + 1))]
-    [InlineData("name=peter", 1)]
-    [InlineData("name=not-present,another-not-present", 0)]
-    [InlineData("name=peter,not-present", 1)]
-    [InlineData("name=not-present,peter", 1)]
-    [InlineData("name:contains=eter", 1)]
-    [InlineData("name:contains=zzrot", 0)]
-    [InlineData("name:exact=Peter", 1)]
-    [InlineData("name:exact=peter", 0)]
-    [InlineData("name:exact=Peterish", 0)]
-    [InlineData("_profile:missing=true", R4Tests._patientCount - 1)]
-    [InlineData("_profile:missing=false", 1)]
-    [InlineData("multiplebirth=3", 1)]
-    [InlineData("multiplebirth=le3", 1)]
-    [InlineData("multiplebirth=lt3", 0)]
-    [InlineData("birthdate=1982-01-23", 1)]
-    [InlineData("birthdate=1982-01", 1)]
-    [InlineData("birthdate=1982", 2)]
-    [InlineData("gender=InvalidValue", 0)]
-    [InlineData("gender=male", R4Tests._patientsMale)]
-    [InlineData("gender=female", R4Tests._patientsFemale)]
-    [InlineData("gender=male,female", (R4Tests._patientsMale + R4Tests._patientsFemale))]
-    [InlineData("name-use=official", R4Tests._patientCount - 1)]
-    [InlineData("name-use=invalid-name-use", 0)]
-    [InlineData("identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
-    [InlineData("identifier=|12345", 1)]
-    [InlineData("identifier=urn:oid:1.2.36.146.595.217.0.1|ValueThatDoesNotExist", 0)]
-    [InlineData("identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|12345", 1)]
-    [InlineData("identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|EXT|12345", 0)]
-    [InlineData("identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|ABC", 0)]
-    [InlineData("active=true", R4Tests._patientCount - 1)]
-    [InlineData("active=false", 0)]
-    [InlineData("active:missing=true", 1)]
-    [InlineData("active=garbage", 0)]
-    [InlineData("telecom=phone|(03) 5555 6473", 1)]
-    [InlineData("telecom=|(03) 5555 6473", 1)]
-    [InlineData("telecom=phone|", 1)]
-    [InlineData("_id=example&name=peter", 1)]
-    [InlineData("_id=example&name=not-present", 0)]
-    [InlineData("_id=example&_profile:missing=false", 0)]
-    [InlineData("_has:Observation:patient:_id=blood-pressure", 1)]
-    [InlineData("_has:Observation:subject:_id=blood-pressure", 1)]
-    public void PatientSearch(string search, int matchCount, int? entryCount = null)
+    [InlineData(null, "_id:not=example", (R4Tests._patientCount - 1))]
+    [InlineData(null, "_id=AnIdThatDoesNotExist", 0)]
+    [InlineData(null, "_id=example", 1)]
+    [InlineData(null, "_id=example&_revinclude=Observation:patient", 1, (R4Tests._observationsWithSubjectExample + 1))]
+    [InlineData(null, "name=peter", 1)]
+    [InlineData(null, "name=not-present,another-not-present", 0)]
+    [InlineData(null, "name=peter,not-present", 1)]
+    [InlineData(null, "name=not-present,peter", 1)]
+    [InlineData(null, "name:contains=eter", 1)]
+    [InlineData(null, "name:contains=zzrot", 0)]
+    [InlineData(null, "name:exact=Peter", 1)]
+    [InlineData(null, "name:exact=peter", 0)]
+    [InlineData(null, "name:exact=Peterish", 0)]
+    [InlineData(null, "_profile:missing=true", R4Tests._patientCount - 1)]
+    [InlineData(null, "_profile:missing=false", 1)]
+    [InlineData(null, "multiplebirth=3", 1)]
+    [InlineData(null, "multiplebirth=le3", 1)]
+    [InlineData(null, "multiplebirth=lt3", 0)]
+    [InlineData(null, "birthdate=1982-01-23", 1)]
+    [InlineData(null, "birthdate=1982-01", 1)]
+    [InlineData(null, "birthdate=1982", 2)]
+    [InlineData(null, "gender=InvalidValue", 0)]
+    [InlineData(null, "gender=male", R4Tests._patientsMale)]
+    [InlineData(null, "gender=female", R4Tests._patientsFemale)]
+    [InlineData(null, "gender=male,female", (R4Tests._patientsMale + R4Tests._patientsFemale))]
+    [InlineData(null, "name-use=official", R4Tests._patientCount - 1)]
+    [InlineData(null, "name-use=invalid-name-use", 0)]
+    [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
+    [InlineData(null, "identifier=|12345", 1)]
+    [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|ValueThatDoesNotExist", 0)]
+    [InlineData(null, "identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|12345", 1)]
+    [InlineData(null, "identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|EXT|12345", 0)]
+    [InlineData(null, "identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|ABC", 0)]
+    [InlineData(null, "active=true", R4Tests._patientCount - 1)]
+    [InlineData(null, "active=false", 0)]
+    [InlineData(null, "active:missing=true", 1)]
+    [InlineData(null, "active=garbage", 0)]
+    [InlineData(null, "telecom=phone|(03) 5555 6473", 1)]
+    [InlineData(null, "telecom=|(03) 5555 6473", 1)]
+    [InlineData(null, "telecom=phone|", 1)]
+    [InlineData(null, "_id=example&name=peter", 1)]
+    [InlineData(null, "_id=example&name=not-present", 0)]
+    [InlineData(null, "_id=example&_profile:missing=false", 0)]
+    [InlineData(null, "_has:Observation:patient:_id=blood-pressure", 1)]
+    [InlineData(null, "_has:Observation:subject:_id=blood-pressure", 1)]
+    [InlineData("PatientExampleFull", "_id=example", 1)]
+    [InlineData("PatientExampleFull", "_id:missing=false", 1)]
+    [InlineData("PatientExampleFull", "_id:not=example", 0)]
+    [InlineData("PatientExampleFull", "_id=AnIdThatDoesNotExist", 0)]
+    [InlineData("PatientExampleFull", "_id=example&_revinclude=Observation:patient", 1, (R4Tests._observationsWithSubjectExample + 1))]
+    [InlineData("PatientExampleFull", "name=peter", 1)]
+    [InlineData("PatientExampleFull", "name=not-present,another-not-present", 0)]
+    [InlineData("PatientExampleFull", "name=peter,not-present", 1)]
+    [InlineData("PatientExampleFull", "name=not-present,peter", 1)]
+    [InlineData("PatientExampleFull", "name:contains=eter", 1)]
+    [InlineData("PatientExampleFull", "name:contains=zzrot", 0)]
+    [InlineData("PatientExampleFull", "name:exact=Peter", 1)]
+    [InlineData("PatientExampleFull", "name:exact=peter", 0)]
+    [InlineData("PatientExampleFull", "name:exact=Peterish", 0)]
+    [InlineData("PatientExampleFull", "_profile:missing=true", 1)]
+    [InlineData("PatientExampleFull", "_profile:missing=false", 0)]
+    [InlineData("PatientExampleFull", "_has:Observation:patient:_id=blood-pressure", 1)]
+    [InlineData("PatientExampleFull", "_has:Observation:subject:_id=blood-pressure", 1)]
+    [InlineData("PatientDoesNotExistFull", "_id=example", 0)]
+    [InlineData("PatientDoesNotExistFull", "_id:missing=false", 0)]
+    [InlineData("PatientDoesNotExistFull", "_id:not=example", 0)]
+    [InlineData("PatientDoesNotExistFull", "_id=AnIdThatDoesNotExist", 0)]
+    [InlineData("PatientDoesNotExistFull", "_id=example&_revinclude=Observation:patient", 0)]
+    [InlineData("PatientDoesNotExistFull", "name=peter", 0)]
+    [InlineData("PatientDoesNotExistFull", "name=not-present,another-not-present", 0)]
+    [InlineData("PatientDoesNotExistFull", "name=peter,not-present", 0)]
+    [InlineData("PatientDoesNotExistFull", "name=not-present,peter", 0)]
+    [InlineData("PatientDoesNotExistFull", "name:contains=eter", 0)]
+    [InlineData("PatientDoesNotExistFull", "name:contains=zzrot", 0)]
+    [InlineData("PatientDoesNotExistFull", "name:exact=Peter", 0)]
+    [InlineData("PatientDoesNotExistFull", "name:exact=peter", 0)]
+    [InlineData("PatientDoesNotExistFull", "name:exact=Peterish", 0)]
+    [InlineData("PatientDoesNotExistFull", "_profile:missing=true", 0)]
+    [InlineData("PatientDoesNotExistFull", "_profile:missing=false", 0)]
+    [InlineData("PatientDoesNotExistFull", "_has:Observation:patient:_id=blood-pressure", 0)]
+    [InlineData("PatientDoesNotExistFull", "_has:Observation:subject:_id=blood-pressure", 0)]
+    public void PatientSearch(string? authKey, string search, int matchCount, int? entryCount = null)
     {
+        AuthorizationInfo? authInfo = null;
+
+        if ((authKey != null) &&
+            !_fixture._authorizations.TryGetValue(authKey, out authInfo))
+        {
+            throw new InvalidOperationException($"Authorization key '{authKey}' not found");
+        }
+
         //_testOutputHelper.WriteLine($"Running with {jsons.Length} files");
 
         FhirRequestContext ctx = new()
@@ -345,7 +466,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             HttpMethod = "GET",
             Url = _fixture._store.Config.BaseUrl + "/Patient?" + search,
             Forwarded = null,
-            Authorization = null,
+            Authorization = authInfo,
             SourceFormat = "application/fhir+json",
             DestinationFormat = "application/fhir+json",
         };
@@ -385,7 +506,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             HttpMethod = "POST",
             Url = _fixture._store.Config.BaseUrl + "/Patient/_search",
             Forwarded = null,
-            Authorization = null,
+            Authorization = authInfo,
             SourceContent = search,
             SourceFormat = "application/x-www-form-urlencoded",
             DestinationFormat = "application/fhir+json",
@@ -418,16 +539,33 @@ public class R4TestsPatient : IClassFixture<R4Tests>
         }
     }
 
+
     [Theory]
-    [InlineData("example", null, null, R4Tests._observationsWithSubjectExample)]
-    [InlineData("example", "Observation", null, R4Tests._observationsWithSubjectExample)]
-    [InlineData("example", "Observation", "_id=blood-pressure", 1)]
-    [InlineData("example", "Observation", "_id=656", 0)]
-    [InlineData("not-a-patient", null, null, 0)]
-    [InlineData("not-a-patient", "Observation", null, 0)]
-    [InlineData("not-a-patient", "Observation", "_id=blood-pressure", 0)]
-    public void PatientCompartmentSearch(string id, string? resourceType, string? search, int matchCount, int? entryCount = null)
+    [InlineData(null, "example", null, null, R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "example", "Observation", null, R4Tests._observationsWithSubjectExample)]
+    [InlineData(null, "example", "Observation", "_id=blood-pressure", 1)]
+    [InlineData(null, "example", "Observation", "_id=656", 0)]
+    [InlineData(null, "not-a-patient", null, null, 0)]
+    [InlineData(null, "not-a-patient", "Observation", null, 0)]
+    [InlineData(null, "not-a-patient", "Observation", "_id=blood-pressure", 0)]
+    [InlineData("PatientExampleFull", "example", null, null, R4Tests._observationsWithSubjectExample)]
+    [InlineData("PatientExampleFull", "example", "Observation", null, R4Tests._observationsWithSubjectExample)]
+    [InlineData("PatientExampleFull", "example", "Observation", "_id=blood-pressure", 1)]
+    [InlineData("PatientExampleFull", "example", "Observation", "_id=656", 0)]
+    [InlineData("PatientDoesNotExistFull", "example", null, null, 0)]
+    [InlineData("PatientDoesNotExistFull", "example", "Observation", null, 0)]
+    [InlineData("PatientDoesNotExistFull", "example", "Observation", "_id=blood-pressure", 0)]
+    [InlineData("PatientDoesNotExistFull", "example", "Observation", "_id=656", 0)]
+    public void PatientCompartmentSearch(string? authKey, string id, string? resourceType, string? search, int matchCount, int? entryCount = null)
     {
+        AuthorizationInfo? authInfo = null;
+
+        if ((authKey != null) &&
+            !_fixture._authorizations.TryGetValue(authKey, out authInfo))
+        {
+            throw new InvalidOperationException($"Authorization key '{authKey}' not found");
+        }
+
         FhirResponseContext response;
         string getUrl;
         string postUrl;
@@ -462,7 +600,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             HttpMethod = "GET",
             Url = getUrl,
             Forwarded = null,
-            Authorization = null,
+            Authorization = authInfo,
             SourceFormat = "application/fhir+json",
             DestinationFormat = "application/fhir+json",
         };
@@ -502,7 +640,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             HttpMethod = "POST",
             Url = postUrl,
             Forwarded = null,
-            Authorization = null,
+            Authorization = authInfo,
             SourceContent = search,
             SourceFormat = "application/x-www-form-urlencoded",
             DestinationFormat = "application/fhir+json",
@@ -534,8 +672,8 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             selfLink.ShouldContain(searchPart);
         }
     }
-
 }
+
 
 /// <summary>A 4 test conditionals.</summary>
 public class R4TestConditionals : IClassFixture<R4Tests>

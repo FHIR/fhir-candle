@@ -16,7 +16,6 @@ using Hl7.Fhir.Support;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Collections;
 using System.Collections.Concurrent;
 using static FhirCandle.Search.SearchDefinitions;
@@ -1198,7 +1197,6 @@ public partial class VersionedFhirStore : IFhirStore
                         : DoSystemSearch(ctx, out response);
                 }
 
-            case Common.StoreInteractionCodes.CompartmentOperation:
             case Common.StoreInteractionCodes.CompartmentSearch:
             case Common.StoreInteractionCodes.CompartmentTypeSearch:
             case Common.StoreInteractionCodes.InstanceDeleteHistory:
@@ -3722,21 +3720,6 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        switch (ctx.Interaction)
-        {
-            case Common.StoreInteractionCodes.CompartmentOperation:
-                response = new()
-                {
-                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.NotFound,
-                        $"Compartment operations are not supported."),
-                    StatusCode = HttpStatusCode.NotFound,
-                };
-                return false;
-            default:
-                break;
-        }
-
         IFhirOperation op = _operations[ctx.OperationName];
 
         if (!op.AllowInstanceLevel)
@@ -4354,7 +4337,18 @@ rs,
             ? ctx.UrlQuery
             : ctx.SourceContent;
 
-        IEnumerable<ParsedSearchParameter> compartmentParameters= [];
+        if (string.IsNullOrEmpty(ctx.ResourceType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Resource type is required for type search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
 
         if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
@@ -4365,79 +4359,6 @@ rs,
                     $"Resource type: {ctx.ResourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
                 StatusCode = HttpStatusCode.NotFound,
-            };
-            return false;
-        }
-
-        switch (ctx.Interaction)
-        {
-            case Common.StoreInteractionCodes.CompartmentTypeSearch:
-                if (_store.TryGetValue("CompartmentDefinition", out IVersionedResourceStore? rsCompartment) && ctx.CompartmentType != null)
-                {
-                    var compartmentUrl = "http://hl7.org/fhir/CompartmentDefinition/" +
-                                         ctx.CompartmentType.ToLower();
-                    var resource = rsCompartment.GetByCanonical(compartmentUrl);
-                    if (resource != null)
-                    {
-                        var compartmentDefinition = resource as CompartmentDefinition;
-                        // retrieve search params
-                        var compartmentSearchParam = compartmentDefinition!.Resource
-                            .Where(component => component.Code != null)
-                            .Where(component =>
-                                ModelInfo.FhirTypeNameToResourceType(ctx.ResourceType).Equals(component.Code))
-                            .Select(component => component.Param)
-                            .SelectMany(param => param);
-
-                        // create search string
-                        foreach (var param in compartmentSearchParam??[])
-                        {
-                            compartmentParameters = compartmentParameters.Concat(
-                                ParsedSearchParameter.Parse(
-                                    $"?{param}={ctx.CompartmentType}/{ctx.Id}",
-                                    this,
-                                    rs,
-                                    ctx.ResourceType)
-                                );
-
-                        }
-                    }
-                }
-                else
-                {
-                    response = new FhirResponseContext()
-                    {
-                        Outcome = SerializationUtils.BuildOutcomeForRequest(
-                            HttpStatusCode.NotFound,
-                            $"CompartmentDefinition {ctx.CompartmentType} is not supported",
-                            OperationOutcome.IssueType.NotSupported),
-                        StatusCode = HttpStatusCode.NotFound,
-                    };
-                    return false;
-                }
-
-                break;
-            case Common.StoreInteractionCodes.CompartmentOperation:
-            case Common.StoreInteractionCodes.CompartmentSearch:
-                response = new FhirResponseContext()
-                {
-                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.NotImplemented,
-                        $"Compartment based operation ({ctx.Interaction}) is not supported",
-                        OperationOutcome.IssueType.Structure),
-                    StatusCode = HttpStatusCode.BadRequest,
-                };
-                return false;
-        }
-
-        if (string.IsNullOrEmpty(ctx.ResourceType))
-        {
-            response = new()
-            {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.BadRequest,
-                    "Resource type is required for type-search interactions",
-                    OperationOutcome.IssueType.Structure),
-                StatusCode = HttpStatusCode.BadRequest,
             };
             return false;
         }
@@ -4473,39 +4394,11 @@ rs,
             ctx.ResourceType);
 
         // execute search
-        Resource[] results = rs.TypeSearch(parameters).ToArray();
+        List<Resource> results = rs.TypeSearch(parameters).ToList();
 
-        // // null results indicates failure
-        // if (results == null)
-        // {
-        //     response = new()
-        //     {
-        //         Outcome = SerializationUtils.BuildOutcomeForRequest(
-        //             HttpStatusCode.InternalServerError,
-        //             $"Type Search against {ctx.ResourceType} failed",
-        //             OperationOutcome.IssueType.Processing),
-        //         StatusCode = HttpStatusCode.InternalServerError,
-        //     };
-        //     return false;
-        // }
-
-        // Reduce based on compartment
-        if (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)
+        if (ctx.Authorization != null)
         {
-            results = results.Where(result =>
-            {
-                return compartmentParameters.Any(compartmentParam =>
-                {
-                    IEnumerable<ParsedSearchParameter> theParam = ParsedSearchParameter.Parse(
-                        $"_id={result.Id}",
-                        this,
-                        rs,
-                        ctx.ResourceType);
-                    IEnumerable<ParsedSearchParameter> compartmentParams = theParam.Append(compartmentParam);
-                    IEnumerable<Resource>? matchingResources = rs.TypeSearch(compartmentParams);
-                    return matchingResources?.Any() ?? false;
-                });
-            }).ToArray();
+            results = filterSearchResultsForAuth(ctx, results);
         }
 
         // parse search result parameters
@@ -4533,7 +4426,7 @@ rs,
         Bundle bundle = new Bundle
         {
             Type = Bundle.BundleType.Searchset,
-            Total = results.Length,
+            Total = results.Count(),
             Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
@@ -4650,6 +4543,102 @@ rs,
         return success;
     }
 
+    private bool isAuthorizedAsSearchMatch(FhirRequestContext ctx, Resource r)
+    {
+        if (ctx.Authorization == null)
+        {
+            return true;
+        }
+
+        // check for user scopes that would cover this resource
+        if (ctx.Authorization.UserScopes.Contains("*.*") ||
+            ctx.Authorization.UserScopes.Contains("*.s") ||
+            ctx.Authorization.UserScopes.Contains(r.TypeName + ".*") ||
+            ctx.Authorization.UserScopes.Contains(r.TypeName + ".s"))
+        {
+            return true;
+        }
+
+        // check for a patient compartment search matching the launch patient (already filtered)
+        if (((ctx.Interaction == Common.StoreInteractionCodes.CompartmentSearch) ||
+             (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)) &&
+            (ctx.CompartmentType == "Patient") &&
+            (("Patient/" + ctx.Id) == ctx.Authorization.LaunchPatient))
+        {
+            return true;
+        }
+
+        // get the patient compartment
+        if (!_compartments.TryGetValue("Patient", out ParsedCompartment? patientCompartment))
+        {
+            return false;
+        }
+
+        // patients can only search for resources that are in the patient compartment
+        if (!patientCompartment.IncludedResources.TryGetValue(r.TypeName, out ParsedCompartment.IncludedResource? ir))
+        {
+            return false;
+        }
+
+        // check to see if this resource is allowed under a patient scope (still need to match with actual patient)
+        if (ctx.Authorization.PatientScopes.Contains("*.*") ||
+            ctx.Authorization.PatientScopes.Contains("*.s") ||
+            ctx.Authorization.PatientScopes.Contains(r.TypeName + ".*") ||
+            ctx.Authorization.PatientScopes.Contains(r.TypeName + ".s"))
+        {
+            // check to see if this is a patient resource
+            if ((r.TypeName == "Patient") &&
+                (("Patient/" + r.Id) == ctx.Authorization.LaunchPatient))
+            {
+                return true;
+            }
+
+            ITypedElement te = r.ToTypedElement();
+
+            // check to see if this resource would be in the desired patient compartment
+            foreach (string spCode in ir.SearchParamCodes)
+            {
+                if (_searchTester.TestForMatch(
+                    te,
+                    ParsedSearchParameter.Parse($"?{spCode}={ctx.Authorization.LaunchPatient}", this, _store[r.TypeName], r.TypeName)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // default fails
+        return false;
+    }
+
+    private List<Resource> filterSearchResultsForAuth(FhirRequestContext ctx, List<Resource> resources)
+    {
+        // if no authorization is required, return the unfiltered resources
+        if (ctx.Authorization == null)
+        {
+            return resources;
+        }
+
+        // check for user * scopes
+        if (ctx.Authorization.UserScopes.Contains("*.*") ||
+            ctx.Authorization.UserScopes.Contains("*.s"))
+        {
+            return resources;
+        }
+
+        // check for a patient compartment search matching the launch patient (already filtered)
+        if (((ctx.Interaction == Common.StoreInteractionCodes.CompartmentSearch) ||
+             (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)) &&
+            (ctx.CompartmentType == "Patient") &&
+            (("Patient/" + ctx.Id) == ctx.Authorization.LaunchPatient))
+        {
+            return resources;
+        }
+
+        // check each resource
+        return resources.Where(r => isAuthorizedAsSearchMatch(ctx, r)).ToList();
+    }
+
 
     /// <summary>Executes the compartment search operation.</summary>
     /// <param name="ctx">The request and related context.</param>
@@ -4748,20 +4737,37 @@ rs,
                 rs,
                 resourceType);
 
+            List<ParsedSearchParameter> compartmentFilters = [];
+
             // parse the relevant compartment type parameters
-            ParsedSearchParameter[] compartmentFilters = ir.SearchParamCodes.Select(
-                code => ParsedSearchParameter.Parse(
-                $"?{code}={ctx.CompartmentType}/{ctx.Id}",
-                this,
-                rs,
-                resourceType).First()).ToArray();
+            foreach (string spCode in ir.SearchParamCodes)
+            {
+                ParsedSearchParameter[] psps = ParsedSearchParameter.Parse(
+                    $"?{spCode}={ctx.CompartmentType}/{ctx.Id}",
+                    this,
+                    rs,
+                    resourceType).ToArray();
+
+                if (psps.Length == 0)
+                {
+                    continue;
+                }
+
+                compartmentFilters.AddRange(psps);
+            }
+
+            // do not add anything that does not have a valid filter
+            if (compartmentFilters.Count == 0)
+            {
+                continue;
+            }
 
             // execute search - if there is only one compartment criteria, add it here
-            IEnumerable<Resource> compartmentResults = (compartmentFilters.Length == 1)
+            IEnumerable<Resource> compartmentResults = (compartmentFilters.Count() == 1)
                 ? rs.TypeSearch([.. parameters, .. compartmentFilters])
                 : rs.TypeSearch(parameters);
 
-            if (compartmentFilters.Length == 1)
+            if (compartmentFilters.Count() == 1)
             {
                 results.AddRange(compartmentResults);
             }
@@ -4772,6 +4778,11 @@ rs,
             }
 
             appliedParameters.AddRange(parameters.Where(p => !p.IgnoredParameter));
+        }
+
+        if (ctx.Authorization != null)
+        {
+            results = filterSearchResultsForAuth(ctx, results);
         }
 
         // parse search result parameters
@@ -5051,9 +5062,9 @@ rs,
             ctx.ResourceType).First()).ToArray();
 
         // execute search - if there is only one compartment criteria, add it here
-        Resource[] results = (compartmentFilters.Length == 1)
-            ? rs.TypeSearch([..parameters, ..compartmentFilters]).ToArray()
-            : rs.TypeSearch(parameters).ToArray();
+        List<Resource> results = (compartmentFilters.Length == 1)
+            ? rs.TypeSearch([..parameters, ..compartmentFilters]).ToList()
+            : rs.TypeSearch(parameters).ToList();
 
         // reduce based on compartment filters if there was more than one
         if (compartmentFilters.Length != 1)
@@ -5061,7 +5072,12 @@ rs,
             // reduce based on compartment filters (OR)
             results = results
                 .Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf])))
-                .ToArray();
+                .ToList();
+        }
+
+        if (ctx.Authorization != null)
+        {
+            results = filterSearchResultsForAuth(ctx, results);
         }
 
         // parse search result parameters
@@ -5089,7 +5105,7 @@ rs,
         Bundle bundle = new Bundle
         {
             Type = Bundle.BundleType.Searchset,
-            Total = results.Length,
+            Total = results.Count(),
             Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
@@ -5280,19 +5296,6 @@ rs,
             // execute search
             IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters);
 
-            // // null results indicates failure
-            // if (results == null)
-            // {
-            //     response = new()
-            //     {
-            //         Outcome = SerializationUtils.BuildOutcomeForRequest(
-            //             HttpStatusCode.InternalServerError,
-            //             $"System search into {resourceType} failed"),
-            //         StatusCode = HttpStatusCode.InternalServerError,
-            //     };
-            //     return false;
-            // }
-
             // parse search result parameters
             ParsedResultParameters resultParameters = new ParsedResultParameters(searchQueryParams, this, _store[resourceType], resourceType);
 
@@ -5344,6 +5347,12 @@ rs,
                 // flag that we cannot use this total
                 resultCount = -1;
                 break;
+            }
+
+            // skip resources we cannot include
+            if ((ctx.Authorization != null) && !isAuthorizedAsSearchMatch(ctx, resource))
+            {
+                continue;
             }
 
             resultCount++;

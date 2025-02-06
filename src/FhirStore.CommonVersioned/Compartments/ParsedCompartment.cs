@@ -72,7 +72,7 @@ public class ParsedCompartment
             .Select(r => new IncludedResource
             {
                 ResourceType = r.Code.GetLiteral()!,
-                SearchParamCodes = r.Param.ToArray(),
+                SearchParamCodes = r.Param.Select(c => c == "{def}" ? "_id" : c).ToArray(),
             })
             .ToDictionary(ir => ir.ResourceType, ir => ir);
     }
