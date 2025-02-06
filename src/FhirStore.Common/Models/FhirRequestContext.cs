@@ -724,6 +724,8 @@ public record class FhirRequestContext
 
                                     if (pathComponents[2].Equals("_search", StringComparison.Ordinal))
                                     {
+                                        _compartmentType = pathComponents[0];
+                                        _resourceType = string.Empty;
                                         _id = pathComponents[1];
                                         _interaction = StoreInteractionCodes.CompartmentSearch;
 
@@ -737,10 +739,11 @@ public record class FhirRequestContext
                             {
                                 if (hasValidResourceType &&
                                     pathComponents[3].Equals("_search", StringComparison.Ordinal) &&
-                                    _store.Keys.Contains(pathComponents[3]))
+                                    _store.Keys.Contains(pathComponents[2]))
                                 {
+                                    _compartmentType = pathComponents[0];
                                     _id = pathComponents[1];
-                                    _compartmentType = pathComponents[3];
+                                    _resourceType = pathComponents[2];
                                     _interaction = StoreInteractionCodes.CompartmentTypeSearch;
 
                                     return true;

@@ -386,7 +386,7 @@ public class FhirController : ControllerBase
     /// <summary>(An Action that handles HTTP GET requests) gets resource instance.</summary>
     /// <param name="storeName">      The store.</param>
     /// <param name="resourceName">   Name of the resource.</param>
-    /// <param name="id">             The identifier.</param>
+    /// <param name="id">             The resource identifier.</param>
     /// <param name="format">         Describes the format to use.</param>
     /// <param name="summary">        The summary.</param>
     /// <param name="pretty">         The pretty.</param>
@@ -710,6 +710,299 @@ public class FhirController : ControllerBase
             await LogAndReturnError(Response, 500, msg);
             return;
         }
+    }
+
+    /// <summary>
+    /// (An Action that handles HTTP POST requests) posts a compartment resource type search.
+    /// </summary>
+    /// <param name="storeName">      The store.</param>
+    /// <param name="compartmentType">Name of the compartment resource.</param>
+    /// <param name="id">             The resource identifier.</param>
+    /// <param name="format">      Describes the format to use.</param>
+    /// <param name="pretty">      The pretty.</param>
+    /// <param name="summary">     The summary.</param>
+    /// <param name="authHeader"></param>
+    /// <returns>An asynchronous result.</returns>
+    [HttpPost, Route("{storeName}/{compartmentType}/{id}/_search")]
+    [Consumes("application/x-www-form-urlencoded")]
+    public async Task PostCompartmentSearch(
+        [FromRoute] string storeName,
+        [FromRoute] string compartmentType,
+        [FromRoute] string id,
+        [FromQuery(Name = "_format")] string? format,
+        [FromQuery(Name = "_pretty")] string? pretty,
+        [FromQuery(Name = "_summary")] string? summary,
+        [FromHeader(Name = "Authorization")] string? authHeader)
+    {
+        if (!_fhirStoreManager.TryGetValue(storeName, out IFhirStore? store))
+        {
+            await LogAndReturnError(Response, 404, $"PostCompartmentSearch <<< no tenant at {storeName}!");
+            return;
+        }
+
+        if (!store.SupportsResource(compartmentType))
+        {
+            await LogAndReturnError(Response, 404, $"PostCompartmentSearch <<< tenant {storeName} does not support resource {compartmentType}!");
+            return;
+        }
+
+        try
+        {
+            // read the post body to process
+            string content;
+            if (Request.HasFormContentType)
+            {
+                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
+            }
+            else
+            {
+                using StreamReader reader = new StreamReader(Request.Body);
+                content = await reader.ReadToEndAsync();
+            }
+
+            string queryString = Request.QueryString.ToString();
+
+            if (!string.IsNullOrEmpty(queryString))
+            {
+                if (string.IsNullOrEmpty(content))
+                {
+                    content = queryString;
+                }
+                else
+                {
+                    content += $"&{queryString}";
+                }
+            }
+
+            FhirRequestContext ctx = new()
+            {
+                TenantName = storeName,
+                Store = store,
+                HttpMethod = Request.Method.ToUpperInvariant(),
+                Url = Request.GetDisplayUrl(),
+                UrlPath = Request.Path,
+                UrlQuery = queryString,
+                RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
+                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                DestinationFormat = getMimeType(format, Request),
+                SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
+                SerializeSummaryFlag = summary ?? string.Empty,
+                Interaction = Common.StoreInteractionCodes.CompartmentSearch,
+                CompartmentType = compartmentType,
+                Id = id,
+                SourceContent = content,
+                SourceFormat = Request.ContentType ?? string.Empty,
+            };
+
+            if (!_smartAuthManager.IsAuthorized(ctx))
+            {
+                Response.StatusCode = 401;
+                return;
+            }
+
+            bool success = _fhirStoreManager[storeName].CompartmentSearch(
+                ctx,
+                out FhirResponseContext opResponse);
+
+            // cannot prefer outcome on search
+            await AddFhirResponse(Response, null, success, opResponse);
+        }
+        catch (Exception ex)
+        {
+            string msg = ex.InnerException == null ? $"PostResourceCompartmentSearch <<< caught: {ex.Message}" : $"PostResourceCompartmentSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            await LogAndReturnError(Response, 500, msg);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// (An Action that handles HTTP POST requests) posts a compartment resource type search.
+    /// </summary>
+    /// <param name="storeName">      The store.</param>
+    /// <param name="compartmentType">Name of the compartment resource.</param>
+    /// <param name="id">             The resource identifier.</param>
+    /// <param name="resourceType">   Name of the resource to search within the compartment.</param>
+    /// <param name="format">      Describes the format to use.</param>
+    /// <param name="pretty">      The pretty.</param>
+    /// <param name="summary">     The summary.</param>
+    /// <param name="authHeader"></param>
+    /// <returns>An asynchronous result.</returns>
+    [HttpPost, Route("{storeName}/{compartmentType}/{id}/{resourceType}/_search")]
+    [Consumes("application/x-www-form-urlencoded")]
+    public async Task PostCompartmentTypeSearch(
+        [FromRoute] string storeName,
+        [FromRoute] string compartmentType,
+        [FromRoute] string id,
+        [FromRoute] string resourceType,
+        [FromQuery(Name = "_format")] string? format,
+        [FromQuery(Name = "_pretty")] string? pretty,
+        [FromQuery(Name = "_summary")] string? summary,
+        [FromHeader(Name = "Authorization")] string? authHeader)
+    {
+        if (!_fhirStoreManager.TryGetValue(storeName, out IFhirStore? store))
+        {
+            await LogAndReturnError(Response, 404, $"PostCompartmentTypeSearch <<< no tenant at {storeName}!");
+            return;
+        }
+
+        if (!store.SupportsResource(compartmentType))
+        {
+            await LogAndReturnError(Response, 404, $"PostCompartmentTypeSearch <<< tenant {storeName} does not support resource {compartmentType}!");
+            return;
+        }
+
+        if (!store.SupportsResource(resourceType))
+        {
+            await LogAndReturnError(Response, 404, $"PostCompartmentTypeSearch <<< tenant {storeName} does not support resource {resourceType}!");
+            return;
+        }
+
+        try
+        {
+            // read the post body to process
+            string content;
+            if (Request.HasFormContentType)
+            {
+                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
+            }
+            else
+            {
+                using StreamReader reader = new StreamReader(Request.Body);
+                content = await reader.ReadToEndAsync();
+            }
+
+            string queryString = Request.QueryString.ToString();
+
+            if (!string.IsNullOrEmpty(queryString))
+            {
+                if (string.IsNullOrEmpty(content))
+                {
+                    content = queryString;
+                }
+                else
+                {
+                    content += $"&{queryString}";
+                }
+            }
+
+            FhirRequestContext ctx = new()
+            {
+                TenantName = storeName,
+                Store = store,
+                HttpMethod = Request.Method.ToUpperInvariant(),
+                Url = Request.GetDisplayUrl(),
+                UrlPath = Request.Path,
+                UrlQuery = queryString,
+                RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
+                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                DestinationFormat = getMimeType(format, Request),
+                SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
+                SerializeSummaryFlag = summary ?? string.Empty,
+                Interaction = Common.StoreInteractionCodes.CompartmentTypeSearch,
+                CompartmentType = compartmentType,
+                ResourceType = resourceType,
+                Id = id,
+                SourceContent = content,
+                SourceFormat = Request.ContentType ?? string.Empty,
+            };
+
+            if (!_smartAuthManager.IsAuthorized(ctx))
+            {
+                Response.StatusCode = 401;
+                return;
+            }
+
+            bool success = _fhirStoreManager[storeName].CompartmentTypeSearch(
+                ctx,
+                out FhirResponseContext opResponse);
+
+            // cannot prefer outcome on search
+            await AddFhirResponse(Response, null, success, opResponse);
+        }
+        catch (Exception ex)
+        {
+            string msg = ex.InnerException == null ? $"PostCompartmentTypeSearch <<< caught: {ex.Message}" : $"PostCompartmentTypeSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            await LogAndReturnError(Response, 500, msg);
+            return;
+        }
+    }
+
+    /// <summary>(An Action that handles HTTP GET requests) gets a compartment search, restricted to a single type.</summary>
+    /// <param name="storeName">   The store.</param>
+    /// <param name="compartmentType">Name of the compartment resource.</param>
+    /// <param name="id">             The resource identifier.</param>
+    /// <param name="resourceType">   Name of the resource to search within the compartment.</param>
+    /// <param name="format">      Describes the format to use.</param>
+    /// <param name="pretty">      The pretty.</param>
+    /// <param name="summary">     The summary.</param>
+    /// <param name="authHeader">  The authentication header.</param>
+    /// <returns>An asynchronous result.</returns>
+    [HttpGet, Route("{storeName}/{compartmentType}/{id}/{resourceType}")]
+    public async Task GetCompartmentSearch(
+        [FromRoute] string storeName,
+        [FromRoute] string compartmentType,
+        [FromRoute] string id,
+        [FromRoute] string resourceType,
+        [FromQuery(Name = "_format")] string? format,
+        [FromQuery(Name = "_pretty")] string? pretty,
+        [FromQuery(Name = "_summary")] string? summary,
+        [FromHeader(Name = "Authorization")] string? authHeader)
+    {
+        if (!_fhirStoreManager.TryGetValue(storeName, out IFhirStore? store))
+        {
+            await LogAndReturnError(Response, 404, $"GetCompartmentSearch <<< no tenant at {storeName}!");
+            return;
+        }
+
+        if (!store.SupportsResource(compartmentType))
+        {
+            await LogAndReturnError(Response, 404, $"GetCompartmentSearch <<< tenant {storeName} does not support resource {compartmentType}!");
+            return;
+        }
+
+        bool isTypeSearch = resourceType == "*";
+
+        if (isTypeSearch && !store.SupportsResource(resourceType))
+        {
+            await LogAndReturnError(Response, 404, $"GetCompartmentSearch <<< tenant {storeName} does not support resource {resourceType}!");
+            return;
+        }
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = storeName,
+            Store = store,
+            HttpMethod = Request.Method.ToUpperInvariant(),
+            Url = Request.GetDisplayUrl(),
+            UrlPath = Request.Path,
+            UrlQuery = Request.QueryString.ToString(),
+            RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            Forwarded = getForwardedInfo(Request),
+            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            DestinationFormat = getMimeType(format, Request),
+            SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
+            Interaction = isTypeSearch
+                ? Common.StoreInteractionCodes.CompartmentTypeSearch
+                : Common.StoreInteractionCodes.CompartmentSearch,
+            CompartmentType = compartmentType,
+            Id = id,
+            ResourceType = isTypeSearch ? resourceType : string.Empty,
+        };
+
+        if (!_smartAuthManager.IsAuthorized(ctx))
+        {
+            Response.StatusCode = 401;
+            return;
+        }
+
+        bool success = isTypeSearch
+            ? store.CompartmentTypeSearch(ctx, out FhirResponseContext opResponse)
+            : store.CompartmentSearch(ctx, out opResponse);
+
+        // cannot prefer outcome on search
+        await AddFhirResponse(Response, null, success, opResponse);
     }
 
     /// <summary>(An Action that handles HTTP POST requests) posts a type operation.</summary>

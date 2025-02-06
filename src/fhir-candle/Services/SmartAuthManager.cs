@@ -930,7 +930,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
 
         IEnumerable<string> permittedScopes = local.Scopes.Where(kvp => kvp.Value == true).Select(kvp => kvp.Key);
 
-        ExtractScopes(permittedScopes, out HashSet<string> userScopes, out HashSet<string> patientScopes);
+        extractScopes(permittedScopes, out HashSet<string> userScopes, out HashSet<string> patientScopes);
         local.UserScopes = userScopes;
         local.PatientScopes = patientScopes;
 
@@ -1304,7 +1304,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
 
         string code = Guid.NewGuid().ToString();
 
-        ExtractScopes(scopes, out HashSet<string> userScopes, out HashSet<string> patientScopes);
+        extractScopes(scopes, out HashSet<string> userScopes, out HashSet<string> patientScopes);
 
         DateTime expiration = DateTime.UtcNow.AddHours(24);
 
@@ -1348,7 +1348,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     /// <param name="scopes">       The scopes.</param>
     /// <param name="userScopes">   [out] The user scopes.</param>
     /// <param name="patientScopes">[out] The patient scopes.</param>
-    private void ExtractScopes(
+    private void extractScopes(
         IEnumerable<string> scopes,
         out HashSet<string> userScopes, 
         out HashSet<string> patientScopes)

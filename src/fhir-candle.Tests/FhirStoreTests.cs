@@ -550,27 +550,31 @@ public class TestBundleRequestParsing : IClassFixture<FhirStoreTests>
     [InlineData("GET", "Patient/id/_history", StoreInteractionCodes.InstanceReadHistory)]
     [InlineData("GET", "Patient/id/_history/version", StoreInteractionCodes.InstanceReadVersion)]
     [InlineData("GET", "Patient/id/*", StoreInteractionCodes.CompartmentSearch)]
-    [InlineData("GET", "Patient/id/Patient", StoreInteractionCodes.CompartmentTypeSearch)]
+    [InlineData("GET", "Patient/id/*?withParams=true", StoreInteractionCodes.CompartmentSearch)]
+    [InlineData("GET", "Patient/id/Encounter", StoreInteractionCodes.CompartmentTypeSearch)]
+    [InlineData("GET", "Patient/id/Encounter?withParams=true", StoreInteractionCodes.CompartmentTypeSearch)]
     [InlineData("GET", "request/with/too/many/path/segments", null)]
     [InlineData("GET", "Patient?search=true&garbage=^*?$%", StoreInteractionCodes.TypeSearch)]
     [InlineData("HEAD", "", null)]
     [InlineData("HEAD", "?withParams=true", null)]
     [InlineData("HEAD", "metadata", StoreInteractionCodes.SystemCapabilities)]
     [InlineData("HEAD", "_history", null)]
-    [InlineData("HEAD", "$test", null)]
+    [InlineData("HEAD", "$test", null)]                                 // would be StoreInteractionCodes.SystemOperation, but is not cacheable
     [InlineData("HEAD", "$test?withParams=true", null)]
-    [InlineData("HEAD", "Patient", null)]
+    [InlineData("HEAD", "Patient", null)]                               // would be StoreInteractionCodes.TypeSearch, but is not cacheable
     [InlineData("HEAD", "Invalid", null)]
-    [InlineData("HEAD", "Patient/$test", null)]
+    [InlineData("HEAD", "Patient/$test", null)]                         // would be StoreInteractionCodes.TypeOperation, but is not cacheable
     [InlineData("HEAD", "Invalid/$test", null)]
     [InlineData("HEAD", "Patient/id", StoreInteractionCodes.InstanceRead)]
     [InlineData("HEAD", "Invalid/id", null)]
-    [InlineData("HEAD", "Patient/id/$test", null)]
+    [InlineData("HEAD", "Patient/id/$test", null)]                      // would be StoreInteractionCodes.InstanceOperation, but is not cacheable
     [InlineData("HEAD", "Invalid/id/$test", null)]
     [InlineData("HEAD", "Patient/id/_history", null)]
     [InlineData("HEAD", "Patient/id/_history/version", StoreInteractionCodes.InstanceReadVersion)]
-    [InlineData("HEAD", "Patient/id/*", null)]
-    [InlineData("HEAD", "Patient/id/Patient", null)]
+    [InlineData("HEAD", "Patient/id/*", null)]                          // would be StoreInteractionCodes.CompartmentSearch, but is not cacheable
+    [InlineData("HEAD", "Patient/id/*?withParams=true", null)]          // would be StoreInteractionCodes.CompartmentSearch, but is not cacheable
+    [InlineData("HEAD", "Patient/id/Encounter", null)]                  // would be StoreInteractionCodes.CompartmentTypeSearch, but is not cacheable
+    [InlineData("HEAD", "Patient/id/Encounter?withParams=true", null)]  // would be StoreInteractionCodes.CompartmentTypeSearch, but is not cacheable
     [InlineData("HEAD", "request/with/too/many/path/segments", null)]
     [InlineData("POST", "", StoreInteractionCodes.SystemBundle)]
     [InlineData("POST", "?withParams=true", StoreInteractionCodes.SystemBundle)]
@@ -588,6 +592,9 @@ public class TestBundleRequestParsing : IClassFixture<FhirStoreTests>
     [InlineData("POST", "Patient/id", null)]
     [InlineData("POST", "Patient/id/$test", StoreInteractionCodes.InstanceOperation)]
     [InlineData("POST", "Patient/id/_search", StoreInteractionCodes.CompartmentSearch)]
+    [InlineData("POST", "Patient/id/_search?withParams=true", StoreInteractionCodes.CompartmentSearch)]
+    [InlineData("POST", "Patient/id/Encounter/_search", StoreInteractionCodes.CompartmentTypeSearch)]
+    [InlineData("POST", "Patient/id/Encounter/_search?withParams=true", StoreInteractionCodes.CompartmentTypeSearch)]
     [InlineData("PUT", "", null)]
     [InlineData("PUT", "?withParams=true", null)]
     [InlineData("PUT", "_search", null)]

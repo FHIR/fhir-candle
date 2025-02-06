@@ -56,7 +56,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <param name="outcome">           [out] The outcome.</param>
     /// <returns>The updated resource, or null if it could not be performed.</returns>
     Hl7.Fhir.Model.Resource? InstanceUpdate(
-        Hl7.Fhir.Model.Resource source, 
+        Hl7.Fhir.Model.Resource source,
         bool allowCreate,
         string ifMatch,
         string ifNoneMatch,
@@ -76,15 +76,17 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// Performs a type search in this resource store.
     /// </summary>
     /// <param name="parameters">The search parameters.</param>
+    /// <param name="isNestedSearch">If this search has been triggered from inside another search request (for locking)</param>
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
-    IEnumerable<Hl7.Fhir.Model.Resource>? TypeSearch(IEnumerable<ParsedSearchParameter> parameters, bool isNestedSearch = false);
+    IEnumerable<Hl7.Fhir.Model.Resource> TypeSearch(IEnumerable<ParsedSearchParameter> parameters, bool isNestedSearch = false);
 
     /// <summary>
     /// Tests for the presence of any resources matching the given search parameter.
     /// </summary>
-    /// <param name="sps">The search parameters to test against.</param>
+    /// <param name="link"></param>
+    /// <param name="filter"></param>
     /// <returns>True if any resources match all requested search parameters, false otherwise.</returns>
     bool TestForAny(ParsedSearchParameter link, ParsedSearchParameter filter);
 
@@ -104,7 +106,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <param name="spDefinition">[out] The sp definition.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
     bool TryGetSearchParamDefinition(
-        string name, 
+        string name,
         [NotNullWhen(true)] out Hl7.Fhir.Model.ModelInfo.SearchParamDefinition? spDefinition);
 
     /// <summary>Gets the search parameter definitions known by this store</summary>

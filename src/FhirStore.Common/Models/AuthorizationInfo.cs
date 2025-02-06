@@ -18,7 +18,7 @@ public class AuthorizationInfo
     public readonly record struct AuthActivityRecord
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="AuthorizationInfo"/> class.
+        /// Initializes a new instance of the <see cref="AuthActivityRecord"/> class.
         /// </summary>
         public AuthActivityRecord() { }
 
@@ -39,7 +39,7 @@ public class AuthorizationInfo
     public readonly record struct IntrospectionResponse
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="AuthorizationInfo"/> class.
+        /// Initializes a new instance of the <see cref="IntrospectionResponse"/> class.
         /// </summary>
         public IntrospectionResponse() { }
 
@@ -224,13 +224,13 @@ public class AuthorizationInfo
     public string LaunchPractitioner { get; set; } = string.Empty;
 
     /// <summary>Gets or initializes the scopes.</summary>
-    public Dictionary<string, bool> Scopes { get; init; } = new();
+    public Dictionary<string, bool> Scopes { get; init; } = [];
 
     /// <summary>Gets or initializes the normalized allowed patient-based scopes.</summary>
-    public HashSet<string> PatientScopes { get; set; } = new();
+    public HashSet<string> PatientScopes { get; set; } = [];
 
     /// <summary>Gets or initializes the normalized allowed patient-based scopes.</summary>
-    public HashSet<string> UserScopes { get; set; } = new();
+    public HashSet<string> UserScopes { get; set; } = [];
 
     /// <summary>Gets or sets the authentication code.</summary>
     public string AuthCode { get; set; } = string.Empty;
@@ -239,7 +239,7 @@ public class AuthorizationInfo
     public SmartResponse? Response = null;
 
     /// <summary>Gets the activity.</summary>
-    public List<AuthActivityRecord> Activity { get; } = new();
+    public List<AuthActivityRecord> Activity { get; } = [];
 
     /// <summary>Query if this object is authorized.</summary>
     /// <returns>True if authorized, false if not.</returns>
@@ -255,12 +255,6 @@ public class AuthorizationInfo
 
         switch (interaction)
         {
-            // TODO: compartments are not implemented yet
-            case Storage.Common.StoreInteractionCodes.CompartmentOperation:
-            case Storage.Common.StoreInteractionCodes.CompartmentSearch:
-            case Storage.Common.StoreInteractionCodes.CompartmentTypeSearch:
-                break;
-
             case Storage.Common.StoreInteractionCodes.InstanceDelete:
             case Storage.Common.StoreInteractionCodes.InstanceDeleteHistory:
             case Storage.Common.StoreInteractionCodes.InstanceDeleteVersion:
@@ -344,6 +338,7 @@ public class AuthorizationInfo
                     return false;
                 }
 
+            case Storage.Common.StoreInteractionCodes.CompartmentTypeSearch:
             case Storage.Common.StoreInteractionCodes.TypeSearch:
                 {
                     if (PatientScopes.Contains("*.s") ||
@@ -437,6 +432,8 @@ public class AuthorizationInfo
                     return false;
                 }
 
+            // TODO: compartment search should be clever and check the intersection of the sets of resources in the compartment
+            case Storage.Common.StoreInteractionCodes.CompartmentSearch:
             case Storage.Common.StoreInteractionCodes.SystemSearch:
                 {
                     if (PatientScopes.Contains("*.s") ||

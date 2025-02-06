@@ -14,7 +14,7 @@ public static partial class Common
     /// <summary>Values that represent store interactions.</summary>
     public enum StoreInteractionCodes
     {
-        CompartmentOperation,
+        //CompartmentOperation,     // compartment operations are not defined - either they are instance operations or type operations
         CompartmentSearch,
         CompartmentTypeSearch,
 

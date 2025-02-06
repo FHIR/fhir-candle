@@ -1,4 +1,13 @@
 * Work in Progress
+    * Added support for compartment-based searching.
+        * Default listeners automatically support compartments defined in core.
+        * Clients can store `CompartmentDefinition` resources, which update or add to existing compartments.
+    * Fixed issue with `FhirRequestContext` incorrectly allowing some `HEAD` requests that are not cacheable.
+    * First pass of SMART scope-based filtering for search.
+        * Limited to testing of `match` results.
+        * Does not test granular scopes yet.
+
+* v2025.129
     * Added commit log
     * Added CSS fonts for monospace content.
     * Removed `FluentAssertions` (`6.12.0`) and replaced with `Shouldly` (`4.3.0`) due to license changes.

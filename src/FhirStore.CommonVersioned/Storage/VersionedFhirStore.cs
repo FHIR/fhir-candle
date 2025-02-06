@@ -16,17 +16,13 @@ using Hl7.Fhir.Support;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Collections;
 using System.Collections.Concurrent;
 using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
+using FhirCandle.Compartments;
 using Hl7.Fhir.Utility;
-using System.Diagnostics.CodeAnalysis;
-using System.Resources;
-using System.Text;
-using ResourceType = System.Security.AccessControl.ResourceType;
 
 namespace FhirCandle.Storage;
 
@@ -72,11 +68,16 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>(Immutable) The cache of compiled search parameter extraction functions.</summary>
     private readonly ConcurrentDictionary<string, CompiledExpression> _compiledSearchParameters = [];
 
+    /// <summary>
+    /// A dictionary that holds the parsed compartments.
+    /// </summary>
+    private readonly Dictionary<string, ParsedCompartment> _compartments = [];
+
     /// <summary>The sp lock object.</summary>
-    private object _spLockObject = new();
+    private readonly object _spLockObject = new();
 
     /// <summary>The subscription topic converter.</summary>
-    internal static TopicConverter _topicConverter = new();
+    internal readonly static TopicConverter _topicConverter = new();
 
     /// <summary>The subscription converter.</summary>
     internal static SubscriptionConverter _subscriptionConverter = null!;
@@ -86,10 +87,6 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>(Immutable) The subscriptions, by id.</summary>
     internal readonly ConcurrentDictionary<string, ParsedSubscription> _subscriptions = [];
-
-    /// <summary>(Immutable) The FHIRPath variable matcher.</summary>
-    [GeneratedRegex("[%][\\w\\-]+", RegexOptions.Compiled)]
-    private static partial Regex _fhirpathVarMatcher();
 
     /// <summary>The configuration.</summary>
     private TenantConfiguration _config = null!;
@@ -101,22 +98,22 @@ public partial class VersionedFhirStore : IFhirStore
     private const string _capabilityStatementId = "metadata";
 
     /// <summary>The operations supported by this server, by name.</summary>
-    private Dictionary<string, IFhirOperation> _operations = [];
+    private readonly Dictionary<string, IFhirOperation> _operations = [];
 
     /// <summary>The loaded hooks.</summary>
-    private Dictionary<string, string> _hookNamesById = [];
+    private readonly Dictionary<string, string> _hookNamesById = [];
 
     /// <summary>The system hooks.</summary>
-    private Dictionary<string, Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>> _hooksByInteractionByResource = [];
+    private readonly Dictionary<string, Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>> _hooksByInteractionByResource = [];
 
     /// <summary>The loaded directives.</summary>
-    private HashSet<string> _loadedDirectives = [];
+    private readonly HashSet<string> _loadedDirectives = [];
 
     /// <summary>List of ids of the loaded packages.</summary>
-    private HashSet<string> _loadedPackageIds = [];
+    private readonly HashSet<string> _loadedPackageIds = [];
 
     /// <summary>The loaded supplements.</summary>
-    private HashSet<string> _loadedSupplements = [];
+    private readonly HashSet<string> _loadedSupplements = [];
 
     /// <summary>Values that represent load state codes.</summary>
     private enum LoadStateCodes
@@ -136,10 +133,10 @@ public partial class VersionedFhirStore : IFhirStore
     private int _maxResourceCount = 0;
 
     /// <summary>Queue of identifiers of resources (used for max resource cleaning).</summary>
-    private ConcurrentQueue<string> _resourceQ = [];
+    private readonly ConcurrentQueue<string> _resourceQ = [];
 
     /// <summary>The received notifications.</summary>
-    private ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = [];
+    private readonly ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = [];
 
     /// <summary>(Immutable) The received notification window ticks.</summary>
     private static readonly long _receivedNotificationWindowTicks = TimeSpan.FromMinutes(10).Ticks;
@@ -148,13 +145,13 @@ public partial class VersionedFhirStore : IFhirStore
     private bool _hasProtected = false;
 
     /// <summary>List of identifiers for the protected.</summary>
-    private HashSet<string> _protectedResources = [];
+    private readonly HashSet<string> _protectedResources = [];
 
     /// <summary>The storage capacity timer.</summary>
     private System.Threading.Timer? _capacityMonitor = null;
 
     /// <summary>The terminology.</summary>
-    private StoreTerminologyService _terminology = new();
+    private readonly StoreTerminologyService _terminology = new();
 
     // TODO: finish implementing paging...
     //private record class PagedSearchContext
@@ -263,20 +260,23 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        // check for a load directory
-        if ((config.LoadDirectory != null) && (!_loadedSupplements.Contains(config.LoadDirectory.FullName)))
+        // traverse compartment definitions
+        foreach (CompartmentDefinition cd in CoreCompartmentSource.GetCompartments())
         {
-            _loadedSupplements.Add(config.LoadDirectory.FullName);
+            _ = RegisterCompartmentDefinition(cd);
+        }
 
+        // check for a load directory
+        if ((config.LoadDirectory != null) && _loadedSupplements.Add(config.LoadDirectory.FullName))
+        {
             _hasProtected = config.ProtectLoadedContent;
             _loadReprocess = new();
             _loadState = LoadStateCodes.Read;
 
-            bool success;
-
             foreach (FileInfo file in config.LoadDirectory.GetFiles("*.*", SearchOption.AllDirectories))
             {
                 Resource? r = null;
+                bool success;
 
                 switch (file.Extension.ToLowerInvariant())
                 {
@@ -340,14 +340,9 @@ public partial class VersionedFhirStore : IFhirStore
                     }
                 }
 
-                if (success)
-                {
-                    Console.WriteLine($"{config.ControllerName} <<<      loaded: {file.FullName}");
-                }
-                else
-                {
-                    Console.WriteLine($"{config.ControllerName} <<< load FAILED: {file.FullName}");
-                }
+                Console.WriteLine(success
+                    ? $"{config.ControllerName} <<<      loaded: {file.FullName}"
+                    : $"{config.ControllerName} <<< load FAILED: {file.FullName}");
             }
 
             _loadState = LoadStateCodes.Process;
@@ -421,10 +416,8 @@ public partial class VersionedFhirStore : IFhirStore
                 continue;
             }
 
-            if (!_operations.ContainsKey(fhirOp.OperationName))
+            if (_operations.TryAdd(fhirOp.OperationName, fhirOp))
             {
-                _operations.Add(fhirOp.OperationName, fhirOp);
-
                 try
                 {
                     Hl7.Fhir.Model.OperationDefinition? opDef = fhirOp.GetDefinition(_config.FhirVersion);
@@ -453,12 +446,14 @@ public partial class VersionedFhirStore : IFhirStore
         {
             IFhirInteractionHook? hook = (IFhirInteractionHook?)Activator.CreateInstance(hookType);
 
+            // skip if not supported by this fhir version
             if ((hook == null) ||
-                (hook.SupportedFhirVersions.Any() && !hook.SupportedFhirVersions.Contains(_config.FhirVersion)))
+                ((hook.SupportedFhirVersions.Count != 0) && !hook.SupportedFhirVersions.Contains(_config.FhirVersion)))
             {
                 continue;
             }
 
+            // skip if requires a package that is not loaded
             if ((!string.IsNullOrEmpty(hook.RequiresPackage)) &&
                 (!_loadedDirectives.Contains(hook.RequiresPackage)) &&
                 (!_loadedPackageIds.Contains(hook.RequiresPackage)))
@@ -466,6 +461,7 @@ public partial class VersionedFhirStore : IFhirStore
                 continue;
             }
 
+            // skip if we already have this hook
             if (_hookNamesById.ContainsKey(hook.Id))
             {
                 continue;
@@ -474,6 +470,8 @@ public partial class VersionedFhirStore : IFhirStore
             // determine where this hook belongs
             foreach ((string resource, HashSet<Common.StoreInteractionCodes> interactions) in hook.InteractionsByResource)
             {
+                Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>? hbr;
+
                 if (string.IsNullOrEmpty(resource) ||
                     resource.Equals("*", StringComparison.Ordinal) ||
                     resource.Equals("Resource", StringComparison.Ordinal))
@@ -481,21 +479,20 @@ public partial class VersionedFhirStore : IFhirStore
                     // add to all resources - use VersionedFhirStore
                     foreach (string resourceType in _store.Keys)
                     {
-                        if (!_hooksByInteractionByResource.ContainsKey(resourceType))
+                        if (!_hooksByInteractionByResource.TryGetValue(resourceType, out hbr))
                         {
-                            _hooksByInteractionByResource.Add(resourceType, new());
+                            hbr = [];
+                            _hooksByInteractionByResource.Add(resourceType, hbr);
                         }
 
                         foreach (Common.StoreInteractionCodes interaction in interactions)
                         {
-                            if (!_hooksByInteractionByResource[resourceType].ContainsKey(interaction))
+                            if (!hbr.TryGetValue(interaction, out IFhirInteractionHook[]? hooks))
                             {
-                                _hooksByInteractionByResource[resourceType].Add(interaction, new IFhirInteractionHook[] { hook });
+                                hooks = [];
                             }
-                            else
-                            {
-                                _hooksByInteractionByResource[resourceType][interaction] = _hooksByInteractionByResource[resourceType][interaction].Append(hook).ToArray();
-                            }
+
+                            hbr[interaction] = hooks.Append(hook).ToArray();
                         }
                     }
 
@@ -503,21 +500,20 @@ public partial class VersionedFhirStore : IFhirStore
                 }
 
                 // add to a single resource - use ResourceStore
-                if (!_hooksByInteractionByResource.ContainsKey(resource))
+                if (!_hooksByInteractionByResource.TryGetValue(resource, out hbr))
                 {
-                    _hooksByInteractionByResource.Add(resource, new());
+                    hbr = [];
+                    _hooksByInteractionByResource.Add(resource, hbr);
                 }
 
                 foreach (Common.StoreInteractionCodes interaction in interactions)
                 {
-                    if (!_hooksByInteractionByResource[resource].ContainsKey(interaction))
+                    if (!hbr.TryGetValue(interaction, out IFhirInteractionHook[]? hooks))
                     {
-                        _hooksByInteractionByResource[resource].Add(interaction, new IFhirInteractionHook[] { hook });
+                        hooks = [];
                     }
-                    else
-                    {
-                        _hooksByInteractionByResource[resource][interaction] = _hooksByInteractionByResource[resource][interaction].Append(hook).ToArray();
-                    }
+
+                    hbr[interaction] = hooks.Append(hook).ToArray();
                 }
             }
 
@@ -537,7 +533,7 @@ public partial class VersionedFhirStore : IFhirStore
         string packageSupplements,
         bool includeExamples)
     {
-        _loadReprocess = new();
+        _loadReprocess = [];
         _loadState = LoadStateCodes.Read;
 
         bool success;
@@ -640,14 +636,9 @@ public partial class VersionedFhirStore : IFhirStore
                         continue;
                 }
 
-                if (success)
-                {
-                    Console.WriteLine($"{_config.ControllerName}:{directive} <<<      loaded: {file.FullName}");
-                }
-                else
-                {
-                    Console.WriteLine($"{_config.ControllerName}:{directive} <<< load FAILED: {file.FullName}");
-                }
+                Console.WriteLine(success
+                    ? $"{_config.ControllerName}:{directive} <<<      loaded: {file.FullName}"
+                    : $"{_config.ControllerName}:{directive} <<< load FAILED: {file.FullName}");
             }
         }
 
@@ -687,14 +678,9 @@ public partial class VersionedFhirStore : IFhirStore
                         continue;
                 }
 
-                if (success)
-                {
-                    Console.WriteLine($"{_config.ControllerName}:{directive} <<<      loaded: {file.FullName}");
-                }
-                else
-                {
-                    Console.WriteLine($"{_config.ControllerName}:{directive} <<< load FAILED: {file.FullName}");
-                }
+                Console.WriteLine(success
+                    ? $"{_config.ControllerName}:{directive} <<<      loaded: {file.FullName}"
+                    : $"{_config.ControllerName}:{directive} <<< load FAILED: {file.FullName}");
             }
         }
 
@@ -758,20 +744,14 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>
     /// Gets an enumerable collection that contains the keys in the read-only dictionary.
     /// </summary>
-    /// <typeparam name="string">        Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore">Type of the resource store.</typeparam>
     IEnumerable<string> IReadOnlyDictionary<string, IResourceStore>.Keys => _store.Keys;
 
     /// <summary>
     /// Gets an enumerable collection that contains the values in the read-only dictionary.
     /// </summary>
-    /// <typeparam name="string">        Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore">Type of the resource store.</typeparam>
     IEnumerable<IResourceStore> IReadOnlyDictionary<string, IResourceStore>.Values => _store.Values;
 
     /// <summary>Gets the number of elements in the collection.</summary>
-    /// <typeparam name="string">         Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore>">Type of the resource store></typeparam>
     int IReadOnlyCollection<KeyValuePair<string, IResourceStore>>.Count => _store.Count;
 
     /// <summary>Gets the current topics.</summary>
@@ -784,8 +764,6 @@ public partial class VersionedFhirStore : IFhirStore
     public ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> ReceivedNotifications => _receivedNotifications;
 
     /// <summary>Gets the element that has the specified key in the read-only dictionary.</summary>
-    /// <typeparam name="string">        Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore">Type of the resource store.</typeparam>
     /// <param name="key">The key to locate.</param>
     /// <returns>The element that has the specified key in the read-only dictionary.</returns>
     IResourceStore IReadOnlyDictionary<string, IResourceStore>.this[string key] => _store[key];
@@ -793,8 +771,6 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>
     /// Determines whether the read-only dictionary contains an element that has the specified key.
     /// </summary>
-    /// <typeparam name="string">        Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore">Type of the resource store.</typeparam>
     /// <param name="key">The key to locate.</param>
     /// <returns>
     /// <see langword="true" /> if the read-only dictionary contains an element that has the
@@ -803,8 +779,6 @@ public partial class VersionedFhirStore : IFhirStore
     bool IReadOnlyDictionary<string, IResourceStore>.ContainsKey(string key) => _store.ContainsKey(key);
 
     /// <summary>Gets the value that is associated with the specified key.</summary>
-    /// <typeparam name="string">        Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore">Type of the resource store.</typeparam>
     /// <param name="key">  The key to locate.</param>
     /// <param name="value">[out] When this method returns, the value associated with the specified
     ///  key, if the key is found; otherwise, the default value for the type of the <paramref name="value" />
@@ -821,8 +795,6 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>Returns an enumerator that iterates through the collection.</summary>
-    /// <typeparam name="string">         Type of the string.</typeparam>
-    /// <typeparam name="IResourceStore>">Type of the resource store></typeparam>
     /// <returns>An enumerator that can be used to iterate through the collection.</returns>
     IEnumerator<KeyValuePair<string, IResourceStore>> IEnumerable<KeyValuePair<string, IResourceStore>>.GetEnumerator() =>
         _store.Select(kvp => new KeyValuePair<string, IResourceStore>(kvp.Key, kvp.Value)).GetEnumerator();
@@ -846,13 +818,16 @@ public partial class VersionedFhirStore : IFhirStore
 
         lock (_spLockObject)
         {
-            if (!_compiledSearchParameters.ContainsKey(c))
+            if (_compiledSearchParameters.TryGetValue(c, out CompiledExpression? ce))
             {
-                _ = _compiledSearchParameters.TryAdd(c, _compiler.Compile(expression));
+                return ce;
             }
-        }
 
-        return _compiledSearchParameters[c];
+            ce = _compiler.Compile(expression);
+            _ = _compiledSearchParameters.TryAdd(c, ce);
+
+            return ce;
+        }
     }
 
     /// <summary>Check resource usage.</summary>
@@ -879,9 +854,9 @@ public partial class VersionedFhirStore : IFhirStore
                     // resource and id
                     case 2:
                         {
-                            if (_store.ContainsKey(components[0]))
+                            if (_store.TryGetValue(components[0], out IVersionedResourceStore? rs))
                             {
-                                _store[components[0]].InstanceDelete(components[1], _protectedResources);
+                                rs.InstanceDelete(components[1], _protectedResources);
                             }
                         }
                         break;
@@ -890,9 +865,9 @@ public partial class VersionedFhirStore : IFhirStore
                     // resource, id, and version
                     case 3:
                         {
-                            if (_store.ContainsKey(components[0]))
+                            if (_store.TryGetValue(components[0], out IVersionedResourceStore? rs))
                             {
-                                _store[components[0]].InstanceDelete(components[1], _protectedResources);
+                                rs.InstanceDelete(components[1], _protectedResources);
                             }
                         }
                         break;
@@ -977,20 +952,22 @@ public partial class VersionedFhirStore : IFhirStore
             _ = _subscriptions.TryRemove(id, out _);
 
             // look for a subscription resource to modify
-            if (_store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore) &&
-                resourceStore!.TryGetValue(id, out object? resourceObj) &&
-                (resourceObj is Subscription r))
+            if (!_store.TryGetValue("Subscription", out IVersionedResourceStore? rs) ||
+                !rs!.TryGetValue(id, out object? resourceObj) ||
+                (resourceObj is not Subscription r))
             {
-                r.Status = SubscriptionConverter.OffCode;
-                resourceStore.InstanceUpdate(
-                    r,
-                    false,
-                    string.Empty,
-                    string.Empty,
-                    _protectedResources,
-                    out _,
-                    out _);
+                continue;
             }
+
+            r.Status = SubscriptionConverter.OffCode;
+            rs.InstanceUpdate(
+                r,
+                false,
+                string.Empty,
+                string.Empty,
+                _protectedResources,
+                out _,
+                out _);
         }
     }
 
@@ -1069,12 +1046,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         resource = rs.InstanceRead(id);
 
-        if (resource == null)
-        {
-            return false;
-        }
-
-        return true;
+        return resource != null;
     }
 
     /// <summary>Resolves the given URI into a resource.</summary>
@@ -1104,21 +1076,14 @@ public partial class VersionedFhirStore : IFhirStore
             //throw new ArgumentException("Invalid URI - unsupported resource type", nameof(uri));
         }
 
-        Resource? resource = rs.InstanceRead(id);
-
-        if (resource == null)
-        {
-            return null!;
-            //throw new ArgumentException("Invalid URI - ID not found", nameof(uri));
-        }
-
-        return resource.ToTypedElement().ToScopedNode();
+        return rs.InstanceRead(id)?.ToTypedElement().ToScopedNode() ?? null!;
     }
 
     /// <summary>Performs the interaction specified in the request.</summary>
     /// <param name="ctx">            The request context.</param>
     /// <param name="response">       [out] The response data.</param>
     /// <param name="serializeReturn">(Optional) True to serialize return.</param>
+    /// <param name="forceAllowExistingId">(Optional) True to override configuration and force existing IDs to be used, useful for transaction processing.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool PerformInteraction(
         FhirRequestContext ctx,
@@ -1130,38 +1095,23 @@ public partial class VersionedFhirStore : IFhirStore
         {
             case Common.StoreInteractionCodes.InstanceDelete:
                 {
-                    if (serializeReturn)
-                    {
-                        return InstanceDelete(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoInstanceDelete(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? InstanceDelete(ctx, out response)
+                        : DoInstanceDelete(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.InstanceOperation:
                 {
-                    if (serializeReturn)
-                    {
-                        return InstanceOperation(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoInstanceOperation(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? InstanceOperation(ctx, out response)
+                        : DoInstanceOperation(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.InstanceRead:
                 {
-                    if (serializeReturn)
-                    {
-                        return InstanceRead(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoInstanceRead(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? InstanceRead(ctx, out response)
+                        : DoInstanceRead(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.InstanceUpdate:
@@ -1171,10 +1121,8 @@ public partial class VersionedFhirStore : IFhirStore
                     {
                         return InstanceUpdate(ctx, out response);
                     }
-                    else
-                    {
-                        return DoInstanceUpdate(ctx, r, out response);
-                    }
+
+                    return DoInstanceUpdate(ctx, r, out response);
                 }
 
             case Common.StoreInteractionCodes.TypeCreate:
@@ -1184,60 +1132,38 @@ public partial class VersionedFhirStore : IFhirStore
                     {
                         return InstanceCreate(ctx, out response, forceAllowExistingId);
                     }
-                    else
-                    {
-                        return DoInstanceCreate(ctx, r, out response, forceAllowExistingId);
-                    }
+
+                    return DoInstanceCreate(ctx, r, out response, forceAllowExistingId);
                 }
 
             case Common.StoreInteractionCodes.TypeDeleteConditional:
             case Common.StoreInteractionCodes.TypeDeleteConditionalSingle:
             case Common.StoreInteractionCodes.TypeDeleteConditionalMultiple:
                 {
-                    if (serializeReturn)
-                    {
-                        return TypeDelete(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoTypeDelete(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? TypeDelete(ctx, out response)
+                        : DoTypeDelete(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.TypeOperation:
                 {
-                    if (serializeReturn)
-                    {
-                        return TypeOperation(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoTypeOperation(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? TypeOperation(ctx, out response)
+                        : DoTypeOperation(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.TypeSearch:
                 {
-                    if (serializeReturn)
-                    {
-                        return TypeSearch(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoTypeSearch(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? TypeSearch(ctx, out response)
+                        : DoTypeSearch(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.SystemCapabilities:
                 {
-                    if (serializeReturn)
-                    {
-                        return GetMetadata(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoGetMetadata(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? GetMetadata(ctx, out response)
+                        : DoGetMetadata(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.SystemBundle:
@@ -1246,49 +1172,31 @@ public partial class VersionedFhirStore : IFhirStore
                     {
                         return ProcessBundle(ctx, out response);
                     }
-                    else
-                    {
-                        return DoProcessBundle(ctx, b, out response);
-                    }
+
+                    return DoProcessBundle(ctx, b, out response);
                 }
 
             case Common.StoreInteractionCodes.SystemDeleteConditional:
                 {
-                    if (serializeReturn)
-                    {
-                        return SystemDelete(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoSystemDelete(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? SystemDelete(ctx, out response)
+                        : DoSystemDelete(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.SystemOperation:
                 {
-                    if (serializeReturn)
-                    {
-                        return SystemOperation(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoSystemOperation(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? SystemOperation(ctx, out response)
+                        : DoSystemOperation(ctx, out response);
                 }
 
             case Common.StoreInteractionCodes.SystemSearch:
                 {
-                    if (serializeReturn)
-                    {
-                        return SystemSearch(ctx, out response);
-                    }
-                    else
-                    {
-                        return DoSystemSearch(ctx, out response);
-                    }
+                    return serializeReturn
+                        ? SystemSearch(ctx, out response)
+                        : DoSystemSearch(ctx, out response);
                 }
 
-            case Common.StoreInteractionCodes.CompartmentOperation:
             case Common.StoreInteractionCodes.CompartmentSearch:
             case Common.StoreInteractionCodes.CompartmentTypeSearch:
             case Common.StoreInteractionCodes.InstanceDeleteHistory:
@@ -1317,8 +1225,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="interaction"> The interaction.</param>
     /// <returns>An array of i FHIR interaction hook.</returns>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private IEnumerable<IFhirInteractionHook> GetHooks(string resourceType, Common.StoreInteractionCodes interaction)
+    private IFhirInteractionHook[] GetHooks(string? resourceType, Common.StoreInteractionCodes interaction)
     {
+        if (string.IsNullOrEmpty(resourceType))
+        {
+            return [];
+        }
+
         if (!_hooksByInteractionByResource.TryGetValue(resourceType, out Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>? hooksByInteraction))
         {
             return [];
@@ -1337,14 +1250,14 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="interactions">The interactions.</param>
     /// <returns>An array of i FHIR interaction hook.</returns>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private IEnumerable<IFhirInteractionHook> GetHooks(string resourceType, IEnumerable<Common.StoreInteractionCodes> interactions)
+    private IFhirInteractionHook[] GetHooks(string resourceType, IEnumerable<Common.StoreInteractionCodes> interactions)
     {
         if (!_hooksByInteractionByResource.TryGetValue(resourceType, out Dictionary<Common.StoreInteractionCodes, IFhirInteractionHook[]>? hooksByInteraction))
         {
             return [];
         }
 
-        List<IFhirInteractionHook[]> collector = new();
+        List<IFhirInteractionHook> collector = [];
 
         foreach (Common.StoreInteractionCodes interaction in interactions)
         {
@@ -1353,15 +1266,16 @@ public partial class VersionedFhirStore : IFhirStore
                 continue;
             }
 
-            collector.Add(hooks);
+            collector.AddRange(hooks);
         }
 
-        return collector.SelectMany(v => v);
+        return collector.ToArray();
     }
 
     /// <summary>Instance create.</summary>
     /// <param name="ctx">     The request context.</param>
     /// <param name="response">[out] The response data.</param>
+    /// <param name="forceAllowExistingId">[optional] override configuration to force allowance of existing ids, useful in bundle processing</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool InstanceCreate(
         FhirRequestContext ctx,
@@ -1406,8 +1320,13 @@ public partial class VersionedFhirStore : IFhirStore
             out response,
             forceAllowExistingId);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1423,6 +1342,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="ctx">     The request context.</param>
     /// <param name="content"> The content.</param>
     /// <param name="response">[out] The response data.</param>
+    /// <param name="forceExistingId">(Optional) True to override configuration and force allowance of existing IDs, useful in transaction processing.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
     internal bool DoInstanceCreate(
         FhirRequestContext ctx,
@@ -1445,7 +1365,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        if (!_store.ContainsKey(resourceType))
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -1458,33 +1378,34 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(
+        IFhirInteractionHook[] hooks = GetHooks(
             resourceType,
             string.IsNullOrEmpty(ctx.IfNoneExist) ? Common.StoreInteractionCodes.TypeCreate : Common.StoreInteractionCodes.TypeCreateConditional);
-
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                _ = hook.DoInteractionHook(
-                        ctx,
-                        this,
-                        _store[resourceType],
-                        content,
-                        out FhirResponseContext hr);
+                continue;
+            }
 
-                // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
-                {
-                    response = hr;
-                    return true;
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                content,
+                out FhirResponseContext hr);
 
-                // if the hook modified the resource, use that moving forward
-                if (hr.Resource != null)
-                {
-                    content = (Resource)hr.Resource;
-                }
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                content = (Resource)hr.Resource;
             }
         }
 
@@ -1496,10 +1417,9 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext searchResp);
 
             if (success &&
-                (searchResp.Resource != null) &&
-                (searchResp.Resource is Bundle bundle))
+                searchResp.Resource is Bundle bundle)
             {
-                switch (bundle?.Total)
+                switch (bundle.Total)
                 {
                     // no matches - continue with store as normal
                     case 0:
@@ -1533,7 +1453,7 @@ public partial class VersionedFhirStore : IFhirStore
                             {
                                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.PreconditionFailed,
-                                    $"If-None-Exist query returned too many matches: {bundle?.Total}"),
+                                    $"If-None-Exist query returned too many matches: {bundle.Total}"),
                                 StatusCode = HttpStatusCode.PreconditionFailed,
                             };
                             return false;
@@ -1554,11 +1474,10 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // create the resource
-        Resource? stored = _store[resourceType].InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId);
-
+        Resource? stored = rs.InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId);
         Resource? sForHook = null;
 
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        foreach (IFhirInteractionHook hook in hooks)
         {
             sForHook ??= (Resource?)stored?.DeepCopy();
 
@@ -1567,7 +1486,7 @@ public partial class VersionedFhirStore : IFhirStore
                 _ = hook.DoInteractionHook(
                         ctx,
                         this,
-                        _store[resourceType],
+                        rs,
                         sForHook,
                         out FhirResponseContext hr);
 
@@ -1689,8 +1608,13 @@ public partial class VersionedFhirStore : IFhirStore
             requestBundle,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1769,8 +1693,13 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1790,7 +1719,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        if (!_store.ContainsKey(ctx.ResourceType))
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -1803,43 +1732,43 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.InstanceDelete);
-
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.InstanceDelete);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                _ = hook.DoInteractionHook(
-                        ctx,
-                        this,
-                        _store[ctx.ResourceType],
-                        null,
-                        out FhirResponseContext hr);
+                continue;
+            }
 
-                // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
-                {
-                    response = hr;
-                    return true;
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
             }
         }
 
         // attempt delete
-        Resource? resource = _store[ctx.ResourceType].InstanceDelete(ctx.Id, _protectedResources);
+        Resource? resource = rs.InstanceDelete(ctx.Id, _protectedResources);
 
         Resource? sForHook = null;
 
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        foreach (IFhirInteractionHook hook in hooks)
         {
             sForHook ??= (Resource?)resource?.DeepCopy();
-
             if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
             {
                 _ = hook.DoInteractionHook(
                         ctx,
                         this,
-                        _store[ctx.ResourceType],
+                        rs,
                         sForHook,
                         out FhirResponseContext hr);
 
@@ -1889,14 +1818,14 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryInstanceRead(string resourceType, string id, out object? resource)
     {
-        if ((!_store.ContainsKey(resourceType)) ||
-            (!((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)_store[resourceType]).ContainsKey(id)))
+        if ((!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs)) ||
+            (!rs.TryGetValue(id, out Hl7.Fhir.Model.Resource? r)))
         {
             resource = null;
             return false;
         }
 
-        resource = ((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)_store[resourceType])[id].DeepCopy();
+        resource = r.DeepCopy();
         return true;
     }
 
@@ -1910,8 +1839,13 @@ public partial class VersionedFhirStore : IFhirStore
     {
         bool success = DoInstanceRead(ctx, out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -1944,7 +1878,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        if (!_store.ContainsKey(ctx.ResourceType))
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -1970,33 +1904,34 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.InstanceRead);
-
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.InstanceRead);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                _ = hook.DoInteractionHook(
-                        ctx,
-                        this,
-                        _store[ctx.ResourceType],
-                        null,
-                        out FhirResponseContext hr);
+                continue;
+            }
 
-                // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
-                {
-                    response = hr;
-                    return true;
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
             }
         }
 
-        Resource? r = _store[ctx.ResourceType].InstanceRead(ctx.Id);
+        Resource? r = rs.InstanceRead(ctx.Id);
 
         Resource? sForHook = null;
 
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        foreach (IFhirInteractionHook hook in hooks)
         {
             sForHook ??= (Resource?)r?.DeepCopy();
 
@@ -2005,7 +1940,7 @@ public partial class VersionedFhirStore : IFhirStore
                 _ = hook.DoInteractionHook(
                         ctx,
                         this,
-                        _store[ctx.ResourceType],
+                        rs,
                         sForHook,
                         out FhirResponseContext hr);
 
@@ -2057,7 +1992,7 @@ public partial class VersionedFhirStore : IFhirStore
         string lastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r");
 
         if ((!string.IsNullOrEmpty(ctx.IfModifiedSince)) &&
-            (String.Compare(lastModified, ctx.IfModifiedSince, StringComparison.Ordinal) < 0))
+            (string.Compare(lastModified, ctx.IfModifiedSince, StringComparison.Ordinal) < 0))
         {
             response = new()
             {
@@ -2173,13 +2108,13 @@ public partial class VersionedFhirStore : IFhirStore
 
         id = r.Id;
 
-        if (!_store.ContainsKey(resourceType))
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
             return false;
         }
 
         if ((!_config.AllowCreateAsUpdate) &&
-            (!((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)_store[resourceType]).ContainsKey(id)))
+            (!((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)rs).ContainsKey(id)))
         {
             return false;
         }
@@ -2213,22 +2148,30 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        Resource? r;
+        if (ctx.SourceObject is not Resource r)
+        {
+            // if we do not have a resource already, check for content we can deserialize
+            if (string.IsNullOrEmpty(ctx.SourceContent) ||
+                string.IsNullOrEmpty(ctx.SourceFormat))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.BadRequest,
+                        "Resource is required",
+                        OperationOutcome.IssueType.Structure),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
 
-        if ((ctx.SourceObject != null) &&
-            (ctx.SourceObject is Resource))
-        {
-            r = ctx.SourceObject as Resource;
-        }
-        else
-        {
             HttpStatusCode sc = SerializationUtils.TryDeserializeFhir(
                 ctx.SourceContent,
                 ctx.SourceFormat,
-                out r,
+                out Resource? deserializeResource,
                 out string exMessage);
 
-            if ((!sc.IsSuccessful()) || (r == null))
+            if ((!sc.IsSuccessful()) || (deserializeResource == null))
             {
                 OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
@@ -2244,19 +2187,8 @@ public partial class VersionedFhirStore : IFhirStore
 
                 return false;
             }
-        }
 
-        if (r == null)
-        {
-            response = new()
-            {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.BadRequest,
-                    "Resource is required",
-                    OperationOutcome.IssueType.Structure),
-                StatusCode = HttpStatusCode.BadRequest,
-            };
-            return false;
+            r = deserializeResource;
         }
 
         bool success = DoInstanceUpdate(
@@ -2264,8 +2196,13 @@ public partial class VersionedFhirStore : IFhirStore
             r,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -2312,7 +2249,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        if (!_store.ContainsKey(resourceType))
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -2327,33 +2264,34 @@ public partial class VersionedFhirStore : IFhirStore
 
         HttpStatusCode sc;
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(
+        IFhirInteractionHook[] hooks = GetHooks(
             ctx.ResourceType,
             string.IsNullOrEmpty(ctx.UrlQuery) ? Common.StoreInteractionCodes.InstanceUpdate : Common.StoreInteractionCodes.InstanceUpdateConditional);
-
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                _ = hook.DoInteractionHook(
-                        ctx,
-                        this,
-                        _store[ctx.ResourceType],
-                        content,
-                        out FhirResponseContext hr);
+                continue;
+            }
 
-                // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
-                {
-                    response = hr;
-                    return true;
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                content,
+                out FhirResponseContext hr);
 
-                // if the hook modified the resource, use that moving forward
-                if (hr.Resource != null)
-                {
-                    content = (Resource)hr.Resource;
-                }
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                content = (Resource)hr.Resource;
             }
         }
 
@@ -2421,7 +2359,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        Resource? resource = _store[resourceType].InstanceUpdate(
+        Resource? resource = rs.InstanceUpdate(
             content,
             _config.AllowCreateAsUpdate,
             ctx.IfMatch,
@@ -2432,16 +2370,15 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? sForHook = null;
 
-        foreach (IFhirInteractionHook hook in hooks ?? [])
+        foreach (IFhirInteractionHook hook in hooks)
         {
             sForHook ??= (Resource?)resource?.DeepCopy();
-
             if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
             {
                 _ = hook.DoInteractionHook(
                         ctx,
                         this,
-                        _store[ctx.ResourceType],
+                        rs,
                         sForHook,
                         out FhirResponseContext hr);
 
@@ -2488,6 +2425,59 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>
+    /// Registers a new compartment definition in the FHIR store.
+    /// </summary>
+    /// <param name="compartmentDefinition">The compartment definition to register.</param>
+    /// <returns>True if the compartment definition was successfully registered; otherwise, false.</returns>
+    /// <remarks>
+    /// This method attempts to parse the provided compartment definition and add it to the store.
+    /// If the compartment type is not supported or an error occurs during parsing, the method returns false.
+    /// </remarks>
+    public bool RegisterCompartmentDefinition(object compartmentDefinition)
+    {
+        try
+        {
+            if (compartmentDefinition is not CompartmentDefinition cd)
+            {
+                Console.WriteLine("CompartmentDefinition: resource is not a CompartmentDefinition");
+                return false;
+            }
+
+            // try to parse the definition
+            ParsedCompartment parsed = new(cd);
+
+            if (!_store.ContainsKey(parsed.CompartmentType))
+            {
+                Console.WriteLine($"CompartmentDefinition: resource type {parsed.CompartmentType} not supported for requested compartment {cd.Url}");
+                return false;
+            }
+
+            _compartments[parsed.CompartmentType] = parsed;
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error parsing CompartmentDefinition: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes a compartment definition from the store.
+    /// </summary>
+    /// <param name="compartmentType">The type of the compartment to remove.</param>
+    public void RemoveCompartmentDefinition(string compartmentType)
+    {
+        if (!_compartments.ContainsKey(compartmentType))
+        {
+            return;
+        }
+
+        _compartments.Remove(compartmentType);
+    }
+
+    /// <summary>
     /// Attempts to add an executable search parameter to a given resource.
     /// </summary>
     /// <param name="resourceType">Type of the resource.</param>
@@ -2495,7 +2485,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TrySetExecutableSearchParameter(string resourceType, ModelInfo.SearchParamDefinition spDefinition)
     {
-        if (!_store.ContainsKey(resourceType))
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
             return false;
         }
@@ -2511,7 +2501,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         _capabilitiesAreStale = true;
-        _store[resourceType].SetExecutableSearchParameter(spDefinition);
+        rs.SetExecutableSearchParameter(spDefinition);
         return true;
     }
 
@@ -2521,7 +2511,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryRemoveExecutableSearchParameter(string resourceType, string name)
     {
-        if (!_store.ContainsKey(resourceType))
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
             return false;
         }
@@ -2537,7 +2527,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         _capabilitiesAreStale = true;
-        _store[resourceType].RemoveExecutableSearchParameter(name);
+        rs.RemoveExecutableSearchParameter(name);
         return true;
     }
 
@@ -2551,7 +2541,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryGetSearchParamDefinition(string resourceName, string spName, out ModelInfo.SearchParamDefinition? spDefinition)
     {
-        if (!_store.TryGetValue(resourceName, out IVersionedResourceStore? resourceStore))
+        if (!_store.TryGetValue(resourceName, out IVersionedResourceStore? rs))
         {
             spDefinition = null;
             return false;
@@ -2562,7 +2552,7 @@ public partial class VersionedFhirStore : IFhirStore
             return true;
         }
 
-        return resourceStore.TryGetSearchParamDefinition(spName, out spDefinition);
+        return rs.TryGetSearchParamDefinition(spName, out spDefinition);
     }
 
     /// <summary>Compile FHIR path criteria.</summary>
@@ -2949,7 +2939,6 @@ public partial class VersionedFhirStore : IFhirStore
         }
     }
 
-
     /// <summary>
     /// Serialize one or more subscription events into the desired format and content level.
     /// </summary>
@@ -3051,10 +3040,10 @@ public partial class VersionedFhirStore : IFhirStore
         string notificationType,
         string contentLevel = "")
     {
-        if (_subscriptions.ContainsKey(subscriptionId))
+        if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
         {
             Bundle? bundle = _subscriptionConverter.BundleForSubscriptionEvents(
-                _subscriptions[subscriptionId],
+                subscription,
                 eventNumbers,
                 notificationType,
                 _config.BaseUrl,
@@ -3094,10 +3083,10 @@ public partial class VersionedFhirStore : IFhirStore
         string subscriptionId,
         string notificationType)
     {
-        if (_subscriptions.ContainsKey(subscriptionId))
+        if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
         {
             return _subscriptionConverter.StatusForSubscription(
-                _subscriptions[subscriptionId],
+                subscription,
                 notificationType,
                 _config.BaseUrl);
         }
@@ -3132,12 +3121,12 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // check for existing record
-        bool priorExisted = _subscriptions.ContainsKey(subscription.Id);
+        bool priorExisted = _subscriptions.TryGetValue(subscription.Id, out ParsedSubscription? priorSubscription);
         string priorState;
 
         if (priorExisted)
         {
-            priorState = _subscriptions[subscription.Id].CurrentStatus;
+            priorState = priorSubscription!.CurrentStatus;
             _subscriptions[subscription.Id] = subscription;
         }
         else
@@ -3151,12 +3140,13 @@ public partial class VersionedFhirStore : IFhirStore
         {
             if (_loadState == LoadStateCodes.Read)
             {
-                if (!_loadReprocess!.ContainsKey("Subscription"))
+                if (!_loadReprocess!.TryGetValue("Subscription", out List<object>? reprocess))
                 {
-                    _loadReprocess.Add("Subscription", new());
+                    reprocess = [];
+                    _loadReprocess.Add("Subscription", reprocess);
                 }
 
-                _loadReprocess["Subscription"].Add(subscription);
+                reprocess.Add(subscription);
             }
 
             return false;
@@ -3189,24 +3179,23 @@ public partial class VersionedFhirStore : IFhirStore
 
             List<ParsedSearchParameter> parsedFilters = new();
 
-            string[] keys = new string[3] { resourceName, "*", "Resource" };
+            string[] keys = [resourceName, "*", "Resource"];
 
             foreach (string key in keys)
             {
-                if (!subscription.Filters.ContainsKey(key))
+                if (!subscription.Filters.TryGetValue(key, out List<ParsedSubscription.SubscriptionFilter>? subscriptionFilter))
                 {
                     continue;
                 }
 
-                foreach (ParsedSubscription.SubscriptionFilter filter in subscription.Filters[key])
+                foreach (ParsedSubscription.SubscriptionFilter filter in subscriptionFilter)
                 {
                     // TODO: check support for chained parameters in filters
 
                     // TODO: validate this is working for generic parameters (e.g., _id)
 
                     // TODO: support inline-defined parameters
-                    if (!rs.TryGetSearchParamDefinition(filter.Name, out ModelInfo.SearchParamDefinition? spd) ||
-                        spd == null)
+                    if (!rs.TryGetSearchParamDefinition(filter.Name, out ModelInfo.SearchParamDefinition? spd))
                     {
                         Console.WriteLine($"Cannot apply filter with no search parameter definition {resourceName}?{filter.Name}");
                         continue;
@@ -3254,12 +3243,12 @@ public partial class VersionedFhirStore : IFhirStore
     {
         bool success = DoSystemOperation(
             ctx,
-            out response);
+            out FhirResponseContext resp);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = resp.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)resp.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = resp.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)resp.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
-        response = response with
+        response = resp with
         {
             MimeType = ctx.DestinationFormat,
             SerializedResource = sr,
@@ -3269,17 +3258,15 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
-    /// <summary>Executes the system operation operation.</summary>
+    /// <summary>Executes the system-level operation.</summary>
     /// <param name="ctx">            The request context.</param>
-    /// <param name="contentResource">The content resource.</param>
-    /// <param name="resource">       [out] The resource.</param>
-    /// <param name="outcome">        [out] The outcome.</param>
+    /// <param name="response">[out] The response data.</param>
     /// <returns>A HttpStatusCode.</returns>
     internal bool DoSystemOperation(
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        if (!_operations.ContainsKey(ctx.OperationName))
+        if (!_operations.TryGetValue(ctx.OperationName, out IFhirOperation? op))
         {
             response = new()
             {
@@ -3290,8 +3277,6 @@ public partial class VersionedFhirStore : IFhirStore
             };
             return false;
         }
-
-        IFhirOperation op = _operations[ctx.OperationName];
 
         if (!op.AllowSystemLevel)
         {
@@ -3310,9 +3295,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (ctx.SourceObject != null)
         {
-            if (ctx.SourceObject is Resource)
+            if (ctx.SourceObject is Resource resource)
             {
-                r = ctx.SourceObject as Resource;
+                r = resource;
             }
             else if (!op.AcceptsNonFhir)
             {
@@ -3346,34 +3331,32 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemOperation);
-
-        if (hooks?.Any() ?? false)
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemOperation);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            null,
-                            null,
-                            out FhirResponseContext hr);
+                continue;
+            }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                null,
+                null,
+                out FhirResponseContext hr);
 
-                    // if the hook modified the content resource, use that moving forward
-                    if (hr.Resource != null)
-                    {
-                        r = (Resource)hr.Resource;
-                    }
-                }
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the content resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                r = (Resource)hr.Resource;
             }
         }
 
@@ -3391,7 +3374,7 @@ public partial class VersionedFhirStore : IFhirStore
             r = (Resource)opResponse.Resource;
         }
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             Resource? sForHook = (Resource?)r?.DeepCopy();
 
@@ -3469,7 +3452,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        if (!_store.ContainsKey(ctx.ResourceType))
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -3578,41 +3561,39 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.TypeOperation);
-
-        if (hooks?.Any() ?? false)
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.TypeOperation);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            r,
-                            out FhirResponseContext hr);
+                continue;
+            }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                r,
+                out FhirResponseContext hr);
 
-                    // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
-                    {
-                        r = (Resource)hr.Resource;
-                    }
-                }
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                r = (Resource)hr.Resource;
             }
         }
 
         bool success = op.DoOperation(
             ctx,
             this,
-            _store[ctx.ResourceType],
+            rs,
             null,
             r,
             out FhirResponseContext opResponse);
@@ -3623,7 +3604,7 @@ public partial class VersionedFhirStore : IFhirStore
             r = (Resource)opResponse.Resource;
         }
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             Resource? sForHook = (Resource?)r?.DeepCopy();
 
@@ -3634,7 +3615,7 @@ public partial class VersionedFhirStore : IFhirStore
                     _ = hook.DoInteractionHook(
                             ctx,
                             this,
-                            _store[ctx.ResourceType],
+                            rs,
                             sForHook,
                             out FhirResponseContext hr);
 
@@ -3701,7 +3682,7 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        if (!_store.ContainsKey(ctx.ResourceType))
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -3715,7 +3696,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         if (string.IsNullOrEmpty(ctx.Id) ||
-            !((IReadOnlyDictionary<string, Resource>)_store[ctx.ResourceType]).ContainsKey(ctx.Id))
+            !((IReadOnlyDictionary<string, Resource>)rs).ContainsKey(ctx.Id))
         {
             response = new()
             {
@@ -3737,21 +3718,6 @@ public partial class VersionedFhirStore : IFhirStore
                 StatusCode = HttpStatusCode.NotFound,
             };
             return false;
-        }
-
-        switch (ctx.Interaction)
-        {
-            case Common.StoreInteractionCodes.CompartmentOperation:
-                response = new()
-                {
-                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.NotFound,
-                        $"Compartment operations are not supported."),
-                    StatusCode = HttpStatusCode.NotFound,
-                };
-                return false;
-            default:
-                break;
         }
 
         IFhirOperation op = _operations[ctx.OperationName];
@@ -3822,34 +3788,32 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.InstanceOperation);
-
-        if (hooks?.Any() ?? false)
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.InstanceOperation);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            r,
-                            out FhirResponseContext hr);
+                continue;
+            }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                r,
+                out FhirResponseContext hr);
 
-                    // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
-                    {
-                        r = (Resource)hr.Resource;
-                    }
-                }
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                r = (Resource)hr.Resource;
             }
         }
 
@@ -3858,18 +3822,17 @@ public partial class VersionedFhirStore : IFhirStore
         bool success = op.DoOperation(
             ctx,
             this,
-            _store[ctx.ResourceType],
+            rs,
             focusResource,
             r,
             out FhirResponseContext opResponse);
 
-        if ((opResponse.Resource != null) &&
-            (opResponse.Resource is Resource))
+        if (opResponse.Resource is Resource opRes)
         {
-            r = (Resource)opResponse.Resource;
+            r = opRes;
         }
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             Resource? sForHook = (Resource?)r?.DeepCopy();
 
@@ -3880,7 +3843,7 @@ public partial class VersionedFhirStore : IFhirStore
                     _ = hook.DoInteractionHook(
                             ctx,
                             this,
-                            _store[ctx.ResourceType],
+                            rs,
                             sForHook,
                             out FhirResponseContext hr);
 
@@ -3940,7 +3903,7 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>Executes the system delete operation.</summary>
-    /// <param name="queryString">The query string.</param>
+    /// <param name="ctx"></param>
     /// <param name="response">   [out] The response data.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
     internal bool DoSystemDelete(
@@ -3992,7 +3955,6 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         Resource? match = resultBundle.Entry.First().Resource;
-
         if (match == null)
         {
             response = new()
@@ -4006,47 +3968,57 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemDeleteConditional);
-
-        if (hooks?.Any() ?? false)
+        string resourceType = match.TypeName;
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            response = new()
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            match,
-                            out FhirResponseContext hr);
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Resource type {resourceType} does not exist on this server.",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemDeleteConditional);
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            {
+                continue;
+            }
 
-                    // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
-                    {
-                        match = (Resource)hr.Resource;
-                    }
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                match,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                match = (Resource)hr.Resource;
             }
         }
 
-        string resourceType = match.TypeName;
         string id = match.Id;
 
         // attempt delete
-        Resource? resource = _store[resourceType].InstanceDelete(id, _protectedResources);
+        Resource? resource = rs.InstanceDelete(id, _protectedResources);
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             Resource? sForHook = (Resource?)resource?.DeepCopy();
-
             foreach (IFhirInteractionHook hook in hooks)
             {
                 if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
@@ -4054,7 +4026,7 @@ public partial class VersionedFhirStore : IFhirStore
                     _ = hook.DoInteractionHook(
                             ctx,
                             this,
-                            _store[ctx.ResourceType],
+                            rs,
                             sForHook,
                             out FhirResponseContext hr);
 
@@ -4110,8 +4082,13 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -4144,7 +4121,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        if (!_store.ContainsKey(ctx.ResourceType))
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -4216,40 +4193,38 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(
+        IFhirInteractionHook[] hooks = GetHooks(
             ctx.ResourceType,
-            new Common.StoreInteractionCodes[]
-            {
+            [
                 Common.StoreInteractionCodes.TypeDeleteConditional,
                 Common.StoreInteractionCodes.TypeDeleteConditionalSingle,
                 Common.StoreInteractionCodes.TypeDeleteConditionalMultiple,
-            });
-        if (hooks?.Any() ?? false)
+            ]);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            match,
-                            out FhirResponseContext hr);
+                continue;
+            }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+rs,
+                match,
+                out FhirResponseContext hr);
 
-                    // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
-                    {
-                        match = (Resource)hr.Resource;
-                    }
-                }
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+
+            // if the hook modified the resource, use that moving forward
+            if (hr.Resource != null)
+            {
+                match = (Resource)hr.Resource;
             }
         }
 
@@ -4257,9 +4232,9 @@ public partial class VersionedFhirStore : IFhirStore
         string id = match.Id;
 
         // attempt delete
-        Resource? resource = _store[resourceType].InstanceDelete(id, _protectedResources);
+        Resource? resource = rs.InstanceDelete(id, _protectedResources);
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             Resource? sForHook = (Resource?)resource?.DeepCopy();
 
@@ -4270,7 +4245,7 @@ public partial class VersionedFhirStore : IFhirStore
                     _ = hook.DoInteractionHook(
                             ctx,
                             this,
-                            _store[ctx.ResourceType],
+                            rs,
                             sForHook,
                             out FhirResponseContext hr);
 
@@ -4351,10 +4326,8 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>Executes the type search operation.</summary>
-    /// <param name="resourceType">Type of the resource.</param>
-    /// <param name="queryString"> The query string.</param>
-    /// <param name="bundle">      [out] The bundle.</param>
-    /// <param name="outcome">     [out] The outcome.</param>
+    /// <param name="ctx">The request and related context.</param>
+    /// <param name="response">[out] The response status, resource, outcome, and context.</param>
     /// <returns>A HttpStatusCode.</returns>
     internal bool DoTypeSearch(
         FhirRequestContext ctx,
@@ -4364,82 +4337,20 @@ public partial class VersionedFhirStore : IFhirStore
             ? ctx.UrlQuery
             : ctx.SourceContent;
 
-        IEnumerable<ParsedSearchParameter> compartmentParameters= [];
-
-        switch (ctx.Interaction)
-        {
-            case Common.StoreInteractionCodes.CompartmentTypeSearch:
-                if (_store.TryGetValue("CompartmentDefinition", out IVersionedResourceStore? value) && ctx.CompartmentType != null)
-                {
-                    var compartmentUrl = "http://hl7.org/fhir/CompartmentDefinition/" +
-                                         ctx.CompartmentType.ToLower();
-                    var resource = value.GetByCanonical(compartmentUrl);
-                    if (resource != null)
-                    {
-                        var compartmentDefinition = resource as CompartmentDefinition;
-                        // retrieve search params
-                        var compartmentSearchParam = compartmentDefinition!.Resource
-                            .Where(component => component.Code != null)
-                            .Where(component =>
-                                ModelInfo.FhirTypeNameToResourceType(ctx.ResourceType).Equals(component.Code))
-                            .Select(component => component.Param)
-                            .SelectMany(param => param);
-
-                        // create search string
-                        foreach (var param in compartmentSearchParam??[])
-                        {
-                            compartmentParameters = compartmentParameters.Concat(
-                                ParsedSearchParameter.Parse(
-                                    $"?{param}={ctx.CompartmentType}/{ctx.Id}",
-                                    this,
-                                    _store[ctx.ResourceType],
-                                    ctx.ResourceType)
-                                );
-
-                        }
-                    }
-                }
-                else
-                {
-                    response = new FhirResponseContext()
-                    {
-                        Outcome = SerializationUtils.BuildOutcomeForRequest(
-                            HttpStatusCode.NotFound,
-                            $"CompartmentDefinition {ctx.CompartmentType} is not supported",
-                            OperationOutcome.IssueType.NotSupported),
-                        StatusCode = HttpStatusCode.NotFound,
-                    };
-                    return false;
-                }
-
-                break;
-            case Common.StoreInteractionCodes.CompartmentOperation:
-            case Common.StoreInteractionCodes.CompartmentSearch:
-                response = new FhirResponseContext()
-                {
-                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.NotImplemented,
-                        $"Compartment based operation ({ctx.Interaction}) is not supported",
-                        OperationOutcome.IssueType.Structure),
-                    StatusCode = HttpStatusCode.BadRequest,
-                };
-                return false;
-        }
-
         if (string.IsNullOrEmpty(ctx.ResourceType))
         {
             response = new()
             {
                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.BadRequest,
-                    "Resource type is required for type-delete interactions",
+                    "Resource type is required for type search interactions",
                     OperationOutcome.IssueType.Structure),
                 StatusCode = HttpStatusCode.BadRequest,
             };
             return false;
         }
 
-        if (!_store.ContainsKey(ctx.ResourceType))
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
         {
             response = new()
             {
@@ -4452,27 +4363,26 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.TypeSearch);
-        if (hooks?.Any() ?? false)
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.TypeSearch);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                        ctx,
-                        this,
-                        _store[ctx.ResourceType],
-                        null,
-                        out FhirResponseContext hr);
+                continue;
+            }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
             }
         }
 
@@ -4480,51 +4390,22 @@ public partial class VersionedFhirStore : IFhirStore
         IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
             searchQueryParams,
             this,
-            _store[ctx.ResourceType],
+            rs,
             ctx.ResourceType);
 
         // execute search
-        IEnumerable<Resource>? results = _store[ctx.ResourceType].TypeSearch(parameters);
+        List<Resource> results = rs.TypeSearch(parameters).ToList();
 
-        // null results indicates failure
-        if (results == null)
+        if (ctx.Authorization != null)
         {
-            response = new()
-            {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.InternalServerError,
-                    $"Type Search against {ctx.ResourceType} failed",
-                    OperationOutcome.IssueType.Processing),
-                StatusCode = HttpStatusCode.InternalServerError,
-            };
-            return false;
-        }
-
-        // Reduce based on compartment
-        if (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)
-        {
-            results = results.Where(result =>
-            {
-                return compartmentParameters.Any(compartmentParam =>
-                {
-                    var theParam = ParsedSearchParameter.Parse(
-                        $"_id={result.Id}",
-                        this,
-                        _store[ctx.ResourceType],
-                        ctx.ResourceType);
-                    var compartmentParams = theParam.Append(compartmentParam);
-                    var matchingResources = _store[ctx.ResourceType]
-                        .TypeSearch(compartmentParams);
-                    return matchingResources?.Any() ?? false;
-                });
-            });
+            results = filterSearchResultsForAuth(ctx, results);
         }
 
         // parse search result parameters
         ParsedResultParameters resultParameters = new ParsedResultParameters(
             searchQueryParams,
             this,
-            _store[ctx.ResourceType],
+            rs,
             ctx.ResourceType);
 
         string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
@@ -4546,14 +4427,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Type = Bundle.BundleType.Searchset,
             Total = results.Count(),
-            Link = new()
-            {
-                new Bundle.LinkComponent()
-                {
-                    Relation = "self",
-                    Url = selfLink,
-                }
-            },
+            Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
         // create our sort comparer, if necessary
@@ -4564,7 +4438,7 @@ public partial class VersionedFhirStore : IFhirStore
         HashSet<string> addedIds = new();
         int resultCount = 0;
 
-        foreach (Resource resource in (comparer == null ? results : results.OrderBy(r => r, comparer)))
+        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
         {
             if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
                 (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
@@ -4599,9 +4473,7 @@ public partial class VersionedFhirStore : IFhirStore
             AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
 
-        bundle.Total = resultCount;
-
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             foreach (IFhirInteractionHook hook in hooks)
             {
@@ -4610,7 +4482,7 @@ public partial class VersionedFhirStore : IFhirStore
                     _ = hook.DoInteractionHook(
                             ctx,
                             this,
-                            _store[ctx.ResourceType],
+                            rs,
                             bundle,
                             out FhirResponseContext hr);
 
@@ -4635,11 +4507,692 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = bundle,
             ResourceType = "Bundle",
-            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Type search successful"),
             StatusCode = HttpStatusCode.OK,
         };
         return true;
     }
+
+    /// <summary>Compartment search.</summary>
+    /// <param name="ctx">     The request context.</param>
+    /// <param name="response">[out] The response data.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    public bool CompartmentSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        bool success = DoCompartmentSearch(
+            ctx,
+            out response);
+
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+
+        response = response with
+        {
+            MimeType = ctx.DestinationFormat,
+            SerializedResource = sr,
+            SerializedOutcome = so,
+        };
+
+        return success;
+    }
+
+    private bool isAuthorizedAsSearchMatch(FhirRequestContext ctx, Resource r)
+    {
+        if (ctx.Authorization == null)
+        {
+            return true;
+        }
+
+        // check for user scopes that would cover this resource
+        if (ctx.Authorization.UserScopes.Contains("*.*") ||
+            ctx.Authorization.UserScopes.Contains("*.s") ||
+            ctx.Authorization.UserScopes.Contains(r.TypeName + ".*") ||
+            ctx.Authorization.UserScopes.Contains(r.TypeName + ".s"))
+        {
+            return true;
+        }
+
+        // check for a patient compartment search matching the launch patient (already filtered)
+        if (((ctx.Interaction == Common.StoreInteractionCodes.CompartmentSearch) ||
+             (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)) &&
+            (ctx.CompartmentType == "Patient") &&
+            (("Patient/" + ctx.Id) == ctx.Authorization.LaunchPatient))
+        {
+            return true;
+        }
+
+        // get the patient compartment
+        if (!_compartments.TryGetValue("Patient", out ParsedCompartment? patientCompartment))
+        {
+            return false;
+        }
+
+        // patients can only search for resources that are in the patient compartment
+        if (!patientCompartment.IncludedResources.TryGetValue(r.TypeName, out ParsedCompartment.IncludedResource? ir))
+        {
+            return false;
+        }
+
+        // check to see if this resource is allowed under a patient scope (still need to match with actual patient)
+        if (ctx.Authorization.PatientScopes.Contains("*.*") ||
+            ctx.Authorization.PatientScopes.Contains("*.s") ||
+            ctx.Authorization.PatientScopes.Contains(r.TypeName + ".*") ||
+            ctx.Authorization.PatientScopes.Contains(r.TypeName + ".s"))
+        {
+            // check to see if this is a patient resource
+            if ((r.TypeName == "Patient") &&
+                (("Patient/" + r.Id) == ctx.Authorization.LaunchPatient))
+            {
+                return true;
+            }
+
+            ITypedElement te = r.ToTypedElement();
+
+            // check to see if this resource would be in the desired patient compartment
+            foreach (string spCode in ir.SearchParamCodes)
+            {
+                if (_searchTester.TestForMatch(
+                    te,
+                    ParsedSearchParameter.Parse($"?{spCode}={ctx.Authorization.LaunchPatient}", this, _store[r.TypeName], r.TypeName)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // default fails
+        return false;
+    }
+
+    private List<Resource> filterSearchResultsForAuth(FhirRequestContext ctx, List<Resource> resources)
+    {
+        // if no authorization is required, return the unfiltered resources
+        if (ctx.Authorization == null)
+        {
+            return resources;
+        }
+
+        // check for user * scopes
+        if (ctx.Authorization.UserScopes.Contains("*.*") ||
+            ctx.Authorization.UserScopes.Contains("*.s"))
+        {
+            return resources;
+        }
+
+        // check for a patient compartment search matching the launch patient (already filtered)
+        if (((ctx.Interaction == Common.StoreInteractionCodes.CompartmentSearch) ||
+             (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)) &&
+            (ctx.CompartmentType == "Patient") &&
+            (("Patient/" + ctx.Id) == ctx.Authorization.LaunchPatient))
+        {
+            return resources;
+        }
+
+        // check each resource
+        return resources.Where(r => isAuthorizedAsSearchMatch(ctx, r)).ToList();
+    }
+
+
+    /// <summary>Executes the compartment search operation.</summary>
+    /// <param name="ctx">The request and related context.</param>
+    /// <param name="response">[out] The response status, resource, outcome, and context.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    internal bool DoCompartmentSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+
+        // check to see if we have a compartment type
+        if (string.IsNullOrEmpty(ctx.CompartmentType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Compartment type is required for compartment search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        // check to see if the compartment resource is supported
+        if (!_store.TryGetValue(ctx.CompartmentType, out IVersionedResourceStore? compartmentRS))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment Resource type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if we have a compatible compartment definition
+        if (!_compartments.TryGetValue(ctx.CompartmentType, out ParsedCompartment? compartment))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        IFhirInteractionHook[] hooks = GetHooks(ctx.CompartmentType, Common.StoreInteractionCodes.CompartmentSearch);
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            {
+                continue;
+            }
+
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                compartmentRS,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+        }
+
+        List<Resource> results = [];
+        List<ParsedSearchParameter> appliedParameters = [];
+
+        // iterate across the compartment resources
+        foreach ((string resourceType, ParsedCompartment.IncludedResource ir) in compartment.IncludedResources)
+        {
+            // check to see if we support this resource type
+            if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
+            {
+                // skip
+                continue;
+            }
+
+            // parse the search parameters in the context of this resource
+            IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+                searchQueryParams,
+                this,
+                rs,
+                resourceType);
+
+            List<ParsedSearchParameter> compartmentFilters = [];
+
+            // parse the relevant compartment type parameters
+            foreach (string spCode in ir.SearchParamCodes)
+            {
+                ParsedSearchParameter[] psps = ParsedSearchParameter.Parse(
+                    $"?{spCode}={ctx.CompartmentType}/{ctx.Id}",
+                    this,
+                    rs,
+                    resourceType).ToArray();
+
+                if (psps.Length == 0)
+                {
+                    continue;
+                }
+
+                compartmentFilters.AddRange(psps);
+            }
+
+            // do not add anything that does not have a valid filter
+            if (compartmentFilters.Count == 0)
+            {
+                continue;
+            }
+
+            // execute search - if there is only one compartment criteria, add it here
+            IEnumerable<Resource> compartmentResults = (compartmentFilters.Count() == 1)
+                ? rs.TypeSearch([.. parameters, .. compartmentFilters])
+                : rs.TypeSearch(parameters);
+
+            if (compartmentFilters.Count() == 1)
+            {
+                results.AddRange(compartmentResults);
+            }
+            else
+            {
+                // reduce based on compartment filters (OR)
+                results.AddRange(compartmentResults.Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf]))));
+            }
+
+            appliedParameters.AddRange(parameters.Where(p => !p.IgnoredParameter));
+        }
+
+        if (ctx.Authorization != null)
+        {
+            results = filterSearchResultsForAuth(ctx, results);
+        }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            searchQueryParams,
+            this,
+            compartmentRS,
+            ctx.CompartmentType);
+
+        string selfLink = $"{getBaseUrl(ctx)}/{ctx.CompartmentType}/{ctx.Id}/*";
+        string selfSearchParams = string.Join('&', appliedParameters.Select(p => p.GetAppliedQueryString()).Distinct());
+        string selfResultParams = resultParameters.GetAppliedQueryString();
+
+        if (!string.IsNullOrEmpty(selfSearchParams))
+        {
+            selfLink = selfLink + "?" + selfSearchParams;
+        }
+
+        if (!string.IsNullOrEmpty(selfResultParams))
+        {
+            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
+        }
+
+        // create our bundle for results
+        Bundle bundle = new Bundle
+        {
+            Type = Bundle.BundleType.Searchset,
+            Total = results.Count(),
+            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
+        };
+
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+            ? null
+            : new(this, resultParameters.SortRequests);
+
+        HashSet<string> addedIds = new();
+        int resultCount = 0;
+
+        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        {
+            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            {
+                break;
+            }
+
+            resultCount++;
+
+            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+            if (addedIds.Contains(relativeUrl))
+            {
+                // promote to match
+                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+            }
+            else
+            {
+                // add the matched result to the bundle
+                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                // track we have added this id
+                addedIds.Add(relativeUrl);
+            }
+
+            // add any included resources
+            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+            // TODO: check for include:iterate directives
+
+            // add any reverse included resources
+            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+        }
+
+        if (hooks.Length > 0)
+        {
+            foreach (IFhirInteractionHook hook in hooks)
+            {
+                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
+                {
+                    _ = hook.DoInteractionHook(
+                            ctx,
+                            this,
+                            compartmentRS,
+                            bundle,
+                            out FhirResponseContext hr);
+
+                    // check for the hook indicating processing is complete
+                    if (hr.StatusCode != null)
+                    {
+                        response = hr;
+                        return true;
+                    }
+
+                    // if the hook modified the resource, use that moving forward
+                    if ((hr.Resource != null) &&
+                        (hr.Resource is Bundle opBundle))
+                    {
+                        bundle = opBundle;
+                    }
+                }
+            }
+        }
+
+        response = new()
+        {
+            Resource = bundle,
+            ResourceType = "Bundle",
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Compartment search successful"),
+            StatusCode = HttpStatusCode.OK,
+        };
+        return true;
+    }
+
+    /// <summary>Compartment search, restricted to a single type.</summary>
+    /// <param name="ctx">     The request context.</param>
+    /// <param name="response">[out] The response data.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    public bool CompartmentTypeSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        bool success = DoCompartmentTypeSearch(
+            ctx,
+            out response);
+
+        string sr = response.Resource == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+
+        string so = response.Outcome == null
+            ? string.Empty
+            : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+
+        response = response with
+        {
+            MimeType = ctx.DestinationFormat,
+            SerializedResource = sr,
+            SerializedOutcome = so,
+        };
+
+        return success;
+    }
+
+    /// <summary>Executes the compartment type search operation.</summary>
+    /// <param name="ctx">The request and related context.</param>
+    /// <param name="response">[out] The response status, resource, outcome, and context.</param>
+    /// <returns>A HttpStatusCode.</returns>
+    internal bool DoCompartmentTypeSearch(
+        FhirRequestContext ctx,
+        out FhirResponseContext response)
+    {
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+
+        // check to see if we have a compartment type
+        if (string.IsNullOrEmpty(ctx.CompartmentType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Compartment type is required for compartment type search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        // check to see if the compartment resource is supported
+        if (!_store.TryGetValue(ctx.CompartmentType, out IVersionedResourceStore? compartmentRS))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment Resource type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if we have a compatible compartment definition
+        if (!_compartments.TryGetValue(ctx.CompartmentType, out ParsedCompartment? compartment))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Compartment type: {ctx.CompartmentType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if we have a resource type
+        if (string.IsNullOrEmpty(ctx.ResourceType))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    "Resource type is required for compartment type search interactions",
+                    OperationOutcome.IssueType.Structure),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        // get the resource store for the target search resource type
+        if (!_store.TryGetValue(ctx.ResourceType, out IVersionedResourceStore? rs))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Resource type: {ctx.ResourceType} is not supported",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check to see if this resource is defined in this compartment
+        if (!compartment.IncludedResources.TryGetValue(ctx.ResourceType, out ParsedCompartment.IncludedResource? compartmentIR))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound,
+                    $"Resource type: {ctx.ResourceType} is not supported in compartment {ctx.CompartmentType}",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // check for hooks to call before evaluating
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.CompartmentTypeSearch);
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            {
+                continue;
+            }
+
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
+            }
+        }
+
+        // parse search parameters
+        IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+            searchQueryParams,
+            this,
+            rs,
+            ctx.ResourceType);
+
+        ParsedSearchParameter[] compartmentFilters = compartmentIR.SearchParamCodes.Select(
+            code => ParsedSearchParameter.Parse(
+            $"?{code}={ctx.CompartmentType}/{ctx.Id}",
+            this,
+            rs,
+            ctx.ResourceType).First()).ToArray();
+
+        // execute search - if there is only one compartment criteria, add it here
+        List<Resource> results = (compartmentFilters.Length == 1)
+            ? rs.TypeSearch([..parameters, ..compartmentFilters]).ToList()
+            : rs.TypeSearch(parameters).ToList();
+
+        // reduce based on compartment filters if there was more than one
+        if (compartmentFilters.Length != 1)
+        {
+            // reduce based on compartment filters (OR)
+            results = results
+                .Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf])))
+                .ToList();
+        }
+
+        if (ctx.Authorization != null)
+        {
+            results = filterSearchResultsForAuth(ctx, results);
+        }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            searchQueryParams,
+            this,
+            rs,
+            ctx.ResourceType);
+
+        string selfLink = $"{getBaseUrl(ctx)}/{ctx.CompartmentType}/{ctx.Id}/{ctx.ResourceType}";
+        string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
+        string selfResultParams = resultParameters.GetAppliedQueryString();
+
+        if (!string.IsNullOrEmpty(selfSearchParams))
+        {
+            selfLink = selfLink + "?" + selfSearchParams;
+        }
+
+        if (!string.IsNullOrEmpty(selfResultParams))
+        {
+            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
+        }
+
+        // create our bundle for results
+        Bundle bundle = new Bundle
+        {
+            Type = Bundle.BundleType.Searchset,
+            Total = results.Count(),
+            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
+        };
+
+        // create our sort comparer, if necessary
+        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+            ? null
+            : new(this, resultParameters.SortRequests);
+
+        HashSet<string> addedIds = new();
+        int resultCount = 0;
+
+        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        {
+            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            {
+                break;
+            }
+
+            resultCount++;
+
+            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+            if (addedIds.Contains(relativeUrl))
+            {
+                // promote to match
+                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+            }
+            else
+            {
+                // add the matched result to the bundle
+                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                // track we have added this id
+                addedIds.Add(relativeUrl);
+            }
+
+            // add any included resources
+            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+            // TODO: check for include:iterate directives
+
+            // add any reverse included resources
+            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+        }
+
+        if (hooks.Length > 0)
+        {
+            foreach (IFhirInteractionHook hook in hooks)
+            {
+                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
+                {
+                    _ = hook.DoInteractionHook(
+                            ctx,
+                            this,
+                            rs,
+                            bundle,
+                            out FhirResponseContext hr);
+
+                    // check for the hook indicating processing is complete
+                    if (hr.StatusCode != null)
+                    {
+                        response = hr;
+                        return true;
+                    }
+
+                    // if the hook modified the resource, use that moving forward
+                    if ((hr.Resource != null) &&
+                        (hr.Resource is Bundle opBundle))
+                    {
+                        bundle = opBundle;
+                    }
+                }
+            }
+        }
+
+        response = new()
+        {
+            Resource = bundle,
+            ResourceType = "Bundle",
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Compartment type search successful"),
+            StatusCode = HttpStatusCode.OK,
+        };
+        return true;
+    }
+
+
 
     /// <summary>System search.</summary>
     /// <param name="ctx">     The request context.</param>
@@ -4706,27 +5259,26 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemSearch);
-        if (hooks?.Any() ?? false)
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemSearch);
+        foreach (IFhirInteractionHook hook in hooks)
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            null,
-                            out FhirResponseContext hr);
+                continue;
+            }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-                }
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                null,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
             }
         }
 
@@ -4742,20 +5294,7 @@ public partial class VersionedFhirStore : IFhirStore
                 resourceType);
 
             // execute search
-            IEnumerable<Resource>? results = _store[resourceType].TypeSearch(parameters);
-
-            // null results indicates failure
-            if (results == null)
-            {
-                response = new()
-                {
-                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.InternalServerError,
-                        $"System search into {resourceType} failed"),
-                    StatusCode = HttpStatusCode.InternalServerError,
-                };
-                return false;
-            }
+            IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters);
 
             // parse search result parameters
             ParsedResultParameters resultParameters = new ParsedResultParameters(searchQueryParams, this, _store[resourceType], resourceType);
@@ -4784,14 +5323,7 @@ public partial class VersionedFhirStore : IFhirStore
         Bundle bundle = new()
         {
             Type = Bundle.BundleType.Searchset,
-            Link = new()
-            {
-                new Bundle.LinkComponent()
-                {
-                    Relation = "self",
-                    Url = selfLink,
-                }
-            },
+            Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, }, ],
         };
 
         HashSet<string> addedIds = new();
@@ -4812,7 +5344,15 @@ public partial class VersionedFhirStore : IFhirStore
             if (((rpForResource.MaxResults != null) && (resultCount >= rpForResource.MaxResults)) ||
                 ((rpForResource.PageMatchCount != null) && (resultCount >= rpForResource.PageMatchCount)))
             {
+                // flag that we cannot use this total
+                resultCount = -1;
                 break;
+            }
+
+            // skip resources we cannot include
+            if ((ctx.Authorization != null) && !isAuthorizedAsSearchMatch(ctx, resource))
+            {
+                continue;
             }
 
             resultCount++;
@@ -4842,7 +5382,7 @@ public partial class VersionedFhirStore : IFhirStore
             AddReverseInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
         }
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             foreach (IFhirInteractionHook hook in hooks)
             {
@@ -4873,7 +5413,14 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // set the total number of results aggregated across types
-        bundle.Total = resultCount;
+        if (resultCount == -1)
+        {
+            bundle.Total = null;
+        }
+        else
+        {
+            bundle.Total = resultCount;
+        }
 
         response = new()
         {
@@ -4930,22 +5477,18 @@ public partial class VersionedFhirStore : IFhirStore
                 };
 
                 // execute search
-                IEnumerable<Resource>? results = _store[reverseResourceType].TypeSearch(parameters);
-
-                if (results?.Any() ?? false)
+                IEnumerable<Resource> results = _store[reverseResourceType].TypeSearch(parameters);
+                foreach (Resource revIncludeRes in results)
                 {
-                    foreach (Resource revIncludeRes in results)
+                    string id = $"{revIncludeRes.TypeName}/{revIncludeRes.Id}";
+
+                    if (!addedIds.Contains(id))
                     {
-                        string id = $"{revIncludeRes.TypeName}/{revIncludeRes.Id}";
+                        // add the result to the list
+                        inclusions.Add(revIncludeRes);
 
-                        if (!addedIds.Contains(id))
-                        {
-                            // add the result to the list
-                            inclusions.Add(revIncludeRes);
-
-                            // track we have added this id
-                            addedIds.Add(id);
-                        }
+                        // track we have added this id
+                        addedIds.Add(id);
                     }
                 }
             }
@@ -5200,33 +5743,45 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        IEnumerable<IFhirInteractionHook> hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemCapabilities);
-        if (hooks?.Any() ?? false)
+        if (!_store.TryGetValue("CapabilityStatement", out IVersionedResourceStore? rs))
         {
-            foreach (IFhirInteractionHook hook in hooks)
+            response = new()
             {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store["CapabilityStatement"],
-                            null,
-                            out FhirResponseContext hr);
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.InternalServerError,
+                    "CapabilityStatement store not available",
+                    OperationOutcome.IssueType.Exception),
+                StatusCode = HttpStatusCode.InternalServerError,
+            };
+            return false;
+        }
 
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-                }
+        IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemCapabilities);
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
+            {
+                continue;
+            }
+
+            _ = hook.DoInteractionHook(
+                ctx,
+                this,
+                rs,
+                null,
+                out FhirResponseContext hr);
+
+            // check for the hook indicating processing is complete
+            if (hr.StatusCode != null)
+            {
+                response = hr;
+                return true;
             }
         }
 
         Hl7.Fhir.Model.Resource? r = GetCapabilities(ctx);
 
-        if (hooks?.Any() ?? false)
+        if (hooks.Length > 0)
         {
             Resource? sForHook = (Resource?)r?.DeepCopy();
 
@@ -5237,7 +5792,7 @@ public partial class VersionedFhirStore : IFhirStore
                     _ = hook.DoInteractionHook(
                             ctx,
                             this,
-                            _store["CapabilityStatement"],
+                            rs,
                             sForHook,
                             out FhirResponseContext hr);
 
@@ -6455,7 +7010,7 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 _capacityMonitor?.Dispose();
 
-                foreach (IResourceStore rs in _store.Values)
+                foreach (IVersionedResourceStore rs in _store.Values)
                 {
                     rs.Dispose();
                     //rs.OnChanged -= ResourceStore_OnChanged;

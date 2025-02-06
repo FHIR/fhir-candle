@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Client\*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Compartments\*.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)CSharpExtensions\*.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Interactions\*.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\*.cs" />
@@ -23,6 +24,7 @@
     <Folder Include="$(MSBuildThisFileDirectory)CSharpExtensions\" />
     <Folder Include="$(MSBuildThisFileDirectory)Interactions\" />
     <Folder Include="$(MSBuildThisFileDirectory)Models\" />
+    <Folder Include="$(MSBuildThisFileDirectory)Compartments\" />
     <Folder Include="$(MSBuildThisFileDirectory)Operations\" />
     <Folder Include="$(MSBuildThisFileDirectory)Serialization\" />
     <Folder Include="$(MSBuildThisFileDirectory)Storage\" />
