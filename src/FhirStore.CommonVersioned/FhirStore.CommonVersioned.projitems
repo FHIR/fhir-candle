@@ -10,7 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Client\*.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)compartments\ParsedCompartment.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Compartments\*.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)CSharpExtensions\*.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Interactions\*.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\*.cs" />
