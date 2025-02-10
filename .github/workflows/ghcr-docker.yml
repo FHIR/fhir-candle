@@ -101,7 +101,8 @@ jobs:
           org.opencontainers.image.description=A small in-memory FHIR server that can be used for testing and development - NOT for production workloads.
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=dev,enable={{is_default_branch}}
+          # type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push Docker image
       id: push
@@ -109,7 +110,7 @@ jobs:
       with:
         context: .
         platforms: linux/amd64,linux/arm64
-        push: false
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
@@ -118,4 +119,4 @@ jobs:
       with:
         subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
         subject-digest: ${{ steps.push.outputs.digest }}
-        push-to-registry: false
+        push-to-registry: true
