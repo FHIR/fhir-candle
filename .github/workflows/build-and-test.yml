@@ -2,6 +2,10 @@ name: Tests
 # Basics from https://learn.microsoft.com/en-us/dotnet/devops/dotnet-test-github-action
 on:
   push:
+    branches: [ main ]
+    paths:
+    - '**.cs'
+    - '**.csproj'
   pull_request:
     branches: [ main ]
     paths:
