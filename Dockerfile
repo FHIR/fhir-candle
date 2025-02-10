@@ -12,7 +12,7 @@ RUN dotnet restore --ucr -a $TARGETARCH src/fhir-candle/fhir-candle.csproj
 RUN dotnet publish --framework net9.0 -a $TARGETARCH src/fhir-candle/fhir-candle.csproj -c Release -o out --no-restore
 
 # Build runtime image
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/aspnet:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 COPY --from=build-env /app/out .
 ENTRYPOINT ["dotnet", "fhir-candle.dll"]
