@@ -1,11 +1,38 @@
 * Work in Progress
+    * Updated NuGet dependencies:
+        * `» fhir-candle`
+            * `  MailKit                                       4.9.0  -> 4.10.0`
+            * `  OpenTelemetry                                 1.11.0 -> 1.11.1`
+            * `  OpenTelemetry.Exporter.Console                1.11.0 -> 1.11.1`
+            * `  OpenTelemetry.Exporter.OpenTelemetryProtocol  1.11.0 -> 1.11.1`
+            * `  OpenTelemetry.Extensions.Hosting              1.11.0 -> 1.11.1`
+            * `  OpenTelemetry.Instrumentation.AspNetCore      1.10.1 -> 1.11.0`
+            * `  System.IdentityModel.Tokens.Jwt               8.3.1  -> 8.4.0`
+        * `» fhir-candle.Tests`
+            * `  Hl7.Fhir.R4                5.11.2  -> 5.11.3`
+            * `  Hl7.Fhir.R4B               5.11.2  -> 5.11.3`
+            * `  Hl7.Fhir.R5                5.11.2  -> 5.11.3`
+            * `  Microsoft.NET.Test.Sdk     17.12.0 -> 17.13.0`
+            * `  xunit.runner.visualstudio  3.0.1   -> 3.0.2`
+        * `» FhirCandle.Common`
+            * `  Microsoft.IdentityModel.Tokens  8.3.1 -> 8.4.0`
+        * `» FhirCandle.R4`
+            * `  Hl7.Fhir.R4  5.11.2 -> 5.11.3`
+        * `» FhirCandle.R4B`
+            * `  Hl7.Fhir.R4B  5.11.2 -> 5.11.3`
+        * `» FhirCandle.R5`
+            * `  Hl7.Fhir.R5  5.11.2 -> 5.11.3`
+      * Updates to subscription RI
+
+* v2025.206
     * Added support for compartment-based searching.
         * Default listeners automatically support compartments defined in core.
         * Clients can store `CompartmentDefinition` resources, which update or add to existing compartments.
     * Fixed issue with `FhirRequestContext` incorrectly allowing some `HEAD` requests that are not cacheable.
     * First pass of SMART scope-based filtering for search.
         * Limited to testing of `match` results.
-        * Does not test granular scopes yet.
+        * Does **not** filter inclusions yet.
+        * Does **not** test granular scopes yet.
 
 * v2025.129
     * Added commit log
