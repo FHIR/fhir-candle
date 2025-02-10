@@ -18,8 +18,8 @@ jobs:
     - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
-            '9'
-            '8'
+            9.0
+            8.0
 
     - name: Build and Publish
       run: |
