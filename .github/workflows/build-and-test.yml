@@ -8,8 +8,8 @@ on:
     - '**.cs'
     - '**.csproj'
 
-env:
-  DOTNET_VERSION: '8'           # The .NET SDK version to use
+# env:
+#   DOTNET_VERSION: '9'           # The .NET SDK version to use
 
 jobs:
   build-and-test:
@@ -22,6 +22,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+            9.0
+            8.0
 
     - name: Install dependencies
       run: dotnet restore

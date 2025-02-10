@@ -6,23 +6,27 @@ on:
     workflows: ['Tests']
     types: [completed]
     branches:
-    - main
+    - main-disabled
 
 jobs:
   build:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - uses: actions/setup-dotnet@v3
+    - uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8'
+        dotnet-version: |
+            9.0
+            8.0
 
     - name: Build and Publish
       run: |
-        dotnet restore
+        dotnet restore src/fhir-candle/fhir-candle.csproj
         dotnet pack -c Release ./src/fhir-candle/fhir-candle.csproj
         mv ./src/fhir-candle/bin/Release/net8.0/publish/wwwroot ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets
+        mv ./src/fhir-candle/bin/Release/net9.0/publish/wwwroot ./src/fhir-candle/bin/Release/net9.0/publish/staticwebassets
         7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets/
+        7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net9.0/publish/staticwebassets/
         dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.GINOC_NUGET }} --source https://api.nuget.org/v3/index.json

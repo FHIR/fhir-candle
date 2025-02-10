@@ -5,7 +5,7 @@ on:
     workflows: ['Publish on GitHub Container Registry']
     types: [completed]
     branches:
-    - main
+    - main-disabled
 
 jobs:
   restart_deployment:

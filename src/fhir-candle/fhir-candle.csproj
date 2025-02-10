@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
   <Import Project="..\..\fhir-candle.props" />
+  <Import Project="..\..\fhir-candle-ui.props" />
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>fhir.candle</RootNamespace>
     <StartupObject>fhir.candle.Program</StartupObject>
     <Title>fhir-candle</Title>
@@ -74,19 +74,15 @@
   <ItemGroup>
     <PackageReference Include="Firely.Fhir.Packages" Version="4.9.0" />
     <PackageReference Include="ini-parser-netcore" Version="3.0.0" />
-    <PackageReference Include="MailKit" Version="4.9.0" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.11.3" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="4.11.3" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.11.3" />
-    <PackageReference Include="BlazorMonaco" Version="3.3.0" IncludeAssets="all" />
-    <PackageReference Include="OpenTelemetry" Version="1.11.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.11.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.11.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.10.1" />
+    <PackageReference Include="MailKit" Version="4.10.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.11.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.11.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.11.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="System.CommandLine.NamingConventionBinder" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.1" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.4.0" />
     <PackageReference Include="zulip-cs-lib" Version="0.0.1-alpha.6" />
   </ItemGroup>
 
