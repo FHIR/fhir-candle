@@ -6,7 +6,7 @@ on:
     workflows: ['Tests']
     types: [completed]
     branches:
-    - main-disabled
+    - main
 
 jobs:
   build:

@@ -1,4 +1,6 @@
 * Work in Progress
+
+* v2025.210
     * Updated NuGet dependencies:
         * `» fhir-candle`
             * `  MailKit                                       4.9.0  -> 4.10.0`
@@ -17,16 +19,17 @@
         * `» FhirCandle.Common`
             * `  Microsoft.IdentityModel.Tokens  8.3.1 -> 8.4.0`
         * `» FhirCandle.R4`
-            * `  Hl7.Fhir.R4  5.11.2 -> 5.11.3`
+            * `  Hl7.Fhir.R4   5.11.2 -> 5.11.3`
         * `» FhirCandle.R4B`
             * `  Hl7.Fhir.R4B  5.11.2 -> 5.11.3`
         * `» FhirCandle.R5`
-            * `  Hl7.Fhir.R5  5.11.2 -> 5.11.3`
+            * `  Hl7.Fhir.R5   5.11.2 -> 5.11.3`
     * Updated Language version to 13.
     * Updated projects to multi-target .Net 8.0 and .Net 9.0.
         * Updated references specific to .Net 9.0:
             * `  Microsoft.AspNetCore.Components.Web  8.0.12 -> 9.0.1`
     * Updated docker image for multi-platform support (`linux/arm64` and `linux/amd64`).
+    * Some additions for US Core Patient Data Feed subscriptions testing (WIP)
 
 * v2025.206
     * Added support for compartment-based searching.

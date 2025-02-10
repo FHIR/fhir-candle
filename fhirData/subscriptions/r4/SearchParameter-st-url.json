@@ -1,0 +1,29 @@
+{
+    "resourceType": "SearchParameter",
+    "id": "Basic-SubscriptionTopic-Url",
+    "url": "http://hl7.org/fhir/uv/subscriptions-backport/SearchParameter/SubscriptionTopic-url",
+    "version": "1.2.0",
+    "name": "Basic-SubscriptionTopic-Url-SearchParameter",
+    "status": "draft",
+    "date": "2025-02-10T00:00:00+00:00",
+    "publisher": "HL7 FHIR Infrastructure WG",
+    "description": "This SearchParameter enables query of backported Subscription Topics by canonical url.",
+    "jurisdiction": [
+        {
+            "coding": [
+                {
+                    "system": "http://unstats.un.org/unsd/methods/m49/m49.htm",
+                    "code": "001",
+                    "display": "World"
+                }
+            ]
+        }
+    ],
+    "code": "subscriptiontopic-url",
+    "base": [
+        "Basic"
+    ],
+    "type": "uri",
+    "expression": "Basic.extension('http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.url').value",
+    "xpathUsage": "normal"
+}

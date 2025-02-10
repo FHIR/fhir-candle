@@ -535,9 +535,9 @@ public class ResourceStore<T> : IVersionedResourceStore
                     // fail the request if this fails
                     if ((source is Hl7.Fhir.Model.Basic b) &&
                         (b.Code?.Coding?.Any() ?? false) &&
-                        (b.Code.Coding.Any(c =>
+                        b.Code.Coding.Any(c =>
                             c.Code.Equals("SubscriptionTopic", StringComparison.Ordinal) &&
-                            c.System.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal))))
+                            c.System.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal)))
                     {
                         if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
                         {
@@ -650,12 +650,18 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             foreach (Identifier i in sil.Identifier)
             {
-                _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
+                if (sil.Identifier != null)
+                {
+                    _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
+                }
             }
         }
         else if (source is IIdentifiable<Identifier> si)
         {
-            _ = _identifierToId.TryAdd(GetIdentifierKey(si.Identifier), source.Id);
+            if (si.Identifier != null)
+            {
+                _ = _identifierToId.TryAdd(GetIdentifierKey(si.Identifier), source.Id);
+            }
         }
 
         //if (source is IHasIdentifier hasId)
