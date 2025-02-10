@@ -1,0 +1,481 @@
+{
+    "resourceType": "Basic",
+    "id": "us-core-patient-data-feed",
+    "modifierExtension": [
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.status",
+            "valueCode": "draft"
+        }
+    ],
+    "extension": [
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.url",
+            "valueUri": "http://hl7.org/fhir/us/core/SubscriptionTopic/patient-data-feed"
+        },
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.version",
+            "valueString": "1.0.0-fhir.r4"
+        },
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.name",
+            "valueString": "Test Artifact for US Core Patient Data Feed"
+        },
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.title",
+            "valueString": "us-core-patient-data-feed"
+        },
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.date",
+            "valueDateTime": "2025-02-10"
+        },
+        {
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.description",
+            "valueMarkdown": "Test topic for US Core Patient Data Feed - data of interest to a patient has changed"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "An Encounter status has changed."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/Encounter"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "delete"
+                },
+                {
+                    "url": "fhirPathCriteria",
+                    "valueString": "%previous.id.empty() or %current.id.empty() or (%previous.status != %current.status)"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "An Encounter location has changed."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/Encounter"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "delete"
+                },
+                {
+                    "url": "fhirPathCriteria",
+                    "valueString": "(%previous.location.empty() and %current.location.empty().not()) or (%previous.location.empty().not() and %current.location.empty().not() and (%previous.location != %current.location))"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "A Laboratory Observation status has changed."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/Observation"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "delete"
+                },
+                {
+                    "url": "fhirPathCriteria",
+                    "valueString": "(%previous.id.empty() or %current.id.empty() or (%previous.status != %current.status)) and (%previous.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/observation-category' and code = 'laboratory') or %current.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/observation-category' and code = 'laboratory'))"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "A Laboratory Observation value (result) has changed."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/Observation"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "fhirPathCriteria",
+                    "valueString": "(%previous.id.empty() or %current.id.empty() or (%previous.value != %current.value)) and (%previous.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/observation-category' and code = 'laboratory') or %current.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/observation-category' and code = 'laboratory'))"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "A DocumentReference has been added/removed/updated."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/DocumentReference"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "delete"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "A Laboratory Report status has changed."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/DiagnosticReport"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "delete"
+                },
+                {
+                    "url": "fhirPathCriteria",
+                    "valueString": "(%previous.id.empty() or %current.id.empty() or (%previous.status != %current.status)) and (%previous.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/v2-0074' and code = 'LAB') or %current.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/v2-0074' and code = 'LAB'))"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "A Laboratory Report result has changed."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "http://hl7.org/fhir/StructureDefinition/DiagnosticReport"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "create"
+                },
+                {
+                    "url": "supportedInteraction",
+                    "valueCode": "update"
+                },
+                {
+                    "url": "fhirPathCriteria",
+                    "valueString": "(%previous.id.empty() or %current.id.empty() or (%previous.result != %current.result)) and (%previous.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/v2-0074' and code = 'LAB') or %current.category.coding.exists(system = 'http://terminology.hl7.org/CodeSystem/v2-0074' and code = 'LAB'))"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger"
+        },
+
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the patient of an Encounter."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "Encounter"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "patient"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the type of an Encounter."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "Encounter"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "type"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the patient of an Observation."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "Observation"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "patient"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the code of an Observation."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "Observation"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "code"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the patient of a DocumentReference."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "DocumentReference"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "patient"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the type of a DocumentReference."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "DocumentReference"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "type"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the patient of a DiagnosticReport."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "DiagnosticReport"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "patient"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on the code of a DiagnosticReport."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "DiagnosticReport"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "code"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "resource",
+                    "valueUri": "Encounter"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Encounter:patient"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Encounter:practitioner"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Encounter:diagnosis"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Encounter:observation"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Encounter:location"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "resource",
+                    "valueUri": "Observation"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Observation:patient"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Observation:performer"
+                },
+                {
+                    "url": "include",
+                    "valueString": "Observation:encounter"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "resource",
+                    "valueUri": "DocumentReference"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DocumentReference:patient"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DocumentReference:author"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DocumentReference:encounter"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape"
+        },
+
+        {
+            "extension": [
+                {
+                    "url": "resource",
+                    "valueUri": "DiagnosticReport"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DiagnosticReport:patient"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DiagnosticReport:performer"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DiagnosticReport:encounter"
+                },
+                {
+                    "url": "include",
+                    "valueString": "DiagnosticReport:result"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape"
+        }
+
+    ],
+    "code": {
+        "coding": [
+            {
+                "system": "http://hl7.org/fhir/fhir-types",
+                "code": "SubscriptionTopic"
+            }
+        ]
+    }
+}
