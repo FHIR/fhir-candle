@@ -9,7 +9,7 @@ WORKDIR /app
 COPY . ./
 
 RUN dotnet restore --ucr -a $TARGETARCH src/fhir-candle/fhir-candle.csproj
-RUN dotnet publish --ucr --framework net9.0 -a $TARGETARCH src/fhir-candle/fhir-candle.csproj -c Release -o out --no-restore
+RUN dotnet publish --framework net9.0 -a $TARGETARCH src/fhir-candle/fhir-candle.csproj -c Release -o out --no-restore
 
 # Build runtime image
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/aspnet:9.0
