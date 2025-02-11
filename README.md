@@ -172,10 +172,9 @@ Note: items are unsorted within their priorities
 * Add loading packages/profiles to CapabilityStatement
 
 ## Mid Priority
-* SMART support
-* Transaction support
+* Complete SMART support
+* Additional Transaction support
 * OpenAPI generation
-* Compartments
 * Contained resources
 * Subscription websocket support
 
