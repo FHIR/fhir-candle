@@ -21,6 +21,97 @@ public class MinimalBundle
             public string Mode { get; set; } = string.Empty;
         }
 
+        public class MinimalMeta
+        {
+            [JsonPropertyName("versionId")]
+            public string? VersionId { get; set; } = null;
+
+            [JsonPropertyName("lastUpdated")]
+            public string? LastUpdated { get; set; } = null;
+        }
+
+        public class MinimalR5Event
+        {
+            [JsonPropertyName("eventNumber")]
+            public string EventNumber { get; set; } = string.Empty;
+
+            [JsonPropertyName("timestamp")]
+            public string Timestamp { get; set; } = string.Empty;
+
+            [JsonPropertyName("focus")]
+            public object? Focus { get; set; } = null;
+
+            [JsonPropertyName("additionalContext")]
+            public IEnumerable<object>? AdditionalContext { get; set; } = null;
+        }
+
+
+        public class MinimalResource
+        {
+            [JsonPropertyName("id")]
+            public string Id { get; set; } = string.Empty;
+
+            [JsonPropertyName("resourceType")]
+            public string ResourceType { get; set; } = string.Empty;
+
+            [JsonPropertyName("meta")]
+            public MinimalMeta? Meta { get; set; } = null;
+
+            // notification status R5 properties
+            [JsonPropertyName("status")]
+            public object? Status { get; set; } = null;
+
+            [JsonPropertyName("type")]
+            public object? NotificationType { get; set; } = null;
+
+            [JsonPropertyName("eventsSinceSubscriptionStart")]
+            public object? EventsSinceSubscriptionStart { get; set; } = null;
+        }
+
+        public class MinimalIssue
+        {
+            [JsonPropertyName("severity")]
+            public string Severity { get; set; } = string.Empty;
+
+            [JsonPropertyName("code")]
+            public string Code { get; set; } = string.Empty;
+
+            [JsonPropertyName("diagnostics")]
+            public string? Diagnostics { get; set; } = null;
+        }
+
+        public class MinimalOutcome : MinimalResource
+        {
+            [JsonPropertyName("issue")]
+            public IEnumerable<MinimalIssue> Issues { get; set; } = [];
+        }
+
+        public class MinimalRequest
+        {
+            [JsonPropertyName("method")]
+            public string Method { get; set; } = string.Empty;
+            [JsonPropertyName("url")]
+            public string Url { get; set; } = string.Empty;
+        }
+
+        public class MinimalResponse
+        {
+            [JsonPropertyName("status")]
+            public string Status { get; set; } = string.Empty;
+
+            [JsonPropertyName("location")]
+            public string? Location { get; set; } = null;
+
+            [JsonPropertyName("etag")]
+            public string? ETag { get; set; } = null;
+
+            [JsonPropertyName("lastModified")]
+            public string? LastModified { get; set; } = null;
+
+            [JsonPropertyName("outcome")]
+            public MinimalOutcome? Outcome { get; set; } = null;
+        }
+
         /// <summary>Gets or sets URL of the full.</summary>
         [JsonPropertyName("fullUrl")]
         public string FullUrl { get; set; } = string.Empty;
@@ -33,7 +124,13 @@ public class MinimalBundle
         /// Gets or sets the resource.
         /// </summary>
         [JsonPropertyName("resource")]
-        public object? Resource { get; set; } = null;
+        public MinimalResource? Resource { get; set; } = null;
+
+        [JsonPropertyName("request")]
+        public MinimalRequest? Request { get; set; } = null;
+
+        [JsonPropertyName("response")]
+        public MinimalResponse? Response { get; set; } = null;
     }
 
     /// <summary>A minimal link.</summary>

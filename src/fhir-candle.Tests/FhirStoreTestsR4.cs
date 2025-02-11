@@ -35,6 +35,23 @@ public class FhirStoreTestsR4: IDisposable
 
     private const int _expectedRestResources = 146;
 
+    private const int _hospitalOrganizationCount = 272;
+    private const int _hospitalLocationCount = 273;
+    private const int _practitionerCount = 272;
+    private const int _practitionerRoleCount = 272;
+    private const int _patientBundleCount = 343;
+    private const int _patientCount = 1;
+    private const int _patientConditionCount = 12;
+    private const int _patientClaimCount = 25;
+    private const int _patientDiagnosticReportCount = 21;
+    private const int _patientDocumentReferenceCount = 20;
+    private const int _patientEncounterCount = 20;
+    private const int _patientExplanationOfBenefitCount = 25;
+    private const int _patientImmunizationCount = 32;
+    private const int _patientObservationCount = 159;
+    private const int _patientProcedureCount = 15;
+
+
     /// <summary>
     /// Initializes a new instance of the <see cref="FhirStoreTestsR4B"/> class.
     /// </summary>
@@ -51,6 +68,122 @@ public class FhirStoreTestsR4: IDisposable
     public void Dispose()
     {
         // cleanup
+    }
+
+    [Theory]
+    [Trait("RunningTime", "Long")]
+    [FileData("data/r4-synthea/Bundle-Patient-01.json", "data/r4-synthea/Bundle-Hospital-01.json", "data/r4-synthea/Bundle-Practitioner-01.json")]
+    public void SyntheaBundles(string patientJson, string hospitalJson, string practitionerJson)
+    {
+        IFhirStore fhirStore = new VersionedFhirStore();
+        fhirStore.Init(_config);
+
+        FhirRequestContext ctx;
+        FhirResponseContext response;
+        bool success;
+
+        // post the hospital bundle (batch of organizations and locations)
+        ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = fhirStore.Config.BaseUrl,
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = hospitalJson,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = fhirStore.ProcessBundle(ctx, out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? hospitalResponseBundle = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+        hospitalResponseBundle.ShouldNotBeNull();
+        hospitalResponseBundle.Entries.ShouldNotBeNullOrEmpty();
+        hospitalResponseBundle.Entries.Count().ShouldBe(_hospitalOrganizationCount + _hospitalLocationCount);
+
+        hospitalResponseBundle.Entries.All(validateEntries).ShouldBeTrue();
+
+        // post the practitioner bundle (batch)
+        ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = fhirStore.Config.BaseUrl,
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = practitionerJson,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = fhirStore.ProcessBundle(ctx, out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? practitionerResponseBundle = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+        practitionerResponseBundle.ShouldNotBeNull();
+        practitionerResponseBundle.Entries.ShouldNotBeNullOrEmpty();
+        practitionerResponseBundle.Entries.Count().ShouldBe(_practitionerCount + _practitionerRoleCount);
+
+        practitionerResponseBundle.Entries.All(validateEntries).ShouldBeTrue();
+
+        // post the practitioner bundle (transaction)
+        ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = fhirStore.Config.BaseUrl,
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = patientJson,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = fhirStore.ProcessBundle(ctx, out response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? patientResponseBundle = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+        patientResponseBundle.ShouldNotBeNull();
+        patientResponseBundle.Entries.ShouldNotBeNullOrEmpty();
+        patientResponseBundle.Entries.Count().ShouldBe(_patientBundleCount);
+
+        patientResponseBundle.Entries.All(validateEntries).ShouldBeTrue();
+
+        return;
+
+        bool validateEntries(MinimalBundle.MinimalEntry entry)
+        {
+            entry.FullUrl.ShouldNotBeNullOrEmpty();
+
+            entry.Resource.ShouldNotBeNull();
+            entry.Resource.ResourceType.ShouldNotBeNullOrEmpty();
+            entry.Resource.Id.ShouldNotBeNullOrEmpty();
+
+            entry.Response.ShouldNotBeNull();
+            entry.Response.Status.ShouldBeOneOf(["200 OK", "201 Created"]);
+            entry.Response.Location.ShouldEndWith(entry.Resource.Id);
+
+            entry.Response.Outcome.ShouldNotBeNull();
+            entry.Response.Outcome.Issues.ShouldHaveCount(1);
+            entry.Response.Outcome.Issues.First().Severity.ShouldBe("information");
+            entry.Response.Outcome.Issues.First().Code.ShouldBe("success");
+
+            return true;
+        }
     }
 
     [Theory]
