@@ -1,4 +1,8 @@
 * Work in Progress
+    * Improved transaction processing: resolving literal references that are searches for contents not in the bundle.
+    * Fixed issue where some packages were loading examples when examples were excluded.
+    * Work on HTI-2 proposed US Core Subscription testing.
+    * Added support for `Resource.meta.tag` in `ParsedSubscription` objects.
 
 * v2025.210
     * Updated NuGet dependencies:

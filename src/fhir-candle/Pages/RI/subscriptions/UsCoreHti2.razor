@@ -1,0 +1,104 @@
+﻿@using Microsoft.FluentUI.AspNetCore.Components;
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+
+
+@page "/subscriptions/uscore-hti-2"
+
+@inject NavigationManager NavigationManager
+@inject IFhirStoreManager StoreManager
+@inject ISmartAuthManager AuthManager
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+@inject IMessageService MessageService
+@inject IHttpContextAccessor HttpContextAccessor
+@inject ProtectedLocalStorage BrowserStore
+
+@implements IDisposable
+@implements IPackagePage
+
+<PageTitle>HTI-2 Proposed Requirements Testing for US Core Subscriptions</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" VerticalGap="8" HorizontalAlignment="HorizontalAlignment.Stretch">
+    <FluentLabel Typo="Typography.H6">HTI-2 Proposed Requirements Testing for US Core Subscriptions</FluentLabel>
+
+    <FluentLabel Typo="Typography.Body">
+        This page provides access to testing features for the proposed HTI-2 requirements for US Core Subscriptions.
+        The proposed specification this page builds on can be found on
+        <FluentAnchor Appearance="Appearance.Hypertext" Href="https://github.com/argonautproject/us-core-patient-data-feed/blob/main/spec.md" Target="_blank">GitHub</FluentAnchor>.
+        <br />
+    </FluentLabel>
+
+    <FhirCandle.Ui.R4.Subscriptions.UsCoreHti2ContentsR4
+        StoreName="@StoreName"
+        Store="@_store"
+        BrowserStore="@BrowserStore" />
+
+</FluentStack>
+
+
+@code {
+    /// <summary>Gets or sets the navigation tracker.</summary>
+    [CascadingParameter]
+    public INavTracker? NavTracker { get; set; } = null;
+
+    private NavPageInfoRec[] _navPages => new NavPageInfoRec[]
+    {
+        new() { Display = StoreName, Link = "/store?store=" + StoreName },
+        new() { Display = PageName, Link = RoutePath + "store=" + StoreName },
+    };
+
+    /// <summary>Gets or sets the package name.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "store")]
+    public string StoreName { get; set; } = "";
+
+    /// <summary>The store.</summary>
+    private IFhirStore _store = null!;
+
+    /// <summary>Gets the content for package.</summary>
+    public static string ContentFor => "subscriptions";
+
+    /// <summary>Gets the name of the page.</summary>
+    public static string PageName => "Subscriptions US Core HTI-2 Testing";
+
+    /// <summary>Gets the description.</summary>
+    public static string Description => "This page contains a testing utilites for proposed US Core subscriptions.";
+
+    /// <summary>Gets the full pathname of the route file.</summary>
+    public static string RoutePath => "/subscriptions/uscore-hti-2";
+
+    /// <summary>Executes the initialized asynchronous action.</summary>
+    /// <returns>An asynchronous result.</returns>
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        if (StoreManager.TryGetValue(StoreName, out IFhirStore? store))
+        {
+            _store = store;
+        }
+
+        // notify of store root in case user clicked here directly
+        NavTracker?.NotifyNav(_navPages);
+    }
+
+    /// <summary>Handles the location changed.</summary>
+    /// <param name="sender">The sender.</param>
+    /// <param name="e">     Location changed event information.</param>
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (e.Location.ToLowerInvariant().Contains("/subscriptions/uscore-hti-2", StringComparison.Ordinal))
+        {
+            // notify of store root in case user clicked here directly
+            NavTracker?.NotifyNav(_navPages);
+        }
+    }
+
+    /// <summary>
+    /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged
+    /// resources.
+    /// </summary>
+    public void Dispose()
+    {
+    }
+}

@@ -73,8 +73,13 @@ public class ParsedSubscription
     /// <summary>Gets or initializes URL of the topic.</summary>
     public required string TopicUrl { get; init; }
 
+    /// <summary>
+    /// Tags on this subscription
+    /// </summary>
+    public HashSet<string> Tags { get; set; } = [];
+
     /// <summary>Gets or initializes the expressed filters by resource type.</summary>
-    public Dictionary<string, List<SubscriptionFilter>> Filters { get; set; } = new();
+    public Dictionary<string, List<SubscriptionFilter>> Filters { get; set; } = [];
 
     /// <summary>Gets or initializes the channel system.</summary>
     public string ChannelSystem { get; set; } = string.Empty;

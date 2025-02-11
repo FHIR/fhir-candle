@@ -578,12 +578,21 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             FileInfo[] files;
-            if ((!includeExamples) &&
-                (!string.IsNullOrEmpty(libDir)) &&
-                Directory.Exists(Path.Combine(directory, libDir)))
+            if (!includeExamples)
             {
-                di = new(Path.Combine(directory, libDir));
-                files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly);
+                if (!string.IsNullOrEmpty(libDir) && Directory.Exists(Path.Combine(directory, libDir)))
+                {
+                    di = new(Path.Combine(directory, libDir));
+                    files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly);
+                }
+                else if (directory.EndsWith(libDir))
+                {
+                    files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly);
+                }
+                else
+                {
+                    files = di.GetFiles("*.*", SearchOption.AllDirectories);
+                }
             }
             else
             {

@@ -1,0 +1,577 @@
+﻿@using Microsoft.FluentUI.AspNetCore.Components;
+@using Hl7.Fhir.Utility;
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
+
+@inject IHttpContextAccessor HttpContextAccessor
+
+@implements IDisposable
+
+<FluentAccordion>
+    <FluentAccordionItem Heading="Patient Selection" Expanded="true">
+        <FluentAutocomplete Id="patient-selector"
+        @ref="PatientSelector"
+        TOption="Hl7.Fhir.Model.Patient"
+        Width="100%"
+        Placeholder="search"
+        MaximumSelectedOptions="1"
+        KeepOpen="false"
+        OnOptionsSearch="@OnPatientSearch"
+        OptionText="@(item => displayFor(item))"
+        OptionStyle="min-height: 40px;"
+        @bind-SelectedOptions="@SelectedPatients">
+            <LabelTemplate>
+                Select a patient
+                <FluentIcon Value="@(new Icons.Regular.Size20.Person())" Style="margin: 0 4px;" />
+            </LabelTemplate>
+            <SelectedOptionTemplate>
+                <FluentPersona Name="@(displayFor(context))"
+                Style="height: 26px; background: var(--neutral-fill-secondary-hover)"
+                ImageSize="24px"
+                Initials="@(getInitials(context.Name))"
+                DismissTitle="Remove"
+                Status="PresenceStatus.Available"
+                OnDismissClick="@(async () => ((List<Hl7.Fhir.Model.Patient>)SelectedPatients).Clear())" />
+            </SelectedOptionTemplate>
+            <OptionTemplate>
+                <FluentPersona ImageSize="32px"
+                Initials="@(getInitials(context.Name))"
+                Status="PresenceStatus.Available"
+                StatusSize="PresenceBadgeSize.Small"
+                Name="@(displayFor(context))" />
+            </OptionTemplate>
+            <MaximumSelectedOptionsMessage>
+                Only one patient can be selected.
+            </MaximumSelectedOptionsMessage>
+            <FooterContent>
+                @if (!context.Any())
+                {
+                    <FluentLabel Style="font-size: 11px; text-align: center; width: 200px;">
+                        No results found
+                    </FluentLabel>
+                }
+            </FooterContent>
+        </FluentAutocomplete>
+    </FluentAccordionItem>
+
+    <br />
+
+    <FluentAccordionItem Heading="Subscription Management" Expanded="true">
+        <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+            <FluentLabel Typo="Typography.Body">
+                If you have an existing Subscription, please use it. However, please do not modify subscriptions
+                that other people are using for testing. In order to facilitate that, please enter a user tag
+                that can be used to disambiguate subscriptions.
+
+                Note that this does not apply to resources relating to your subscriptions (e.g., other users
+                can still create an encounter that will trigger your subscription).
+            </FluentLabel>
+
+            <FluentTextField @bind-Value="UserTag" Label="User Tag" />
+
+            <FluentAutocomplete Id="subscription-selector"
+            Label="Select Subscription"
+            TOption="ParsedSubscription"
+            Width="100%"
+            Placeholder="Select a subscription"
+            MaximumSelectedOptions="1"
+            KeepOpen="false"
+            OnOptionsSearch="@OnSubscriptionSearch"
+            OptionText="@(item => displayFor(item))"
+            OptionStyle="min-height: 40px;"
+            @bind-SelectedOptions="@SelectedSubscriptions">
+                <MaximumSelectedOptionsMessage>
+                    Only one subscription can be selected.
+                </MaximumSelectedOptionsMessage>
+                <FooterContent>
+                    @if (!context.Any())
+                    {
+                        <FluentLabel Style="font-size: 11px; text-align: center; width: 200px;">
+                            No results found
+                        </FluentLabel>
+                    }
+                </FooterContent>
+            </FluentAutocomplete>
+
+            <br />
+            @if (SelectedSubscriptions.Any())
+            {
+                <FluentLabel Typo="Typography.H6">Edit Subscription</FluentLabel>
+            }
+            else
+            {
+                <FluentLabel Typo="Typography.H6">Create Subscription</FluentLabel>
+            }
+
+            <FluentTextField @bind-Value="_editingSubscription.Reason" Label="Reason (Description)" />
+
+            <FluentSelect Label="Status" @bind-Value="_editingSubscription.CurrentStatus" TOption="string">
+                <FluentOption Value="@("requested")">Requested</FluentOption>
+                <FluentOption Value="@("active")">Active</FluentOption>
+                <FluentOption Value="@("error")">Error</FluentOption>
+                <FluentOption Value="@("off")">Off</FluentOption>
+                <FluentOption Value="@("entered-in-error")">Entered In Error</FluentOption>
+            </FluentSelect>
+
+            <FluentSelect Label="Channel Type" @bind-Value="_editingSubscription.ChannelCode" TOption="string">
+                <FluentOption Disabled="true" Value="@("email")">Email</FluentOption>
+                <FluentOption Disabled="true" Value="@("message")">FHIR Message</FluentOption>
+                <FluentOption Value="@("rest-hook")">REST Hook (http/s POST)</FluentOption>
+                <FluentOption Disabled="true" Value="@("websocket")">Websocket</FluentOption>
+            </FluentSelect>
+
+            <FluentTextField @bind-Value="_editingSubscription.Endpoint" Label="Endpoint" />
+            <FluentNumberField @bind-Value="_editingSubscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" />
+            <FluentTextField @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true" />
+
+            <FluentLabel Typo="Typography.Body">
+                MIME Type to use for notifications:
+            </FluentLabel>
+
+            <FluentSelect Label="Content Type" @bind-Value="_editingSubscription.ContentType" TOption="string">
+                <FluentOption Value="@("application/fhir+json")">FHIR JSON</FluentOption>
+                <FluentOption Value="@("application/fhir+xml")">FHIR XML</FluentOption>
+            </FluentSelect>
+
+            <FluentLabel Typo="Typography.Body">
+                Amount of data to include in notifications:
+            </FluentLabel>
+
+            <FluentSelect Label="Content Level" @bind-Value="_editingSubscription.ContentLevel" TOption="string">
+                <FluentOption Value="@("empty")">Empty</FluentOption>
+                <FluentOption Value="@("id-only")">IDs Only</FluentOption>
+                <FluentOption Value="@("full-resource")">Full Resources</FluentOption>
+            </FluentSelect>
+
+
+        </FluentStack>
+    </FluentAccordionItem>
+
+    <br />
+
+    <FluentAccordionItem Heading="Status Panel" Expanded="true">
+        <FluentLabel Typo="Typography.Body">
+            Status Panel
+            <br />
+        </FluentLabel>
+    </FluentAccordionItem>
+</FluentAccordion>
+@* 
+<FluentTabs>
+    <FluentTab Label="Encounter Testing" Id="tab-encounter-testing">
+        <Content>
+            <FluentLabel Typo="Typography.Body">
+                Encounter Testing
+                <br />
+            </FluentLabel>
+        </Content>
+    </FluentTab>
+
+    <FluentTab Label="Lab Result Testing" Id="tab-lab-result-testing">
+        <Content>
+            <FluentLabel Typo="Typography.Body">
+                Lab Result Testing
+                <br />
+            </FluentLabel>
+        </Content>
+    </FluentTab>
+
+    <FluentTab Label="Clinical Note Testing" Id="tab-clinical-note-testing">
+        <Content>
+            <FluentLabel Typo="Typography.Body">
+                Clinical Note Testing
+                <br />
+            </FluentLabel>
+        </Content>
+    </FluentTab>
+
+</FluentTabs>
+ *@
+
+@code {
+    /// <summary>Gets or sets the navigation tracker.</summary>
+    [CascadingParameter]
+    public INavTracker? NavTracker { get; set; } = null;
+
+    /// <summary>Gets or sets the name of the store.</summary>
+    [Parameter]
+    public string StoreName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the package name.</summary>
+    [Parameter]
+    public IFhirStore Store { get; set; } = null!;
+
+    [Parameter]
+    public ProtectedLocalStorage BrowserStore { get; set; } = null!;
+
+    private ParsedSubscription _editingSubscription = new()
+    {
+        Id = string.Empty,
+        TopicUrl = "http://hl7.org/fhir/us/core/SubscriptionTopic/patient-data-feed",
+        CurrentStatus = "off",
+        Reason = "Testing the Patient Data Feed",
+        ChannelCode = "rest-hook",
+        ChannelSystem = "http://terminology.hl7.org/CodeSystem/subscription-channel-type",
+        Endpoint = string.Empty,
+        HeartbeatSeconds = 120,
+        ExpirationTicks = DateTime.Now.AddMinutes(30).Ticks,
+        ContentType = "application/fhir+json",
+        ContentLevel = "id-only",
+        Filters = [],
+    };
+
+    /// <summary>Gets the expiration.</summary>
+    private string Expiration
+    {
+        get => DateTime.Now.ToString("O") + " (in 30 minutes)";
+        set { }
+    }
+
+    private IResourceStore? _patientStore = null;
+    private IResourceStore? _encounterStore = null;
+    private IResourceStore? _observationStore = null;
+    private IResourceStore? _documentReferenceStore = null;
+
+    private FluentAutocomplete<Hl7.Fhir.Model.Patient> PatientSelector = default!;
+
+    private Hl7.Fhir.Model.Patient[] _selectedPatients = [];
+    private IEnumerable<Hl7.Fhir.Model.Patient> SelectedPatients
+    {
+        get => _selectedPatients;
+        set
+        {
+            _selectedPatients = value.ToArray();
+            if ((_selectedPatients.Length == 1) &&
+                string.IsNullOrEmpty(_editingSubscription.Id) &&
+                (_editingSubscription.Filters.Count == 0))
+            {
+                _editingSubscription.Filters.Add(
+                    "Patient",
+                    [ new()
+                        {
+                            ResourceType = "Patient",
+                            Name = "_id",
+                            Comparator = string.Empty,
+                            Modifier = string.Empty,
+                            Value = _selectedPatients[0].Id,
+                        }]);
+            }
+        }
+    }
+
+    private ParsedSubscription[] _selectedSubscriptions = [];
+    private IEnumerable<ParsedSubscription> SelectedSubscriptions
+    {
+        get => _selectedSubscriptions;
+        set
+        {
+            _selectedSubscriptions = value.ToArray();
+            if (_selectedSubscriptions.Length == 1)
+            {
+                _editingSubscription = new()
+                {
+                    Id = _selectedSubscriptions[0].Id,
+                    TopicUrl = _selectedSubscriptions[0].TopicUrl,
+                    CurrentStatus = _selectedSubscriptions[0].CurrentStatus,
+                    ChannelCode = _selectedSubscriptions[0].ChannelCode,
+                    Endpoint = _selectedSubscriptions[0].Endpoint,
+                    HeartbeatSeconds = _selectedSubscriptions[0].HeartbeatSeconds,
+                    ExpirationTicks = _selectedSubscriptions[0].ExpirationTicks,
+                    ContentType = _selectedSubscriptions[0].ContentType,
+                    ContentLevel = _selectedSubscriptions[0].ContentLevel,
+                    MaxEventsPerNotification = _selectedSubscriptions[0].MaxEventsPerNotification,
+                    Reason = _selectedSubscriptions[0].Reason,
+                    Filters = [],
+                    Parameters = [],
+                };
+
+                foreach ((string key, List<ParsedSubscription.SubscriptionFilter> filters) in _selectedSubscriptions[0].Filters)
+                {
+                    _editingSubscription.Filters.Add(key, filters.Select(f => f with { }).ToList());
+                }
+                foreach ((string key, List<string> values) in _selectedSubscriptions[0].Parameters)
+                {
+                    _editingSubscription.Parameters.Add(key, values.Select(v => v).ToList());
+                }
+            }
+            else
+            {
+                _editingSubscription = new()
+                {
+                    Id = string.Empty,
+                    TopicUrl = "http://hl7.org/fhir/us/core/SubscriptionTopic/patient-data-feed",
+                    CurrentStatus = "off",
+                    Reason = "Testing the Patient Data Feed",
+                    ChannelCode = "rest-hook",
+                    ChannelSystem = "http://terminology.hl7.org/CodeSystem/subscription-channel-type",
+                    Endpoint = string.Empty,
+                    HeartbeatSeconds = 120,
+                    ExpirationTicks = DateTime.Now.AddMinutes(30).Ticks,
+                    ContentType = "application/fhir+json",
+                    ContentLevel = "id-only",
+                    Filters = [],
+                    Parameters = [],
+                };
+
+                if (_selectedPatients.Length == 1)
+                {
+                    _editingSubscription.Filters.Add(
+                        "Patient",
+                        [ new()
+                        {
+                            ResourceType = "Patient",
+                            Name = "_id",
+                            Comparator = string.Empty,
+                            Modifier = string.Empty,
+                            Value = _selectedPatients[0].Id,
+                        }]);
+                }
+            }
+        }
+    }
+
+    private string _userTag = string.Empty;
+    private string UserTag
+    {
+        get => _userTag;
+        set
+        {
+            _userTag = value;
+            BrowserStore.SetAsync(nameof(UserTag), value);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        configureStores();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadStateAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadStateAsync()
+    {
+        ProtectedBrowserStorageResult<string> result = await BrowserStore.GetAsync<string>(nameof(UserTag));
+        if (result.Value != null)
+        {
+            _userTag = result.Value;
+        }
+    }
+
+    private void configureStores()
+    {
+        if (_patientStore != null)
+        {
+            _patientStore.OnInstanceCreated -= PatientStore_OnChanged;
+            _patientStore.OnInstanceDeleted -= PatientStore_OnChanged;
+        }
+
+        if (Store.TryGetValue("Patient", out _patientStore))
+        {
+            _patientStore.OnInstanceCreated += PatientStore_OnChanged;
+            _patientStore.OnInstanceDeleted += PatientStore_OnChanged;
+        }
+
+    }
+
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        configureStores();
+
+        // _filteredItems = GetFilteredItems();
+    }
+
+    private void PatientStore_OnChanged(object? sender, EventArgs e)
+    {
+        // reset our filtered items
+        // _filteredItems = GetFilteredItems();
+    }
+
+    private void OnPatientSearch(OptionsSearchEventArgs<Hl7.Fhir.Model.Patient> e)
+    {
+        if (_patientStore == null)
+        {
+            e.Items = [];
+            return;
+        }
+
+        if (string.IsNullOrEmpty(e.Text))
+        {
+            e.Items = ((IEnumerable<Hl7.Fhir.Model.Patient>)_patientStore.Values).OrderBy(o => o.Id);
+        }
+
+        e.Items = ((IEnumerable<Hl7.Fhir.Model.Patient>)_patientStore.Values).Where(o => testForSearch(e.Text, o)).OrderBy(o => o.Id);
+    }
+
+    private void OnSubscriptionSearch(OptionsSearchEventArgs<ParsedSubscription> e)
+    {
+        if (Store == null)
+        {
+            e.Items = [];
+            return;
+        }
+
+        string tagCoding = $"http://github.io/fhir/fhir-candle/CodeSystem-user-tags|{_userTag}";
+
+        if (string.IsNullOrEmpty(e.Text))
+        {
+            if (string.IsNullOrEmpty(_userTag))
+            {
+                e.Items = Store.CurrentSubscriptions.OrderBy(o => o.Id);
+                return;
+            }
+
+            e.Items = Store.CurrentSubscriptions.Where(o => o.Tags.Contains(tagCoding)).OrderBy(o => o.Id);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_userTag))
+        {
+            e.Items = Store.CurrentSubscriptions.Where(o => testForSearch(e.Text, o)).OrderBy(o => o.Id);
+            return;
+        }
+
+        e.Items = Store.CurrentSubscriptions.Where(o => o.Tags.Contains(tagCoding) && testForSearch(e.Text, o)).OrderBy(o => o.Id);
+        return;
+    }
+
+    private string getInitials(IEnumerable<Hl7.Fhir.Model.HumanName> names)
+    {
+        Hl7.Fhir.Model.HumanName? name = names.FirstOrDefault();
+
+        if (name == null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join("", name.Given.Select(gn => gn.FirstOrDefault().ToString() ?? string.Empty)) +
+            name.Family?.FirstOrDefault().ToString() ?? string.Empty;
+    }
+
+    private bool testForSearch(string text, object o)
+    {
+        if (o == null)
+        {
+            return false;
+        }
+
+        switch (o)
+        {
+            case Hl7.Fhir.Model.Patient p:
+                return
+                    p.Id.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                    p.Name.Any(n => n.Family.StartsWith(text, StringComparison.OrdinalIgnoreCase) ||
+                                    n.Given.Any(g => g.StartsWith(text, StringComparison.OrdinalIgnoreCase)));
+
+            case ParsedSubscription parsedSubscription:
+                return
+                    parsedSubscription.Id.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                    parsedSubscription.Reason.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                    parsedSubscription.Endpoint.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                    parsedSubscription.CurrentStatus.Contains(text, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private string displayFor(object o)
+    {
+        if (o == null)
+        {
+            return string.Empty;
+        }
+
+        switch (o)
+        {
+            case Hl7.Fhir.Model.Patient p:
+                return $"{p.Id}: {string.Join(", ", p.Name.Select(n => $"{n.Family}, {string.Join(' ', n.Given)}"))}";
+
+            case ParsedSubscription parsedSubscription:
+                return $"{parsedSubscription.Id}: {parsedSubscription.Endpoint} ({parsedSubscription.CurrentStatus})";
+
+            case IEnumerable<Hl7.Fhir.Model.HumanName> hns:
+                return string.Join("; ", hns.Select(hn => $"{hn.Family}, {string.Join(' ', hn.Given)}"));
+
+            case Hl7.Fhir.Model.HumanName hn:
+                return $"{hn.Family}, {string.Join(' ', hn.Given)}";
+
+            case Hl7.Fhir.Model.FhirString s:
+                return s.Value;
+
+            case Hl7.Fhir.Model.Code c:
+                return c.Value;
+
+            case Hl7.Fhir.Model.Coding coding:
+                return string.IsNullOrEmpty(coding.Display) ? $"{coding.System}|{coding.Code}" : coding.Display;
+
+            case IEnumerable<Hl7.Fhir.Model.Identifier> ids:
+                return string.Join(", ", ids.Select(id => displayFor(id)));
+
+            case Hl7.Fhir.Model.Identifier i:
+                {
+                    if (!string.IsNullOrEmpty(i.System) || !string.IsNullOrEmpty(i.Value))
+                    {
+                        return $"{i.System}|{i.Value}";
+                    }
+
+                    if (i.Type != null)
+                    {
+                        return displayFor(i.Type);
+                    }
+                }
+                break;
+
+            case Hl7.Fhir.Model.ResourceReference rr:
+                {
+                    if (!string.IsNullOrEmpty(rr.Display))
+                    {
+                        return rr.Display;
+                    }
+
+                    if (!string.IsNullOrEmpty(rr.Reference))
+                    {
+                        return rr.Reference;
+                    }
+
+                    if (rr.Identifier != null)
+                    {
+                        displayFor(rr.Identifier);
+                    }
+                }
+                break;
+
+            case Hl7.Fhir.Model.CodeableConcept cc:
+                {
+                    if (!string.IsNullOrEmpty(cc.Text))
+                    {
+                        return cc.Text;
+                    }
+
+                    return string.Join(", ", cc.Coding.Select(c => string.IsNullOrEmpty(c.Display) ? $"{c.System}|{c.Code}" : c.Display));
+                }
+
+            case Hl7.Fhir.Model.Resource r:
+                return r.TypeName + "/" + r.Id;
+        }
+
+        return o.ToString() ?? string.Empty;
+    }
+
+    public void Dispose()
+    {
+        // debounceTimer?.Dispose();
+
+        // if (_taskStore != null)
+        // {
+        //     _taskStore.OnInstanceCreated -= ResourceStore_OnChanged;
+        //     _taskStore.OnInstanceDeleted -= ResourceStore_OnChanged;
+        // }
+    }
+}

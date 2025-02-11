@@ -56,10 +56,15 @@ public class SubscriptionConverter
             expirationTicks = _maxSubscriptionTicks;
         }
 
+        HashSet<string> tags = (sub.Meta?.Tag?.Any() ?? false)
+            ? tags = new(sub.Meta.Tag.Select(t => $"{t.System}|{t.Code}"))
+            : [];
+
         common = new()
         {
             Id = sub.Id,
             TopicUrl = sub.Topic,
+            Tags = tags,
             ChannelSystem = sub.ChannelType?.System ?? string.Empty,
             ChannelCode = sub.ChannelType?.Code ?? string.Empty,
             Endpoint = sub.Endpoint,
@@ -112,7 +117,7 @@ public class SubscriptionConverter
         return true;
     }
 
-    /// <summary>Attempts to parse a ParsedSubscription from the given object.</summary>
+    /// <summary>Attempts to create a Subscription from a ParsedSubscription object.</summary>
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(ParsedSubscription common, out Subscription subscription)
     {
@@ -151,8 +156,23 @@ public class SubscriptionConverter
             End = new DateTimeOffset(common.ExpirationTicks, TimeSpan.Zero),
         };
 
+        // add tags
+        if (common.Tags.Count != 0)
+        {
+            if (subscription.Meta == null)
+            {
+                subscription.Meta = new();
+            }
+
+            foreach (string tag in common.Tags)
+            {
+                string[] parts = tag.Split('|');
+                subscription.Meta.Tag.Add(new Coding(parts[0], parts[1]));
+            }
+        }
+
         // add parameters
-        if (common.Parameters.Any())
+        if (common.Parameters.Count != 0)
         {
             subscription.Parameter = new();
 
@@ -167,7 +187,7 @@ public class SubscriptionConverter
         }
 
         // add filters
-        if (common.Filters.Any())
+        if (common.Filters.Count != 0)
         {
             subscription.FilterBy = new();
             foreach (List<ParsedSubscription.SubscriptionFilter> filters in common.Filters.Values)

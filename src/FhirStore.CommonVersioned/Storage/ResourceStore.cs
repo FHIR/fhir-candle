@@ -664,14 +664,6 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        //if (source is IHasIdentifier hasId)
-        //{
-        //    foreach(Identifier i in hasId.Identifier)
-        //    {
-        //        _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
-        //    }
-        //}
-
         TestCreateAgainstSubscriptions((T)source);
 
         if (parsedSubscriptionTopic != null)
