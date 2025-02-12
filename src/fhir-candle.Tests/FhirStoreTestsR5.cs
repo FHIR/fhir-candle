@@ -15,7 +15,6 @@ using System.Net;
 using System.Text.Json;
 using Xunit.Abstractions;
 using candleR5::FhirCandle.Storage;
-using fhircandle.Tests.Models;
 
 namespace fhir.candle.Tests;
 
@@ -421,16 +420,13 @@ public class FhirStoreTestsR5: IDisposable
         notification.ShouldNotBeEmpty();
 
         MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(notification);
-
         results.ShouldNotBeNull();
+        results.Entries.ShouldNotBeNullOrEmpty();
 
-        results!.Entries.ShouldNotBeEmpty();
-        results!.Entries!.First().Resource.ShouldNotBeNull();
-
-        MinimalStatus? status = JsonSerializer.Deserialize<MinimalStatus>(results!.Entries!.First().Resource!.ToString() ?? string.Empty);
-
-        status.ShouldNotBeNull();
-        status!.EventsSinceSubscriptionStart.ShouldBe("1");
+        MinimalBundle.MinimalEntry.MinimalResource? resource = results.Entries.First().Resource;
+        resource.ShouldNotBeNull();
+        resource.EventsSinceSubscriptionStart.ShouldNotBeNull();
+        resource.EventsSinceSubscriptionStart.ToString().ShouldBeEquivalentTo("1");
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -526,17 +522,13 @@ public class FhirStoreTestsR5: IDisposable
         notification.ShouldNotBeEmpty();
 
         results = JsonSerializer.Deserialize<MinimalBundle>(notification);
-
         results.ShouldNotBeNull();
+        results.Entries.ShouldNotBeNullOrEmpty();
 
-        results!.Entries.ShouldNotBeEmpty();
-        results!.Entries!.First().Resource.ShouldNotBeNull();
-
-        MinimalStatus? status = JsonSerializer.Deserialize<MinimalStatus>(results!.Entries!.First().Resource!.ToString() ?? string.Empty);
-
-        status.ShouldNotBeNull();
-        status!.EventsSinceSubscriptionStart.ShouldBe("1");
-
+        MinimalBundle.MinimalEntry.MinimalResource? resource = results.Entries.First().Resource;
+        resource.ShouldNotBeNull();
+        resource.EventsSinceSubscriptionStart.ShouldNotBeNull();
+        resource.EventsSinceSubscriptionStart.ToString().ShouldBeEquivalentTo("1");
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -632,17 +624,13 @@ public class FhirStoreTestsR5: IDisposable
         notification.ShouldNotBeEmpty();
 
         results = JsonSerializer.Deserialize<MinimalBundle>(notification);
-
         results.ShouldNotBeNull();
+        results.Entries.ShouldNotBeNullOrEmpty();
 
-        results!.Entries.ShouldNotBeEmpty();
-        results!.Entries!.First().Resource.ShouldNotBeNull();
-
-        MinimalStatus? status = JsonSerializer.Deserialize<MinimalStatus>(results!.Entries!.First().Resource!.ToString() ?? string.Empty);
-
-        status.ShouldNotBeNull();
-        status!.EventsSinceSubscriptionStart.ShouldBe("1");
-
+        MinimalBundle.MinimalEntry.MinimalResource? resource = results.Entries.First().Resource;
+        resource.ShouldNotBeNull();
+        resource.EventsSinceSubscriptionStart.ShouldNotBeNull();
+        resource.EventsSinceSubscriptionStart.ToString().ShouldBeEquivalentTo("1");
 
         //_testOutputHelper.WriteLine(bundle);
     }

@@ -578,12 +578,21 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             FileInfo[] files;
-            if ((!includeExamples) &&
-                (!string.IsNullOrEmpty(libDir)) &&
-                Directory.Exists(Path.Combine(directory, libDir)))
+            if (!includeExamples)
             {
-                di = new(Path.Combine(directory, libDir));
-                files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly);
+                if (!string.IsNullOrEmpty(libDir) && Directory.Exists(Path.Combine(directory, libDir)))
+                {
+                    di = new(Path.Combine(directory, libDir));
+                    files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly);
+                }
+                else if (directory.EndsWith(libDir))
+                {
+                    files = di.GetFiles("*.*", SearchOption.TopDirectoryOnly);
+                }
+                else
+                {
+                    files = di.GetFiles("*.*", SearchOption.AllDirectories);
+                }
             }
             else
             {
@@ -2845,14 +2854,22 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="status">The status.</param>
     public void ChangeSubscriptionStatus(string id, string status)
     {
-        if (!_subscriptions.TryGetValue(id, out ParsedSubscription? subscription) ||
-            (subscription == null))
+        if (!_subscriptions.TryGetValue(id, out ParsedSubscription? parsedSubscription) ||
+            (parsedSubscription == null))
         {
             return;
         }
 
-        subscription.CurrentStatus = status;
-        RegisterSubscriptionsChanged(subscription);
+        if (!_store.TryGetValue("Subscription", out IVersionedResourceStore? rs) ||
+            !rs.TryGetValue(id, out object? storedSubscription) ||
+            (storedSubscription is not Subscription s))
+        {
+            return;
+        }
+
+        _subscriptionConverter.UpdateResourceStatus(s, status);
+
+        RegisterSubscriptionsChanged(parsedSubscription);
     }
 
     /// <summary>Registers the event.</summary>
@@ -6496,7 +6513,7 @@ rs,
                 {
                     TransactionResourceIdLookupRec? match = null;
 
-                    // if we have a literal reference, see if we have it indexed
+                    // if we have a literal reference, see if it is in the bundle or store already
                     if (!string.IsNullOrEmpty(rr.Reference))
                     {
                         match = fullUrlLookup[rr.Reference].FirstOrDefault();
@@ -6519,58 +6536,81 @@ rs,
                             rr.Reference = match.ResourceType + "/" + match.Id;
                             return;
                         }
+
+                        if (_store.TryGetValue(rr.Reference.Split('/')[0], out IVersionedResourceStore? rs) &&
+                            rs.TryGetValue(rr.Reference, out object? local) &&
+                            (local is Resource referenceResource))
+                        {
+                            rr.Reference = referenceResource.TypeName + "/" + referenceResource.Id;
+                            return;
+                        }
+
+                        if (!string.IsNullOrEmpty(rr.Type) &&
+                            !string.IsNullOrEmpty(rr.Reference) &&
+                            _store.TryGetValue(rr.Type, out rs) &&
+                            rs.TryGetValue(rr.Reference, out local) &&
+                            (local is Resource typedResource))
+                        {
+                            rr.Reference = typedResource.TypeName + "/" + typedResource.Id;
+                            return;
+                        }
                     }
 
-                    // check for invalid search-style references
-                    if (!string.IsNullOrEmpty(rr.Reference) && rr.Reference.Contains('?'))
+                    int queryStartIndex = rr.Reference?.IndexOf('?') ?? -1;
+
+                    // check for search-style references
+                    if (queryStartIndex != -1)
                     {
-                        string resourceType = rr.Reference.Split('?')[0];
-                        string[] queryParams = rr.Reference.Split('?')[1].Split('&');
+                        string queryResourceType = rr.Reference![..queryStartIndex];
 
-                        // iterate across the query parameters
-                        foreach (string queryParam in queryParams)
+                        if (_store.TryGetValue(queryResourceType, out IVersionedResourceStore? rs) &&
+                            rs is not null)
                         {
-                            string[] kvp = queryParam.Split('=');
-                            if (kvp.Length != 2)
+                            // parse the search parameters
+
+                            IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+                                rr.Reference[queryStartIndex..],
+                                this,
+                                rs,
+                                queryResourceType);
+
+                            ParsedSearchParameter? identifierParameter = parameters.FirstOrDefault(psp => psp.Name == "identifier");
+
+                            // if we have ONLY an identifier, we can search against unprocessed bundle contents
+                            if ((identifierParameter != null) && (identifierParameter.Values.Length == 1))
                             {
-                                continue;
+                                match = identifierLookup[identifierParameter.Values[0]].FirstOrDefault();
+                                if (match != null)
+                                {
+                                    rr.Reference = match.ResourceType + "/" + match.Id;
+                                    rr.Type = match.ResourceType;
+                                    return;
+                                }
                             }
 
-                            if (kvp[0] != "identifier")
+                            // search against the current store contents
+                            List<Resource> results = rs.TypeSearch(parameters).ToList();
+                            if (results.Count == 1)
                             {
-                                continue;
-                            }
-
-                            match = identifierLookup[kvp[1]].FirstOrDefault();
-                            if (match != null)
-                            {
-                                rr.Reference = match.ResourceType + "/" + match.Id;
-                                rr.Type = match.ResourceType;
+                                rr.Reference = results[0].TypeName + "/" + results[0].Id;
+                                rr.Type = results[0].TypeName;
                                 return;
                             }
 
-                            // fix this reference
-                            string[] identifierComponents = kvp[1].Split('|');
-
-                            if (identifierComponents.Length == 2)
+                            // see if we can make this an identifier-based reference
+                            if ((identifierParameter != null) &&
+                                (identifierParameter.Values.Length == 1) &&
+                                (identifierParameter.ValueFhirCodes?.Length == 1))
                             {
                                 rr.Identifier = new()
                                 {
-                                    System = identifierComponents[0],
-                                    Value = identifierComponents[1],
+                                    System = identifierParameter.ValueFhirCodes[0].System,
+                                    Value = identifierParameter.ValueFhirCodes[0].Value,
                                 };
-                                rr.Type = resourceType;
+                                rr.Type = queryResourceType;
+                                rr.Reference = null;
+                                return;
                             }
-                            else
-                            {
-                                rr.Identifier = new()
-                                {
-                                    Value = kvp[0],
-                                };
-                                rr.Type = resourceType;
-                            }
-
-                            rr.Reference = null;
                         }
                     }
 
@@ -6677,7 +6717,7 @@ rs,
                 FullUrl = entry.FullUrl,
                 Response = new Bundle.ResponseComponent()
                 {
-                    Status = HttpStatusCode.BadRequest.ToString(),
+                    Status = getResponseStatus(HttpStatusCode.BadRequest),
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.BadRequest,
                         "Entry is missing a request",
@@ -6715,12 +6755,12 @@ rs,
 
             if (entryCtx.Interaction == null)
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = HttpStatusCode.InternalServerError.ToString(),
+                        Status = getResponseStatus(HttpStatusCode.InternalServerError),
                         Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.NotImplemented,
                             $"Request could not be parsed to known interaction: {entry.Request.Method} {entry.Request.Url}",
@@ -6735,12 +6775,12 @@ rs,
             if ((_loadState == LoadStateCodes.None) &&
                 (!ctx.IsAuthorized()))
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = HttpStatusCode.Unauthorized.ToString(),
+                        Status = getResponseStatus(HttpStatusCode.Unauthorized),
                         Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.Unauthorized,
                             $"Unauthorized request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
@@ -6755,13 +6795,13 @@ rs,
             opSuccess = PerformInteraction(entryCtx, out opResponse, serializeReturn: false, forceAllowExistingId: true);
             if (opSuccess)
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
                     Resource = (Resource?)opResponse.Resource,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = (opResponse.StatusCode ?? HttpStatusCode.OK).ToString(),
+                        Status = getResponseStatus(opResponse.StatusCode ?? HttpStatusCode.OK),
                         Outcome = (Resource?)opResponse.Outcome,
                         Etag = opResponse.ETag ?? string.Empty,
                         LastModified = ((Resource?)opResponse.Resource)?.Meta?.LastUpdated ?? null,
@@ -6780,7 +6820,7 @@ rs,
                 }
                 else
                 {
-                    oo.Issue.Add(new OperationOutcome.IssueComponent()
+                    oo.Issue.Add(new()
                     {
                         Severity = OperationOutcome.IssueSeverity.Error,
                         Code = OperationOutcome.IssueType.NotSupported,
@@ -6788,12 +6828,12 @@ rs,
                     });
                 }
 
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = (opResponse.StatusCode ?? HttpStatusCode.InternalServerError).ToString(),
+                        Status = getResponseStatus(opResponse.StatusCode ?? HttpStatusCode.InternalServerError),
                         Outcome = oo,
                     },
                 });
@@ -6819,12 +6859,12 @@ rs,
         {
             if (entry.Request == null)
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = HttpStatusCode.BadRequest.ToString(),
+                        Status = getResponseStatus(HttpStatusCode.BadRequest),
                         Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.UnprocessableEntity,
                             "Entry is missing a request",
@@ -6854,12 +6894,12 @@ rs,
 
             if (entryCtx.Interaction == null)
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = HttpStatusCode.InternalServerError.ToString(),
+                        Status = getResponseStatus(HttpStatusCode.InternalServerError),
                         Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.NotImplemented,
                             $"Request could not be parsed to known interaction: {entry.Request.Method} {entry.Request.Url}",
@@ -6874,12 +6914,12 @@ rs,
             if ((_loadState == LoadStateCodes.None) &&
                 (!ctx.IsAuthorized()))
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = HttpStatusCode.Unauthorized.ToString(),
+                        Status = getResponseStatus(HttpStatusCode.Unauthorized),
                         Outcome = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.Unauthorized,
                             $"Unauthorized request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
@@ -6894,13 +6934,13 @@ rs,
             opSuccess = PerformInteraction(entryCtx, out opResponse, false);
             if (opSuccess)
             {
-                response.Entry.Add(new Bundle.EntryComponent()
+                response.Entry.Add(new()
                 {
                     FullUrl = entry.FullUrl,
                     Resource = (Resource?)opResponse.Resource,
-                    Response = new Bundle.ResponseComponent()
+                    Response = new()
                     {
-                        Status = (opResponse.StatusCode ?? HttpStatusCode.OK).ToString(),
+                        Status = getResponseStatus(opResponse.StatusCode ?? HttpStatusCode.OK),
                         Outcome = (Resource?)opResponse.Outcome,
                         Etag = opResponse.ETag ?? string.Empty,
                         LastModified = ((Resource?)opResponse.Resource)?.Meta?.LastUpdated ?? null,
@@ -6932,7 +6972,7 @@ rs,
                     FullUrl = entry.FullUrl,
                     Response = new Bundle.ResponseComponent()
                     {
-                        Status = (opResponse.StatusCode ?? HttpStatusCode.InternalServerError).ToString(),
+                        Status = getResponseStatus(opResponse.StatusCode ?? HttpStatusCode.InternalServerError),
                         Outcome = oo,
                     },
                 });
@@ -6993,6 +7033,8 @@ rs,
     {
         return ctx?.RequestBaseUrl(_config.BaseUrl) ?? _config.BaseUrl;
     }
+
+    private static string getResponseStatus(HttpStatusCode sc) => $"{(int)sc} {sc.ToString()}";
 
     /// <summary>
     /// Releases the unmanaged resources used by the

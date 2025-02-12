@@ -962,9 +962,9 @@ public class FhirController : ControllerBase
             return;
         }
 
-        bool isTypeSearch = resourceType == "*";
+        bool isTypedSearch = resourceType != "*";
 
-        if (isTypeSearch && !store.SupportsResource(resourceType))
+        if (isTypedSearch && !store.SupportsResource(resourceType))
         {
             await LogAndReturnError(Response, 404, $"GetCompartmentSearch <<< tenant {storeName} does not support resource {resourceType}!");
             return;
@@ -983,12 +983,12 @@ public class FhirController : ControllerBase
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
-            Interaction = isTypeSearch
+            Interaction = isTypedSearch
                 ? Common.StoreInteractionCodes.CompartmentTypeSearch
                 : Common.StoreInteractionCodes.CompartmentSearch,
             CompartmentType = compartmentType,
             Id = id,
-            ResourceType = isTypeSearch ? resourceType : string.Empty,
+            ResourceType = isTypedSearch ? resourceType : string.Empty,
         };
 
         if (!_smartAuthManager.IsAuthorized(ctx))
@@ -997,7 +997,7 @@ public class FhirController : ControllerBase
             return;
         }
 
-        bool success = isTypeSearch
+        bool success = isTypedSearch
             ? store.CompartmentTypeSearch(ctx, out FhirResponseContext opResponse)
             : store.CompartmentSearch(ctx, out opResponse);
 

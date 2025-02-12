@@ -233,11 +233,28 @@
             "extension": [
                 {
                     "url": "description",
-                    "valueMarkdown": "Filter based on the patient of an Encounter."
+                    "valueMarkdown": "Filter based on the type of resource to be included or not."
                 },
                 {
                     "url": "resource",
-                    "valueUri": "Encounter"
+                    "valueUri": "*"
+                },
+                {
+                    "url": "filterParameter",
+                    "valueString": "_type"
+                }
+            ],
+            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
+        },
+        {
+            "extension": [
+                {
+                    "url": "description",
+                    "valueMarkdown": "Filter based on a `patient` reference in the resource."
+                },
+                {
+                    "url": "resource",
+                    "valueUri": "*"
                 },
                 {
                     "url": "filterParameter",
@@ -246,6 +263,8 @@
             ],
             "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
         },
+
+
         {
             "extension": [
                 {
@@ -268,23 +287,6 @@
             "extension": [
                 {
                     "url": "description",
-                    "valueMarkdown": "Filter based on the patient of an Observation."
-                },
-                {
-                    "url": "resource",
-                    "valueUri": "Observation"
-                },
-                {
-                    "url": "filterParameter",
-                    "valueString": "patient"
-                }
-            ],
-            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
-        },
-        {
-            "extension": [
-                {
-                    "url": "description",
                     "valueMarkdown": "Filter based on the code of an Observation."
                 },
                 {
@@ -303,23 +305,6 @@
             "extension": [
                 {
                     "url": "description",
-                    "valueMarkdown": "Filter based on the patient of a DocumentReference."
-                },
-                {
-                    "url": "resource",
-                    "valueUri": "DocumentReference"
-                },
-                {
-                    "url": "filterParameter",
-                    "valueString": "patient"
-                }
-            ],
-            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
-        },
-        {
-            "extension": [
-                {
-                    "url": "description",
                     "valueMarkdown": "Filter based on the type of a DocumentReference."
                 },
                 {
@@ -334,23 +319,6 @@
             "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
         },
 
-        {
-            "extension": [
-                {
-                    "url": "description",
-                    "valueMarkdown": "Filter based on the patient of a DiagnosticReport."
-                },
-                {
-                    "url": "resource",
-                    "valueUri": "DiagnosticReport"
-                },
-                {
-                    "url": "filterParameter",
-                    "valueString": "patient"
-                }
-            ],
-            "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy"
-        },
         {
             "extension": [
                 {
