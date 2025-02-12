@@ -93,54 +93,59 @@
             </FluentAutocomplete>
 
             <br />
-            @if (SelectedSubscriptions.Any())
-            {
-                <FluentLabel Typo="Typography.H6">Edit Subscription</FluentLabel>
-            }
-            else
-            {
-                <FluentLabel Typo="Typography.H6">Create Subscription</FluentLabel>
-            }
 
-            <FluentTextField @bind-Value="_editingSubscription.Reason" Label="Reason (Description)" />
+            <FluentCard Width="600px">
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                    @if (SelectedSubscriptions.Any())
+                    {
+                        <FluentLabel Typo="Typography.H6">Edit Subscription</FluentLabel>
+                    }
+                    else
+                    {
+                        <FluentLabel Typo="Typography.H6">Create Subscription</FluentLabel>
+                    }
 
-            <FluentSelect Label="Status" @bind-Value="_editingSubscription.CurrentStatus" TOption="string">
-                <FluentOption Value="@("requested")">Requested</FluentOption>
-                <FluentOption Value="@("active")">Active</FluentOption>
-                <FluentOption Value="@("error")">Error</FluentOption>
-                <FluentOption Value="@("off")">Off</FluentOption>
-                <FluentOption Value="@("entered-in-error")">Entered In Error</FluentOption>
-            </FluentSelect>
+                    <FluentTextField @bind-Value="_editingSubscription.Reason" Label="Reason (Description)" />
 
-            <FluentSelect Label="Channel Type" @bind-Value="_editingSubscription.ChannelCode" TOption="string">
-                <FluentOption Disabled="true" Value="@("email")">Email</FluentOption>
-                <FluentOption Disabled="true" Value="@("message")">FHIR Message</FluentOption>
-                <FluentOption Value="@("rest-hook")">REST Hook (http/s POST)</FluentOption>
-                <FluentOption Disabled="true" Value="@("websocket")">Websocket</FluentOption>
-            </FluentSelect>
+                    <FluentSelect Label="Status" @bind-Value="_editingSubscription.CurrentStatus" TOption="string">
+                        <FluentOption Value="@("requested")">Requested</FluentOption>
+                        <FluentOption Value="@("active")">Active</FluentOption>
+                        <FluentOption Value="@("error")">Error</FluentOption>
+                        <FluentOption Value="@("off")">Off</FluentOption>
+                        <FluentOption Value="@("entered-in-error")">Entered In Error</FluentOption>
+                    </FluentSelect>
 
-            <FluentTextField @bind-Value="_editingSubscription.Endpoint" Label="Endpoint" />
-            <FluentNumberField @bind-Value="_editingSubscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" />
-            <FluentTextField @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true" />
+                    <FluentSelect Label="Channel Type" @bind-Value="_editingSubscription.ChannelCode" TOption="string">
+                        <FluentOption Disabled="true" Value="@("email")">Email</FluentOption>
+                        <FluentOption Disabled="true" Value="@("message")">FHIR Message</FluentOption>
+                        <FluentOption Value="@("rest-hook")">REST Hook (http/s POST)</FluentOption>
+                        <FluentOption Disabled="true" Value="@("websocket")">Websocket</FluentOption>
+                    </FluentSelect>
 
-            <FluentLabel Typo="Typography.Body">
-                MIME Type to use for notifications:
-            </FluentLabel>
+                    <FluentTextField @bind-Value="_editingSubscription.Endpoint" Label="Endpoint" />
+                    <FluentNumberField @bind-Value="_editingSubscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" />
+                    <FluentTextField @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true" />
 
-            <FluentSelect Label="Content Type" @bind-Value="_editingSubscription.ContentType" TOption="string">
-                <FluentOption Value="@("application/fhir+json")">FHIR JSON</FluentOption>
-                <FluentOption Value="@("application/fhir+xml")">FHIR XML</FluentOption>
-            </FluentSelect>
+                    <FluentLabel Typo="Typography.Body">
+                        MIME Type to use for notifications:
+                    </FluentLabel>
 
-            <FluentLabel Typo="Typography.Body">
-                Amount of data to include in notifications:
-            </FluentLabel>
+                    <FluentSelect Label="Content Type" @bind-Value="_editingSubscription.ContentType" TOption="string">
+                        <FluentOption Value="@("application/fhir+json")">FHIR JSON</FluentOption>
+                        <FluentOption Value="@("application/fhir+xml")">FHIR XML</FluentOption>
+                    </FluentSelect>
 
-            <FluentSelect Label="Content Level" @bind-Value="_editingSubscription.ContentLevel" TOption="string">
-                <FluentOption Value="@("empty")">Empty</FluentOption>
-                <FluentOption Value="@("id-only")">IDs Only</FluentOption>
-                <FluentOption Value="@("full-resource")">Full Resources</FluentOption>
-            </FluentSelect>
+                    <FluentLabel Typo="Typography.Body">
+                        Amount of data to include in notifications:
+                    </FluentLabel>
+
+                    <FluentSelect Label="Content Level" @bind-Value="_editingSubscription.ContentLevel" TOption="string">
+                        <FluentOption Value="@("empty")">Empty</FluentOption>
+                        <FluentOption Value="@("id-only")">IDs Only</FluentOption>
+                        <FluentOption Value="@("full-resource")">Full Resources</FluentOption>
+                    </FluentSelect>
+                </FluentStack>
+            </FluentCard>
 
 
         </FluentStack>
@@ -207,7 +212,7 @@
     {
         Id = string.Empty,
         TopicUrl = "http://hl7.org/fhir/us/core/SubscriptionTopic/patient-data-feed",
-        CurrentStatus = "off",
+        CurrentStatus = "requested",
         Reason = "Testing the Patient Data Feed",
         ChannelCode = "rest-hook",
         ChannelSystem = "http://terminology.hl7.org/CodeSystem/subscription-channel-type",
@@ -299,7 +304,7 @@
                 {
                     Id = string.Empty,
                     TopicUrl = "http://hl7.org/fhir/us/core/SubscriptionTopic/patient-data-feed",
-                    CurrentStatus = "off",
+                        CurrentStatus = "requested",
                     Reason = "Testing the Patient Data Feed",
                     ChannelCode = "rest-hook",
                     ChannelSystem = "http://terminology.hl7.org/CodeSystem/subscription-channel-type",
