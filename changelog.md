@@ -3,7 +3,9 @@
     * Fixed issue where some packages were loading examples when examples were excluded.
     * Work on HTI-2 proposed US Core Subscription testing.
     * Added support for `Resource.meta.tag` in `ParsedSubscription` objects.
+    * Fixed issue with GET-based compartment search for all resource types (controller not allowing `*`).
     * Fixed issue where subscription status changes were not being reflected in the resource.
+    * Added support for `_type` search parameter.
 
 * v2025.210
     * Updated NuGet dependencies:

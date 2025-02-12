@@ -54,7 +54,7 @@ public class SearchTester
 
         foreach (ParsedSearchParameter sp in searchParameters)
         {
-            // skip if this is ignored and not a sort element
+            // skip if this is ignored
             if (sp.IgnoredParameter)
             {
                 continue;
@@ -134,6 +134,18 @@ public class SearchTester
             if ((!string.IsNullOrEmpty(sp.ModifierLiteral)) &&
                 (!IsModifierValidForType(sp.Modifier, sp.ParamType)))
             {
+                continue;
+            }
+
+            // TODO(ginoc): Need this working, but this is not a great way to implement
+            // manually check for _type parameter
+            if (sp.Name == "_type")
+            {
+                if (!sp.Values.Any(v => v.Equals(rootNode.InstanceType, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return false;
+                }
+
                 continue;
             }
 

@@ -65,7 +65,7 @@ public class ParsedSearchParameter : ICloneable
         { "_text", new() { Name = "_text", Type = SearchParamType.String } },
 
         /// <summary>Allow filtering of types in searches that are performed across multiple resource types (e.g., searches across the server root).</summary>
-        { "_type", new() { Name = "_type", Type = SearchParamType.Token } },
+        { "_type", new() { Name = "_type", Type = SearchParamType.Token, Expression = "%resource" } },
     };
 
     /// <summary>A segmented reference.</summary>
