@@ -22,6 +22,7 @@
 		<PackageReference Include="Hl7.Fhir.R5" Version="5.11.3" Aliases="coreR5" />
 	</ItemGroup>
 	<ItemGroup>
+		<Content Include="data\r4-synthea\Bundle-transaction-01.json" />
 		<Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 	<ItemGroup>

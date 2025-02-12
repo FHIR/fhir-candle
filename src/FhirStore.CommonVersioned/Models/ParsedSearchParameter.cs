@@ -32,7 +32,7 @@ public class ParsedSearchParameter : ICloneable
         { "_filter", new() { Name = "_filter", Type = SearchParamType.Special } },
 
         /// <summary>Searching based on the logical identifier of resources (Resource.id).</summary>
-        { "_id", new() { Name = "_id", Expression = "Resource.id", Type = SearchParamType.Token } },
+        { "_id", new() { Name = "_id", Type = SearchParamType.Token, Expression = "Resource.id" } },
 
         /// <summary>Match resources against active membership in collection resources.</summary>
         { "_in", new() { Name = "_in", Type = SearchParamType.Reference } },

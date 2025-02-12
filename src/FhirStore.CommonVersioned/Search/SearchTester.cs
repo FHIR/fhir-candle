@@ -137,19 +137,33 @@ public class SearchTester
                 continue;
             }
 
-            // TODO(ginoc): Need this working, but this is not a great way to implement
-            // manually check for _type parameter
-            if (sp.Name == "_type")
+            IEnumerable<ITypedElement> extracted;
+
+            // either use FHIRPath to extract, or override for known special extractions
+            switch (sp.Name)
             {
-                if (!sp.Values.Any(v => v.Equals(rootNode.InstanceType, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return false;
-                }
+                case "_id":
+                    {
+                        if (rootNode.Children("id").ToFhirValues().FirstOrDefault()?.ToTypedElement() is ITypedElement ete)
+                        {
+                            extracted = [ ete ];
+                        }
+                        else
+                        {
+                            extracted = [];
+                        }
+                    }
 
-                continue;
+                    break;
+
+                case "_type":
+                    extracted = [ new FhirString(rootNode.InstanceType).ToTypedElement() ];
+                    break;
+
+                default:
+                    extracted = sp.CompiledExpression.Invoke(rootNode, fpContext);
+                    break;
             }
-
-            IEnumerable<ITypedElement> extracted = sp.CompiledExpression.Invoke(rootNode, fpContext);
 
             if (!extracted.Any())
             {
