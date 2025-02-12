@@ -25,6 +25,7 @@ else
                         <FluentLabel Typo="Typography.Body">Subscription</FluentLabel>
                         <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Subscription&id={sub.Id}")">Subscription/@sub.Id</FluentAnchor>
 
+                        <FluentTextField Label="Status" ReadOnly="true" Value="@sub.CurrentStatus"/>
                         <FluentTextField Label="Topic" ReadOnly="true" Value="@sub.TopicUrl"/>
                         <FluentTextField Label="Channel" ReadOnly="true" Value="@sub.ChannelCode"/>
                         <FluentTextField Label="Endpoint" ReadOnly="true" Value="@sub.Endpoint"/>

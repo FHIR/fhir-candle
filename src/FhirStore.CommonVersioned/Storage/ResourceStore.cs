@@ -532,17 +532,21 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             case "Basic":
                 {
-                    // fail the request if this fails
-                    if ((source is Hl7.Fhir.Model.Basic b) &&
-                        (b.Code?.Coding?.Any() ?? false) &&
-                        b.Code.Coding.Any(c =>
-                            c.Code.Equals("SubscriptionTopic", StringComparison.Ordinal) &&
-                            c.System.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal)))
+                    if (source is not Basic b)
                     {
-                        if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
-                        {
-                            return null;
-                        }
+                        return null;
+                    }
+
+                    string? basicFhirType = b.Code?.Coding?.FirstOrDefault(c => c.System == "http://hl7.org/fhir/fhir-types")?.Code;
+
+                    switch (basicFhirType)
+                    {
+                        case "SubscriptionTopic":
+                            if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
+                            {
+                                return null;
+                            }
+                            break;
                     }
                 }
                 break;

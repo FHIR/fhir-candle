@@ -2854,14 +2854,22 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="status">The status.</param>
     public void ChangeSubscriptionStatus(string id, string status)
     {
-        if (!_subscriptions.TryGetValue(id, out ParsedSubscription? subscription) ||
-            (subscription == null))
+        if (!_subscriptions.TryGetValue(id, out ParsedSubscription? parsedSubscription) ||
+            (parsedSubscription == null))
         {
             return;
         }
 
-        subscription.CurrentStatus = status;
-        RegisterSubscriptionsChanged(subscription);
+        if (!_store.TryGetValue("Subscription", out IVersionedResourceStore? rs) ||
+            !rs.TryGetValue(id, out object? storedSubscription) ||
+            (storedSubscription is not Subscription s))
+        {
+            return;
+        }
+
+        _subscriptionConverter.UpdateResourceStatus(s, status);
+
+        RegisterSubscriptionsChanged(parsedSubscription);
     }
 
     /// <summary>Registers the event.</summary>

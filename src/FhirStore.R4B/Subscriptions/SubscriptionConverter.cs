@@ -52,6 +52,23 @@ public class SubscriptionConverter
         _maxSubscriptionTicks = TimeSpan.FromMinutes(MaxSubscriptionExpirationMinutes).Ticks;
     }
 
+    public void UpdateResourceStatus(object subscription, string statusLiteral)
+    {
+        if ((subscription == null) ||
+            (subscription is not Hl7.Fhir.Model.Subscription sub))
+        {
+            return;
+        }
+
+        SubscriptionStatusCodes? status = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<SubscriptionStatusCodes>(statusLiteral);
+        if (status == null)
+        {
+            return;
+        }
+
+        sub.Status = status.Value;
+    }
+
     /// <summary>Attempts to parse a ParsedSubscription from the given object.</summary>
     /// <param name="subscription">The subscription.</param>
     /// <param name="common">      [out] The common.</param>
