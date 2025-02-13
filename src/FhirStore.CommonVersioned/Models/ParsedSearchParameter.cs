@@ -1054,7 +1054,7 @@ public class ParsedSearchParameter : ICloneable
             spName = key.Substring(0, colonIndex);
             chainedKey = string.Empty;
 
-            // TODO: sort out reverse chaining
+            // sort out reverse chaining
             if (spName.Equals("_has", StringComparison.Ordinal))
             {
                 string[] revComponents = key.Substring(colonIndex + 1).Split(':', '.');
@@ -1150,7 +1150,7 @@ public class ParsedSearchParameter : ICloneable
         {
             spName = key.Substring(0, colonIndex);
 
-            // TODO: sort out reverse chaining
+            // sort out reverse chaining
             if (spName.Equals("_has", StringComparison.Ordinal))
             {
                 string[] revComponents = key.Substring(colonIndex + 1).Split(':', '.');

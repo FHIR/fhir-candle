@@ -21,6 +21,8 @@
         * `Microsoft.FluentUI.AspNetCore.Components.Icons  4.11.3 -> 4.11.4`
     * Fixed issue with docker images warning about anti-forgery keys.
     * Added exposed default port to dockerfile.
+    * Added support for `_summary=count` in searches.
+    * Added unit tests for `_summary` flags.
 
 * v2025.212
     * Improved transaction processing: resolving literal references that are searches for contents not in the bundle.

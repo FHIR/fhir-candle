@@ -60,7 +60,6 @@ public class SearchTester
                 continue;
             }
 
-            // TODO: finish reverse chaining
             // for reverse chaining, we nest the search instead of evaluating it here
             if ((sp.ReverseChainedParameterLink != null) && (sp.ReverseChainedParameterFilter != null))
             {
@@ -75,7 +74,7 @@ public class SearchTester
                 }
 
                 // extract the ID from this node
-                string id = rootNode.Children("id").ToFhirValues().FirstOrDefault()?.ToString() ?? string.Empty;
+                string id = rootNode.Children("id").FirstOrDefault()?.Value?.ToString() ?? string.Empty;
 
                 ParsedSearchParameter qualifiedLink = new ParsedSearchParameter(sp.ReverseChainedParameterLink);
                 qualifiedLink.Values = [ rootNode.InstanceType! + "/" + id ];

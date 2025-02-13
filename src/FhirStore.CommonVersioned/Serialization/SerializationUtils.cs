@@ -297,8 +297,6 @@ public static class SerializationUtils
         string summaryFlag = "")
         where TResource : Resource
     {
-        // TODO: Need to add support for count
-
         string[] formatComponents = format.Split(';', StringSplitOptions.TrimEntries);
 
         System.Text.Encoding encoding = System.Text.Encoding.UTF8;
