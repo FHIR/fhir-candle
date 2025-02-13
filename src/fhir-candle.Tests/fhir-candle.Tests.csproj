@@ -17,9 +17,9 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>
 		</PackageReference>
-		<PackageReference Include="Hl7.Fhir.R4" Version="5.11.3" Aliases="coreR4" />
-		<PackageReference Include="Hl7.Fhir.R4B" Version="5.11.3" Aliases="coreR4B" />
-		<PackageReference Include="Hl7.Fhir.R5" Version="5.11.3" Aliases="coreR5" />
+		<PackageReference Include="Hl7.Fhir.R4" Version="5.11.4" Aliases="coreR4" />
+		<PackageReference Include="Hl7.Fhir.R4B" Version="5.11.4" Aliases="coreR4B" />
+		<PackageReference Include="Hl7.Fhir.R5" Version="5.11.4" Aliases="coreR5" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="data\r4-synthea\Bundle-transaction-01.json" />
