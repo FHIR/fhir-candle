@@ -3331,7 +3331,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3340,7 +3340,9 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
-                        $"Operation {ctx.OperationName} does not consume non-FHIR content.",
+                        string.IsNullOrEmpty(exMessage)
+                            ? $"Operation {ctx.OperationName} does not consume non-FHIR content."
+                            : $"Operation {ctx.OperationName} does not consume non-FHIR content.\n\nError:\n{exMessage}",
                         OperationOutcome.IssueType.Invalid),
                     StatusCode = HttpStatusCode.UnsupportedMediaType,
                 };
@@ -3561,7 +3563,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3570,7 +3572,9 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
-                        $"Operation {ctx.OperationName} does not consume non-FHIR content.",
+                        string.IsNullOrEmpty(exMessage)
+                            ? $"Operation {ctx.OperationName} does not consume non-FHIR content."
+                            : $"Operation {ctx.OperationName} does not consume non-FHIR content.\n\nError:\n{exMessage}",
                         OperationOutcome.IssueType.Invalid),
                     StatusCode = HttpStatusCode.UnsupportedMediaType,
                 };
@@ -3788,7 +3792,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3797,7 +3801,9 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
-                        $"Operation {ctx.OperationName} does not consume non-FHIR content.",
+                        string.IsNullOrEmpty(exMessage)
+                            ? $"Operation {ctx.OperationName} does not consume non-FHIR content."
+                            : $"Operation {ctx.OperationName} does not consume non-FHIR content.\n\nError:\n{exMessage}",
                         OperationOutcome.IssueType.Invalid),
                     StatusCode = HttpStatusCode.UnsupportedMediaType,
                 };

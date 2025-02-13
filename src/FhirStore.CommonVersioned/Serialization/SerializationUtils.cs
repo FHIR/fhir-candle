@@ -217,7 +217,7 @@ public static class SerializationUtils
                 catch (Exception ex)
                 {
                     resource = null;
-                    exMessage = ex.Message;
+                    exMessage = ex.InnerException == null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
                     return HttpStatusCode.UnprocessableEntity;
                 }
 
@@ -246,7 +246,7 @@ public static class SerializationUtils
                 catch (Exception ex)
                 {
                     resource = null;
-                    exMessage = ex.Message;
+                    exMessage = ex.InnerException == null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
                     return HttpStatusCode.UnprocessableEntity;
                 }
 

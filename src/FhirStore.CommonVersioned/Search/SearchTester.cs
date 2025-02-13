@@ -144,7 +144,7 @@ public class SearchTester
             {
                 case "_id":
                     {
-                        if (rootNode.Children("id").ToFhirValues().FirstOrDefault()?.ToTypedElement() is ITypedElement ete)
+                        if (rootNode.Children("id").FirstOrDefault() is ITypedElement ete)
                         {
                             extracted = [ ete ];
                         }

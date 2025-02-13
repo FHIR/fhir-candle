@@ -1,6 +1,7 @@
 * Work in Progress
     * Improved performance of `_type` and `_id` search parameters.
     * Improved performance of `transaction` bundle unit tests.
+    * Improved dianostic messages for failed parsing of operation FHIR content.
 
 * v2025.212
     * Improved transaction processing: resolving literal references that are searches for contents not in the bundle.
