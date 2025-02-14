@@ -217,7 +217,7 @@ public static class SerializationUtils
                 catch (Exception ex)
                 {
                     resource = null;
-                    exMessage = ex.Message;
+                    exMessage = ex.InnerException == null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
                     return HttpStatusCode.UnprocessableEntity;
                 }
 
@@ -246,7 +246,7 @@ public static class SerializationUtils
                 catch (Exception ex)
                 {
                     resource = null;
-                    exMessage = ex.Message;
+                    exMessage = ex.InnerException == null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
                     return HttpStatusCode.UnprocessableEntity;
                 }
 
@@ -297,8 +297,6 @@ public static class SerializationUtils
         string summaryFlag = "")
         where TResource : Resource
     {
-        // TODO: Need to add support for count
-
         string[] formatComponents = format.Split(';', StringSplitOptions.TrimEntries);
 
         System.Text.Encoding encoding = System.Text.Encoding.UTF8;

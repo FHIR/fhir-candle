@@ -633,18 +633,13 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
     {
         if (!_hasDisposed)
         {
-            if (disposing)
-            {
-                // TODO: dispose managed state (managed objects)
+            // dispose managed state (managed objects)
+            //if (disposing)
+            //{
+            //}
 
-                //foreach (IFhirStore store in _storesByController.Values)
-                //{
-                //    store.OnSubscriptionSendEvent -= FhirStoreManager_OnSubscriptionSendEvent;
-                //}
-            }
-
-            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
-            // TODO: set large fields to null
+            // free unmanaged resources (unmanaged objects) and override finalizer
+            // set large fields to null
             _hasDisposed = true;
         }
     }

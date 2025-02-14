@@ -1978,18 +1978,17 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     {
         if (!_hasDisposed)
         {
+            // dispose managed state (managed objects)
             if (disposing)
             {
-                // TODO: dispose managed state (managed objects)
-
                 //foreach (IFhirStore store in _storesByController.Values)
                 //{
                 //    store.OnSubscriptionSendEvent -= FhirStoreManager_OnSubscriptionSendEvent;
                 //}
             }
 
-            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
-            // TODO: set large fields to null
+            // free unmanaged resources (unmanaged objects) and override finalizer
+            // set large fields to null
             _hasDisposed = true;
         }
     }

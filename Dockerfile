@@ -13,6 +13,7 @@ RUN dotnet publish --framework net9.0 -a $TARGETARCH src/fhir-candle/fhir-candle
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
+EXPOSE 5826
 WORKDIR /app
 COPY --from=build-env /app/out .
 ENTRYPOINT ["dotnet", "fhir-candle.dll"]

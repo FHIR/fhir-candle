@@ -29,7 +29,7 @@ namespace System.Runtime.CompilerServices
 
             (int offset, int length) = range.GetOffsetAndLength(array.Length);
 
-            if (default(T)! != null || typeof(T[]) == array.GetType()) // TODO-NULLABLE: default(T) == null warning (https://github.com/dotnet/roslyn/issues/34757)
+            if (default(T)! != null || typeof(T[]) == array.GetType()) // default(T) == null warning (https://github.com/dotnet/roslyn/issues/34757)
             {
                 if (length == 0)
                 {

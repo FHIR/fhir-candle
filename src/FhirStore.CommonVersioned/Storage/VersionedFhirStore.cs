@@ -3331,7 +3331,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3340,7 +3340,9 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
-                        $"Operation {ctx.OperationName} does not consume non-FHIR content.",
+                        string.IsNullOrEmpty(exMessage)
+                            ? $"Operation {ctx.OperationName} does not consume non-FHIR content."
+                            : $"Operation {ctx.OperationName} does not consume non-FHIR content.\n\nError:\n{exMessage}",
                         OperationOutcome.IssueType.Invalid),
                     StatusCode = HttpStatusCode.UnsupportedMediaType,
                 };
@@ -3561,7 +3563,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3570,7 +3572,9 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
-                        $"Operation {ctx.OperationName} does not consume non-FHIR content.",
+                        string.IsNullOrEmpty(exMessage)
+                            ? $"Operation {ctx.OperationName} does not consume non-FHIR content."
+                            : $"Operation {ctx.OperationName} does not consume non-FHIR content.\n\nError:\n{exMessage}",
                         OperationOutcome.IssueType.Invalid),
                     StatusCode = HttpStatusCode.UnsupportedMediaType,
                 };
@@ -3788,7 +3792,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out _);
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3797,7 +3801,9 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.UnsupportedMediaType,
-                        $"Operation {ctx.OperationName} does not consume non-FHIR content.",
+                        string.IsNullOrEmpty(exMessage)
+                            ? $"Operation {ctx.OperationName} does not consume non-FHIR content."
+                            : $"Operation {ctx.OperationName} does not consume non-FHIR content.\n\nError:\n{exMessage}",
                         OperationOutcome.IssueType.Invalid),
                     StatusCode = HttpStatusCode.UnsupportedMediaType,
                 };
@@ -4447,47 +4453,50 @@ rs,
             Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
-        // create our sort comparer, if necessary
-        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
-            ? null
-            : new(this, resultParameters.SortRequests);
-
-        HashSet<string> addedIds = new();
-        int resultCount = 0;
-
-        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        if (resultParameters.SummaryFlag != "count")
         {
-            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
-                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            // create our sort comparer, if necessary
+            FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+                ? null
+                : new(this, resultParameters.SortRequests);
+
+            HashSet<string> addedIds = new();
+            int resultCount = 0;
+
+            foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
             {
-                break;
+                if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                    (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+                {
+                    break;
+                }
+
+                resultCount++;
+
+                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+                if (addedIds.Contains(relativeUrl))
+                {
+                    // promote to match
+                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                }
+                else
+                {
+                    // add the matched result to the bundle
+                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                    // track we have added this id
+                    addedIds.Add(relativeUrl);
+                }
+
+                // add any included resources
+                AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+                // TODO: check for include:iterate directives
+
+                // add any reverse included resources
+                AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
             }
-
-            resultCount++;
-
-            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-            if (addedIds.Contains(relativeUrl))
-            {
-                // promote to match
-                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
-            }
-            else
-            {
-                // add the matched result to the bundle
-                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                // track we have added this id
-                addedIds.Add(relativeUrl);
-            }
-
-            // add any included resources
-            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-
-            // TODO: check for include:iterate directives
-
-            // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks.Length > 0)
@@ -4831,47 +4840,50 @@ rs,
             Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
-        // create our sort comparer, if necessary
-        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
-            ? null
-            : new(this, resultParameters.SortRequests);
-
-        HashSet<string> addedIds = new();
-        int resultCount = 0;
-
-        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        if (resultParameters.SummaryFlag != "count")
         {
-            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
-                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            // create our sort comparer, if necessary
+            FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+                ? null
+                : new(this, resultParameters.SortRequests);
+
+            HashSet<string> addedIds = new();
+            int resultCount = 0;
+
+            foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
             {
-                break;
+                if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                    (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+                {
+                    break;
+                }
+
+                resultCount++;
+
+                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+                if (addedIds.Contains(relativeUrl))
+                {
+                    // promote to match
+                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                }
+                else
+                {
+                    // add the matched result to the bundle
+                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                    // track we have added this id
+                    addedIds.Add(relativeUrl);
+                }
+
+                // add any included resources
+                AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+                // TODO: check for include:iterate directives
+
+                // add any reverse included resources
+                AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
             }
-
-            resultCount++;
-
-            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-            if (addedIds.Contains(relativeUrl))
-            {
-                // promote to match
-                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
-            }
-            else
-            {
-                // add the matched result to the bundle
-                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                // track we have added this id
-                addedIds.Add(relativeUrl);
-            }
-
-            // add any included resources
-            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-
-            // TODO: check for include:iterate directives
-
-            // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks.Length > 0)
@@ -5126,47 +5138,50 @@ rs,
             Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
-        // create our sort comparer, if necessary
-        FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
-            ? null
-            : new(this, resultParameters.SortRequests);
-
-        HashSet<string> addedIds = new();
-        int resultCount = 0;
-
-        foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+        if (resultParameters.SummaryFlag != "count")
         {
-            if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
-                (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+            // create our sort comparer, if necessary
+            FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
+                ? null
+                : new(this, resultParameters.SortRequests);
+
+            HashSet<string> addedIds = new();
+            int resultCount = 0;
+
+            foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
             {
-                break;
+                if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
+                    (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+                {
+                    break;
+                }
+
+                resultCount++;
+
+                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+                if (addedIds.Contains(relativeUrl))
+                {
+                    // promote to match
+                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                }
+                else
+                {
+                    // add the matched result to the bundle
+                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                    // track we have added this id
+                    addedIds.Add(relativeUrl);
+                }
+
+                // add any included resources
+                AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+
+                // TODO: check for include:iterate directives
+
+                // add any reverse included resources
+                AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
             }
-
-            resultCount++;
-
-            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-            if (addedIds.Contains(relativeUrl))
-            {
-                // promote to match
-                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
-            }
-            else
-            {
-                // add the matched result to the bundle
-                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                // track we have added this id
-                addedIds.Add(relativeUrl);
-            }
-
-            // add any included resources
-            AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-
-            // TODO: check for include:iterate directives
-
-            // add any reverse included resources
-            AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks.Length > 0)
@@ -5299,7 +5314,7 @@ rs,
             }
         }
 
-        List <(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
+        List<(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
 
         foreach (string resourceType in resourceTypes)
         {
@@ -5346,57 +5361,64 @@ rs,
         HashSet<string> addedIds = new();
         int resultCount = 0;
 
-        ParsedResultParameters.SortRequest[] sortRequests = byResource.SelectMany(br => br.resultParameters.SortRequests).DistinctBy(sr => sr.RequestLiteral).ToArray();
-
-        // create our sort comparer, if necessary
-        FhirSortComparer? comparer = sortRequests.Length == 0
-            ? null
-            : new(this, sortRequests);
-
-        foreach (Resource resource in (comparer == null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
+        if (byResource.Any(br => br.resultParameters.SummaryFlag == "count"))
         {
-            ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
-                ?? byResource.First().resultParameters;
+            resultCount = byResource.Sum(br => br.results.Count());
+        }
+        else
+        {
+            ParsedResultParameters.SortRequest[] sortRequests = byResource.SelectMany(br => br.resultParameters.SortRequests).DistinctBy(sr => sr.RequestLiteral).ToArray();
 
-            if (((rpForResource.MaxResults != null) && (resultCount >= rpForResource.MaxResults)) ||
-                ((rpForResource.PageMatchCount != null) && (resultCount >= rpForResource.PageMatchCount)))
+            // create our sort comparer, if necessary
+            FhirSortComparer? comparer = sortRequests.Length == 0
+                ? null
+                : new(this, sortRequests);
+
+            foreach (Resource resource in (comparer == null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
             {
-                // flag that we cannot use this total
-                resultCount = -1;
-                break;
+                ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
+                    ?? byResource.First().resultParameters;
+
+                if (((rpForResource.MaxResults != null) && (resultCount >= rpForResource.MaxResults)) ||
+                    ((rpForResource.PageMatchCount != null) && (resultCount >= rpForResource.PageMatchCount)))
+                {
+                    // flag that we cannot use this total
+                    resultCount = -1;
+                    break;
+                }
+
+                // skip resources we cannot include
+                if ((ctx.Authorization != null) && !isAuthorizedAsSearchMatch(ctx, resource))
+                {
+                    continue;
+                }
+
+                resultCount++;
+
+                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
+
+                if (addedIds.Contains(relativeUrl))
+                {
+                    // promote to match
+                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                }
+                else
+                {
+                    // add the matched result to the bundle
+                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
+
+                    // track we have added this id
+                    addedIds.Add(relativeUrl);
+                }
+
+                // add any included resources
+                AddInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
+
+                // check for include:iterate directives
+
+                // add any reverse included resources
+                AddReverseInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
             }
-
-            // skip resources we cannot include
-            if ((ctx.Authorization != null) && !isAuthorizedAsSearchMatch(ctx, resource))
-            {
-                continue;
-            }
-
-            resultCount++;
-
-            string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-            if (addedIds.Contains(relativeUrl))
-            {
-                // promote to match
-                bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
-            }
-            else
-            {
-                // add the matched result to the bundle
-                bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                // track we have added this id
-                addedIds.Add(relativeUrl);
-            }
-
-            // add any included resources
-            AddInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
-
-            // check for include:iterate directives
-
-            // add any reverse included resources
-            AddReverseInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
         }
 
         if (hooks.Length > 0)
@@ -5430,11 +5452,7 @@ rs,
         }
 
         // set the total number of results aggregated across types
-        if (resultCount == -1)
-        {
-            bundle.Total = null;
-        }
-        else
+        if (resultCount != -1)
         {
             bundle.Total = resultCount;
         }
