@@ -11,7 +11,7 @@
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <PackageVersion>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</PackageVersion>
-    <PackageTags>HL7;FHIR;Firely;Package;SDK;</PackageTags>
+    <PackageTags>HL7;FHIR;FHIR-SERVER;</PackageTags>
     <ToolCommandName>fhir-candle</ToolCommandName>
     <PackageOutputPath>..\..\nupkg</PackageOutputPath>
     <PackageReadmeFile>README.md</PackageReadmeFile>
