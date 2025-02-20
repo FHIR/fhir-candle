@@ -14,6 +14,7 @@ using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Utils;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.FluentUI.AspNetCore.Components;
 using OpenTelemetry.Logs;
@@ -239,9 +240,18 @@ public static partial class Program
                 builder = WebApplication.CreateBuilder();
             }
 
+            string appCacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "fhir-candle-key-store");
+            if (!Directory.Exists(appCacheDir))
+            {
+                Directory.CreateDirectory(appCacheDir);
+            }
+
             StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
             builder.WebHost.UseStaticWebAssets();
 
+            builder.Services.AddDataProtection()
+                .SetApplicationName("fhir-candle")
+                .PersistKeysToFileSystem(new DirectoryInfo(appCacheDir));
             builder.Services.AddCors();
 
             // setup open telemetry if necessary

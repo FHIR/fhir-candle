@@ -490,7 +490,7 @@ public class CandleConfig
     /// </summary>
     [ConfigOption(
         ArgName = "--create-as-update",
-        EnvName = "Create_As_Update",
+        EnvName = "Create_Existing_Id",
         Description = "Allow Update interactions (PUT) to create new resources.")]
     public bool AllowCreateAsUpdate { get; set; } = true;
 

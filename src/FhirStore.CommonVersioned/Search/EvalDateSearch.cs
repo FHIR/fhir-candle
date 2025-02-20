@@ -107,8 +107,6 @@ public static class EvalDateSearch
             case Hl7.Fhir.Model.Timing fhirTiming:
                 if (fhirTiming.EventElement.Any())
                 {
-                    // TODO: this is iterating over the elements twice, should change to single pass
-                    // add an extension method .MinAndMax() that returns both
                     valueStart = fhirTiming.EventElement.Min()?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MinValue;
                     valueEnd = fhirTiming.EventElement.Max()?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MaxValue;
                 }

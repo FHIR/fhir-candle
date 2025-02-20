@@ -14,8 +14,7 @@ namespace FhirCandle.Models;
 public class ParsedResultParameters
 {
     /// <summary>(Immutable) Options for controlling the search result.</summary>
-    public static readonly HashSet<string> SearchResultParameters = new()
-    {
+    public static readonly HashSet<string> SearchResultParameters = [
         "_contained",
         "_count",
         "_elements",
@@ -28,16 +27,16 @@ public class ParsedResultParameters
         "_sort",
         "_summary",
         "_total",
-    };
+    ];
 
     /// <summary>Gets or sets the inclusion FHIRpath extractions, keyed by resource.</summary>
-    public Dictionary<string, List<ModelInfo.SearchParamDefinition>> Inclusions { get; set; } = new();
+    public Dictionary<string, List<ModelInfo.SearchParamDefinition>> Inclusions { get; private set; } = [];
 
     /// <summary>Gets or sets the iterative inclusion FHIRpath extractions, keyed by resource.</summary>
-    public Dictionary<string, List<string>> IterativeInclusions { get; set; } = new();
+    public Dictionary<string, List<string>> IterativeInclusions { get; private set; } = [];
 
     /// <summary>Gets or sets the reverse inclusion search parameter definitions, keyed by resource.</summary>
-    public Dictionary<string, List<ModelInfo.SearchParamDefinition>> ReverseInclusions { get; set; } = new();
+    public Dictionary<string, List<ModelInfo.SearchParamDefinition>> ReverseInclusions { get; private set; } = [];
 
     /// <summary>
     /// Represents a request to sort search results by a specific search parameter.
@@ -55,19 +54,24 @@ public class ParsedResultParameters
     /// <summary>
     /// Gets or sets the array of sort requests.
     /// </summary>
-    public SortRequest[] SortRequests { get; set; } = [];
+    public SortRequest[] SortRequests { get; private set; } = [];
 
     /// <summary>
     /// The parameter _count is defined as an instruction to the server regarding how many resources
     /// should be returned in a single page. Servers SHALL NOT return more resources in a single page than
     /// requested, even if they don't support paging, but may return less than the client requested.
     /// </summary>
-    public int? PageMatchCount { get; set; } = null;
+    public int? PageMatchCount { get; private set; } = null;
 
     /// <summary>
     /// Gets or sets the maximum number of results to return.
     /// </summary>
-    public long? MaxResults { get; set; } = null;
+    public long? MaxResults { get; private set; } = null;
+
+    /// <summary>
+    /// Gets or sets the summary flag
+    /// </summary>
+    public string? SummaryFlag { get; private set; } = null;
 
     /// <summary>The applied query string.</summary>
     private string _appliedQueryString = string.Empty;
@@ -359,6 +363,35 @@ public class ParsedResultParameters
                     break;
 
                 case "_summary":
+                    {
+                        switch (value)
+                        {
+                            case "true":
+                                SummaryFlag = "true";
+                                break;
+
+                            case "text":
+                                SummaryFlag = "text";
+                                break;
+
+                            case "data":
+                                SummaryFlag = "data";
+                                break;
+
+                            case "count":
+                                SummaryFlag = "count";
+                                break;
+
+                            case "false":
+                                SummaryFlag = "false";
+                                break;
+
+                            default:
+                                continue;
+                        }
+
+                        applied.Add(key + "=" + value);
+                    }
                     break;
 
                 case "_total":

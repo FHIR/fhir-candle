@@ -732,13 +732,13 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     {
         if (!_disposedValue)
         {
-            if (disposing)
-            {
-                // TODO: dispose managed state (managed objects)
-            }
+            // dispose managed state (managed objects)
+            //if (disposing)
+            //{
+            //}
 
-            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
-            // TODO: set large fields to null
+            // free unmanaged resources (unmanaged objects) and override finalizer
+            // set large fields to null
             _disposedValue = true;
         }
     }

@@ -809,14 +809,14 @@ public class NotificationManager : INotificationManager
     {
         if (!_hasDisposed)
         {
+            // dispose managed state (managed objects)
             if (disposing)
             {
-                // TODO: dispose managed state (managed objects)
                 _heartbeatTimer?.Dispose();
             }
 
-            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
-            // TODO: set large fields to null
+            // free unmanaged resources (unmanaged objects) and override finalizer
+            // set large fields to null
             _hasDisposed = true;
         }
     }

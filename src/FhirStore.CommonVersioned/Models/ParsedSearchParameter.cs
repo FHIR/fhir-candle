@@ -32,7 +32,7 @@ public class ParsedSearchParameter : ICloneable
         { "_filter", new() { Name = "_filter", Type = SearchParamType.Special } },
 
         /// <summary>Searching based on the logical identifier of resources (Resource.id).</summary>
-        { "_id", new() { Name = "_id", Expression = "Resource.id", Type = SearchParamType.Token } },
+        { "_id", new() { Name = "_id", Type = SearchParamType.Token, Expression = "Resource.id" } },
 
         /// <summary>Match resources against active membership in collection resources.</summary>
         { "_in", new() { Name = "_in", Type = SearchParamType.Reference } },
@@ -1054,7 +1054,7 @@ public class ParsedSearchParameter : ICloneable
             spName = key.Substring(0, colonIndex);
             chainedKey = string.Empty;
 
-            // TODO: sort out reverse chaining
+            // sort out reverse chaining
             if (spName.Equals("_has", StringComparison.Ordinal))
             {
                 string[] revComponents = key.Substring(colonIndex + 1).Split(':', '.');
@@ -1150,7 +1150,7 @@ public class ParsedSearchParameter : ICloneable
         {
             spName = key.Substring(0, colonIndex);
 
-            // TODO: sort out reverse chaining
+            // sort out reverse chaining
             if (spName.Equals("_has", StringComparison.Ordinal))
             {
                 string[] revComponents = key.Substring(colonIndex + 1).Split(':', '.');

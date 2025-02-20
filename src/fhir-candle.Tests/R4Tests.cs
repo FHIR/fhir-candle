@@ -18,6 +18,7 @@ using Shouldly;
 using System.Net;
 using Hl7.FhirPath;
 using fhir.candle.Services;
+using static FhirCandle.Storage.Common;
 
 namespace fhir.candle.Tests;
 
@@ -1235,6 +1236,161 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
             }
 
             subscription.ClearEvents();
+        }
+    }
+}
+
+
+/// <summary>Summary flags in R4 searches.</summary>
+public class R4TestsSummary : IClassFixture<R4Tests>
+{
+    /// <summary>(Immutable) The test output helper.</summary>
+    private readonly ITestOutputHelper _testOutputHelper;
+
+    /// <summary>(Immutable) The fixture.</summary>
+    private readonly R4Tests _fixture;
+
+    /// <summary>Initializes a new instance of the <see cref="R4TestsPatient"/> class.</summary>
+    /// <param name="fixture">         (Immutable) The fixture.</param>
+    /// <param name="testOutputHelper">The test output helper.</param>
+    public R4TestsSummary(R4Tests fixture, ITestOutputHelper testOutputHelper)
+    {
+        _fixture = fixture;
+        _testOutputHelper = testOutputHelper;
+    }
+
+    private readonly record struct SearchResultInfo(
+        string SummaryFlag,
+        bool Success,
+        int? Total,
+        int MatchCount,
+        int EntryCount,
+        int ResponseLength,
+        string SelfLink);
+
+    private static string[] _summaryFlags = ["false", "true", "text", "data", "count"];
+
+    [Theory]
+    [InlineData("/Patient?_id:not=example", (R4Tests._patientCount - 1))]
+    [InlineData("/Patient?_id=AnIdThatDoesNotExist", 0)]
+    [InlineData("/Patient?_id=example", 1)]
+    [InlineData("/Patient?name=peter", 1)]
+    [InlineData("/Patient?name=not-present,another-not-present", 0)]
+    [InlineData("/Patient?name=peter,not-present", 1)]
+    [InlineData("/Patient?name=not-present,peter", 1)]
+    [InlineData("/Patient?name:contains=eter", 1)]
+    [InlineData("/Patient?name:contains=zzrot", 0)]
+    [InlineData("/Patient?name:exact=Peter", 1)]
+    [InlineData("/Patient?name:exact=peter", 0)]
+    [InlineData("/Patient?name:exact=Peterish", 0)]
+    [InlineData("/Patient?_profile:missing=true", R4Tests._patientCount - 1)]
+    [InlineData("/Patient?_profile:missing=false", 1)]
+    [InlineData("/Patient?multiplebirth=3", 1)]
+    [InlineData("/Patient?multiplebirth=le3", 1)]
+    [InlineData("/Patient?multiplebirth=lt3", 0)]
+    [InlineData("/Patient?birthdate=1982-01-23", 1)]
+    [InlineData("/Patient?birthdate=1982-01", 1)]
+    [InlineData("/Patient?birthdate=1982", 2)]
+    [InlineData("/Patient?gender=InvalidValue", 0)]
+    [InlineData("/Patient?gender=male", R4Tests._patientsMale)]
+    [InlineData("/Patient?gender=female", R4Tests._patientsFemale)]
+    [InlineData("/Patient?gender=male,female", (R4Tests._patientsMale + R4Tests._patientsFemale))]
+    [InlineData("/Patient?name-use=official", R4Tests._patientCount - 1)]
+    [InlineData("/Patient?name-use=invalid-name-use", 0)]
+    [InlineData("/Patient?identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
+    [InlineData("/Patient?identifier=|12345", 1)]
+    [InlineData("/Patient?identifier=urn:oid:1.2.36.146.595.217.0.1|ValueThatDoesNotExist", 0)]
+    [InlineData("/Patient?identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|12345", 1)]
+    [InlineData("/Patient?identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|EXT|12345", 0)]
+    [InlineData("/Patient?identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|ABC", 0)]
+    [InlineData("/Patient?active=true", R4Tests._patientCount - 1)]
+    [InlineData("/Patient?active=false", 0)]
+    [InlineData("/Patient?active:missing=true", 1)]
+    [InlineData("/Patient?active=garbage", 0)]
+    [InlineData("/Patient?telecom=phone|(03) 5555 6473", 1)]
+    [InlineData("/Patient?telecom=|(03) 5555 6473", 1)]
+    [InlineData("/Patient?telecom=phone|", 1)]
+    [InlineData("/Patient?_id=example&name=peter", 1)]
+    [InlineData("/Patient?_id=example&name=not-present", 0)]
+    [InlineData("/Patient?_id=example&_profile:missing=false", 0)]
+    [InlineData("/Patient?_has:Observation:patient:_id=blood-pressure", 1)]
+    [InlineData("/Patient?_has:Observation:subject:_id=blood-pressure", 1)]
+    [InlineData("?_type=Patient", R4Tests._patientCount)]
+    [InlineData("?_type=Patient,Observation", R4Tests._patientCount + R4Tests._observationCount)]
+    [InlineData("/Patient/example/Observation?patient=example", R4Tests._observationsWithSubjectExample)]
+    public void Search(string search, int matchCount)
+    {
+        Dictionary<string, SearchResultInfo> summaryResults = _summaryFlags.Select(sf => doSearch(sf)).ToDictionary(s => s.SummaryFlag);
+
+        // first, make sure everything worked
+        foreach ((string summaryFlag, SearchResultInfo sri) in summaryResults)
+        {
+            sri.Success.ShouldBeTrue($"Search with _summary={summaryFlag} failed");
+            sri.ResponseLength.ShouldBeGreaterThan(0, $"Search with _summary={summaryFlag} returned no data");
+        }
+
+        // false should have the longest response
+        summaryResults["false"].ResponseLength.ShouldBe(summaryResults.Values.Max(sri => sri.ResponseLength));
+
+        // count should have no entries
+        summaryResults["count"].EntryCount.ShouldBe(0);
+
+        // total should match for all
+        foreach ((string summaryFlag, SearchResultInfo sri) in summaryResults)
+        {
+            sri.Total.ShouldBe(matchCount, $"Search with _summary={summaryFlag} returned wrong total");
+        }
+
+        // all self links should include the summary flag
+        foreach ((string summaryFlag, SearchResultInfo sri) in summaryResults)
+        {
+            sri.SelfLink.Contains($"_summary={summaryFlag}").ShouldBeTrue($"Search with _summary={summaryFlag} returned incorrect self link");
+        }
+
+        return;
+
+        SearchResultInfo doSearch(string summaryFlag)
+        {
+            FhirRequestContext ctx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "GET",
+                Url = _fixture._store.Config.BaseUrl + search + "&_summary=" + summaryFlag,
+                Forwarded = null,
+                Authorization = null,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+
+            FhirResponseContext response;
+            bool success = ctx.Interaction switch
+            {
+                StoreInteractionCodes.CompartmentSearch => _fixture._store.CompartmentSearch(ctx, out response),
+                StoreInteractionCodes.CompartmentTypeSearch => _fixture._store.CompartmentTypeSearch(ctx, out response),
+                StoreInteractionCodes.TypeSearch => _fixture._store.TypeSearch(ctx, out response),
+                StoreInteractionCodes.SystemSearch => _fixture._store.SystemSearch(ctx, out response),
+                _ => _fixture._store.TypeSearch(ctx, out response)
+            };
+
+            MinimalBundle? results = null;
+
+            if (success)
+            {
+                results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+            }
+
+            return new()
+            {
+                SummaryFlag = summaryFlag,
+                Success = success,
+                Total = results?.Total,
+                MatchCount = results?.Entries?.Count(e => e.Search?.Mode == "match") ?? 0,
+                EntryCount = results?.Entries?.Count() ?? 0,
+                ResponseLength = response.SerializedResource?.Length ?? 0,
+                SelfLink = results?.Links?.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty,
+            };
+
         }
     }
 }

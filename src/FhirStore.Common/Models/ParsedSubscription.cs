@@ -141,7 +141,6 @@ public class ParsedSubscription
     {
         if (_generatedEvents.ContainsKey(subscriptionEvent.EventNumber))
         {
-            // TODO: for now just overwrite, figure out what we want to do later
             _generatedEvents[subscriptionEvent.EventNumber] = subscriptionEvent;
             return;
         }
@@ -158,7 +157,6 @@ public class ParsedSubscription
 
         if (_serializedEvents.ContainsKey(eventNumber))
         {
-            // TODO: for now just overwrite, figure out what we want to do later
             _serializedEvents[eventNumber] = content;
             return;
         }

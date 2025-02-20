@@ -1,4 +1,32 @@
 * Work in Progress
+
+* v2025.214
+    * Improved performance of `_type` and `_id` search parameters.
+    * Improved performance of `transaction` bundle unit tests.
+    * Improved dianostic messages for failed parsing of operation FHIR content.
+    * Updated NuGet dependencies:
+        * `[net9.0]`
+        * `Hl7.Fhir.R4                                     5.11.3 -> 5.11.4`
+        * `Hl7.Fhir.R4B                                    5.11.3 -> 5.11.4`
+        * `Hl7.Fhir.R5                                     5.11.3 -> 5.11.4`
+        * `Microsoft.AspNetCore.Components.Web             9.0.1  -> 9.0.2`
+        * `Microsoft.FluentUI.AspNetCore.Components        4.11.3 -> 4.11.4`
+        * `Microsoft.FluentUI.AspNetCore.Components.Emoji  4.11.3 -> 4.11.4`
+        * `Microsoft.FluentUI.AspNetCore.Components.Icons  4.11.3 -> 4.11.4`
+        * `[net8.0]`
+        * `Hl7.Fhir.R4                                     5.11.3 -> 5.11.4`
+        * `Hl7.Fhir.R4B                                    5.11.3 -> 5.11.4`
+        * `Hl7.Fhir.R5                                     5.11.3 -> 5.11.4`
+        * `Microsoft.AspNetCore.Components.Web             8.0.12 -> 8.0.13`
+        * `Microsoft.FluentUI.AspNetCore.Components        4.11.3 -> 4.11.4`
+        * `Microsoft.FluentUI.AspNetCore.Components.Emoji  4.11.3 -> 4.11.4`
+        * `Microsoft.FluentUI.AspNetCore.Components.Icons  4.11.3 -> 4.11.4`
+    * Fixed issue with docker images warning about anti-forgery keys.
+    * Added exposed default port to dockerfile.
+    * Added support for `_summary=count` in searches.
+    * Added unit tests for `_summary` flags.
+
+* v2025.212
     * Improved transaction processing: resolving literal references that are searches for contents not in the bundle.
     * Fixed issue where some packages were loading examples when examples were excluded.
     * Work on HTI-2 proposed US Core Subscription testing.
