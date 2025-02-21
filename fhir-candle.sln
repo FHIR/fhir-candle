@@ -29,6 +29,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		LICENSE = LICENSE
 		README.md = README.md
 		THIRDPARTYNOTICES.md = THIRDPARTYNOTICES.md
+		Dockerfile_chiseled = Dockerfile_chiseled
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Ui.R4", "src\FhirCandle.Ui.R4\FhirCandle.Ui.R4.csproj", "{34A8DC55-57B2-4AF5-9A9D-6C764EE9507B}"
@@ -52,6 +53,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
 		.github\workflows\ghcr-docker.yml = .github\workflows\ghcr-docker.yml
 		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
+		.github\workflows\ghcr-docker-min.yml = .github\workflows\ghcr-docker-min.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "fhir-candle-minimal", "src\fhir-candle-minimal\fhir-candle-minimal.csproj", "{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}"

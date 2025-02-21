@@ -12,6 +12,7 @@ RUN dotnet restore --ucr -a $TARGETARCH src/fhir-candle/fhir-candle.csproj
 RUN dotnet publish --framework net9.0 -a $TARGETARCH src/fhir-candle/fhir-candle.csproj -c Release -o out --no-restore
 
 # Build runtime image
+#FROM mcr.microsoft.com/dotnet/aspnet:9.0-noble-chiseled
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 EXPOSE 5826
 WORKDIR /app

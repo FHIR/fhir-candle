@@ -89,6 +89,7 @@ spec:
       containers:
       - name: fhir-candle
         image: ghcr.io/fhir/fhir-candle:latest
+        imagePullPolicy: Always
         resources:
           limits:
             memory: "512Mi"
@@ -176,6 +177,7 @@ spec:
       containers:
       - name: fhir-candle
         image: ghcr.io/fhir/fhir-candle:latest
+        imagePullPolicy: Always
         resources:
           limits:
             memory: "512Mi"
@@ -264,6 +266,7 @@ spec:
       containers:
       - name: fhir-candle
         image: ghcr.io/fhir/fhir-candle:latest
+        imagePullPolicy: Always
         resources:
           limits:
             memory: "512Mi"
