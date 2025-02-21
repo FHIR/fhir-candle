@@ -2,11 +2,11 @@ name: Publish on GitHub Container Registry
 # Basics from https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ['Tests']
-    types: [completed]
-    branches:
-    - main
+  # workflow_run:
+  #   workflows: ['Tests']
+  #   types: [completed]
+  #   branches:
+  #   - main
 
 env:
   REGISTRY: ghcr.io
