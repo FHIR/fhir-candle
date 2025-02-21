@@ -11,6 +11,8 @@ using FhirCandle.Extensions;
 using FhirCandle.Models;
 using Firely.Fhir.Packages;
 using Hl7.Fhir.Specification;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using System.Collections.Concurrent;
 using System.Formats.Tar;
 using System.IO.Compression;

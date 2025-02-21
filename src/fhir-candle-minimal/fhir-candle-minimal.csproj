@@ -1,0 +1,120 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\fhir-candle.props" />
+
+  <PropertyGroup>
+    <RootNamespace>fhir.candle</RootNamespace>
+    <StartupObject>fhir.candle.Program</StartupObject>
+    <Title>fhir-candle-min</Title>
+    <Description>The minimal build for a small in-memory FHIR server that can be used for testing and development - NOT for production workloads.</Description>
+
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <PackageVersion>$([System.DateTime]::Now.ToString("yyyy.MMdd.HHmm"))</PackageVersion>
+    <PackageTags>HL7;FHIR;FHIR-SERVER;</PackageTags>
+    <ToolCommandName>fhir-candle-min</ToolCommandName>
+    <PackageOutputPath>..\..\nupkg</PackageOutputPath>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/FHIR/fhir-candle</PackageProjectUrl>
+    <PackageTags>fhir;server;</PackageTags>
+    <OutputType>Exe</OutputType>
+
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(RunConfiguration)' == 'candle-min' " />
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);CANDLE_MINIMAL</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Moels\**" />
+    <EmbeddedResource Remove="Moels\**" />
+    <None Remove="Moels\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\fhir-candle\Controllers\FhirController.cs" Link="Controllers\FhirController.cs" />
+    <Compile Include="..\fhir-candle\Controllers\SmartController.cs" Link="Controllers\SmartController.cs" />
+    <Compile Include="..\fhir-candle\Controllers\VersionController.cs" Link="Controllers\VersionController.cs" />
+    <Compile Include="..\fhir-candle\Models\IIndexContent.cs" Link="Models\IIndexContent.cs" />
+    <Compile Include="..\fhir-candle\Models\RegistryPackageManifest.cs" Link="Models\RegistryPackageManifest.cs" />
+    <Compile Include="..\fhir-candle\Services\FhirPackageService.cs" Link="Services\FhirPackageService.cs" />
+    <Compile Include="..\fhir-candle\Services\FhirStoreManager.cs" Link="Services\FhirStoreManager.cs" />
+    <Compile Include="..\fhir-candle\Services\IFhirPackageService.cs" Link="Services\IFhirPackageService.cs" />
+    <Compile Include="..\fhir-candle\Services\IFhirStoreManager.cs" Link="Services\IFhirStoreManager.cs" />
+    <Compile Include="..\fhir-candle\Services\INotificationManager.cs" Link="Services\INotificationManager.cs" />
+    <Compile Include="..\fhir-candle\Services\ISmartAuthManager.cs" Link="Services\ISmartAuthManager.cs" />
+    <Compile Include="..\fhir-candle\Services\RestOnlyNotificationManager.cs" Link="Services\RestOnlyNotificationManager.cs" />
+    <Compile Include="..\fhir-candle\Services\SmartAuthManager.cs" Link="Services\SmartAuthManager.cs" />
+    <Compile Include="..\fhir-candle\_ForPackages\AuthorJsonConverter.cs" Link="_ForPackages\AuthorJsonConverter.cs" />
+    <Compile Include="..\fhir-candle\_ForPackages\DiskPackageCache.cs" Link="_ForPackages\DiskPackageCache.cs" />
+    <Compile Include="..\fhir-candle\_ForPackages\FhirCiClient.cs" Link="_ForPackages\FhirCiClient.cs" />
+    <Compile Include="..\fhir-candle\_ForPackages\JsonModels.cs" Link="_ForPackages\JsonModels.cs" />
+    <Compile Include="..\fhir-candle\_ForPackages\ManifestDateJsonConverter.cs" Link="_ForPackages\ManifestDateJsonConverter.cs" />
+    <Compile Include="..\fhir-candle\_ForPackages\VersionExtensions.cs" Link="_ForPackages\VersionExtensions.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.2" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.5.0" />
+    <PackageReference Include="Firely.Fhir.Packages" Version="4.9.0" />
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+    <PackageReference Include="System.CommandLine.NamingConventionBinder" Version="2.0.0-beta4.22272.1" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.4.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <FrameworkReference Include="Microsoft.AspNetCore.App" Version="8.0.13" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <FrameworkReference Include="Microsoft.AspNetCore.App" Version="9.0.2" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
+    <ProjectReference Include="..\FhirStore.R4\FhirCandle.R4.csproj" />
+    <ProjectReference Include="..\FhirStore.R4B\FhirCandle.R4B.csproj" />
+    <ProjectReference Include="..\FhirStore.R5\FhirCandle.R5.csproj" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <Folder Include="Controllers\" />
+    <Folder Include="Models\" />
+    <Folder Include="_ForPackages\" />
+    <Folder Include="Services\" />
+  </ItemGroup>
+
+  <Target Name="AddPackageAliases" BeforeTargets="ResolveReferences" Outputs="%(PackageReference.Identity)">
+    <ItemGroup>
+      <ReferencePath Condition="'%(FileName)'=='FhirCandle.R4'">
+        <Aliases>candleR4</Aliases>
+      </ReferencePath>
+      <ReferencePath Condition="'%(FileName)'=='FhirCandle.R4B'">
+        <Aliases>candleR4B</Aliases>
+      </ReferencePath>
+      <ReferencePath Condition="'%(FileName)'=='FhirCandle.R5'">
+        <Aliases>candleR5</Aliases>
+      </ReferencePath>
+      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R4.Core'">
+        <Aliases>coreR4</Aliases>
+      </ReferencePath>
+      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R4B.Core'">
+        <Aliases>coreR4B</Aliases>
+      </ReferencePath>
+      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R5.Core'">
+        <Aliases>coreR5</Aliases>
+      </ReferencePath>
+    </ItemGroup>
+  </Target>
+</Project>

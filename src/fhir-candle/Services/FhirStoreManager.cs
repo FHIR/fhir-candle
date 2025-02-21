@@ -18,7 +18,8 @@ using FhirCandle.Utils;
 using FhirStore.Smart;
 using Firely.Fhir.Packages;
 using Hl7.Fhir.Utility;
-using static Org.BouncyCastle.Math.EC.ECCurve;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 
 namespace fhir.candle.Services;
 
@@ -264,6 +265,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
     /// <returns>The package pages.</returns>
     private void LoadPackagePages()
     {
+#if !CANDLE_MINIMAL
         _logger.LogInformation("FhirStoreManager <<< Discovering package-based pages...");
 
         // get all page types
@@ -392,6 +394,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
                 }
             }
         }
+#endif
     }
 
     private void loadContents(string dir, bool allowRootLoad = true)

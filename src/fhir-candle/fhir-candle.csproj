@@ -71,10 +71,19 @@
     <Compile Remove="Services\IFhirWebSerializer.cs" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <FrameworkReference Include="Microsoft.AspNetCore.App" Version="8.0.13" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <FrameworkReference Include="Microsoft.AspNetCore.App" Version="9.0.2" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Firely.Fhir.Packages" Version="4.9.0" />
     <PackageReference Include="ini-parser-netcore" Version="3.0.0" />
     <PackageReference Include="MailKit" Version="4.10.0" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.5.0" />
     <PackageReference Include="OpenTelemetry" Version="1.11.1" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.11.1" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.1" />
@@ -82,7 +91,6 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="System.CommandLine.NamingConventionBinder" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.4.0" />
     <PackageReference Include="zulip-cs-lib" Version="0.0.1-alpha.6" />
   </ItemGroup>
 

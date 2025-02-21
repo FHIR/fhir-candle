@@ -5,6 +5,7 @@
 
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using Microsoft.Extensions.Hosting;
 
 namespace fhir.candle.Services;
 

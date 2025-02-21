@@ -54,6 +54,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "fhir-candle-minimal", "src\fhir-candle-minimal\fhir-candle-minimal.csproj", "{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -100,6 +102,10 @@ Global
 		{2276D057-68A6-4639-A821-0C028D8449D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2276D057-68A6-4639-A821-0C028D8449D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2276D057-68A6-4639-A821-0C028D8449D0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
