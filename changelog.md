@@ -1,4 +1,5 @@
 * Work in Progress
+    * Added basic implementation of `$convert` operation.
 
 * v2025.214
     * Improved performance of `_type` and `_id` search parameters.

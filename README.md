@@ -180,6 +180,8 @@ Note: items are unsorted within their priorities
 * Runtime Operation definitions with static/template or JS scripted responses.
 * Minimal build (project and image) focused on size reduction
     * Use Native AOT deployment
+* Add 'core' operations (e.g., `$meta-add`).
+* Add support for operaions within `transaction` bundles
 
 ## The long tail
 * Versioned Resource support
