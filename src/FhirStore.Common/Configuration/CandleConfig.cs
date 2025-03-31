@@ -826,7 +826,7 @@ public class CandleConfig
     /// <param name="envPR">The environment parse result.</param>
     public virtual void Parse(
         System.CommandLine.Parsing.ParseResult pr,
-        System.CommandLine.Parsing.ParseResult envPR)
+        System.CommandLine.Parsing.ParseResult? envPR)
     {
         foreach (ConfigurationOption opt in _options)
         {
@@ -968,13 +968,13 @@ public class CandleConfig
     /// <returns>The option.</returns>
     internal T GetOpt<T>(
         System.CommandLine.Parsing.ParseResult parseResult,
-        System.CommandLine.Parsing.ParseResult envParseResult,
+        System.CommandLine.Parsing.ParseResult? envParseResult,
         System.CommandLine.Option opt,
         T defaultValue)
     {
         ParseResult? pr = parseResult.HasOption(opt)
             ? parseResult
-            : envParseResult.HasOption(opt)
+            : envParseResult?.HasOption(opt) == true
             ? envParseResult
             : null;
 
@@ -985,10 +985,61 @@ public class CandleConfig
 
         object? parsed = pr.GetValueForOption(opt);
 
-        if ((parsed != null) &&
-            (parsed is T typed))
+        if (parsed is System.CommandLine.Parsing.Token t)
         {
-            return typed;
+            switch (defaultValue)
+            {
+                case bool:
+                    return (T)((object?)Convert.ToBoolean(t.Value) ?? defaultValue);
+                case int:
+                    return (T)((object?)Convert.ToInt32(t.Value) ?? defaultValue);
+                case long:
+                    return (T)((object?)Convert.ToInt64(t.Value) ?? defaultValue);
+                case float:
+                    return (T)((object?)Convert.ToSingle(t.Value) ?? defaultValue);
+                case double:
+                    return (T)((object?)Convert.ToDouble(t.Value) ?? defaultValue);
+                case decimal:
+                    return (T)((object?)Convert.ToDecimal(t.Value) ?? defaultValue);
+                case string:
+                    return (T)((object?)Convert.ToString(t.Value) ?? defaultValue);
+                default:
+                    {
+                        if ((t.Value != null) &&
+                            (t.Value is T typed))
+                        {
+                            return typed;
+                        }
+                    }
+                    break;
+            }
+        }
+
+        switch (parsed)
+        {
+            case bool:
+                return (T)((object?)Convert.ToBoolean(parsed) ?? defaultValue!);
+            case int:
+                return (T)((object?)Convert.ToInt32(parsed) ?? defaultValue!);
+            case long:
+                return (T)((object?)Convert.ToInt64(parsed) ?? defaultValue!);
+            case float:
+                return (T)((object?)Convert.ToSingle(parsed) ?? defaultValue!);
+            case double:
+                return (T)((object?)Convert.ToDouble(parsed) ?? defaultValue!);
+            case decimal:
+                return (T)((object?)Convert.ToDecimal(parsed) ?? defaultValue!);
+            case string:
+                return (T)((object?)Convert.ToString(parsed) ?? defaultValue!);
+            default:
+                {
+                    if ((parsed != null) &&
+                        (parsed is T typed))
+                    {
+                        return typed;
+                    }
+                }
+                break;
         }
 
         return defaultValue;
@@ -1004,14 +1055,14 @@ public class CandleConfig
     /// <returns>An array of t.</returns>
     internal T[] GetOptArray<T>(
         System.CommandLine.Parsing.ParseResult parseResult,
-        System.CommandLine.Parsing.ParseResult envParseResult,
+        System.CommandLine.Parsing.ParseResult? envParseResult,
         System.CommandLine.Option opt,
         T[] defaultValue,
         char? singleSplitChar = null)
     {
         ParseResult? pr = parseResult.HasOption(opt)
             ? parseResult
-            : envParseResult.HasOption(opt)
+            : envParseResult?.HasOption(opt) == true
             ? envParseResult
             : null;
 

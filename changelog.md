@@ -1,5 +1,7 @@
 * Work in Progress
     * Added basic implementation of `$convert` operation.
+    * Fixed regression caused by updating System.CommandLine: non-string type config values were not parsing correctly.
+        * Added Unit Testing for configuraiton parsing.
 
 * v2025.214
     * Improved performance of `_type` and `_id` search parameters.
