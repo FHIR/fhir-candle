@@ -4,6 +4,7 @@ using System.Net;
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
 
 namespace fhir.candle.Controllers;

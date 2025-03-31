@@ -8,7 +8,6 @@ using FhirCandle.Operations;
 using FhirCandle.Storage;
 using FhirCandle.Extensions;
 using System.Net;
-using System.Reflection;
 
 namespace FhirStore.CommonVersioned.Operations;
 

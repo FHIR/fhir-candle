@@ -7,6 +7,7 @@ using FhirCandle.Models;
 using FhirCandle.Smart;
 using FhirStore.Smart;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Hosting;
 
 namespace fhir.candle.Services;
 

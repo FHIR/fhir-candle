@@ -1,4 +1,49 @@
 * Work in Progress
+    * Added basic implementation of `$convert` operation.
+    * Fixed regression caused by updating System.CommandLine: non-string type config values were not parsing correctly.
+        * Added Unit Testing for configuraiton parsing.
+    * Updated NuGet dependencies:
+        * `[net9.0]`
+            * `MailKit                                                  4.10.0 -> 4.11.0`
+            * `Microsoft.AspNetCore.Components.Web                      9.0.2  -> 9.0.3`
+            * `Microsoft.Extensions.Configuration                       9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Configuration.EnvironmentVariables  9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Configuration                       9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Configuration.EnvironmentVariables  9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Configuration.Json                  9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Logging                             9.0.2 -> 9.0.3`
+            * `Microsoft.FluentUI.AspNetCore.Components                 4.11.4 -> 4.11.7`
+            * `Microsoft.FluentUI.AspNetCore.Components.Emoji           4.11.4 -> 4.11.7`
+            * `Microsoft.FluentUI.AspNetCore.Components.Icons           4.11.4 -> 4.11.7`
+            * `Microsoft.Extensions.Hosting.Abstractions                9.0.2 -> 9.0.3`
+            * `Microsoft.IdentityModel.JsonWebTokens                    8.5.0  -> 8.7.0`
+            * `Microsoft.IdentityModel.Tokens                           8.4.0 -> 8.7.0`
+            * `OpenTelemetry                                            1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Exporter.Console                           1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Exporter.OpenTelemetryProtocol             1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Extensions.Hosting                         1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Instrumentation.AspNetCore                 1.11.0 -> 1.11.1`
+            * `System.IdentityModel.Tokens.Jwt                          8.4.0 -> 8.7.0`
+
+        * `[net8.0]`
+            * `MailKit                                                  4.10.0 -> 4.11.0`
+            * `Microsoft.AspNetCore.Components.Web                      8.0.13 -> 8.0.14`
+            * `Microsoft.Extensions.Configuration                       9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Configuration.EnvironmentVariables  9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Configuration.Json                  9.0.2 -> 9.0.3`
+            * `Microsoft.Extensions.Logging                             9.0.2 -> 9.0.3`
+            * `Microsoft.FluentUI.AspNetCore.Components                 4.11.4 -> 4.11.7`
+            * `Microsoft.FluentUI.AspNetCore.Components.Emoji           4.11.4 -> 4.11.7`
+            * `Microsoft.FluentUI.AspNetCore.Components.Icons           4.11.4 -> 4.11.7`
+            * `Microsoft.Extensions.Hosting.Abstractions                9.0.2 -> 9.0.3`
+            * `Microsoft.IdentityModel.JsonWebTokens                    8.5.0  -> 8.7.0`
+            * `OpenTelemetry                                            1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Exporter.Console                           1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Exporter.OpenTelemetryProtocol             1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Extensions.Hosting                         1.11.1 -> 1.11.2`
+            * `OpenTelemetry.Instrumentation.AspNetCore                 1.11.0 -> 1.11.1`
+            * `Microsoft.IdentityModel.Tokens                           8.4.0 -> 8.7.0`
+            * `System.IdentityModel.Tokens.Jwt                          8.4.0 -> 8.7.0`
 
 * v2025.214
     * Improved performance of `_type` and `_id` search parameters.

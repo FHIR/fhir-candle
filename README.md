@@ -166,10 +166,10 @@ Note: items are unsorted within their priorities
 * Persistent 'unsubscribe' list
 * Finish search evaluators (remaining modifier combinations)
 * Save/restore points
-* Versioned Resource support
 * Resource display / edit in UI
 * Resource editor design improvements
 * Add loading packages/profiles to CapabilityStatement
+* Configuration and content loading via GH repos
 
 ## Mid Priority
 * Complete SMART support
@@ -177,8 +177,14 @@ Note: items are unsorted within their priorities
 * OpenAPI generation
 * Contained resources
 * Subscription websocket support
+* Runtime Operation definitions with static/template or JS scripted responses.
+* Minimal build (project and image) focused on size reduction
+    * Use Native AOT deployment
+* Add 'core' operations (e.g., `$meta-add`).
+* Add support for operaions within `transaction` bundles
 
 ## The long tail
+* Versioned Resource support
 * Non-terminology validation
 * Link to terminology server for full validation
 * `_filter` support

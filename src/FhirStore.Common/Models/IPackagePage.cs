@@ -1,9 +1,4 @@
-﻿// <copyright file="IPackagePage.cs" company="Microsoft Corporation">
-//     Copyright (c) Microsoft Corporation. All rights reserved.
-//     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-// </copyright>
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -32,23 +27,23 @@ public record struct PackagePageInfo(
 public interface IPackagePage
 {
     /// <summary>Gets the package or ri name this page is for.</summary>
-    public virtual static string ContentFor => string.Empty;
+    virtual static string ContentFor => string.Empty;
 
     /// <summary>Gets the name of the page.</summary>
-    public virtual static string PageName => string.Empty;
+    virtual static string PageName => string.Empty;
 
     /// <summary>Gets the description.</summary>
-    public virtual static string Description => string.Empty;
+    virtual static string Description => string.Empty;
 
     /// <summary>Gets the full pathname of the route file.</summary>
-    public virtual static string RoutePath => string.Empty;
+    virtual static string RoutePath => string.Empty;
 
     /// <summary>Gets the FHIR version literal.</summary>
-    public virtual static string FhirVersionLiteral => string.Empty;
+    virtual static string FhirVersionLiteral => string.Empty;
 
     /// <summary>Gets the FHIR version numeric.</summary>
-    public virtual static string FhirVersionNumeric => string.Empty;
+    virtual static string FhirVersionNumeric => string.Empty;
 
     /// <summary>Gets the only show on endpoint.</summary>
-    public virtual static string OnlyShowOnEndpoint => string.Empty;
+    virtual static string OnlyShowOnEndpoint => string.Empty;
 }

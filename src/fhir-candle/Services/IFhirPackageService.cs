@@ -6,6 +6,7 @@
 using FhirCandle.Utils;
 using FhirCandle.Models;
 using Firely.Fhir.Packages;
+using Microsoft.Extensions.Hosting;
 using static fhir.candle.Services.FhirPackageService;
 
 namespace fhir.candle.Services;

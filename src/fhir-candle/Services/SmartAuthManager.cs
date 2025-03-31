@@ -4,8 +4,6 @@
 // </copyright>
 
 using fhir.candle.Models;
-using fhir.candle.Pages.Smart;
-using fhir.candle.Pages.Subscriptions;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Smart;
@@ -13,14 +11,16 @@ using FhirCandle.Storage;
 using FhirStore.Smart;
 using Hl7.Fhir.Rest;
 using Hl7.Fhir.Utility;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using System.ComponentModel.DataAnnotations;
-using System.IdentityModel.Tokens.Jwt;
+using Microsoft.IdentityModel.JsonWebTokens;
 using System.Security.Cryptography;
 using System.Text;
-using zulip_cs_lib.Resources;
 using static FhirCandle.Models.AuthorizationInfo;
+using Newtonsoft.Json.Linq;
 
 namespace fhir.candle.Services;
 
@@ -1053,7 +1053,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             return false;
         }
 
-        JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+        JsonWebTokenHandler tokenHandler = new();
 
         if (!tokenHandler.CanReadToken(clientAssertion))
         {
@@ -1065,7 +1065,16 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         }
 
         // read the token so we can get the claims
-        JwtSecurityToken jwtToken = tokenHandler.ReadJwtToken(clientAssertion);
+        SecurityToken securityToken = tokenHandler.ReadToken(clientAssertion);
+
+        if (securityToken is not JsonWebToken jwtToken)
+        {
+            string msg = $"TryClientAssertionExchange <<< unexpected token type: {securityToken.GetType().Name}.";
+            messages.Add(msg);
+            _logger.LogWarning(msg);
+            response = null!;
+            return false;
+        }
 
         //// check to see if we are an audience on the key
         //if (!jwtToken.Audiences.Any(a => a.Equals(tenant.BaseUrl, StringComparison.OrdinalIgnoreCase)))
@@ -1089,7 +1098,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         }
 
         // check to see if there is a keyset url
-        if (jwtToken.Header.TryGetValue("jku", out object? jku) &&
+        if (jwtToken.TryGetHeaderValue("jku", out object? jku) &&
             (jku != null) &&
             (jku is string keySetUrl))
         {
@@ -1127,7 +1136,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             keySetUrl = string.Empty;
         }
 
-        if (!jwtToken.Header.TryGetValue("kid", out object? kid) ||
+        if (!jwtToken.TryGetHeaderValue("kid", out object? kid) ||
             (kid == null) ||
             (kid is not string signingKeyId))
         {
@@ -1204,7 +1213,16 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                 IssuerSigningKeys = smartClient.Keys.Values,
             };
 
-            tokenHandler.ValidateToken(clientAssertion, tokenValidationParameters, out SecurityToken validatedToken);
+            TokenValidationResult valdiationResult = tokenHandler.ValidateTokenAsync(clientAssertion, tokenValidationParameters).Result;
+            if (!valdiationResult.IsValid)
+            {
+                tokenIsValid = false;
+                string msg = valdiationResult.Exception.InnerException == null
+                    ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
+                    : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
+                messages.Add(msg);
+                _logger.LogWarning(msg);
+            }
         }
         catch (Exception ex)
         {
@@ -1228,7 +1246,16 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                 IssuerSigningKeys = smartClient.Keys.Values,
             };
 
-            tokenHandler.ValidateToken(clientAssertion, tokenValidationParameters, out SecurityToken validatedToken);
+            TokenValidationResult valdiationResult = tokenHandler.ValidateTokenAsync(clientAssertion, tokenValidationParameters).Result;
+            if (!valdiationResult.IsValid)
+            {
+                tokenIsValid = false;
+                string msg = valdiationResult.Exception.InnerException == null
+                    ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
+                    : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
+                messages.Add(msg);
+                _logger.LogWarning(msg);
+            }
         }
         catch (Exception ex)
         {
@@ -1252,7 +1279,16 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                 IssuerSigningKeys = smartClient.Keys.Values,
             };
 
-            tokenHandler.ValidateToken(clientAssertion, tokenValidationParameters, out SecurityToken validatedToken);
+            TokenValidationResult valdiationResult = tokenHandler.ValidateTokenAsync(clientAssertion, tokenValidationParameters).Result;
+            if (!valdiationResult.IsValid)
+            {
+                tokenIsValid = false;
+                string msg = valdiationResult.Exception.InnerException == null
+                    ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
+                    : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
+                messages.Add(msg);
+                _logger.LogWarning(msg);
+            }
         }
         catch (Exception ex)
         {
@@ -1276,7 +1312,16 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                 IssuerSigningKeys = smartClient.Keys.Values,
             };
 
-            tokenHandler.ValidateToken(clientAssertion, tokenValidationParameters, out SecurityToken validatedToken);
+            TokenValidationResult valdiationResult = tokenHandler.ValidateTokenAsync(clientAssertion, tokenValidationParameters).Result;
+            if (!valdiationResult.IsValid)
+            {
+                tokenIsValid = false;
+                string msg = valdiationResult.Exception.InnerException == null
+                    ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
+                    : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
+                messages.Add(msg);
+                _logger.LogWarning(msg);
+            }
         }
         catch (Exception ex)
         {
@@ -1450,7 +1495,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     /// <returns>The jwt.</returns>
     internal string GenerateAccessJwt(string rootUrl, AuthorizationInfo auth)
     {
-        JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+        JsonWebTokenHandler tokenHandler = new();
         SecurityTokenDescriptor tokenDescriptor = new()
         {
             Subject = new System.Security.Claims.ClaimsIdentity(new System.Security.Claims.Claim[]
@@ -1469,8 +1514,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             SigningCredentials = new(new SymmetricSecurityKey(_jwtBytes), SecurityAlgorithms.HmacSha256Signature),
         };
 
-        SecurityToken token = tokenHandler.CreateToken(tokenDescriptor);
-        return tokenHandler.WriteToken(token);
+        return tokenHandler.CreateToken(tokenDescriptor);
     }
 
     /// <summary>Attempts to introspection.</summary>
@@ -1595,7 +1639,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         DateTime expiration,
         JsonWebKey webKey)
     {
-        JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+        JsonWebTokenHandler tokenHandler = new();
         SecurityTokenDescriptor tokenDescriptor = new()
         {
             Subject = new System.Security.Claims.ClaimsIdentity(new System.Security.Claims.Claim[]
@@ -1616,8 +1660,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             tokenDescriptor.SigningCredentials = new SigningCredentials(securityKey, webKey.Alg);
         }
 
-        SecurityToken token = tokenHandler.CreateToken(tokenDescriptor);
-        return tokenHandler.WriteToken(token);
+        return tokenHandler.CreateToken(tokenDescriptor);
     }
 
     /// <summary>Generates an id-token jwt.</summary>
@@ -1626,7 +1669,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     /// <returns>The identifier jwt.</returns>
     internal string GenerateIdJwt(string rootUrl, AuthorizationInfo auth)
     {
-        JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+        JsonWebTokenHandler tokenHandler = new();
         SecurityTokenDescriptor tokenDescriptor = new()
         {
             Subject = new System.Security.Claims.ClaimsIdentity(new System.Security.Claims.Claim[]
@@ -1643,8 +1686,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             SigningCredentials = new(new SymmetricSecurityKey(_jwtBytes), SecurityAlgorithms.HmacSha256Signature),
         };
 
-        SecurityToken token = tokenHandler.CreateToken(tokenDescriptor);
-        return tokenHandler.WriteToken(token);
+        return tokenHandler.CreateToken(tokenDescriptor);
     }
 
     /// <summary>Generates an id-token jwt.</summary>
@@ -1662,7 +1704,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         DateTime expires,
         string audience)
     {
-        JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+        JsonWebTokenHandler tokenHandler = new();
         SecurityTokenDescriptor tokenDescriptor = new()
         {
             Subject = new System.Security.Claims.ClaimsIdentity(new System.Security.Claims.Claim[]
@@ -1679,8 +1721,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             SigningCredentials = new(new SymmetricSecurityKey(_jwtBytes), SecurityAlgorithms.HmacSha256Signature),
         };
 
-        SecurityToken token = tokenHandler.CreateToken(tokenDescriptor);
-        return tokenHandler.WriteToken(token);
+        return tokenHandler.CreateToken(tokenDescriptor);
     }
 
     /// <summary>Initializes this service.</summary>
