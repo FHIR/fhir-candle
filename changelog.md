@@ -1,4 +1,7 @@
 * Work in Progress
+  *
+
+* v2025.331
     * Added basic implementation of `$convert` operation.
     * Fixed regression caused by updating System.CommandLine: non-string type config values were not parsing correctly.
         * Added Unit Testing for configuraiton parsing.
@@ -82,7 +85,7 @@
 
 * v2025.210
     * Updated NuGet dependencies:
-        * `» fhir-candle`
+        * `ï¿½ fhir-candle`
             * `  MailKit                                       4.9.0  -> 4.10.0`
             * `  OpenTelemetry                                 1.11.0 -> 1.11.1`
             * `  OpenTelemetry.Exporter.Console                1.11.0 -> 1.11.1`
@@ -90,19 +93,19 @@
             * `  OpenTelemetry.Extensions.Hosting              1.11.0 -> 1.11.1`
             * `  OpenTelemetry.Instrumentation.AspNetCore      1.10.1 -> 1.11.0`
             * `  System.IdentityModel.Tokens.Jwt               8.3.1  -> 8.4.0`
-        * `» fhir-candle.Tests`
+        * `ï¿½ fhir-candle.Tests`
             * `  Hl7.Fhir.R4                5.11.2  -> 5.11.3`
             * `  Hl7.Fhir.R4B               5.11.2  -> 5.11.3`
             * `  Hl7.Fhir.R5                5.11.2  -> 5.11.3`
             * `  Microsoft.NET.Test.Sdk     17.12.0 -> 17.13.0`
             * `  xunit.runner.visualstudio  3.0.1   -> 3.0.2`
-        * `» FhirCandle.Common`
+        * `ï¿½ FhirCandle.Common`
             * `  Microsoft.IdentityModel.Tokens  8.3.1 -> 8.4.0`
-        * `» FhirCandle.R4`
+        * `ï¿½ FhirCandle.R4`
             * `  Hl7.Fhir.R4   5.11.2 -> 5.11.3`
-        * `» FhirCandle.R4B`
+        * `ï¿½ FhirCandle.R4B`
             * `  Hl7.Fhir.R4B  5.11.2 -> 5.11.3`
-        * `» FhirCandle.R5`
+        * `ï¿½ FhirCandle.R5`
             * `  Hl7.Fhir.R5   5.11.2 -> 5.11.3`
     * Updated Language version to 13.
     * Updated projects to multi-target .Net 8.0 and .Net 9.0.

@@ -217,27 +217,33 @@ public static partial class Program
 
             Dictionary<string, TenantConfiguration> tenants = BuildTenantConfigurations(config);
 
-            WebApplicationBuilder builder = null!;
+            WebApplicationBuilder? builder = null;
 
             // when packaging as a dotnet tool, we need to do some directory shenanigans for the static content root
             string root = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location ?? AppContext.BaseDirectory) ?? string.Empty;
             if (!string.IsNullOrEmpty(root))
             {
-                string webRoot = FindRelativeDir(root, "staticwebassets", false);
+                string staticWebRoot = FindRelativeDir(root, "staticwebassets", false);
+                string wwwRoot = FindRelativeDir(root, "wwwroot", false);
 
-                if ((!string.IsNullOrEmpty(webRoot)) && Directory.Exists(webRoot))
+                if ((!string.IsNullOrEmpty(staticWebRoot)) && Directory.Exists(staticWebRoot))
                 {
                     builder = WebApplication.CreateBuilder(new WebApplicationOptions()
                     {
-                        WebRootPath = webRoot,
+                        WebRootPath = staticWebRoot,
+                    });
+                }
+                else if ((!string.IsNullOrEmpty(wwwRoot)) && Directory.Exists(wwwRoot))
+                {
+                    builder = WebApplication.CreateBuilder(new WebApplicationOptions()
+                    {
+                        WebRootPath = wwwRoot,
                     });
                 }
             }
 
-            if (builder == null)
-            {
-                builder = WebApplication.CreateBuilder();
-            }
+            // if we didn't find a web root, use the default
+            builder ??= WebApplication.CreateBuilder();
 
             string appCacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "fhir-candle-key-store");
             if (!Directory.Exists(appCacheDir))
@@ -252,6 +258,11 @@ public static partial class Program
                 .SetApplicationName("fhir-candle")
                 .PersistKeysToFileSystem(new DirectoryInfo(appCacheDir));
             builder.Services.AddCors();
+
+            // add MCP services
+            builder.Services.AddMcpServer()
+                .WithHttpTransport()
+                .WithToolsFromAssembly();
 
             // setup open telemetry if necessary
             ConfigureOpenTelemetry(config, builder);
@@ -314,7 +325,7 @@ public static partial class Program
             WebApplication app = builder.Build();
 
             // we want to essentially disable CORS
-            app.UseCors(builder => builder
+            app.UseCors(b => b
                 .AllowAnyOrigin()
                 .AllowAnyMethod()
                 .AllowAnyHeader()
@@ -325,6 +336,9 @@ public static partial class Program
             app.UseRouting();
             app.UseAntiforgery();
             app.MapControllers();
+
+            // map our MCP services, use a /mcp prefix to avoid collisions with FHIR and UI services
+            app.MapMcp("/mcp");
 
             // this is developer tooling - always respond with as much detail as we can
             app.UseDeveloperExceptionPage();
