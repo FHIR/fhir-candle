@@ -84,8 +84,8 @@
     <PackageReference Include="ini-parser-netcore" Version="3.0.0" />
     <PackageReference Include="MailKit" Version="4.11.0" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.7.0" />
-    <PackageReference Include="ModelContextProtocol" Version="0.1.0-preview.11" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.1.0-preview.11" />
+    <PackageReference Include="ModelContextProtocol" Version="0.2.0-preview.1" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.2.0-preview.1" />
     <PackageReference Include="OpenTelemetry" Version="1.11.2" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.11.2" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.2" />
@@ -135,7 +135,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="McpTools\" />
     <Folder Include="Pages\Client\" />
   </ItemGroup>
 

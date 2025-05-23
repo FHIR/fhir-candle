@@ -15,9 +15,9 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
-    "wgm": {
+    "r4r5": {
       "commandName": "Project",
-      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source ./202501-WGM/search_candle_small",
+      "commandLineArgs": "--r4 r4 --smart-optional * --r5 r5",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {

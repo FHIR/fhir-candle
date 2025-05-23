@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using fhir.candle.McpTools;
 using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
@@ -17,6 +18,7 @@ using FhirCandle.Utils;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.FluentUI.AspNetCore.Components;
+using ModelContextProtocol.Server;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -259,11 +261,6 @@ public static partial class Program
                 .PersistKeysToFileSystem(new DirectoryInfo(appCacheDir));
             builder.Services.AddCors();
 
-            // add MCP services
-            builder.Services.AddMcpServer()
-                .WithHttpTransport()
-                .WithToolsFromAssembly();
-
             // setup open telemetry if necessary
             ConfigureOpenTelemetry(config, builder);
 
@@ -286,6 +283,16 @@ public static partial class Program
             // add a SMART Authorization singleton, then register as a hosted service
             builder.Services.AddSingleton<ISmartAuthManager, SmartAuthManager>();
             builder.Services.AddHostedService<ISmartAuthManager>(sp => sp.GetRequiredService<ISmartAuthManager>());
+
+            FhirMcpTools fMcpTools = new();
+            builder.Services.AddSingleton<FhirMcpTools>(fMcpTools);
+
+            // add MCP services
+            builder.Services.AddMcpServer()
+                .WithHttpTransport()
+                .WithListToolsHandler(fMcpTools.HandleListToolsRequest)
+                .WithCallToolHandler(fMcpTools.HandleCallToolRequest);
+                // .WithToolsFromAssembly();
 
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddControllers();
@@ -337,9 +344,6 @@ public static partial class Program
             app.UseAntiforgery();
             app.MapControllers();
 
-            // map our MCP services, use a /mcp prefix to avoid collisions with FHIR and UI services
-            app.MapMcp("/mcp");
-
             // this is developer tooling - always respond with as much detail as we can
             app.UseDeveloperExceptionPage();
 
@@ -360,6 +364,9 @@ public static partial class Program
             ps.Init();          // store manager requires Package Service to be initialized
             sm.Init();          // store manager may need to download packages
             am.Init();          // spin up authorization manager
+
+            // map our MCP services, use a /mcp prefix to avoid collisions with FHIR and UI services
+            app.MapMcp("/mcp");
 
             // run the server
             //await app.RunAsync(cancellationToken);
@@ -567,6 +574,31 @@ public static partial class Program
     /// </returns>
     private static Dictionary<string, TenantConfiguration> BuildTenantConfigurations(CandleConfig config)
     {
+        Dictionary<string, int> tenantMcpPorts = [];
+
+        foreach (string rawValue in config.StoreMcpPorts)
+        {
+            // check for commas in case someone stuffed multiple values in a single parameter
+            string[] values = rawValue.Split(',');
+
+            foreach (string value in values)
+            {
+                // split into key (store name) and value (port)
+                string[] kvp = value.Split(':');
+                if (kvp.Length != 2)
+                {
+                    continue;
+                }
+
+                if (int.TryParse(kvp[1], out int port))
+                {
+                    tenantMcpPorts[kvp[0]] = port;
+                }
+            }
+        }
+
+        int currentPort = config.ListenPort + 1;
+
         HashSet<string> smartRequired = config.SmartRequiredTenants.ToHashSet();
         HashSet<string> smartOptional = config.SmartOptionalTenants.ToHashSet();
 
@@ -590,6 +622,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                McpListenPort = tenantMcpPorts.TryGetValue(tenant, out int port) ? port : currentPort++,
             });
         }
 
@@ -607,6 +640,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                McpListenPort = tenantMcpPorts.TryGetValue(tenant, out int port) ? port : currentPort++,
             });
         }
 
@@ -624,6 +658,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                McpListenPort = tenantMcpPorts.TryGetValue(tenant, out int port) ? port : currentPort++,
             });
         }
 
@@ -671,6 +706,7 @@ public static partial class Program
     /// <summary>Searches for the FHIR specification directory.</summary>
     /// <exception cref="DirectoryNotFoundException">Thrown when the requested directory is not
     ///  present.</exception>
+    /// <param name="startDir"></param>
     /// <param name="dirName">       The name of the directory we are searching for.</param>
     /// <param name="throwIfNotFound">(Optional) True to throw if not found.</param>
     /// <returns>The found FHIR directory.</returns>

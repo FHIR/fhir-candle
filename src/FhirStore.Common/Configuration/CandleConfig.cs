@@ -282,6 +282,24 @@ public class CandleConfig
         },
     };
 
+    [ConfigOption(
+        ArgName = "--store-mcp-ports",
+        EnvName = "Store_Mcp_Ports",
+        Description = "Colon-delimited (':') Store/Tenant name and MCP listen port pairs.")]
+    public string[] StoreMcpPorts { get; set; } = [];
+
+    private static ConfigurationOption StoreMcpPortsParameter { get; } = new()
+    {
+        Name = "StoreMcpPorts",
+        EnvVarName = "Store_Mcp_Ports",
+        DefaultValue = Array.Empty<string>(),
+        CliOption = new System.CommandLine.Option<string[]>("--store-mcp-ports", "Colon-delimited (':') Store/Tenant name and MCP listen port pairs.")
+        {
+            Arity = System.CommandLine.ArgumentArity.ZeroOrMore,
+            IsRequired = false,
+        },
+    };
+
     //[ConfigOption(
     //    ArgName = "--source-repository",
     //    EnvName = "Source_Repository",
@@ -803,6 +821,7 @@ public class CandleConfig
         TenantsR5Parameter,
         SmartRequiredTenantsParameter,
         SmartOptionalTenantsParameter,
+        StoreMcpPortsParameter,
         AllowExistingIdParameter,
         AllowCreateAsUpdateParameter,
         MaxSubscriptionExpirationMinutesParameter,
@@ -903,6 +922,9 @@ public class CandleConfig
                     break;
                 case "SmartOptionalTenants":
                     SmartOptionalTenants = GetOptArray(pr, envPR, opt.CliOption, SmartOptionalTenants, ',');
+                    break;
+                case "StoreMcpPorts":
+                    StoreMcpPorts = GetOptArray(pr, envPR, opt.CliOption, StoreMcpPorts, ',');
                     break;
                 case "CreateExistingId":
                     AllowExistingId = GetOpt(pr, envPR, opt.CliOption, AllowExistingId);

@@ -18,6 +18,10 @@ using FhirCandle.Utils;
 using FhirStore.Smart;
 using Firely.Fhir.Packages;
 using Hl7.Fhir.Utility;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 
@@ -26,6 +30,9 @@ namespace fhir.candle.Services;
 /// <summary>Manager for FHIR stores.</summary>
 public class FhirStoreManager : IFhirStoreManager, IDisposable
 {
+    public static FhirStoreManager? Instance { get; private set; } = null;
+    public static IFhirStoreManager? IInstance => Instance;
+
     /// <summary>True if has disposed, false if not.</summary>
     private bool _hasDisposed = false;
 
@@ -37,6 +44,8 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
 
     /// <summary>The tenants.</summary>
     private Dictionary<string, TenantConfiguration> _tenants;
+
+    private Dictionary<string, CancellationTokenSource> _mcpCancellationTokens;
 
     /// <summary>The server configuration.</summary>
     private CandleConfig _serverConfig;
@@ -118,9 +127,16 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
         IFhirPackageService fhirPackageService)
     {
         _tenants = tenants;
+        _mcpCancellationTokens = [];
+        foreach (string tenant in _tenants.Keys)
+        {
+            _mcpCancellationTokens.Add(tenant, new CancellationTokenSource());
+        }
+
         _logger = logger;
         _serverConfig = serverConfiguration;
         _packageService = fhirPackageService;
+        Instance = this;
     }
 
     /// <summary>Gets the additional pages by tenant.</summary>
@@ -579,7 +595,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
 
     /// <summary>Gets supplement dir.</summary>
     /// <param name="supplementalRoot"> The supplemental root.</param>
-    /// <param name="entry">The resolved directive entry.</param>
+    /// <param name="packageReference">The resolved package entry to examine</param>
     /// <returns>The supplement dir.</returns>
     private string GetSupplementDir(string supplementalRoot, PackageReference packageReference)
     {
@@ -588,10 +604,8 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
             return string.Empty;
         }
 
-        string dir;
-
         // check to see if we have an exact match
-        dir = Path.Combine(supplementalRoot, packageReference.Moniker);
+        string dir = Path.Combine(supplementalRoot, packageReference.Moniker);
         if (Directory.Exists(dir))
         {
             return dir;
@@ -616,12 +630,69 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
         return string.Empty;
     }
 
+    // public async Task StartStoreMcpServer(string name, IFhirStore store)
+    // {
+    //     WebApplicationBuilder builder = WebApplication.CreateBuilder();
+    //
+    //     string appCacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "fhir-candle-key-store");
+    //     if (!Directory.Exists(appCacheDir))
+    //     {
+    //         Directory.CreateDirectory(appCacheDir);
+    //     }
+    //
+    //     builder.Services.AddDataProtection()
+    //         .SetApplicationName("fhir-candle")
+    //         .PersistKeysToFileSystem(new DirectoryInfo(appCacheDir));
+    //     builder.Services.AddCors();
+    //
+    //     // add MCP services - switch to local tool definition
+    //     builder.Services.AddMcpServer()
+    //         .WithHttpTransport()
+    //         .WithToolsFromAssembly();
+    //
+    //     // add a specific FHIR-Store singleton
+    //     builder.Services.AddSingleton<IFhirStore>(store);
+    //
+    //     builder.Services.AddHttpContextAccessor();
+    //     builder.Services.AddAntiforgery();
+    //
+    //     string localUrl = $"http://*:{store.Config.McpListenPort}";
+    //
+    //     builder.WebHost.UseUrls(localUrl);
+    //
+    //     WebApplication app = builder.Build();
+    //
+    //     // we want to essentially disable CORS
+    //     app.UseCors(b => b
+    //         .AllowAnyOrigin()
+    //         .AllowAnyMethod()
+    //         .AllowAnyHeader()
+    //         .WithExposedHeaders(new[] { "Content-Location", "Location", "Etag", "Last-Modified" }));
+    //
+    //     app.UseAntiforgery();
+    //
+    //     // this is developer tooling - always respond with as much detail as we can
+    //     app.UseDeveloperExceptionPage();
+    //
+    //     _ = app.StartAsync(_mcpCancellationTokens[name].Token);
+    // }
+
     /// <summary>Triggered when the application host is performing a graceful shutdown.</summary>
     /// <param name="cancellationToken">Indicates that the shutdown process should no longer be
     ///  graceful.</param>
     /// <returns>An asynchronous result.</returns>
     Task IHostedService.StopAsync(CancellationToken cancellationToken)
     {
+        // cancel all the MCP services
+        foreach (CancellationTokenSource cts in _mcpCancellationTokens.Values)
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            finally { }
+        }
+
         return Task.CompletedTask;
     }
 
