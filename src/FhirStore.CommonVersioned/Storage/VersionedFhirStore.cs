@@ -22,6 +22,7 @@ using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
 using FhirCandle.Compartments;
+using FhirCandle.Extensions;
 using Hl7.Fhir.Utility;
 
 namespace FhirCandle.Storage;
@@ -29,7 +30,7 @@ namespace FhirCandle.Storage;
 /// <summary>A FHIR store.</summary>
 public partial class VersionedFhirStore : IFhirStore
 {
-    /// <summary>True if has disposed, false if not.</summary>
+    /// <summary>True if this has disposed, false if not.</summary>
     private bool _hasDisposed;
 
     /// <summary>Occurs when On Instance Created.</summary>
@@ -453,7 +454,7 @@ public partial class VersionedFhirStore : IFhirStore
                 continue;
             }
 
-            // skip if requires a package that is not loaded
+            // skip if this requires a package that is not loaded
             if ((!string.IsNullOrEmpty(hook.RequiresPackage)) &&
                 (!_loadedDirectives.Contains(hook.RequiresPackage)) &&
                 (!_loadedPackageIds.Contains(hook.RequiresPackage)))
@@ -559,7 +560,7 @@ public partial class VersionedFhirStore : IFhirStore
             di = new(directory);
             string libDir = string.Empty;
 
-            // look for an package.json so we can determine examples
+            // look for a package.json so we can determine examples
             foreach (FileInfo file in di.GetFiles("package.json", SearchOption.AllDirectories))
             {
                 try
@@ -2540,6 +2541,34 @@ public partial class VersionedFhirStore : IFhirStore
         return true;
     }
 
+    public List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)>
+        GetSearchParameters(string? resourceName)
+    {
+        List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)> results = [];
+
+        string rn = resourceName ?? "Resource";
+
+        // iterate over the all resource parameters
+        foreach (ModelInfo.SearchParamDefinition spd in ParsedSearchParameter._allResourceParameters.Values)
+        {
+            results.Add((rn, spd.Name, spd.Code, spd.Description, EnumUtility.GetLiteral(spd.Type)));
+        }
+
+        // check if we have a resource name and we have a store for it
+        if (string.IsNullOrEmpty(resourceName) ||
+            !_store.TryGetValue(resourceName, out IVersionedResourceStore? rs))
+        {
+            return results;
+        }
+
+        foreach (ModelInfo.SearchParamDefinition spd in rs.GetSearchParamDefinitions())
+        {
+            results.Add((resourceName, spd.Name, spd.Code, spd.Description, EnumUtility.GetLiteral(spd.Type)));
+        }
+
+        return results;
+    }
+
     /// <summary>
     /// Attempts to get search parameter definition a ModelInfo.SearchParamDefinition from the given
     /// string.
@@ -3463,7 +3492,7 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
-    /// <summary>Executes the type operation operation.</summary>
+    /// <summary>Executes the type operation.</summary>
     /// <param name="ctx">     The request context.</param>
     /// <param name="response">[out] The response data.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
@@ -3695,7 +3724,7 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
-    /// <summary>Executes the instance operation operation.</summary>
+    /// <summary>Executes the instance operation.</summary>
     /// <param name="ctx">     The request context.</param>
     /// <param name="response">[out] The response data.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>

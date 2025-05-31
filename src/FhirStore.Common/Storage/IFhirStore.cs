@@ -58,9 +58,9 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     /// <param name="packageSupplements">The package supplements.</param>
     /// <param name="includeExamples">   True to include, false to exclude the examples.</param>
     void LoadPackage(
-        string directive, 
-        string directory, 
-        string packageSupplements, 
+        string directive,
+        string directory,
+        string packageSupplements,
         bool includeExamples);
 
     /// <summary>Gets a list of names of the loaded packages.</summary>
@@ -287,6 +287,9 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
 
     /// <summary>Gets the received notifications.</summary>
     ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> ReceivedNotifications { get; }
+
+    List<(string ResourceName, string? Name, string? Code, string? Description, string SearchType)>
+        GetSearchParameters(string? resourceName);
 
     ///// <summary>
     ///// Get the metadata from a remote fhir server.

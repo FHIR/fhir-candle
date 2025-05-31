@@ -14,6 +14,13 @@ namespace fhir.candle.McpTools;
 //[McpServerToolType]
 public class FhirMcpTools
 {
+    private const string _toolNameStoreDelimiter = "::";
+
+    private const string _toolNameGetResourceList = "getResourceList";
+    private const string _toolNameGetStoreList = "getStoreList";
+    private const string _toolNameGetStoreUrl = "getStoreUrl";
+    private const string _toolNameGetSearchParametersForResource = "getSearchParametersForResource";
+
     private ILogger<FhirMcpTools> _logger;
 
     private string CurrentVersion =>
@@ -43,9 +50,17 @@ public class FhirMcpTools
                 }
             """;
 
+    private static string _resourceNameArg = "resourceType";
+//     private static string _resourceNameToolProp = $$$"""
+//               "{{{_resourceNameArg}}}": {
+//                   "type": "string",
+//                   "description": "Name of the resource type for this request"
+//                   }
+//               """;
+
     private static Tool _getStoreUrlTool = new()
     {
-        Name = "getStoreUrl",
+        Name = _toolNameGetStoreUrl,
         Description = "Get the base FHIR URL for the specified store.",
         InputSchema = JsonSerializer.Deserialize<JsonElement>($$$"""
             {
@@ -60,13 +75,13 @@ public class FhirMcpTools
 
     private static Tool _getStoreListTool = new()
     {
-        Name = "getStoreList",
+        Name = _toolNameGetStoreList,
         Description = "Gets the list of FHIR stores, the base URL of the FHIR store, and their FHIR Versions that are configured on this server.",
     };
 
     private static Tool _getResourceListTool = new()
     {
-        Name = "getResourceList",
+        Name = _toolNameGetResourceList,
         Description = "Gets the list of FHIR resources supported by the specified resource store.",
         InputSchema = JsonSerializer.Deserialize<JsonElement>($$$"""
             {
@@ -81,7 +96,7 @@ public class FhirMcpTools
 
     private List<Tool> buildToolList()
     {
-        // static tools we provide
+        // static tools we provide (require store name as an argument)
         List<Tool> tools = [
             _getStoreUrlTool,
             _getStoreListTool,
@@ -99,12 +114,39 @@ public class FhirMcpTools
             // add the store name to the tool name
             string storeName = store.Config.ControllerName;
 
-            // add the tool to the list
+            // add the get store URL tool to the list
+            tools.Add(new Tool()
+            {
+                Name = $"{storeName}{_toolNameStoreDelimiter}{_toolNameGetStoreUrl}",
+                Description = $"The base URL for the {storeName} store.",
+                InputSchema = _getStoreUrlTool.InputSchema,
+            });
+
+            // add the get resource list tool to the list
              tools.Add(new Tool()
              {
-                 Name = $"{storeName}::getResourceList",
+                 Name = $"{storeName}{_toolNameStoreDelimiter}{_toolNameGetResourceList}",
                  Description = $"The resource list for the {storeName} store.",
              });
+
+            // add the get search parameters for resource tool to the list
+            tools.Add(new Tool()
+            {
+                Name = $"{storeName}{_toolNameStoreDelimiter}{_toolNameGetSearchParametersForResource}",
+                Description = $"The search parameters for a resource in the {storeName} store.",
+                InputSchema = JsonSerializer.Deserialize<JsonElement>($$$"""
+                    {
+                        "type": "object",
+                        "properties": {
+                          "{{{_resourceNameArg}}}": {
+                              "type": "string",
+                              "description": "Name of the resource type to get search parameters for"
+                              }
+                        },
+                        "required": ["resourceType"]
+                    }
+                    """),
+            });
         }
 
         return tools;
@@ -139,19 +181,25 @@ public class FhirMcpTools
         string fnName = request.Params.Name;
         string? storeName = null;
 
-        int sepLoc = fnName.IndexOf("::", StringComparison.Ordinal);
+        int sepLoc = fnName.IndexOf(_toolNameStoreDelimiter, StringComparison.Ordinal);
         if (sepLoc != -1)
         {
             // store name is first
-            string[] fnParts = fnName.Split("::", StringSplitOptions.RemoveEmptyEntries);
+            string[] fnParts = fnName.Split(_toolNameStoreDelimiter, StringSplitOptions.RemoveEmptyEntries);
             storeName = fnParts[0];
             fnName = fnParts[1];
         }
 
         if ((storeName == null) &&
-            (request.Params?.Arguments?.TryGetValue("store", out JsonElement storeNameJ) == true))
+            (request.Params?.Arguments?.TryGetValue(_storeNameArg, out JsonElement storeNameJ) == true))
         {
             storeName = storeNameJ.GetString();
+        }
+
+        string? resourceName = null;
+        if (request.Params?.Arguments?.TryGetValue(_resourceNameArg, out JsonElement resourceTypeJ) == true)
+        {
+            resourceName = resourceTypeJ.GetString();
         }
 
         IFhirStore? store = (storeName != null) && (FhirStoreManager.IInstance?.TryGetValue(storeName, out IFhirStore? fhirStore) == true)
@@ -160,25 +208,39 @@ public class FhirMcpTools
 
         switch (fnName)
         {
-            case "getStoreUrl":
+            case _toolNameGetStoreUrl:
                 response = store?.Config.BaseUrl ?? $"Failed to resolve store named: {storeName}";
                 break;
 
-            case "getStoreList":
+            case _toolNameGetStoreList:
                 responses = GetStoreList();
                 break;
 
-            case "getResourceList":
+            case _toolNameGetResourceList:
                 {
                     if (store == null)
                     {
-                        response = "A store name must be provided.";
+                        response = "A store name is required.";
                     }
                     else
                     {
                         responses = GetResourceList(store!);
                     }
                 }
+                break;
+
+            case _toolNameGetSearchParametersForResource:
+                {
+                    if (store == null)
+                    {
+                        response = "A store name is required.";
+                    }
+                    else
+                    {
+                        responses = GetSearchParameterList(store!, resourceName);
+                    }
+                }
+
                 break;
 
             default:
@@ -231,5 +293,13 @@ public class FhirMcpTools
             McpData.ResourceDescriptions.TryGetValue(rName, out McpData.ResourceDescriptionRec rdRec)
             ? rdRec.ToString()
             : rName);
+    }
+
+    private static IEnumerable<string> GetSearchParameterList(IFhirStore store, string? resourceName)
+    {
+        List<(string ResourceName, string? Name, string? Code, string? Description, string SearchType)> sps = store.GetSearchParameters(resourceName);
+
+        return sps.Order().Select(spRec =>
+            $"{spRec.Code ?? spRec.Name ?? "Unnamed"} ({spRec.SearchType}): {spRec.Description ?? "No description"}");
     }
 }
