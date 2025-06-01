@@ -14,12 +14,15 @@ namespace fhir.candle.McpTools;
 //[McpServerToolType]
 public class FhirMcpTools
 {
-    private const string _toolNameStoreDelimiter = "::";
+    private const string _toolNameStoreDelimiter = "_";
 
     private const string _toolNameGetResourceList = "getResourceList";
     private const string _toolNameGetStoreList = "getStoreList";
     private const string _toolNameGetStoreUrl = "getStoreUrl";
     private const string _toolNameGetSearchParametersForResource = "getSearchParametersForResource";
+    private const string _toolNameGetSearchTypeList = "getSearchTypeList";
+    private const string _toolNameGetSearchTypeDefinition = "getSearchTypeDefinition";
+    private const string _toolNameValidateTypeSearch = "validateTypeSearch";
 
     private ILogger<FhirMcpTools> _logger;
 
@@ -42,21 +45,24 @@ public class FhirMcpTools
         };
     }
 
-    private static string _storeNameArg = "store";
-    private static string _storeNameToolProp = $$$"""
-            "{{{_storeNameArg}}}": {
-                "type": "string",
-                "description": "Name of the store or tenant to service this request"
-                }
-            """;
+    private const string _storeNameArg = "store";
+    private const string _storeNameToolProp = $$$"""
+        "{{{_storeNameArg}}}": {
+            "type": "string",
+            "description": "Name of the store or tenant to service this request"
+            }
+        """;
 
-    private static string _resourceNameArg = "resourceType";
-//     private static string _resourceNameToolProp = $$$"""
+    private const string _resourceNameArg = "resourceType";
+//     private const string _resourceNameToolProp = $$$"""
 //               "{{{_resourceNameArg}}}": {
 //                   "type": "string",
 //                   "description": "Name of the resource type for this request"
 //                   }
 //               """;
+
+    private const string _searchTypeNameArg = "searchType";
+    private const string _searchStringArg = "searchString";
 
     private static Tool _getStoreUrlTool = new()
     {
@@ -94,6 +100,30 @@ public class FhirMcpTools
             """),
     };
 
+    private static Tool _getSearchTypeListTool = new()
+    {
+        Name = _toolNameGetSearchTypeList,
+        Description = "Gets the list of search types supported by this server.",
+    };
+
+    private static Tool _getSearchTypeDefinitionTool = new()
+    {
+        Name = _toolNameGetSearchTypeDefinition,
+        Description = "Gets the definition of a search type supported by this server.",
+        InputSchema = JsonSerializer.Deserialize<JsonElement>($$$"""
+            {
+                "type": "object",
+                "properties": {
+                    "{{{_searchTypeNameArg}}}": {
+                        "type": "string",
+                        "description": "Name of the search type to get the definition of"
+                    }
+                },
+                "required": ["{{{_resourceNameArg}}}"]
+            }
+            """),
+    };
+
     private List<Tool> buildToolList()
     {
         // static tools we provide (require store name as an argument)
@@ -101,6 +131,8 @@ public class FhirMcpTools
             _getStoreUrlTool,
             _getStoreListTool,
             _getResourceListTool,
+            _getSearchTypeListTool,
+            _getSearchTypeDefinitionTool,
         ];
 
         // iterate across all the stores
@@ -143,7 +175,30 @@ public class FhirMcpTools
                               "description": "Name of the resource type to get search parameters for"
                               }
                         },
-                        "required": ["resourceType"]
+                        "required": ["{{{_resourceNameArg}}}"]
+                    }
+                    """),
+            });
+
+            // add the type search validation tool to the list
+            tools.Add(new Tool()
+            {
+                Name = $"{storeName}{_toolNameStoreDelimiter}{_toolNameValidateTypeSearch}",
+                Description = $"Validate a FHIR search request against a resource type in the store.",
+                InputSchema = JsonSerializer.Deserialize<JsonElement>($$$"""
+                    {
+                        "type": "object",
+                        "properties": {
+                            "{{{_resourceNameArg}}}": {
+                                "type": "string",
+                                "description": "Name of the resource type as the base of the search request"
+                            },
+                            "{{{_searchStringArg}}}": {
+                                "type": "string",
+                                "description": "FHIR search request to validate"
+                            }
+                        },
+                        "required": ["{{{_resourceNameArg}}}", "{{{_searchStringArg}}}"]
                     }
                     """),
             });
@@ -240,7 +295,49 @@ public class FhirMcpTools
                         responses = GetSearchParameterList(store!, resourceName);
                     }
                 }
+                break;
 
+            case _toolNameGetSearchTypeList:
+                {
+                    responses = GetSearchTypeList();
+                }
+                break;
+
+            case _toolNameGetSearchTypeDefinition:
+                {
+                    string? searchTypeName = null;
+                    if (request.Params?.Arguments?.TryGetValue(_searchTypeNameArg, out JsonElement searchTypeNameJ) == true)
+                    {
+                        searchTypeName = searchTypeNameJ.GetString();
+                    }
+
+                    response = GetSearchTypeDescription(searchTypeName);
+                }
+                break;
+
+            case _toolNameValidateTypeSearch:
+                {
+                    if (store == null)
+                    {
+                        response = "A store name is required.";
+                    }
+                    else if (resourceName == null)
+                    {
+                        response = "A resource type name is required.";
+                    }
+                    else
+                    {
+                        if (request.Params?.Arguments?.TryGetValue(_searchStringArg, out JsonElement searchStringJ) == true)
+                        {
+                            string? searchString = searchStringJ.GetString();
+                            responses = ValidateTypeSearch(store!, resourceName, searchString!);
+                        }
+                        else
+                        {
+                            response = "A search string is required.";
+                        }
+                    }
+                }
                 break;
 
             default:
@@ -282,6 +379,18 @@ public class FhirMcpTools
         });
     }
 
+    private static IEnumerable<string> ValidateTypeSearch(IFhirStore store, string resourceName, string searchString)
+    {
+        (string overallMessage, List<(string SpName, string SpValue, bool IsOk, string Message)> results) = store.ValidateTypeSearchRequest(resourceName, searchString);
+
+        yield return overallMessage;
+
+        foreach ((string spName, string spValue, bool isOk, string message) in results)
+        {
+            yield return $"'{spName}={spValue}': {(isOk ? "Valid" : "Invalid")} - {message}`";
+        }
+    }
+
     private static IEnumerable<string> GetStoreList()
     {
         return ((IFhirStoreManager?)FhirStoreManager.Instance)?.Values.Select(t => $"{t.Config.ControllerName}: URL is {t.Config.BaseUrl}/, FHIR version is {t.Config.FhirVersion}").ToList() ?? [];
@@ -293,6 +402,22 @@ public class FhirMcpTools
             McpData.ResourceDescriptions.TryGetValue(rName, out McpData.ResourceDescriptionRec rdRec)
             ? rdRec.ToString()
             : rName);
+    }
+
+    private static IEnumerable<string> GetSearchTypeList()
+    {
+        return McpData.SearchTypeDescriptions.OrderBy(kvp => kvp.Key).Select(kvp => kvp.Value.ToString());
+    }
+
+    private static string GetSearchTypeDescription(string? searchTypeName)
+    {
+        if ((searchTypeName != null) &&
+            McpData.SearchTypeDescriptions.TryGetValue(searchTypeName, out McpData.FhirSearchTypeDescriptionRec searchTypeRec))
+        {
+            return searchTypeRec.ToString();
+        }
+
+        return $"Search type '{searchTypeName}' not found.";
     }
 
     private static IEnumerable<string> GetSearchParameterList(IFhirStore store, string? resourceName)

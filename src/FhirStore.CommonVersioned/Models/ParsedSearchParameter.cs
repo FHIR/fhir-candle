@@ -188,10 +188,12 @@ public class ParsedSearchParameter : ICloneable
     public required string[] Values { get; set; }
 
     /// <summary>Gets or sets the applied value flags.</summary>
-    public bool[] IgnoredValueFlags { get; set; } = Array.Empty<bool>();
+    public bool[] IgnoredValueFlags { get; set; } = [];
 
     /// <summary>Gets or sets a value indicating whether this parameter has been ignored.</summary>
     public bool IgnoredParameter { get; set; } = false;
+
+    public string? IgnoredReason { get; set; } = null;
 
     /// <summary>Gets or sets the chained parameter.</summary>
     public Dictionary<string, ParsedSearchParameter>? ChainedParameters { get; set; } = null;
@@ -228,7 +230,7 @@ public class ParsedSearchParameter : ICloneable
     public SegmentedReference[]? ValueReferences { get; set; }
 
     /// <summary>Gets or sets the prefix.</summary>
-    public SearchPrefixCodes?[] Prefixes { get; set; } = Array.Empty<SearchPrefixCodes?>();
+    public SearchPrefixCodes?[] Prefixes { get; set; } = [];
 
     /// <summary>Gets or sets the type of the parameter.</summary>
     public required SearchParamType ParamType { get; set; }
@@ -256,6 +258,7 @@ public class ParsedSearchParameter : ICloneable
         Values = other.Values.Select(v => v).ToArray();
         IgnoredValueFlags = other.IgnoredValueFlags.Select(v => v).ToArray();
         IgnoredParameter = other.IgnoredParameter;
+        IgnoredReason = other.IgnoredReason;
         ChainedParameters = other.ChainedParameters?.DeepCopy();
         ReverseChainedParameterLink = ReverseChainedParameterLink == null ? null : new ParsedSearchParameter(ReverseChainedParameterLink);
         ReverseChainedParameterFilter = ReverseChainedParameterFilter == null ? null : new ParsedSearchParameter(ReverseChainedParameterFilter);
@@ -312,8 +315,9 @@ public class ParsedSearchParameter : ICloneable
             ParamType = spd?.Type ?? SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
+            IgnoredReason = $"Search parameter definition for '{name}' is null or has no expression.";
             return;
         }
 
@@ -329,8 +333,9 @@ public class ParsedSearchParameter : ICloneable
                 ParamType = SearchParamType.Special;
                 SelectExpression = string.Empty;
                 CompiledExpression = null;
-                Values = Array.Empty<string>();
+                Values = [];
                 IgnoredParameter = true;
+                IgnoredReason = $"Search parameter component definition '{component.Value.Definition}' for '{name}' is not defined in the store.";
                 return;
             }
 
@@ -345,8 +350,9 @@ public class ParsedSearchParameter : ICloneable
                 ParamType = SearchParamType.Special;
                 SelectExpression = string.Empty;
                 CompiledExpression = null;
-                Values = Array.Empty<string>();
+                Values = [];
                 IgnoredParameter = true;
+                IgnoredReason = $"Search parameter component definition '{component.Value.Definition}' for '{name}' has no expression.";
                 return;
             }
 
@@ -366,8 +372,9 @@ public class ParsedSearchParameter : ICloneable
                     ParamType = SearchParamType.Special;
                     SelectExpression = string.Empty;
                     CompiledExpression = null;
-                    Values = Array.Empty<string>();
+                    Values = [];
                     IgnoredParameter = true;
+                    IgnoredReason = $"Search parameter definition '{name}' is a composite but has no components defined.";
                     return;
                 }
 
@@ -384,8 +391,8 @@ public class ParsedSearchParameter : ICloneable
                 CompositeComponents = cpValues.ToArray();
 
                 // we do not want to run composite parameters through the normal parsing logic
-                Prefixes = Array.Empty<SearchPrefixCodes?>();
-                Values = Array.Empty<string>();
+                Prefixes = [];
+                Values = [];
 
                 return;
             }
@@ -393,18 +400,16 @@ public class ParsedSearchParameter : ICloneable
 
         if (string.IsNullOrEmpty(value))
         {
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
+            IgnoredReason = $"Search parameter '{name}' has no value provided.";
             return;
         }
 
         // parse the value string into prefixes and values
         ExtractValues(value, definition);
 
-        if (Values == null)
-        {
-            Values = Array.Empty<string>();
-        }
+        Values ??= [];
 
         // by default, assume all values are applied (will be updated during typed parsing)
         IgnoredValueFlags = Enumerable.Repeat(false, Values.Length).ToArray<bool>();
@@ -415,6 +420,7 @@ public class ParsedSearchParameter : ICloneable
         if (IgnoredValueFlags.Any() && IgnoredValueFlags.All(x => x))
         {
             IgnoredParameter = true;
+            IgnoredReason = $"Search parameter '{name}' has no valid values to apply after processing.";
         }
     }
 
@@ -424,7 +430,9 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="parseResult">  The parse result.</param>
-    /// <param name="value">        The http-paramter value string.</param>
+    /// <param name="value">        The http-parameter value string.</param>
+    /// <param name="requestKeyLiteral"></param>
+    /// <param name="requestValueLiteral"></param>
     [SetsRequiredMembers]
     private ParsedSearchParameter(
         VersionedFhirStore store,
@@ -438,6 +446,8 @@ public class ParsedSearchParameter : ICloneable
         ResourceType = parseResult.ResourceType;
         Modifier = parseResult.ModifierCode;
         ModifierLiteral = parseResult.ModifierLiteral;
+        RequestedKeyLiteral = requestKeyLiteral;
+        RequestedValueLiteral = requestValueLiteral;
 
         // check for reverse chained parameters - short circuit the constructor logic
         if ((parseResult.ReverseLinkKey != null) &&
@@ -463,10 +473,8 @@ public class ParsedSearchParameter : ICloneable
             ParamType = SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = false;
-            RequestedKeyLiteral = requestKeyLiteral;
-            RequestedValueLiteral = requestValueLiteral;
             return;
         }
 
@@ -476,7 +484,7 @@ public class ParsedSearchParameter : ICloneable
             ParamType = parseResult.SearchParameterDefinition?.Type ?? SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
             return;
         }
@@ -496,7 +504,7 @@ public class ParsedSearchParameter : ICloneable
                 ParamType = SearchParamType.Special;
                 SelectExpression = string.Empty;
                 CompiledExpression = null;
-                Values = Array.Empty<string>();
+                Values = [];
                 IgnoredParameter = true;
                 return;
             }
@@ -514,8 +522,8 @@ public class ParsedSearchParameter : ICloneable
             CompositeComponents = cpValues.ToArray();
 
             // we do not want to run composite parameters through the normal parsing logic
-            Prefixes = Array.Empty<SearchPrefixCodes?>();
-            Values = Array.Empty<string>();
+            Prefixes = [];
+            Values = [];
 
             return;
         }
@@ -538,13 +546,13 @@ public class ParsedSearchParameter : ICloneable
             }
 
             // when chaining, we do not want to parse the value - it is handled at the last link in the chain
-            Values = Array.Empty<string>();
+            Values = [];
             return;
         }
 
         if (string.IsNullOrEmpty(value))
         {
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
             return;
         }
@@ -552,10 +560,7 @@ public class ParsedSearchParameter : ICloneable
         // parse the value string into prefixes and values
         ExtractValues(value, parseResult.SearchParameterDefinition);
 
-        if (Values == null)
-        {
-            Values = Array.Empty<string>();
-        }
+        Values ??= [];
 
         // by default, assume all values are applied (will be updated during typed parsing)
         IgnoredValueFlags = Enumerable.Repeat(false, Values.Length).ToArray<bool>();
@@ -563,7 +568,8 @@ public class ParsedSearchParameter : ICloneable
         ProcessTypedValues(value, parseResult.SearchParameterDefinition);
 
         // check for no valid values to apply
-        if (IgnoredValueFlags.Any() && IgnoredValueFlags.All(x => x))
+        if ((IgnoredValueFlags.Length != 0) &&
+            IgnoredValueFlags.All(x => x))
         {
             IgnoredParameter = true;
         }
@@ -620,7 +626,7 @@ public class ParsedSearchParameter : ICloneable
                     sb.Append(ModifierLiteral);
                 }
 
-                sb.Append("=");
+                sb.Append('=');
             }
 
             sb.Append(string.Join('$', CompositeComponents.Select(c => c.GetAppliedQueryString(false))));
@@ -649,7 +655,7 @@ public class ParsedSearchParameter : ICloneable
                         sb.Append(ModifierLiteral);
                     }
 
-                    sb.Append("=");
+                    sb.Append('=');
                 }
                 else
                 {
@@ -675,7 +681,12 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Extracts the composite parameters.</summary>
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
+    /// <param name="modifierCode"></param>
     /// <param name="value">        The http-paramter value string.</param>
+    /// <param name="resourceType"></param>
+    /// <param name="spd"></param>
+    /// <param name="modifierLiteral"></param>
+    /// <param name="cpValues"></param>
     /// <returns>The extracted composite parameters.</returns>
     private static void ExtractCompositeParams(
         VersionedFhirStore store,
@@ -721,7 +732,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // note this is wrong - composite parameters do not contain the name of the parameter
-        //// work backwards through the composite values so we can understand multi-valued components
+        //// work backwards through the composite values so we can understand multivalued components
         //for (int i = split.Length - 1; i >= 0; i--)
         //{
         //    int delimIndex = split[i].IndexOf('$');
@@ -1050,7 +1061,7 @@ public class ParsedSearchParameter : ICloneable
     /// <returns>
     /// An enumerator that allows foreach to be used to process parse in this collection.
     /// </returns>
-    public static IEnumerable<ParsedSearchParameter> Parse(
+    public static ParsedSearchParameter[] Parse(
         string queryString,
         VersionedFhirStore store,
         IVersionedResourceStore resourceStore,
@@ -1058,8 +1069,10 @@ public class ParsedSearchParameter : ICloneable
     {
         if (string.IsNullOrWhiteSpace(queryString))
         {
-            yield break;
+            return [];
         }
+
+        List<ParsedSearchParameter> results = [];
 
         System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(queryString);
         foreach (string key in query)
@@ -1070,7 +1083,6 @@ public class ParsedSearchParameter : ICloneable
             }
 
             SearchKeyParseResult? parseResult = tryParseKey(key, store, resourceStore, resourceType);
-
             if (parseResult == null)
             {
                 if (ParsedResultParameters.SearchResultParameters.Contains(key))
@@ -1083,16 +1095,18 @@ public class ParsedSearchParameter : ICloneable
                 continue;
             }
 
-            yield return new ParsedSearchParameter(
+            results.Add(new ParsedSearchParameter(
                 store,
                 resourceStore,
                 parseResult,
                 query[key] ?? string.Empty,
                 key,
-                query[key]);
+                query[key]));
 
             continue;
         }
+
+        return results.ToArray();
     }
 
     /// <summary>Encapsulates the result of a search key parse.</summary>

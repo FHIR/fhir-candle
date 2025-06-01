@@ -27,7 +27,7 @@ public class SearchTester
     /// <param name="rootNode">The resource.</param>
     /// <param name="searchParameters">Options for controlling the search.</param>
     /// <param name="fpContext">(Optional) The context.</param>
-    /// <param name="resultParameters">(Optional) The result parameters.</param>
+    /// <param name="reverseChainCache"></param>
     /// <returns>True if the test passes, false if the test fails.</returns>
     public bool TestForMatch(
         ITypedElement rootNode,

@@ -291,6 +291,12 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     List<(string ResourceName, string? Name, string? Code, string? Description, string SearchType)>
         GetSearchParameters(string? resourceName);
 
+    (string Message, List<(string SpName, string SpValue, bool IsOk, string Message)> Results)
+        ValidateTypeSearchRequest(
+            string resourceType,
+            string searchString);
+
+
     ///// <summary>
     ///// Get the metadata from a remote fhir server.
     ///// </summary>
