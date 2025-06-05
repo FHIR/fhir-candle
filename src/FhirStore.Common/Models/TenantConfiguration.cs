@@ -120,9 +120,4 @@ public class TenantConfiguration
     /// Gets or sets a value indicating whether to allow create as update.
     /// </summary>
     public bool AllowCreateAsUpdate { get; set; } = true;
-
-    /// <summary>
-    /// The TCP listen port for the MCP HTTP server.
-    /// </summary>
-    public int? McpListenPort { get; set; } = null;
 }

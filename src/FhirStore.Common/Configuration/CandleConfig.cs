@@ -283,19 +283,19 @@ public class CandleConfig
     };
 
     [ConfigOption(
-        ArgName = "--store-mcp-ports",
-        EnvName = "Store_Mcp_Ports",
-        Description = "Colon-delimited (':') Store/Tenant name and MCP listen port pairs.")]
-    public string[] StoreMcpPorts { get; set; } = [];
+        ArgName = "--enable-mcp",
+        EnvName = "Enable_Mcp",
+        Description = "True to enable Model Context Protocol (MCP) at [root]/mcp.")]
+    public bool EnableMcp { get; set; } = false;
 
-    private static ConfigurationOption StoreMcpPortsParameter { get; } = new()
+    private static ConfigurationOption EnableMcpParameter { get; } = new()
     {
-        Name = "StoreMcpPorts",
-        EnvVarName = "Store_Mcp_Ports",
-        DefaultValue = Array.Empty<string>(),
-        CliOption = new System.CommandLine.Option<string[]>("--store-mcp-ports", "Colon-delimited (':') Store/Tenant name and MCP listen port pairs.")
+        Name = "EnableMcp",
+        EnvVarName = "Enable_Mcp",
+        DefaultValue = false,
+        CliOption = new System.CommandLine.Option<bool>("--enable-mcp", "True to enable Model Context Protocol (MCP) at [root]/mcp.")
         {
-            Arity = System.CommandLine.ArgumentArity.ZeroOrMore,
+            Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
             IsRequired = false,
         },
     };
@@ -490,7 +490,7 @@ public class CandleConfig
         Description = "Allow Create interactions (POST) to specify an ID.")]
     public bool AllowExistingId { get; set; } = true;
 
-    /// <summary>Gets the enable create existing identifier option.</summary>
+    /// <summary>Gets the "enable create existing identifier" option.</summary>
     private static ConfigurationOption AllowExistingIdParameter { get; } = new()
     {
         Name = "CreateExistingId",
@@ -512,7 +512,7 @@ public class CandleConfig
         Description = "Allow Update interactions (PUT) to create new resources.")]
     public bool AllowCreateAsUpdate { get; set; } = true;
 
-    /// <summary>Gets the enable create as update option.</summary>
+    /// <summary>Gets the "enable create as update" option.</summary>
     private static ConfigurationOption AllowCreateAsUpdateParameter { get; } = new()
     {
         Name = "CreateAsUpdate",
@@ -821,7 +821,7 @@ public class CandleConfig
         TenantsR5Parameter,
         SmartRequiredTenantsParameter,
         SmartOptionalTenantsParameter,
-        StoreMcpPortsParameter,
+        EnableMcpParameter,
         AllowExistingIdParameter,
         AllowCreateAsUpdateParameter,
         MaxSubscriptionExpirationMinutesParameter,
@@ -923,8 +923,8 @@ public class CandleConfig
                 case "SmartOptionalTenants":
                     SmartOptionalTenants = GetOptArray(pr, envPR, opt.CliOption, SmartOptionalTenants, ',');
                     break;
-                case "StoreMcpPorts":
-                    StoreMcpPorts = GetOptArray(pr, envPR, opt.CliOption, StoreMcpPorts, ',');
+                case "EnableMcp":
+                    EnableMcp = GetOpt(pr, envPR, opt.CliOption, EnableMcp);
                     break;
                 case "CreateExistingId":
                     AllowExistingId = GetOpt(pr, envPR, opt.CliOption, AllowExistingId);

@@ -73,8 +73,8 @@ public class ParsedResultParameters
     /// </summary>
     public string? SummaryFlag { get; private set; } = null;
 
-    private readonly Dictionary<string, string> _rawParameters = [];
-    public Dictionary<string, string> RawParameters => _rawParameters;
+    private readonly List<(string key, string value)> _rawParameters = [];
+    public List<(string key, string value)> RawParameters => _rawParameters;
 
     /// <summary>The applied query string.</summary>
     private string _appliedQueryString = string.Empty;
@@ -146,7 +146,7 @@ public class ParsedResultParameters
                         {
                             PageMatchCount = count;
                             applied.Add(key + "=" + value);
-                            _rawParameters.Add(key, value);
+                            _rawParameters.Add((key, value));
                         }
                     }
                     break;
@@ -206,7 +206,7 @@ public class ParsedResultParameters
 
                             Inclusions[components[0]].Add(spDefinition);
                             applied.Add(key + "=" + value);
-                            _rawParameters.Add(key, value);
+                            _rawParameters.Add((key, value));
                         }
                     }
                     break;
@@ -240,7 +240,7 @@ public class ParsedResultParameters
 
                             IterativeInclusions[components[0]].Add(spDefinition.Expression);
                             applied.Add(key + "=" + value);
-                            _rawParameters.Add(key, value);
+                            _rawParameters.Add((key, value));
                         }
                     }
                     break;
@@ -252,7 +252,7 @@ public class ParsedResultParameters
                         {
                             MaxResults = maxResults;
                             applied.Add(key + "=" + value);
-                            _rawParameters.Add(key, value);
+                            _rawParameters.Add((key, value));
                         }
                     }
                     break;
@@ -307,7 +307,7 @@ public class ParsedResultParameters
 
                             ReverseInclusions[components[0]].Add(spDefinition);
                             applied.Add(key + "=" + value);
-                            _rawParameters.Add(key, value);
+                            _rawParameters.Add((key, value));
                         }
                     }
                     break;
@@ -371,7 +371,7 @@ public class ParsedResultParameters
                         SortRequests = sr.ToArray();
 
                         applied.Add(key + "=" + string.Join(',', sr.Select(r => r.RequestLiteral)));
-                        _rawParameters.Add(key, string.Join(',', sr.Select(r => r.RequestLiteral)));
+                        _rawParameters.Add((key, string.Join(',', sr.Select(r => r.RequestLiteral))));
                     }
                     break;
 
@@ -404,7 +404,7 @@ public class ParsedResultParameters
                         }
 
                         applied.Add(key + "=" + value);
-                        _rawParameters.Add(key, value);
+                        _rawParameters.Add((key, value));
                     }
                     break;
 

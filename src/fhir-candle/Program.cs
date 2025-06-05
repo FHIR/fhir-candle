@@ -7,7 +7,6 @@ using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using System.Diagnostics;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using fhir.candle.McpTools;
@@ -18,7 +17,6 @@ using FhirCandle.Utils;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.FluentUI.AspNetCore.Components;
-using ModelContextProtocol.Server;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -31,8 +29,6 @@ namespace fhir.candle;
 /// <summary>A program.</summary>
 public static partial class Program
 {
-    private static List<SCL.Option> _optsWithEnums = [];
-
     [GeneratedRegex("(http[s]*:\\/\\/.*(:\\d+)*)")]
     private static partial Regex InputUrlFormatRegex();
 
@@ -40,7 +36,7 @@ public static partial class Program
     /// <param name="args">An array of command-line argument strings.</param>
     public static async Task<int> Main(string[] args)
     {
-        // setup our configuration (command line > environment > appsettings.json)
+        // set up our configuration (command line > environment > appsettings.json)
         IConfiguration envConfig = new ConfigurationBuilder()
             .AddJsonFile("appsettings.json", optional: true)
             .AddEnvironmentVariables()
@@ -71,12 +67,7 @@ public static partial class Program
                 continue;
             }
 
-            string? value = section.Value ?? null;
-
-            if (value == null)
-            {
-                value = string.Join(',', section.GetChildren().Select(c => c.Value));
-            }
+            string? value = (section.Value ?? null) ?? string.Join(',', section.GetChildren().Select(c => c.Value));
 
             if (string.IsNullOrEmpty(value))
             {
@@ -116,64 +107,9 @@ public static partial class Program
         return await rootCommand.InvokeAsync(args);
     }
 
-    /// <summary>
-    /// Builds the command line options for the specified type.
-    /// </summary>
-    /// <param name="forType">The type for which to build the command line options.</param>
-    /// <param name="excludeFromType">The type to exclude from the command line options.</param>
-    /// <param name="envConfig">The environment configuration.</param>
-    /// <returns>An enumerable collection of command line options.</returns>
-    private static Dictionary<string, SCL.Option> BuildCliOptions(
-        Type forType,
-        Type? excludeFromType = null,
-        IConfiguration? envConfig = null)
-    {
-        Dictionary<string, SCL.Option> options = [];
-        HashSet<string> inheritedPropNames = [];
-
-        if (excludeFromType != null)
-        {
-            PropertyInfo[] exProps = excludeFromType.GetProperties();
-            foreach (PropertyInfo exProp in exProps)
-            {
-                inheritedPropNames.Add(exProp.Name);
-            }
-        }
-
-        object? configDefault = null;
-        if (forType.IsAbstract)
-        {
-            throw new Exception($"Config type cannot be abstract! {forType.Name}");
-        }
-
-        configDefault = Activator.CreateInstance(forType);
-
-        if (configDefault is not CandleConfig config)
-        {
-            throw new Exception("Config type must be CandleConfig");
-        }
-
-        foreach (ConfigurationOption opt in config.GetOptions())
-        {
-            // need to configure default values
-            if ((envConfig != null) &&
-                (!string.IsNullOrEmpty(opt.EnvVarName)))
-            {
-                opt.CliOption.SetDefaultValueFactory(() => envConfig.GetSection(opt.EnvVarName).GetChildren().Select(c => c.Value));
-            }
-            else
-            {
-                opt.CliOption.SetDefaultValue(opt.DefaultValue);
-            }
-
-            options[opt.Name] = opt.CliOption;
-        }
-
-        return options;
-    }
-
     /// <summary>Executes the server operation.</summary>
-    /// <param name="config">           The configuration.</param>
+    /// <param name="pr">The parsed configuration data from launch.</param>
+    /// <param name="envPR">The parsed configuration data from environment variables</param>
     /// <param name="cancellationToken">A token that allows processing to be cancelled.</param>
     /// <returns>An asynchronous result that yields an int.</returns>
     public static async Task<int> RunServer(
@@ -284,15 +220,18 @@ public static partial class Program
             builder.Services.AddSingleton<ISmartAuthManager, SmartAuthManager>();
             builder.Services.AddHostedService<ISmartAuthManager>(sp => sp.GetRequiredService<ISmartAuthManager>());
 
-            FhirMcpTools fMcpTools = new();
-            builder.Services.AddSingleton<FhirMcpTools>(fMcpTools);
+            if (config.EnableMcp == true)
+            {
+                FhirMcpTools fMcpTools = new();
+                builder.Services.AddSingleton<FhirMcpTools>(fMcpTools);
 
-            // add MCP services
-            builder.Services.AddMcpServer()
-                .WithHttpTransport()
-                .WithListToolsHandler(fMcpTools.HandleListToolsRequest)
-                .WithCallToolHandler(fMcpTools.HandleCallToolRequest);
+                // add MCP services
+                builder.Services.AddMcpServer()
+                    .WithHttpTransport()
+                    .WithListToolsHandler(fMcpTools.HandleListToolsRequest)
+                    .WithCallToolHandler(fMcpTools.HandleCallToolRequest);
                 // .WithToolsFromAssembly();
+            }
 
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddControllers();
@@ -365,8 +304,11 @@ public static partial class Program
             sm.Init();          // store manager may need to download packages
             am.Init();          // spin up authorization manager
 
-            // map our MCP services, use a /mcp prefix to avoid collisions with FHIR and UI services
-            app.MapMcp("/mcp");
+            if (config.EnableMcp == true)
+            {
+                // map our MCP services, use a /mcp prefix to avoid collisions with FHIR and UI services
+                app.MapMcp("/mcp");
+            }
 
             // run the server
             //await app.RunAsync(cancellationToken);
@@ -574,31 +516,6 @@ public static partial class Program
     /// </returns>
     private static Dictionary<string, TenantConfiguration> BuildTenantConfigurations(CandleConfig config)
     {
-        Dictionary<string, int> tenantMcpPorts = [];
-
-        foreach (string rawValue in config.StoreMcpPorts)
-        {
-            // check for commas in case someone stuffed multiple values in a single parameter
-            string[] values = rawValue.Split(',');
-
-            foreach (string value in values)
-            {
-                // split into key (store name) and value (port)
-                string[] kvp = value.Split(':');
-                if (kvp.Length != 2)
-                {
-                    continue;
-                }
-
-                if (int.TryParse(kvp[1], out int port))
-                {
-                    tenantMcpPorts[kvp[0]] = port;
-                }
-            }
-        }
-
-        int currentPort = config.ListenPort + 1;
-
         HashSet<string> smartRequired = config.SmartRequiredTenants.ToHashSet();
         HashSet<string> smartOptional = config.SmartOptionalTenants.ToHashSet();
 
@@ -622,7 +539,6 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
-                McpListenPort = tenantMcpPorts.TryGetValue(tenant, out int port) ? port : currentPort++,
             });
         }
 
@@ -640,7 +556,6 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
-                McpListenPort = tenantMcpPorts.TryGetValue(tenant, out int port) ? port : currentPort++,
             });
         }
 
@@ -658,7 +573,6 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
-                McpListenPort = tenantMcpPorts.TryGetValue(tenant, out int port) ? port : currentPort++,
             });
         }
 
@@ -687,16 +601,9 @@ public static partial class Program
         {
             foreach (TenantConfiguration tenant in tenants.Values)
             {
-                // check for a tenant-named sub-directory
+                // check for a tenant-named subdirectory
                 string subPath = Path.Combine(loadDir.FullName, tenant.ControllerName);
-                if (Directory.Exists(subPath))
-                {
-                    tenant.LoadDirectory = new DirectoryInfo(subPath);
-                }
-                else
-                {
-                    tenant.LoadDirectory = loadDir;
-                }
+                tenant.LoadDirectory = Directory.Exists(subPath) ? new DirectoryInfo(subPath) : loadDir;
             }
         }
 

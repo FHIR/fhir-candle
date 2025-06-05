@@ -159,7 +159,7 @@ public partial class VersionedFhirStore : IFhirStore
     //{
     //    public required Guid Id { get; init; }
     //    public required FhirRequestContext Ctx { get; init; }
-    //    public required int Offet { get; init; }
+    //    public required int Offset { get; init; }
     //}
 
     //private const int _pagedSearchCacheSize = 5;
@@ -234,7 +234,7 @@ public partial class VersionedFhirStore : IFhirStore
                     continue;
             }
 
-            Type[] tArgs = { t };
+            Type[] tArgs = [t];
 
             IVersionedResourceStore? irs = (IVersionedResourceStore?)Activator.CreateInstance(
                 rsType.MakeGenericType(tArgs),
@@ -1207,16 +1207,16 @@ public partial class VersionedFhirStore : IFhirStore
                         : DoSystemSearch(ctx, out response);
                 }
 
-            case Common.StoreInteractionCodes.CompartmentSearch:
-            case Common.StoreInteractionCodes.CompartmentTypeSearch:
-            case Common.StoreInteractionCodes.InstanceDeleteHistory:
-            case Common.StoreInteractionCodes.InstanceDeleteVersion:
-            case Common.StoreInteractionCodes.InstancePatch:
-            case Common.StoreInteractionCodes.InstancePatchConditional:
-            case Common.StoreInteractionCodes.InstanceReadHistory:
-            case Common.StoreInteractionCodes.InstanceReadVersion:
-            case Common.StoreInteractionCodes.TypeHistory:
-            case Common.StoreInteractionCodes.SystemHistory:
+            // case Common.StoreInteractionCodes.CompartmentSearch:
+            // case Common.StoreInteractionCodes.CompartmentTypeSearch:
+            // case Common.StoreInteractionCodes.InstanceDeleteHistory:
+            // case Common.StoreInteractionCodes.InstanceDeleteVersion:
+            // case Common.StoreInteractionCodes.InstancePatch:
+            // case Common.StoreInteractionCodes.InstancePatchConditional:
+            // case Common.StoreInteractionCodes.InstanceReadHistory:
+            // case Common.StoreInteractionCodes.InstanceReadVersion:
+            // case Common.StoreInteractionCodes.TypeHistory:
+            // case Common.StoreInteractionCodes.SystemHistory:
             default:
                 response = new()
                 {
@@ -2677,7 +2677,7 @@ public partial class VersionedFhirStore : IFhirStore
             List<ExecutableSubscriptionInfo.CompiledQueryTrigger> queryTriggers = new();
             ParsedResultParameters? resultParameters = null;
 
-            string[] keys = new string[3] { resourceName, "*", "Resource" };
+            string[] keys = [resourceName, "*", "Resource"];
 
             foreach (string key in keys)
             {
@@ -2721,26 +2721,13 @@ public partial class VersionedFhirStore : IFhirStore
                     // for query-based criteria
                     if ((!string.IsNullOrEmpty(rt.QueryPrevious)) || (!string.IsNullOrEmpty(rt.QueryCurrent)))
                     {
-                        ParsedSearchParameter[] previousTest;
-                        ParsedSearchParameter[] currentTest;
+                        ParsedSearchParameter[] previousTest = string.IsNullOrEmpty(rt.QueryPrevious)
+                            ? []
+                            : ParsedSearchParameter.Parse(rt.QueryPrevious, this, rs, resourceName);
 
-                        if (string.IsNullOrEmpty(rt.QueryPrevious))
-                        {
-                            previousTest = [];
-                        }
-                        else
-                        {
-                            previousTest = ParsedSearchParameter.Parse(rt.QueryPrevious, this, rs, resourceName);
-                        }
-
-                        if (string.IsNullOrEmpty(rt.QueryCurrent))
-                        {
-                            currentTest = [];
-                        }
-                        else
-                        {
-                            currentTest = ParsedSearchParameter.Parse(rt.QueryCurrent, this, rs, resourceName);
-                        }
+                        ParsedSearchParameter[] currentTest = string.IsNullOrEmpty(rt.QueryCurrent)
+                            ? []
+                            : ParsedSearchParameter.Parse(rt.QueryCurrent, this, rs, resourceName);
 
                         queryTriggers.Add(new(
                             onCreate,
@@ -3573,9 +3560,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (ctx.SourceObject != null)
         {
-            if (ctx.SourceObject is Resource)
+            if (ctx.SourceObject is Resource resource)
             {
-                r = ctx.SourceObject as Resource;
+                r = resource;
             }
             else if (!op.AcceptsNonFhir)
             {
@@ -3649,9 +3636,9 @@ public partial class VersionedFhirStore : IFhirStore
             out FhirResponseContext opResponse);
 
         if ((opResponse.Resource != null) &&
-            (opResponse.Resource is Resource))
+            (opResponse.Resource is Resource responseResource))
         {
-            r = (Resource)opResponse.Resource;
+            r = responseResource;
         }
 
         if (hooks.Length > 0)
@@ -4367,6 +4354,8 @@ rs,
         // iterate over our search parameters
         foreach (ParsedSearchParameter parameter in parameters)
         {
+            usedLiterals.Add(parameter.RequestedKeyLiteral ?? parameter.Name);
+
             if (parameter.IgnoredParameter)
             {
                 results.Add((
@@ -4379,7 +4368,6 @@ rs,
                 continue;
             }
 
-            usedLiterals.Add(parameter.RequestedKeyLiteral ?? parameter.Name);
             results.Add((
                 spName: parameter.RequestedKeyLiteral,
                 spValue: parameter.RequestedValueLiteral,
@@ -4395,19 +4383,18 @@ rs,
             rs,
             resourceType);
 
-        // iterate over our search parameters
-        foreach ((string key, string value) in resultParameters.RawParameters)
-        {
-            usedLiterals.Add(key);
-            results.Add((
-                spName: key,
-                spValue: value,
-                true,
-                $"Processed successfully")!);
-            processedParameters++;
-        }
+        // foreach ((string key, string value) in resultParameters.RawParameters)
+        // {
+        //     usedLiterals.Add(key);
+        //     results.Add((
+        //         spName: key,
+        //         spValue: value,
+        //         true,
+        //         $"Processed successfully")!);
+        //     processedParameters++;
+        // }
 
-        // check for parameters that failed to parse entirely
+        // check for parameters that failed to parse as query parameters
         System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(searchString);
         foreach (string key in query)
         {
@@ -4421,11 +4408,24 @@ rs,
                 continue;
             }
 
+            string value = query[key] ?? string.Empty;
+
+            if (resultParameters.RawParameters.Contains((key, value)))
+            {
+                results.Add((
+                    spName: key,
+                    spValue: value,
+                    true,
+                    $"Processed successfully")!);
+                processedParameters++;
+                continue;
+            }
+
             results.Add((
                 spName: key,
-                spValue: query[key],
+                spValue: value,
                 false,
-                $"'{key}={query[key]}' failed to process, unknown search parameter: '{key}'")!);
+                $"'{key}={value}' failed to process.  E.g., unknown search parameter or invalid value")!);
 
             ignoredParameters++;
         }

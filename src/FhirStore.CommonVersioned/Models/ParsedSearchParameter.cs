@@ -1370,9 +1370,9 @@ public class ParsedSearchParameter : ICloneable
             return null;
         }
 
-        if (_allResourceParameters.ContainsKey(spName))
+        if (_allResourceParameters.TryGetValue(spName, out ModelInfo.SearchParamDefinition? parameter))
         {
-            spDefinition = _allResourceParameters[spName];
+            spDefinition = parameter;
         }
         else if (!resourceStore.TryGetSearchParamDefinition(spName, out spDefinition))
         {
@@ -1449,11 +1449,12 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Parse reference common.</summary>
     /// <param name="reference">The reference.</param>
     /// <returns>A SegmentedReference.</returns>
-    private static bool TryParseReference(string reference, out SegmentedReference sr)
+    private bool TryParseReference(string reference, out SegmentedReference sr)
     {
         if (string.IsNullOrEmpty(reference))
         {
             sr = default;
+            IgnoredReason ??= "Empty reference";
             return false;
         }
 
@@ -1512,12 +1513,13 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="start">     [out] The start.</param>
     /// <param name="end">       [out] The end.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public static bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end)
+    public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end)
     {
         if (string.IsNullOrEmpty(dateString))
         {
             start = DateTimeOffset.MinValue;
             end = DateTimeOffset.MaxValue;
+            IgnoredReason ??= "Empty date string";
             return false;
         }
 
@@ -1533,6 +1535,7 @@ public class ParsedSearchParameter : ICloneable
         if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
         {
             Console.WriteLine($"Failed to parse date: {dateString}");
+            IgnoredReason ??= $"Invalid date format: {dateString}";
             start = DateTimeOffset.MinValue;
             end = DateTimeOffset.MaxValue;
             return false;
@@ -1597,6 +1600,7 @@ public class ParsedSearchParameter : ICloneable
 
             default:
                 Console.WriteLine($"Invalid date format: {dateString}");
+                IgnoredReason ??= $"Invalid date format: {dateString}";
                 start = DateTimeOffset.MinValue;
                 end = DateTimeOffset.MaxValue;
                 return false;
