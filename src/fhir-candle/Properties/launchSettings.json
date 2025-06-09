@@ -8,16 +8,16 @@
   "profiles": {
     "candle": {
       "commandName": "Project",
-      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source ~/fhirData --load-package hl7.fhir.r4.core",
+      "commandLineArgs": "--enable-mcp --r4 r4 --smart-optional * --fhir-source ~/fhirData --load-package hl7.fhir.r4.core",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
-    "wgm": {
+    "r4-us-core": {
       "commandName": "Project",
-      "commandLineArgs": "--r4 r4 --smart-optional * --fhir-source ./202501-WGM/search_candle_small",
+      "commandLineArgs": "--enable-mcp --r4 r4 --smart-optional * --load-package hl7.fhir.r4.core --load-package hl7.fhir.us.core#7.0.0",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {

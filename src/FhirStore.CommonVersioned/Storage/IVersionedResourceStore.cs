@@ -80,7 +80,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
-    IEnumerable<Hl7.Fhir.Model.Resource> TypeSearch(IEnumerable<ParsedSearchParameter> parameters, bool isNestedSearch = false);
+    IEnumerable<Hl7.Fhir.Model.Resource> TypeSearch(ParsedSearchParameter[] parameters, bool isNestedSearch = false);
 
     /// <summary>
     /// Tests for the presence of any resources matching the given search parameter.

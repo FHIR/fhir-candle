@@ -22,6 +22,7 @@ using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
 using FhirCandle.Compartments;
+using FhirCandle.Extensions;
 using Hl7.Fhir.Utility;
 
 namespace FhirCandle.Storage;
@@ -29,7 +30,7 @@ namespace FhirCandle.Storage;
 /// <summary>A FHIR store.</summary>
 public partial class VersionedFhirStore : IFhirStore
 {
-    /// <summary>True if has disposed, false if not.</summary>
+    /// <summary>True if this has disposed, false if not.</summary>
     private bool _hasDisposed;
 
     /// <summary>Occurs when On Instance Created.</summary>
@@ -158,7 +159,7 @@ public partial class VersionedFhirStore : IFhirStore
     //{
     //    public required Guid Id { get; init; }
     //    public required FhirRequestContext Ctx { get; init; }
-    //    public required int Offet { get; init; }
+    //    public required int Offset { get; init; }
     //}
 
     //private const int _pagedSearchCacheSize = 5;
@@ -233,7 +234,7 @@ public partial class VersionedFhirStore : IFhirStore
                     continue;
             }
 
-            Type[] tArgs = { t };
+            Type[] tArgs = [t];
 
             IVersionedResourceStore? irs = (IVersionedResourceStore?)Activator.CreateInstance(
                 rsType.MakeGenericType(tArgs),
@@ -453,7 +454,7 @@ public partial class VersionedFhirStore : IFhirStore
                 continue;
             }
 
-            // skip if requires a package that is not loaded
+            // skip if this requires a package that is not loaded
             if ((!string.IsNullOrEmpty(hook.RequiresPackage)) &&
                 (!_loadedDirectives.Contains(hook.RequiresPackage)) &&
                 (!_loadedPackageIds.Contains(hook.RequiresPackage)))
@@ -559,7 +560,7 @@ public partial class VersionedFhirStore : IFhirStore
             di = new(directory);
             string libDir = string.Empty;
 
-            // look for an package.json so we can determine examples
+            // look for a package.json so we can determine examples
             foreach (FileInfo file in di.GetFiles("package.json", SearchOption.AllDirectories))
             {
                 try
@@ -1206,16 +1207,16 @@ public partial class VersionedFhirStore : IFhirStore
                         : DoSystemSearch(ctx, out response);
                 }
 
-            case Common.StoreInteractionCodes.CompartmentSearch:
-            case Common.StoreInteractionCodes.CompartmentTypeSearch:
-            case Common.StoreInteractionCodes.InstanceDeleteHistory:
-            case Common.StoreInteractionCodes.InstanceDeleteVersion:
-            case Common.StoreInteractionCodes.InstancePatch:
-            case Common.StoreInteractionCodes.InstancePatchConditional:
-            case Common.StoreInteractionCodes.InstanceReadHistory:
-            case Common.StoreInteractionCodes.InstanceReadVersion:
-            case Common.StoreInteractionCodes.TypeHistory:
-            case Common.StoreInteractionCodes.SystemHistory:
+            // case Common.StoreInteractionCodes.CompartmentSearch:
+            // case Common.StoreInteractionCodes.CompartmentTypeSearch:
+            // case Common.StoreInteractionCodes.InstanceDeleteHistory:
+            // case Common.StoreInteractionCodes.InstanceDeleteVersion:
+            // case Common.StoreInteractionCodes.InstancePatch:
+            // case Common.StoreInteractionCodes.InstancePatchConditional:
+            // case Common.StoreInteractionCodes.InstanceReadHistory:
+            // case Common.StoreInteractionCodes.InstanceReadVersion:
+            // case Common.StoreInteractionCodes.TypeHistory:
+            // case Common.StoreInteractionCodes.SystemHistory:
             default:
                 response = new()
                 {
@@ -2540,6 +2541,34 @@ public partial class VersionedFhirStore : IFhirStore
         return true;
     }
 
+    public List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)>
+        GetSearchParameters(string? resourceName)
+    {
+        List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)> results = [];
+
+        string rn = resourceName ?? "Resource";
+
+        // iterate over the all resource parameters
+        foreach (ModelInfo.SearchParamDefinition spd in ParsedSearchParameter._allResourceParameters.Values)
+        {
+            results.Add((rn, spd.Name, spd.Code, spd.Description, EnumUtility.GetLiteral(spd.Type)));
+        }
+
+        // check if we have a resource name and we have a store for it
+        if (string.IsNullOrEmpty(resourceName) ||
+            !_store.TryGetValue(resourceName, out IVersionedResourceStore? rs))
+        {
+            return results;
+        }
+
+        foreach (ModelInfo.SearchParamDefinition spd in rs.GetSearchParamDefinitions())
+        {
+            results.Add((resourceName, spd.Name, spd.Code, spd.Description, EnumUtility.GetLiteral(spd.Type)));
+        }
+
+        return results;
+    }
+
     /// <summary>
     /// Attempts to get search parameter definition a ModelInfo.SearchParamDefinition from the given
     /// string.
@@ -2648,7 +2677,7 @@ public partial class VersionedFhirStore : IFhirStore
             List<ExecutableSubscriptionInfo.CompiledQueryTrigger> queryTriggers = new();
             ParsedResultParameters? resultParameters = null;
 
-            string[] keys = new string[3] { resourceName, "*", "Resource" };
+            string[] keys = [resourceName, "*", "Resource"];
 
             foreach (string key in keys)
             {
@@ -2692,26 +2721,13 @@ public partial class VersionedFhirStore : IFhirStore
                     // for query-based criteria
                     if ((!string.IsNullOrEmpty(rt.QueryPrevious)) || (!string.IsNullOrEmpty(rt.QueryCurrent)))
                     {
-                        IEnumerable<ParsedSearchParameter> previousTest;
-                        IEnumerable<ParsedSearchParameter> currentTest;
+                        ParsedSearchParameter[] previousTest = string.IsNullOrEmpty(rt.QueryPrevious)
+                            ? []
+                            : ParsedSearchParameter.Parse(rt.QueryPrevious, this, rs, resourceName);
 
-                        if (string.IsNullOrEmpty(rt.QueryPrevious))
-                        {
-                            previousTest = Array.Empty<ParsedSearchParameter>();
-                        }
-                        else
-                        {
-                            previousTest = ParsedSearchParameter.Parse(rt.QueryPrevious, this, rs, resourceName);
-                        }
-
-                        if (string.IsNullOrEmpty(rt.QueryCurrent))
-                        {
-                            currentTest = Array.Empty<ParsedSearchParameter>();
-                        }
-                        else
-                        {
-                            currentTest = ParsedSearchParameter.Parse(rt.QueryCurrent, this, rs, resourceName);
-                        }
+                        ParsedSearchParameter[] currentTest = string.IsNullOrEmpty(rt.QueryCurrent)
+                            ? []
+                            : ParsedSearchParameter.Parse(rt.QueryCurrent, this, rs, resourceName);
 
                         queryTriggers.Add(new(
                             onCreate,
@@ -3463,7 +3479,7 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
-    /// <summary>Executes the type operation operation.</summary>
+    /// <summary>Executes the type operation.</summary>
     /// <param name="ctx">     The request context.</param>
     /// <param name="response">[out] The response data.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
@@ -3544,9 +3560,9 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (ctx.SourceObject != null)
         {
-            if (ctx.SourceObject is Resource)
+            if (ctx.SourceObject is Resource resource)
             {
-                r = ctx.SourceObject as Resource;
+                r = resource;
             }
             else if (!op.AcceptsNonFhir)
             {
@@ -3620,9 +3636,9 @@ public partial class VersionedFhirStore : IFhirStore
             out FhirResponseContext opResponse);
 
         if ((opResponse.Resource != null) &&
-            (opResponse.Resource is Resource))
+            (opResponse.Resource is Resource responseResource))
         {
-            r = (Resource)opResponse.Resource;
+            r = responseResource;
         }
 
         if (hooks.Length > 0)
@@ -3695,7 +3711,7 @@ public partial class VersionedFhirStore : IFhirStore
         return success;
     }
 
-    /// <summary>Executes the instance operation operation.</summary>
+    /// <summary>Executes the instance operation.</summary>
     /// <param name="ctx">     The request context.</param>
     /// <param name="response">[out] The response data.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
@@ -4312,6 +4328,112 @@ rs,
         return true;
     }
 
+    public (string Message, List<(string SpName, string SpValue, bool IsOk, string Message)> Results) ValidateTypeSearchRequest(
+        string resourceType,
+        string searchString)
+    {
+        List<(string spName, string spValue, bool isOk, string message)> results = [];
+
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
+        {
+            return ($"Resource type: {resourceType} is not supported", []);
+        }
+
+        // parse search parameters
+        ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
+            searchString,
+            this,
+            rs,
+            resourceType);
+
+        HashSet<string> usedLiterals = [];
+
+        int ignoredParameters = 0;
+        int processedParameters = 0;
+
+        // iterate over our search parameters
+        foreach (ParsedSearchParameter parameter in parameters)
+        {
+            usedLiterals.Add(parameter.RequestedKeyLiteral ?? parameter.Name);
+
+            if (parameter.IgnoredParameter)
+            {
+                results.Add((
+                    spName: parameter.RequestedKeyLiteral,
+                    spValue: parameter.RequestedValueLiteral,
+                    false,
+                    parameter.IgnoredReason ?? $"Failed to process")!);
+
+                ignoredParameters++;
+                continue;
+            }
+
+            results.Add((
+                spName: parameter.RequestedKeyLiteral,
+                spValue: parameter.RequestedValueLiteral,
+                true,
+                $"Processed successfully")!);
+            processedParameters++;
+        }
+
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            searchString,
+            this,
+            rs,
+            resourceType);
+
+        // foreach ((string key, string value) in resultParameters.RawParameters)
+        // {
+        //     usedLiterals.Add(key);
+        //     results.Add((
+        //         spName: key,
+        //         spValue: value,
+        //         true,
+        //         $"Processed successfully")!);
+        //     processedParameters++;
+        // }
+
+        // check for parameters that failed to parse as query parameters
+        System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(searchString);
+        foreach (string key in query)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (usedLiterals.Contains(key))
+            {
+                continue;
+            }
+
+            string value = query[key] ?? string.Empty;
+
+            if (resultParameters.RawParameters.Contains((key, value)))
+            {
+                results.Add((
+                    spName: key,
+                    spValue: value,
+                    true,
+                    $"Processed successfully")!);
+                processedParameters++;
+                continue;
+            }
+
+            results.Add((
+                spName: key,
+                spValue: value,
+                false,
+                $"'{key}={value}' failed to process.  E.g., unknown search parameter or invalid value")!);
+
+            ignoredParameters++;
+        }
+
+        return ($"Valid: {processedParameters}, Invalid: {ignoredParameters}", results);
+    }
+
+
     /// <summary>Type search.</summary>
     /// <param name="ctx">     The request context.</param>
     /// <param name="response">[out] The response data.</param>
@@ -4337,8 +4459,7 @@ rs,
         return success;
     }
 
-
-    internal Resource[] DoNestedTypeSearch(string resourceType, IEnumerable<ParsedSearchParameter> parameters)
+    internal Resource[] DoNestedTypeSearch(string resourceType, ParsedSearchParameter[] parameters)
     {
         if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? ivrs))
         {
@@ -4410,7 +4531,7 @@ rs,
         }
 
         // parse search parameters
-        IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+        ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
             searchQueryParams,
             this,
             rs,
@@ -4757,7 +4878,7 @@ rs,
             }
 
             // parse the search parameters in the context of this resource
-            IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+            ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
                 searchQueryParams,
                 this,
                 rs,
@@ -4772,7 +4893,7 @@ rs,
                     $"?{spCode}={ctx.CompartmentType}/{ctx.Id}",
                     this,
                     rs,
-                    resourceType).ToArray();
+                    resourceType);
 
                 if (psps.Length == 0)
                 {
@@ -5077,7 +5198,7 @@ rs,
         }
 
         // parse search parameters
-        IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+        ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
             searchQueryParams,
             this,
             rs,
@@ -5319,7 +5440,7 @@ rs,
         foreach (string resourceType in resourceTypes)
         {
             // parse search parameters
-            IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+            ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
                 searchQueryParams,
                 this,
                 _store[resourceType],
@@ -5512,7 +5633,7 @@ rs,
                 };
 
                 // execute search
-                IEnumerable<Resource> results = _store[reverseResourceType].TypeSearch(parameters);
+                IEnumerable<Resource> results = _store[reverseResourceType].TypeSearch(parameters.ToArray());
                 foreach (Resource revIncludeRes in results)
                 {
                     string id = $"{revIncludeRes.TypeName}/{revIncludeRes.Id}";
@@ -6581,12 +6702,10 @@ rs,
                     {
                         string queryResourceType = rr.Reference![..queryStartIndex];
 
-                        if (_store.TryGetValue(queryResourceType, out IVersionedResourceStore? rs) &&
-                            rs is not null)
+                        if (_store.TryGetValue(queryResourceType, out IVersionedResourceStore? rs))
                         {
                             // parse the search parameters
-
-                            IEnumerable<ParsedSearchParameter> parameters = ParsedSearchParameter.Parse(
+                            ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
                                 rr.Reference[queryStartIndex..],
                                 this,
                                 rs,
@@ -6595,7 +6714,7 @@ rs,
                             ParsedSearchParameter? identifierParameter = parameters.FirstOrDefault(psp => psp.Name == "identifier");
 
                             // if we have ONLY an identifier, we can search against unprocessed bundle contents
-                            if ((identifierParameter != null) && (identifierParameter.Values.Length == 1))
+                            if ((identifierParameter?.Values.Length == 1))
                             {
                                 match = identifierLookup[identifierParameter.Values[0]].FirstOrDefault();
                                 if (match != null)
