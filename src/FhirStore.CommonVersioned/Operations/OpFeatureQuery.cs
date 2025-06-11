@@ -25,6 +25,9 @@ public class OpFeatureQuery : IFhirOperation
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
     public bool IsNamedQuery => false;
 
+    /// <summary>Gets a value indicating whether this operation affects the state of the store.</summary>
+    public bool AffectsState => false;
+
     /// <summary>Gets a value indicating whether we allow get.</summary>
     public bool AllowGet => true;
 
@@ -59,7 +62,7 @@ public class OpFeatureQuery : IFhirOperation
         "_format",
     ];
 
-    /// <summary>Executes the Subscription/$events operation.</summary>
+    /// <summary>Executes the Capability Feature Query operation.</summary>
     /// <param name="ctx">          The context.</param>
     /// <param name="store">        The store.</param>
     /// <param name="resourceStore">The resource store.</param>
@@ -100,8 +103,6 @@ public class OpFeatureQuery : IFhirOperation
         Hl7.Fhir.Model.Resource? bodyResource,
         out FhirResponseContext opResponse)
     {
-        Console.Write("");
-        
         // split the url query
         System.Collections.Specialized.NameValueCollection queryParams = System.Web.HttpUtility.ParseQueryString(ctx.UrlQuery);
         string[] paramValues = queryParams.GetValues("param") ?? [];
@@ -283,6 +284,7 @@ public class OpFeatureQuery : IFhirOperation
             Url = CanonicalByFhirVersion[fhirVersion],
             Status = Hl7.Fhir.Model.PublicationStatus.Draft,
             Kind = IsNamedQuery ? Hl7.Fhir.Model.OperationDefinition.OperationKind.Query : Hl7.Fhir.Model.OperationDefinition.OperationKind.Operation,
+            AffectsState = AffectsState,
             Code = OperationName.Substring(1),
             Resource = SupportedResources.CopyTargetsNullable(),
             System = AllowSystemLevel,

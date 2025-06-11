@@ -1,5 +1,7 @@
 * Work in Progress
-  *
+  * Added initial support for Model Context Protocol (MCP), currently focused on use to build FHIR Search requests.
+  * Added implementation of a system-level `$reset-store` operation. The operation will delete all non-protected resources, but can optionally retain all conformance resources.
+  * Added explicit tracking of `affectsState` for operations.
 
 * v2025.331
     * Added basic implementation of `$convert` operation.

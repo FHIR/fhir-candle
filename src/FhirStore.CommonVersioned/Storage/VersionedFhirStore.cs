@@ -523,6 +523,39 @@ public partial class VersionedFhirStore : IFhirStore
         }
     }
 
+    /// <summary>
+    /// Resets the FHIR store by removing all resources from each resource store.
+    /// </summary>
+    /// <param name="keepConformance">
+    /// If set to <c>true</c>, conformance resources (such as CapabilityStatement, StructureDefinition, etc.) are retained; 
+    /// otherwise, all non-protected resources are removed.
+    /// </param>
+    public void ResetStore(bool keepConformance)
+    {
+        // iterate over the resource stores
+        foreach (IVersionedResourceStore rs in _store.Values)
+        {
+            // skip conformance resources if we are keeping them
+            if (keepConformance && rs.ResourcesAreConformance)
+            {
+                continue;
+            }
+
+            // iterate over the resources in the store
+            foreach (string resourceId in ((IReadOnlyDictionary<string, Resource>)rs).Keys)
+            {
+                // skip protected resources
+                if (_hasProtected && _protectedResources.Contains(resourceId))
+                {
+                    continue;
+                }
+
+                // delete the resource (use the InstanceDelete method so that executables like SearchParameters and SubscriptionTopics are processed)
+                _ = rs.InstanceDelete(resourceId, _protectedResources);
+            }
+        }
+    }
+
     /// <summary>Loads a package.</summary>
     /// <param name="directive">         The directive.</param>
     /// <param name="directory">         Pathname of the directory.</param>
@@ -2541,8 +2574,17 @@ public partial class VersionedFhirStore : IFhirStore
         return true;
     }
 
-    public List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)>
-        GetSearchParameters(string? resourceName)
+    /// <summary>
+    /// Retrieves a list of search parameters for a specified FHIR resource type.
+    /// </summary>
+    /// <param name="resourceName">
+    /// The name of the FHIR resource type to retrieve search parameters for. If <c>null</c>,
+    /// returns parameters for the generic "Resource" type.
+    /// </param>
+    /// <returns>
+    /// A list of tuples containing the resource name, search parameter name, code, description, and search type.
+    /// </returns>
+    public List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)> GetSearchParameters(string? resourceName)
     {
         List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)> results = [];
 
@@ -4328,6 +4370,19 @@ rs,
         return true;
     }
 
+    /// <summary>
+    /// Validates the search parameters in a type-level search request for a given FHIR resource type.
+    /// </summary>
+    /// <param name="resourceType">
+    /// The FHIR resource type to validate the search parameters against.
+    /// </param>
+    /// <param name="searchString">
+    /// The raw search string (query parameters) to validate.
+    /// </param>
+    /// <returns>
+    /// A tuple containing a summary message and a list of results for each search parameter.
+    /// Each result includes the search parameter name, value, a boolean indicating if it is valid, and a message.
+    /// </returns>
     public (string Message, List<(string SpName, string SpValue, bool IsOk, string Message)> Results) ValidateTypeSearchRequest(
         string resourceType,
         string searchString)

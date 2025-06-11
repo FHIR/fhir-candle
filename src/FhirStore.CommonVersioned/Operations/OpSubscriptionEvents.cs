@@ -32,6 +32,9 @@ public class OpSubscriptionEvents : IFhirOperation
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
     public bool IsNamedQuery => false;
 
+    /// <summary>Gets a value indicating whether this operation affects the state of the store.</summary>
+    public bool AffectsState => false;
+
     /// <summary>Gets a value indicating whether we allow get.</summary>
     public bool AllowGet => true;
 
@@ -200,6 +203,7 @@ public class OpSubscriptionEvents : IFhirOperation
             Url = CanonicalByFhirVersion[fhirVersion],
             Status = Hl7.Fhir.Model.PublicationStatus.Draft,
             Kind = IsNamedQuery ? Hl7.Fhir.Model.OperationDefinition.OperationKind.Query : Hl7.Fhir.Model.OperationDefinition.OperationKind.Operation,
+            AffectsState = AffectsState,
             Code = OperationName.Substring(1),
             Resource = SupportedResources.CopyTargetsNullable(),
             System = AllowSystemLevel,

@@ -24,7 +24,7 @@ public class FhirMcpTools
     private const string _toolNameGetSearchTypeDefinition = "getSearchTypeDefinition";
     private const string _toolNameValidateTypeSearch = "validateTypeSearch";
 
-    private ILogger<FhirMcpTools> _logger;
+    //private ILogger<FhirMcpTools> _logger;
 
     private string CurrentVersion =>
         (FileVersionInfo.GetVersionInfo(Assembly.GetEntryAssembly()!.Location).FileVersion?.ToString() ?? "0.0.1") +
@@ -207,12 +207,7 @@ public class FhirMcpTools
         return tools;
     }
 
-    public async ValueTask<ListToolsResult> HandleListToolsRequest(
-        RequestContext<ListToolsRequestParams> request,
-        CancellationToken ct)
-    {
-        return new ListToolsResult() { Tools = buildToolList(), };
-    }
+    public ValueTask<ListToolsResult> HandleListToolsRequest(RequestContext<ListToolsRequestParams> request, CancellationToken ct) => new ValueTask<ListToolsResult>(new ListToolsResult() { Tools = buildToolList(), });
 
     public ValueTask<CallToolResponse> HandleCallToolRequest(
         RequestContext<CallToolRequestParams> request,
@@ -422,7 +417,7 @@ public class FhirMcpTools
 
     private static IEnumerable<string> GetSearchParameterList(IFhirStore store, string? resourceName)
     {
-        List<(string ResourceName, string? Name, string? Code, string? Description, string SearchType)> sps = store.GetSearchParameters(resourceName);
+        List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)> sps = store.GetSearchParameters(resourceName);
 
         return sps.Order().Select(spRec =>
             $"{spRec.Code ?? spRec.Name ?? "Unnamed"} ({spRec.SearchType}): {spRec.Description ?? "No description"}");

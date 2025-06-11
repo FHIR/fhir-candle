@@ -23,6 +23,9 @@ public interface IFhirOperation
     /// <summary>Gets a value indicating whether this object is named query.</summary>
     bool IsNamedQuery { get; }
 
+    /// <summary>Gets a value indicating whether this operation affects the state of the store.</summary>
+    bool AffectsState { get; }
+
     /// <summary>Gets a value indicating whether we allow get.</summary>
     bool AllowGet { get; }
 
