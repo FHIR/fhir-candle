@@ -33,6 +33,9 @@ public class OpPasClaimInquiry : IFhirOperation
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
     public bool IsNamedQuery => false;
 
+    /// <summary>Gets a value indicating whether this operation affects the state of the store.</summary>
+    public bool AffectsState => false;
+
     /// <summary>Gets a value indicating whether we allow get.</summary>
     public bool AllowGet => false;
 

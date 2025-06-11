@@ -1,19 +1,15 @@
-
 using FhirCandle.Extensions;
 using FhirCandle.Models;
-using FhirCandle.Subscriptions;
-using FhirCandle.Versioned;
+using FhirCandle.Operations;
+using FhirCandle.Storage;
 using Hl7.Fhir.Model;
-using Hl7.Fhir.Utility;
-using System.Net;
-using static Hl7.Fhir.Model.OperationOutcome;
 
-namespace FhirCandle.Operations;
+namespace FhirCandle.R4B.Operations;
 
-public class OpConvert : IFhirOperation
+public class OpResetStore : IFhirOperation
 {
-    /// <summary>Gets the name of the operation.</summary>
-    public string OperationName => "$convert";
+        /// <summary>Gets the name of the operation.</summary>
+    public string OperationName => "$reset-store";
 
     /// <summary>Gets the operation version.</summary>
     public string OperationVersion => "0.0.1";
@@ -21,16 +17,16 @@ public class OpConvert : IFhirOperation
     /// <summary>Gets the canonical by FHIR version.</summary>
     public Dictionary<FhirCandle.Utils.FhirReleases.FhirSequenceCodes, string> CanonicalByFhirVersion => new()
     {
-        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://hl7.org/fhir/OperationDefinition/Resource-convert" },
-        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://hl7.org/fhir/OperationDefinition/Resource-convert" },
-        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://hl7.org/fhir/OperationDefinition/Resource-convert" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4, "http://ginoc.io/fhir/OperationDefinition/reset-store" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R4B, "http://ginoc.io/fhir/OperationDefinition/reset-store" },
+        { FhirCandle.Utils.FhirReleases.FhirSequenceCodes.R5, "http://ginoc.io/fhir/OperationDefinition/reset-store" },
     };
 
     /// <summary>Gets a value indicating whether this operation is a named query.</summary>
     public bool IsNamedQuery => false;
 
     /// <summary>Gets a value indicating whether this operation affects the state of the store.</summary>
-    public bool AffectsState => false;
+    public bool AffectsState => true;
 
     /// <summary>Gets a value indicating whether we allow get.</summary>
     public bool AllowGet => false;
@@ -61,7 +57,9 @@ public class OpConvert : IFhirOperation
     /// <summary>Gets the supported resources.</summary>
     public HashSet<string> SupportedResources => [];
 
-    /// <summary>Executes the $convert operation.</summary>
+    private readonly HashSet<string> _excludedParams = [];
+
+    /// <summary>Executes the Reset Store operation, deleting all non-protected resources.</summary>
     /// <param name="ctx">          The context.</param>
     /// <param name="store">        The store.</param>
     /// <param name="resourceStore">The resource store.</param>
@@ -77,82 +75,53 @@ public class OpConvert : IFhirOperation
         Hl7.Fhir.Model.Resource? bodyResource,
         out FhirResponseContext opResponse)
     {
-        if (string.IsNullOrEmpty(ctx.SourceContent))
-        {
-            opResponse = new()
-            {
-                StatusCode = HttpStatusCode.UnprocessableEntity,
-                Outcome = new OperationOutcome()
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Issue = new List<OperationOutcome.IssueComponent>()
-                    {
-                        new OperationOutcome.IssueComponent()
-                        {
-                            Severity = OperationOutcome.IssueSeverity.Fatal,
-                            Code = OperationOutcome.IssueType.Structure,
-                            Diagnostics = "Body is empty",
-                        },
-                    },
-                }
-            };
+        // split the url query
+        System.Collections.Specialized.NameValueCollection queryParams = System.Web.HttpUtility.ParseQueryString(ctx.UrlQuery);
+        string[] stringValues = queryParams.GetValues("keep-conformance") ?? [];
 
-            return false;
+        bool keepConformance = stringValues.Any(value => bool.TryParse(value, out bool result) && result);
+
+        // check for feature request parameters
+        if (bodyResource is Hl7.Fhir.Model.Parameters requestParameters)
+        {
+            foreach (Hl7.Fhir.Model.Parameters.ParameterComponent pc in requestParameters.Parameter)
+            {
+                if (pc.Name == "keep-conformance")
+                {
+                    keepConformance = pc.Value is Hl7.Fhir.Model.FhirBoolean booleanValue && (booleanValue.Value == true);
+                }
+            }
         }
 
-        if (bodyResource == null)
-        {
-            opResponse = new()
-            {
-                StatusCode = HttpStatusCode.UnprocessableEntity,
-                Outcome = new OperationOutcome()
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Issue = new List<OperationOutcome.IssueComponent>()
-                    {
-                        new OperationOutcome.IssueComponent()
-                        {
-                            Severity = OperationOutcome.IssueSeverity.Fatal,
-                            Code = OperationOutcome.IssueType.Structure,
-                            Diagnostics = "Content is not parseable as FHIR",
-                        },
-                    },
-                }
-            };
-
-            return false;
-        }
-
+        store.ResetStore(keepConformance);
+        
         opResponse = new()
         {
-            StatusCode = HttpStatusCode.OK,
-            Resource = bodyResource,
+            StatusCode = System.Net.HttpStatusCode.OK,
             Outcome = new OperationOutcome()
             {
                 Id = Guid.NewGuid().ToString(),
-                Issue = new List<OperationOutcome.IssueComponent>()
-                {
+                Issue =
+                [
                     new OperationOutcome.IssueComponent()
                     {
                         Severity = OperationOutcome.IssueSeverity.Success,
                         Code = OperationOutcome.IssueType.Success,
-                        Diagnostics = "Successful conversion",
-                    },
-                },
+                        Diagnostics = keepConformance
+                            ? "All non-protected and non-conformance resources have been removed."
+                            : "All non-protected resources have been removed.",
+                    }
+                ],
             }
         };
 
         return true;
     }
 
-
-    /// <summary>Gets an OperationDefinition for this operation.</summary>
-    /// <param name="fhirVersion">The FHIR version.</param>
-    /// <returns>The definition.</returns>
     public Hl7.Fhir.Model.OperationDefinition? GetDefinition(
         FhirCandle.Utils.FhirReleases.FhirSequenceCodes fhirVersion)
     {
-        Hl7.Fhir.Model.OperationDefinition def = new()
+        return new()
         {
             Id = OperationName.Substring(1) + "-" + OperationVersion.Replace('.', '-'),
             Name = OperationName,
@@ -165,30 +134,27 @@ public class OpConvert : IFhirOperation
             System = AllowSystemLevel,
             Type = AllowResourceLevel,
             Instance = AllowInstanceLevel,
-            Parameter = new(),
+            Parameter =
+            [
+                new()
+                {
+                    Name = "keep-conformance",
+                    Use = Hl7.Fhir.Model.OperationParameterUse.In,
+                    Min = 0,
+                    Max = "1",
+                    Type = Hl7.Fhir.Model.FHIRAllTypes.Boolean,
+                    Documentation = "True to keep conformance resources, false to delete them. Default is false (delete).",
+                },
+                new()
+                {
+                    Name = "return",
+                    Use = Hl7.Fhir.Model.OperationParameterUse.Out,
+                    Min = 1,
+                    Max = "1",
+                    Type = Hl7.Fhir.Model.FHIRAllTypes.OperationOutcome,
+                    Documentation = "An OperationOutcome resource with the results of the request.",
+                }
+            ],
         };
-
-        def.Parameter.Add(new()
-        {
-            Name = "resource",
-            Use = Hl7.Fhir.Model.OperationParameterUse.In,
-            Min = 1,
-            Max = "1",
-            Type = Hl7.Fhir.Model.FHIRAllTypes.Resource,
-            Documentation = "The resource that is to be converted",
-        });
-
-        def.Parameter.Add(new()
-        {
-            Name = "return",
-            Use = Hl7.Fhir.Model.OperationParameterUse.Out,
-            Min = 1,
-            Max = "1",
-            Type = Hl7.Fhir.Model.FHIRAllTypes.OperationOutcome,
-            Documentation = "The resource after conversion",
-        });
-
-        return def;
     }
 }
-

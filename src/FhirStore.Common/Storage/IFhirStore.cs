@@ -58,9 +58,9 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     /// <param name="packageSupplements">The package supplements.</param>
     /// <param name="includeExamples">   True to include, false to exclude the examples.</param>
     void LoadPackage(
-        string directive, 
-        string directory, 
-        string packageSupplements, 
+        string directive,
+        string directory,
+        string packageSupplements,
         bool includeExamples);
 
     /// <summary>Gets a list of names of the loaded packages.</summary>
@@ -288,21 +288,32 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     /// <summary>Gets the received notifications.</summary>
     ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> ReceivedNotifications { get; }
 
-    ///// <summary>
-    ///// Get the metadata from a remote fhir server.
-    ///// </summary>
-    ///// <param name="fhirServerUrl"></param>
-    ///// <returns></returns>
-    //HttpStatusCode GetRemoteMetadata(
-    //    string fhirServerUrl);
+    /// <summary>
+    /// Retrieves a list of search parameters for a specified FHIR resource type.
+    /// </summary>
+    /// <param name="resourceName">
+    /// The name of the FHIR resource type to retrieve search parameters for. If <c>null</c>,
+    /// returns parameters for the generic "Resource" type.
+    /// </param>
+    /// <returns>
+    /// A list of tuples containing the resource name, search parameter name, code, description, and search type.
+    /// </returns>
+    List<(string ResourceName, string? Name, string? Code, string? Description, string? SearchType)> GetSearchParameters(string? resourceName);
 
-    ///// <summary>
-    ///// Attempt to retrieve the available remote subscription topics.
-    ///// </summary>
-    ///// <param name="fhirServerUrl"></param>
-    ///// <param name="topics"></param>
-    ///// <returns></returns>
-    //HttpStatusCode GetRemoteSubscriptionTopics(
-    //    string fhirServerUrl,
-    //    out Dictionary<string, ParsedSubscriptionTopic?> topics);
+    /// <summary>
+    /// Validates the search parameters in a type-level search request for a given FHIR resource type.
+    /// </summary>
+    /// <param name="resourceType">
+    /// The FHIR resource type to validate the search parameters against.
+    /// </param>
+    /// <param name="searchString">
+    /// The raw search string (query parameters) to validate.
+    /// </param>
+    /// <returns>
+    /// A tuple containing a summary message and a list of results for each search parameter.
+    /// Each result includes the search parameter name, value, a boolean indicating if it is valid, and a message.
+    /// </returns>
+    (string Message, List<(string SpName, string SpValue, bool IsOk, string Message)> Results) ValidateTypeSearchRequest(
+            string resourceType,
+            string searchString);
 }

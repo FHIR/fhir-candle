@@ -27,7 +27,7 @@ public class SearchTester
     /// <param name="rootNode">The resource.</param>
     /// <param name="searchParameters">Options for controlling the search.</param>
     /// <param name="fpContext">(Optional) The context.</param>
-    /// <param name="resultParameters">(Optional) The result parameters.</param>
+    /// <param name="reverseChainCache"></param>
     /// <returns>True if the test passes, false if the test fails.</returns>
     public bool TestForMatch(
         ITypedElement rootNode,
@@ -241,7 +241,7 @@ public class SearchTester
                     break;
                 }
             }
-            
+
             if (!found)
             {
                 // no matches in any extracted value means a parameter did NOT match
@@ -266,6 +266,7 @@ public class SearchTester
             return false;
         }
 
+        // TODO: should I convert this to tuples for the switch?
         // build a routing tuple: {search type}<-{modifier}>-{value type}
         string combined = sp.Modifier == SearchModifierCodes.None
             ? $"{sp.ParamType}-{resultNode.InstanceType}".ToLowerInvariant()
@@ -643,7 +644,7 @@ public class SearchTester
     private static bool SearchTestHumanName(ITypedElement valueNode, ParsedSearchParameter sp)
     {
         foreach (ITypedElement node in valueNode.Descendants())
-        { 
+        {
             if (node.InstanceType != "string")
             {
                 continue;

@@ -1795,7 +1795,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
-    public IEnumerable<Resource> TypeSearch(IEnumerable<ParsedSearchParameter> parameters, bool isNestedSearch = false)
+    public IEnumerable<Resource> TypeSearch(ParsedSearchParameter[] parameters, bool isNestedSearch = false)
     {
         Dictionary<string, Resource[]> reverseChainCache = [];
 

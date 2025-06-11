@@ -25,47 +25,149 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>(Immutable) Options for controlling all resource.</summary>
     internal static readonly Dictionary<string, ModelInfo.SearchParamDefinition> _allResourceParameters = new()
     {
-        /// <summary>Searching all textual content of a resource.</summary>
-        {"_content", new() { Name = "_content", Type = SearchParamType.Special } },
+        {"_content", new()
+            {
+                Name = "_content",
+                Code = "_content",
+                Type = SearchParamType.Special,
+                Description = "Search on the entire content of the resource"
+            }
+        },
 
-        /// <summary>Specify an arbitrary query via filter syntax.</summary>
-        { "_filter", new() { Name = "_filter", Type = SearchParamType.Special } },
+        { "_filter", new()
+            {
+                Name = "_filter",
+                Code = "_filter",
+                Type = SearchParamType.Special,
+                Description = "Filter search parameter which supports a more sophisticated grammar for searching. See documentation for further details."
+            }
+        },
 
-        /// <summary>Searching based on the logical identifier of resources (Resource.id).</summary>
-        { "_id", new() { Name = "_id", Type = SearchParamType.Token, Expression = "Resource.id" } },
+        { "_has", new()
+            {
+                Name = "_has",
+                Code = "_has",
+                Type = SearchParamType.Special,
+                Description = "Provides limited support for reverse chaining - that is, selecting resources based on the properties of resources that refer to them (instead of chaining where resources can be selected based on the properties of resources that they refer to). See the FHIR search page for further documentation"
+            }
+        },
 
-        /// <summary>Match resources against active membership in collection resources.</summary>
-        { "_in", new() { Name = "_in", Type = SearchParamType.Reference } },
+        { "_id", new()
+            {
+                Name = "_id",
+                Code = "_id",
+                Type = SearchParamType.Token,
+                Expression = "Resource.id",
+                Description = "Logical id of this artifact"
+            }
+        },
 
-        /// <summary>Match resources based on the language of the resource used (Resource.language).</summary>
-        { "_language", new() { Name = "_language", Expression = "Resource.language", Type = SearchParamType.Token } },
+        { "_in", new()
+            {
+                Name = "_in",
+                Code = "_in",
+                Type = SearchParamType.Reference,
+                Description = "Allows for the retrieval of resources that are active members of a CareTeam, Group, or List",
+            }
+        },
 
-        /// <summary>Match resources based on when the most recent change has been made (Resource.meta.lastUpdated).</summary>
-        { "_lastUpdated", new() { Name = "_lastUpdated", Expression = "Resource.meta.lastUpdated", Type = SearchParamType.Date } },
+        { "_language", new()
+            {
+                Name = "_language",
+                Code = "_language",
+                Type = SearchParamType.Token,
+                Expression = "Resource.language",
+                Description = "Language of the resource content",
+            }
+        },
 
-        /// <summary>Test resources against references in a List resource.</summary>
-        { "_list", new() { Name = "_list", Type = SearchParamType.Special } },
+        { "_lastUpdated", new()
+            {
+                Name = "_lastUpdated",
+                Code = "_lastUpdated",
+                Type = SearchParamType.Date,
+                Expression = "Resource.meta.lastUpdated",
+                Description = "When the resource version last changed, see documentation for expectations and limitations",
+            }
+        },
 
-        /// <summary>Match resources based on values in the Resource.meta.profile element.</summary>
-        { "_profile", new() { Name = "_profile", Expression = "Resource.meta.profile", Type = SearchParamType.Reference } },
+        { "_list", new()
+            {
+                Name = "_list",
+                Code = "_list",
+                Type = SearchParamType.Special,
+                Description = "Allows for the retrieval of resources that are referenced by a List resource or by one of the pre-defined functional lists",
+            }
+        },
 
-        /// <summary>Execute a pre-defined and named query operation.</summary>
-        { "_query", new() { Name = "_query", Type = SearchParamType.Token } },
+        { "_profile", new()
+            {
+                Name = "_profile",
+                Code = "_profile",
+                Type = SearchParamType.Reference,
+                Expression = "Resource.meta.profile",
+                Description = "Profiles this resource claims to conform to",
+            }
+        },
 
-        /// <summary>Match resources based on security labels in the Resource.meta.security.</summary>
-        { "_security", new() { Name = "_security", Expression = "Resource.meta.security", Type = SearchParamType.Token } },
-        
-        /// <summary>Match resources based on tag information in the Resource.meta.source element</summary>
-        { "_source", new() { Name = "_security", Expression = "Resource.meta.source", Type = SearchParamType.Uri } },
+        { "_query", new()
+            {
+                Name = "_query",
+                Code = "_query",
+                Type = SearchParamType.Token,
+                Description = "A custom search profile that describes a specific defined query operation",
+            }
+        },
 
-        /// <summary>Match resources based on tag information in the Resource.meta.tag element.</summary>
-        { "_tag", new() { Name ="_tag", Expression = "Resource.meta.tag", Type = SearchParamType.Token } },
+        { "_security", new()
+            {
+                Name = "_security",
+                Code = "_security",
+                Type = SearchParamType.Token,
+                Expression = "Resource.meta.security",
+                Description = "Security Labels applied to this resource",
+            }
+        },
 
-        /// <summary>Perform searches against the narrative content of a resource.</summary>
-        { "_text", new() { Name = "_text", Type = SearchParamType.String } },
+        { "_source", new()
+            {
+                Name = "_source",
+                Code = "_source",
+                Type = SearchParamType.Uri,
+                Expression = "Resource.meta.source",
+                Description = "Identifies where the resource comes from",
+            }
+        },
 
-        /// <summary>Allow filtering of types in searches that are performed across multiple resource types (e.g., searches across the server root).</summary>
-        { "_type", new() { Name = "_type", Type = SearchParamType.Token, Expression = "%resource" } },
+        { "_tag", new()
+            {
+                Name ="_tag",
+                Code = "_tag",
+                Type = SearchParamType.Token,
+                Expression = "Resource.meta.tag",
+                Description = "Tags applied to this resource",
+            }
+        },
+
+        // Note that I have not implemented the _text search parameter, so I do not want to list it here.
+        // { "_text", new()
+        //     {
+        //         Name = "_text",
+        //         Code = "_text",
+        //         Type = SearchParamType.String,
+        //         Description = "Advanced implementation-dependant search against the narrative content of a resource.",
+        //     }
+        // },
+
+        { "_type", new()
+            {
+                Name = "_type",
+                Code = "_type",
+                Type = SearchParamType.Token,
+                Expression = "%resource",
+                Description = "A resource type filter",
+            }
+        },
     };
 
     /// <summary>A segmented reference.</summary>
@@ -86,10 +188,12 @@ public class ParsedSearchParameter : ICloneable
     public required string[] Values { get; set; }
 
     /// <summary>Gets or sets the applied value flags.</summary>
-    public bool[] IgnoredValueFlags { get; set; } = Array.Empty<bool>();
+    public bool[] IgnoredValueFlags { get; set; } = [];
 
     /// <summary>Gets or sets a value indicating whether this parameter has been ignored.</summary>
     public bool IgnoredParameter { get; set; } = false;
+
+    public string? IgnoredReason { get; set; } = null;
 
     /// <summary>Gets or sets the chained parameter.</summary>
     public Dictionary<string, ParsedSearchParameter>? ChainedParameters { get; set; } = null;
@@ -126,7 +230,7 @@ public class ParsedSearchParameter : ICloneable
     public SegmentedReference[]? ValueReferences { get; set; }
 
     /// <summary>Gets or sets the prefix.</summary>
-    public SearchPrefixCodes?[] Prefixes { get; set; } = Array.Empty<SearchPrefixCodes?>();
+    public SearchPrefixCodes?[] Prefixes { get; set; } = [];
 
     /// <summary>Gets or sets the type of the parameter.</summary>
     public required SearchParamType ParamType { get; set; }
@@ -154,6 +258,7 @@ public class ParsedSearchParameter : ICloneable
         Values = other.Values.Select(v => v).ToArray();
         IgnoredValueFlags = other.IgnoredValueFlags.Select(v => v).ToArray();
         IgnoredParameter = other.IgnoredParameter;
+        IgnoredReason = other.IgnoredReason;
         ChainedParameters = other.ChainedParameters?.DeepCopy();
         ReverseChainedParameterLink = ReverseChainedParameterLink == null ? null : new ParsedSearchParameter(ReverseChainedParameterLink);
         ReverseChainedParameterFilter = ReverseChainedParameterFilter == null ? null : new ParsedSearchParameter(ReverseChainedParameterFilter);
@@ -210,8 +315,9 @@ public class ParsedSearchParameter : ICloneable
             ParamType = spd?.Type ?? SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
+            IgnoredReason = $"Search parameter definition for '{name}' is null or has no expression.";
             return;
         }
 
@@ -227,8 +333,9 @@ public class ParsedSearchParameter : ICloneable
                 ParamType = SearchParamType.Special;
                 SelectExpression = string.Empty;
                 CompiledExpression = null;
-                Values = Array.Empty<string>();
+                Values = [];
                 IgnoredParameter = true;
+                IgnoredReason = $"Search parameter component definition '{component.Value.Definition}' for '{name}' is not defined in the store.";
                 return;
             }
 
@@ -243,8 +350,9 @@ public class ParsedSearchParameter : ICloneable
                 ParamType = SearchParamType.Special;
                 SelectExpression = string.Empty;
                 CompiledExpression = null;
-                Values = Array.Empty<string>();
+                Values = [];
                 IgnoredParameter = true;
+                IgnoredReason = $"Search parameter component definition '{component.Value.Definition}' for '{name}' has no expression.";
                 return;
             }
 
@@ -264,26 +372,27 @@ public class ParsedSearchParameter : ICloneable
                     ParamType = SearchParamType.Special;
                     SelectExpression = string.Empty;
                     CompiledExpression = null;
-                    Values = Array.Empty<string>();
+                    Values = [];
                     IgnoredParameter = true;
+                    IgnoredReason = $"Search parameter definition '{name}' is a composite but has no components defined.";
                     return;
                 }
 
                 ExtractCompositeParams(
-                    store, 
-                    resourceStore, 
-                    resourceType, 
-                    spd, 
+                    store,
+                    resourceStore,
+                    resourceType,
+                    spd,
                     modifierLiteral,
                     modifierCode,
-                    value, 
+                    value,
                     out List<ParsedSearchParameter> cpValues);
 
                 CompositeComponents = cpValues.ToArray();
 
                 // we do not want to run composite parameters through the normal parsing logic
-                Prefixes = Array.Empty<SearchPrefixCodes?>();
-                Values = Array.Empty<string>();
+                Prefixes = [];
+                Values = [];
 
                 return;
             }
@@ -291,18 +400,16 @@ public class ParsedSearchParameter : ICloneable
 
         if (string.IsNullOrEmpty(value))
         {
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
+            IgnoredReason = $"Search parameter '{name}' has no value provided.";
             return;
         }
 
         // parse the value string into prefixes and values
         ExtractValues(value, definition);
 
-        if (Values == null)
-        {
-            Values = Array.Empty<string>();
-        }
+        Values ??= [];
 
         // by default, assume all values are applied (will be updated during typed parsing)
         IgnoredValueFlags = Enumerable.Repeat(false, Values.Length).ToArray<bool>();
@@ -313,6 +420,7 @@ public class ParsedSearchParameter : ICloneable
         if (IgnoredValueFlags.Any() && IgnoredValueFlags.All(x => x))
         {
             IgnoredParameter = true;
+            IgnoredReason = $"Search parameter '{name}' has no valid values to apply after processing.";
         }
     }
 
@@ -322,7 +430,9 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="parseResult">  The parse result.</param>
-    /// <param name="value">        The http-paramter value string.</param>
+    /// <param name="value">        The http-parameter value string.</param>
+    /// <param name="requestKeyLiteral"></param>
+    /// <param name="requestValueLiteral"></param>
     [SetsRequiredMembers]
     private ParsedSearchParameter(
         VersionedFhirStore store,
@@ -336,6 +446,8 @@ public class ParsedSearchParameter : ICloneable
         ResourceType = parseResult.ResourceType;
         Modifier = parseResult.ModifierCode;
         ModifierLiteral = parseResult.ModifierLiteral;
+        RequestedKeyLiteral = requestKeyLiteral;
+        RequestedValueLiteral = requestValueLiteral;
 
         // check for reverse chained parameters - short circuit the constructor logic
         if ((parseResult.ReverseLinkKey != null) &&
@@ -361,10 +473,8 @@ public class ParsedSearchParameter : ICloneable
             ParamType = SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = false;
-            RequestedKeyLiteral = requestKeyLiteral;
-            RequestedValueLiteral = requestValueLiteral;
             return;
         }
 
@@ -374,7 +484,7 @@ public class ParsedSearchParameter : ICloneable
             ParamType = parseResult.SearchParameterDefinition?.Type ?? SearchParamType.Special;
             SelectExpression = string.Empty;
             CompiledExpression = null;
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
             return;
         }
@@ -394,16 +504,16 @@ public class ParsedSearchParameter : ICloneable
                 ParamType = SearchParamType.Special;
                 SelectExpression = string.Empty;
                 CompiledExpression = null;
-                Values = Array.Empty<string>();
+                Values = [];
                 IgnoredParameter = true;
                 return;
             }
 
             ExtractCompositeParams(
-                store, 
-                resourceStore, 
-                ResourceType, 
-                parseResult.SearchParameterDefinition, 
+                store,
+                resourceStore,
+                ResourceType,
+                parseResult.SearchParameterDefinition,
                 parseResult.ModifierLiteral,
                 parseResult.ModifierCode,
                 value,
@@ -412,8 +522,8 @@ public class ParsedSearchParameter : ICloneable
             CompositeComponents = cpValues.ToArray();
 
             // we do not want to run composite parameters through the normal parsing logic
-            Prefixes = Array.Empty<SearchPrefixCodes?>();
-            Values = Array.Empty<string>();
+            Prefixes = [];
+            Values = [];
 
             return;
         }
@@ -436,13 +546,13 @@ public class ParsedSearchParameter : ICloneable
             }
 
             // when chaining, we do not want to parse the value - it is handled at the last link in the chain
-            Values = Array.Empty<string>();
+            Values = [];
             return;
         }
 
         if (string.IsNullOrEmpty(value))
         {
-            Values = Array.Empty<string>();
+            Values = [];
             IgnoredParameter = true;
             return;
         }
@@ -450,10 +560,7 @@ public class ParsedSearchParameter : ICloneable
         // parse the value string into prefixes and values
         ExtractValues(value, parseResult.SearchParameterDefinition);
 
-        if (Values == null)
-        {
-            Values = Array.Empty<string>();
-        }
+        Values ??= [];
 
         // by default, assume all values are applied (will be updated during typed parsing)
         IgnoredValueFlags = Enumerable.Repeat(false, Values.Length).ToArray<bool>();
@@ -461,7 +568,8 @@ public class ParsedSearchParameter : ICloneable
         ProcessTypedValues(value, parseResult.SearchParameterDefinition);
 
         // check for no valid values to apply
-        if (IgnoredValueFlags.Any() && IgnoredValueFlags.All(x => x))
+        if ((IgnoredValueFlags.Length != 0) &&
+            IgnoredValueFlags.All(x => x))
         {
             IgnoredParameter = true;
         }
@@ -518,7 +626,7 @@ public class ParsedSearchParameter : ICloneable
                     sb.Append(ModifierLiteral);
                 }
 
-                sb.Append("=");
+                sb.Append('=');
             }
 
             sb.Append(string.Join('$', CompositeComponents.Select(c => c.GetAppliedQueryString(false))));
@@ -527,7 +635,7 @@ public class ParsedSearchParameter : ICloneable
             //sb.Append(string.Join('$', CompositeComponents.SelectMany(c => c.Values)));
         }
 
-        // iterate across values 
+        // iterate across values
         for (int i = 0; i < Values.Length; i++)
         {
             if (IgnoredValueFlags[i])
@@ -547,7 +655,7 @@ public class ParsedSearchParameter : ICloneable
                         sb.Append(ModifierLiteral);
                     }
 
-                    sb.Append("=");
+                    sb.Append('=');
                 }
                 else
                 {
@@ -573,7 +681,12 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Extracts the composite parameters.</summary>
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
+    /// <param name="modifierCode"></param>
     /// <param name="value">        The http-paramter value string.</param>
+    /// <param name="resourceType"></param>
+    /// <param name="spd"></param>
+    /// <param name="modifierLiteral"></param>
+    /// <param name="cpValues"></param>
     /// <returns>The extracted composite parameters.</returns>
     private static void ExtractCompositeParams(
         VersionedFhirStore store,
@@ -619,7 +732,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // note this is wrong - composite parameters do not contain the name of the parameter
-        //// work backwards through the composite values so we can understand multi-valued components
+        //// work backwards through the composite values so we can understand multivalued components
         //for (int i = split.Length - 1; i >= 0; i--)
         //{
         //    int delimIndex = split[i].IndexOf('$');
@@ -948,7 +1061,7 @@ public class ParsedSearchParameter : ICloneable
     /// <returns>
     /// An enumerator that allows foreach to be used to process parse in this collection.
     /// </returns>
-    public static IEnumerable<ParsedSearchParameter> Parse(
+    public static ParsedSearchParameter[] Parse(
         string queryString,
         VersionedFhirStore store,
         IVersionedResourceStore resourceStore,
@@ -956,8 +1069,10 @@ public class ParsedSearchParameter : ICloneable
     {
         if (string.IsNullOrWhiteSpace(queryString))
         {
-            yield break;
+            return [];
         }
+
+        List<ParsedSearchParameter> results = [];
 
         System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(queryString);
         foreach (string key in query)
@@ -968,7 +1083,6 @@ public class ParsedSearchParameter : ICloneable
             }
 
             SearchKeyParseResult? parseResult = tryParseKey(key, store, resourceStore, resourceType);
-
             if (parseResult == null)
             {
                 if (ParsedResultParameters.SearchResultParameters.Contains(key))
@@ -981,16 +1095,18 @@ public class ParsedSearchParameter : ICloneable
                 continue;
             }
 
-            yield return new ParsedSearchParameter(
+            results.Add(new ParsedSearchParameter(
                 store,
                 resourceStore,
                 parseResult,
                 query[key] ?? string.Empty,
                 key,
-                query[key]);
+                query[key]));
 
             continue;
         }
+
+        return results.ToArray();
     }
 
     /// <summary>Encapsulates the result of a search key parse.</summary>
@@ -1254,9 +1370,9 @@ public class ParsedSearchParameter : ICloneable
             return null;
         }
 
-        if (_allResourceParameters.ContainsKey(spName))
+        if (_allResourceParameters.TryGetValue(spName, out ModelInfo.SearchParamDefinition? parameter))
         {
-            spDefinition = _allResourceParameters[spName];
+            spDefinition = parameter;
         }
         else if (!resourceStore.TryGetSearchParamDefinition(spName, out spDefinition))
         {
@@ -1264,7 +1380,7 @@ public class ParsedSearchParameter : ICloneable
             Console.WriteLine($"Unable to resolve search parameter: {spName} in resource store");
             return null;
         }
-         
+
         if (string.IsNullOrEmpty(chainedKey))
         {
             chainedResults = null;
@@ -1277,8 +1393,8 @@ public class ParsedSearchParameter : ICloneable
                 store.ContainsKey(modifierLiteral))
             {
                 SearchKeyParseResult? res = tryParseKey(
-                    chainedKey, 
-                    store, 
+                    chainedKey,
+                    store,
                     (IVersionedResourceStore)store[modifierLiteral],
                     modifierLiteral);
 
@@ -1296,8 +1412,8 @@ public class ParsedSearchParameter : ICloneable
                     if (store.ContainsKey(rtName))
                     {
                         SearchKeyParseResult? res = tryParseKey(
-                            chainedKey, 
-                            store, 
+                            chainedKey,
+                            store,
                             (IVersionedResourceStore)store[rtName],
                             rtName);
 
@@ -1333,11 +1449,12 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Parse reference common.</summary>
     /// <param name="reference">The reference.</param>
     /// <returns>A SegmentedReference.</returns>
-    private static bool TryParseReference(string reference, out SegmentedReference sr)
+    private bool TryParseReference(string reference, out SegmentedReference sr)
     {
         if (string.IsNullOrEmpty(reference))
         {
             sr = default;
+            IgnoredReason ??= "Empty reference";
             return false;
         }
 
@@ -1396,12 +1513,13 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="start">     [out] The start.</param>
     /// <param name="end">       [out] The end.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public static bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end)
+    public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end)
     {
         if (string.IsNullOrEmpty(dateString))
         {
             start = DateTimeOffset.MinValue;
             end = DateTimeOffset.MaxValue;
+            IgnoredReason ??= "Empty date string";
             return false;
         }
 
@@ -1417,6 +1535,7 @@ public class ParsedSearchParameter : ICloneable
         if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
         {
             Console.WriteLine($"Failed to parse date: {dateString}");
+            IgnoredReason ??= $"Invalid date format: {dateString}";
             start = DateTimeOffset.MinValue;
             end = DateTimeOffset.MaxValue;
             return false;
@@ -1481,6 +1600,7 @@ public class ParsedSearchParameter : ICloneable
 
             default:
                 Console.WriteLine($"Invalid date format: {dateString}");
+                IgnoredReason ??= $"Invalid date format: {dateString}";
                 start = DateTimeOffset.MinValue;
                 end = DateTimeOffset.MaxValue;
                 return false;
