@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
+using fhir.candle.Mcp;
 using fhir.candle.Services;
 using FhirCandle.Storage;
 using Microsoft.AspNetCore.Mvc;
@@ -394,20 +395,20 @@ public class FhirMcpTools
     private static IEnumerable<string> GetResourceList(IFhirStore store)
     {
         return store.Keys.Select(rName =>
-            McpData.ResourceDescriptions.TryGetValue(rName, out McpData.ResourceDescriptionRec rdRec)
+            FhirResourceData.ResourceDescriptions.TryGetValue(rName, out FhirResourceData.ResourceDescriptionRec rdRec)
             ? rdRec.ToString()
             : rName);
     }
 
     private static IEnumerable<string> GetSearchTypeList()
     {
-        return McpData.SearchTypeDescriptions.OrderBy(kvp => kvp.Key).Select(kvp => kvp.Value.ToString());
+        return SearchTypeData.SearchTypeDescriptionList.Select(r => r.ToString());
     }
 
     private static string GetSearchTypeDescription(string? searchTypeName)
     {
         if ((searchTypeName != null) &&
-            McpData.SearchTypeDescriptions.TryGetValue(searchTypeName, out McpData.FhirSearchTypeDescriptionRec searchTypeRec))
+            SearchTypeData.SearchTypeDescriptions.TryGetValue(searchTypeName, out SearchTypeData.FhirSearchTypeDescriptionRec searchTypeRec))
         {
             return searchTypeRec.ToString();
         }
