@@ -73,7 +73,7 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     HashSet<string> LoadedSupplements { get; }
 
     /// <summary>Gets the configuration.</summary>
-    public TenantConfiguration Config { get; }
+    TenantConfiguration Config { get; }
 
     /// <summary>Performs the interaction specified in the request.</summary>
     /// <param name="ctx">            The request context.</param>
