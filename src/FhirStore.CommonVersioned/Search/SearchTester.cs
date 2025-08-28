@@ -283,7 +283,6 @@ public class SearchTester
             case "date-timing":
                 return EvalDateSearch.TestDate(resultNode, sp);
 
-
             // note that the SDK keeps all ITypedElement 'integer' values in 64-bit format
             case "number-integer":
             case "number-unsignedint":

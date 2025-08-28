@@ -15,7 +15,7 @@ public class ValidateTypeSearch : ICandleMcpTool
     /// <summary>
     /// The name of the tool as exposed in the MCP interface.
     /// </summary>
-    private const string _name = "validateTypeSearcn";
+    private const string _name = "validateTypeSearch";
     
     /// <summary>
     /// The description of what the tool does.
