@@ -7,6 +7,7 @@
     <RootNamespace>FhirCandle</RootNamespace>
   </PropertyGroup>
 
+
   <ItemGroup>
 		<Compile Remove="Services\**" />
 		<EmbeddedResource Remove="Services\**" />
@@ -21,8 +22,10 @@
 		<None Remove="Operations\" />
 	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.7.0" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.3" />
-		<PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+      <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.10" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.10" />
+      <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.14.0" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.10" />
+		<PackageReference Include="System.CommandLine" Version="2.0.0-rc.2.25502.107" />
 	</ItemGroup>
 </Project>

@@ -175,7 +175,7 @@ public class RestOnlyNotificationManager : INotificationManager
             };
 
             // check for additional headers
-            if ((e.Subscription.Parameters != null) && e.Subscription.Parameters.Any())
+            if ((e.Subscription.Parameters is not null) && e.Subscription.Parameters.Any())
             {
                 // add headers
                 foreach ((string param, List<string> values) in e.Subscription.Parameters)
@@ -226,7 +226,7 @@ public class RestOnlyNotificationManager : INotificationManager
         }
         finally
         {
-            if (request != null)
+            if (request is not null)
             {
                 request.Dispose();
             }
@@ -274,7 +274,7 @@ public class RestOnlyNotificationManager : INotificationManager
         while (_notificationRequestQ.Any())
         {
             if ((!_notificationRequestQ.TryDequeue(out NotificationRequest? req)) ||
-                (req == null))
+                (req is null))
             {
                 return;
             }
@@ -296,7 +296,7 @@ public class RestOnlyNotificationManager : INotificationManager
             foreach (ParsedSubscription sub in store.CurrentSubscriptions)
             {
                 if ((!sub.CurrentStatus.Equals("active", StringComparison.Ordinal)) ||
-                    (sub.HeartbeatSeconds == null) ||
+                    (sub.HeartbeatSeconds is null) ||
                     (sub.HeartbeatSeconds <= 0))
                 {
                     continue;
@@ -370,7 +370,7 @@ public class RestOnlyNotificationManager : INotificationManager
         // check for a new subscription
         if (e.SendHandshake)
         {
-            if (e.ChangedSubscription == null)
+            if (e.ChangedSubscription is null)
             {
                 return;
             }
@@ -388,7 +388,7 @@ public class RestOnlyNotificationManager : INotificationManager
         }
 
         // check for a changed subscription
-        if (e.ChangedSubscription != null)
+        if (e.ChangedSubscription is not null)
         {
             // TODO: Check for changes to the heartbeat interval
         }

@@ -5,6 +5,8 @@
 
 using FhirCandle.Models;
 using Hl7.Fhir.ElementModel;
+using Hl7.Fhir.FhirPath;
+using Hl7.Fhir.Model;
 using System.Globalization;
 using static FhirCandle.Search.SearchDefinitions;
 
@@ -17,9 +19,9 @@ public static class EvalDateSearch
     /// <param name="valueNode">The value node.</param>
     /// <param name="sp">       The sp.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public static bool TestDate(ITypedElement valueNode, ParsedSearchParameter sp)
+    public static bool TestDate(PocoNode? valueNode, ParsedSearchParameter sp)
     {
-        if (valueNode?.Value == null)
+        if (valueNode?.Poco is null)
         {
             return false;
         }
@@ -27,71 +29,24 @@ public static class EvalDateSearch
         DateTimeOffset valueStart = DateTimeOffset.MinValue;
         DateTimeOffset valueEnd = DateTimeOffset.MaxValue;
 
-        switch (valueNode.Value)
+        switch (valueNode.Poco)
         {
-            case Hl7.Fhir.ElementModel.Types.DateTime fhirDateTime:
-                valueStart = fhirDateTime.ToDateTimeOffset(TimeSpan.Zero);
+            case Instant fi:
+                valueStart = fi.Value ?? DateTimeOffset.MinValue;
+                valueEnd = fi.Value ?? DateTimeOffset.MaxValue;
+                break;
 
-                switch (fhirDateTime.Precision)
+            case FhirDateTime fdt:
+                if (!ParsedSearchParameter.TryParseFhirDate(fdt.Value, out valueStart, out valueEnd))
                 {
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Year:
-                        valueEnd = valueStart.AddYears(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Month:
-                        valueEnd = valueStart.AddMonths(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Day:
-                        valueEnd = valueStart.AddDays(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Hour:
-                        valueEnd = valueStart.AddHours(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Minute:
-                        valueEnd = valueStart.AddMinutes(1).AddTicks(-1);
-                        break;
-
-                    // we choose to igore fractions of seconds
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Second:
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Fraction:
-                        valueEnd = valueStart.AddSeconds(1).AddTicks(-1);
-                        break;
+                    return false;
                 }
                 break;
 
-            case Hl7.Fhir.ElementModel.Types.Date fhirDate:
-                valueStart = fhirDate.ToDateTimeOffset(0, 0, 0, TimeSpan.Zero);
-
-                switch (fhirDate.Precision)
+            case Date fd:
+                if (!ParsedSearchParameter.TryParseFhirDate(fd.Value, out valueStart, out valueEnd))
                 {
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Year:
-                        valueEnd = valueStart.AddYears(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Month:
-                        valueEnd = valueStart.AddMonths(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Day:
-                        valueEnd = valueStart.AddDays(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Hour:
-                        valueEnd = valueStart.AddHours(1).AddTicks(-1);
-                        break;
-
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Minute:
-                        valueEnd = valueStart.AddMinutes(1).AddTicks(-1);
-                        break;
-
-                    // we choose to ignore fractions of seconds
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Second:
-                    case Hl7.Fhir.ElementModel.Types.DateTimePrecision.Fraction:
-                        valueEnd = valueStart.AddSeconds(1).AddTicks(-1);
-                        break;
+                    return false;
                 }
                 break;
 
@@ -99,31 +54,44 @@ public static class EvalDateSearch
             //case Hl7.Fhir.ElementModel.Types.Time fhirTime:
             //    break;
 
-            case Hl7.Fhir.Model.Period fhirPeriod:
-                valueStart = fhirPeriod.StartElement?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MinValue;
-                valueEnd = fhirPeriod.EndElement?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MaxValue;
+            case Period fp:
+                valueStart = fp.StartElement?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MinValue;
+                valueEnd = fp.EndElement?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MaxValue;
                 break;
 
-            case Hl7.Fhir.Model.Timing fhirTiming:
-                if (fhirTiming.EventElement.Any())
+            case Timing ft:
+                if (ft.EventElement.Count != 0)
                 {
-                    valueStart = fhirTiming.EventElement.Min()?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MinValue;
-                    valueEnd = fhirTiming.EventElement.Max()?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MaxValue;
+                    valueStart = ft.EventElement.Min()?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MinValue;
+                    valueEnd = ft.EventElement.Max()?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MaxValue;
+                }
+                else if (ft.Repeat?.Bounds is Period boundsPeriod)
+                {
+                    valueStart = boundsPeriod.StartElement?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MinValue;
+                    valueEnd = boundsPeriod.EndElement?.ToDateTimeOffset(TimeSpan.Zero) ?? DateTimeOffset.MaxValue;
+                }
+                else if (ft.Repeat?.Bounds is FhirDateTime boundsDateTime)
+                {
+                    if (!ParsedSearchParameter.TryParseFhirDate(boundsDateTime.Value, out valueStart, out valueEnd))
+                    {
+                        return false;
+                    }
                 }
                 else
                 {
-                    // for now, do not try and figure out how to search within repetitions
+                    // TODO: need to check boundsRange, look for others
                     return false;
                 }
+
                 break;
 
             default:
-                Console.WriteLine($"Unknown valueNote type: {valueNode.Value.GetType()}");
+                Console.WriteLine($"Unknown valueNode type: {valueNode.GetValue()?.GetType()}");
                 break;
         }
 
-        if ((sp.ValueDateStarts == null) || 
-            (sp.ValueDateEnds == null) ||
+        if ((sp.ValueDateStarts is null) || 
+            (sp.ValueDateEnds is null) ||
             (sp.ValueDateStarts.Length != sp.ValueDateEnds.Length))
         {
             return false;

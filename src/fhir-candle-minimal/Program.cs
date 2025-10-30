@@ -4,8 +4,6 @@
 // </copyright>
 
 using System.CommandLine;
-using System.CommandLine.Builder;
-using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -33,83 +31,30 @@ public static partial class Program
     [GeneratedRegex("(http[s]*:\\/\\/.*(:\\d+)*)")]
     private static partial Regex InputUrlFormatRegex();
 
+    private static int _retVal = 0;
+
     /// <summary>Main entry-point for this application.</summary>
     /// <param name="args">An array of command-line argument strings.</param>
     public static async Task<int> Main(string[] args)
     {
-        // setup our configuration (command line > environment > appsettings.json)
-        IConfiguration envConfig = new ConfigurationBuilder()
+        // set up our configuration (command line > environment > appsettings.json)
+        IConfiguration extConfig = new ConfigurationBuilder()
             .AddJsonFile("appsettings.json", optional: true)
+            .AddEnvironmentVariables("Candle")
             .AddEnvironmentVariables()
             .Build();
 
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
-        List<string> envArgs = [];
+        RootCommand root = CliOptions.RootCommand;
+        root.SetAction(async (ParseResult pr) => await RunServer(pr, extConfig));
 
-        // build our root command
-        SCL.RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        SCL.RootCommand envCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        ParseResult pr = root.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
-            envCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
 
-            if (string.IsNullOrEmpty(co.EnvVarName))
-            {
-                continue;
-            }
+        await pr.InvokeAsync();
 
-            IConfigurationSection section = envConfig.GetSection(co.EnvVarName);
-
-            if (!section.Exists())
-            {
-                continue;
-            }
-
-            string? value = section.Value ?? null;
-
-            if (value == null)
-            {
-                value = string.Join(',', section.GetChildren().Select(c => c.Value));
-            }
-
-            if (string.IsNullOrEmpty(value))
-            {
-                continue;
-            }
-
-            if (value.Contains(' '))
-            {
-                value = $"\"{value}\"";
-            }
-
-            if (co.CliOption.Aliases.Any())
-            {
-                envArgs.Add(co.CliOption.Aliases.First());
-                envArgs.Add(value);
-                continue;
-            }
-
-            if (!string.IsNullOrEmpty(co.CliOption.Name))
-            {
-                envArgs.Add(co.CliOption.Name);
-                envArgs.Add(value);
-                continue;
-            }
-        }
-
-        // build a parser for our environment arguments
-        SCL.Parsing.Parser envParser = new CommandLineBuilder(envCommand).UseDefaults().Build();
-
-        // attempt a parse
-        SCL.Parsing.ParseResult envParseResult = envParser.Parse(string.Join(' ', envArgs));
-
-        // set our command handler
-        rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, envParseResult, context.GetCancellationToken()));
-
-        // run whatever the caller requested
-        return await rootCommand.InvokeAsync(args);
+        return _retVal;
     }
 
 
@@ -118,16 +63,13 @@ public static partial class Program
     /// <param name="cancellationToken">A token that allows processing to be cancelled.</param>
     /// <returns>An asynchronous result that yields an int.</returns>
     public static async Task<int> RunServer(
-        SCL.Parsing.ParseResult pr,
-        SCL.Parsing.ParseResult envPR,
+        SCL.ParseResult pr,
+        IConfiguration extConfig,
         CancellationToken? cancellationToken = null)
     {
         try
         {
-            CandleConfig config = new();
-
-            // parse the arguments into the configuration object
-            config.Parse(pr, envPR);
+            CandleConfig config = new(new CliOptions(), pr, extConfig);
 
             if (string.IsNullOrEmpty(config.PublicUrl))
             {
@@ -383,7 +325,7 @@ public static partial class Program
             }
         }
 
-        if (loadDir != null)
+        if (loadDir is not null)
         {
             foreach (TenantConfiguration tenant in tenants.Values)
             {

@@ -54,14 +54,14 @@ public class SubscriptionConverter
 
     public void UpdateResourceStatus(object subscription, string statusLiteral)
     {
-        if ((subscription == null) ||
+        if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub))
         {
             return;
         }
 
         SubscriptionStatusCodes? status = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<SubscriptionStatusCodes>(statusLiteral);
-        if (status == null)
+        if (status is null)
         {
             return;
         }
@@ -75,7 +75,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object subscription, out ParsedSubscription common)
     {
-        if ((subscription == null) ||
+        if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub) ||
             string.IsNullOrEmpty(sub.Id) ||
             string.IsNullOrEmpty(sub.Criteria) ||
@@ -102,7 +102,7 @@ public class SubscriptionConverter
             TopicUrl = sub.Criteria,
             Tags = tags,
             ChannelSystem = string.Empty,
-            ChannelCode = sub.Channel.Type == null
+            ChannelCode = sub.Channel.Type is null
                 ? string.Empty
                 : Hl7.Fhir.Utility.EnumUtility.GetLiteral(sub.Channel.Type)!,
             Endpoint = sub.Channel.Endpoint ?? string.Empty,
@@ -145,8 +145,8 @@ public class SubscriptionConverter
         {
             if (extensions.First().Value is Hl7.Fhir.Model.Coding c)
             {
-                common.ChannelSystem = c.System;
-                common.ChannelCode = c.Code;
+                common.ChannelSystem = c.System ?? string.Empty;
+                common.ChannelCode = c.Code ?? string.Empty;
             }
         }
 
@@ -159,8 +159,13 @@ public class SubscriptionConverter
         // add parameters
         if (sub.Channel.Header?.Any() ?? false)
         {
-            foreach (string header in sub.Channel.Header)
+            foreach (string? header in sub.Channel.Header)
             {
+                if (header is null)
+                {
+                    continue;
+                }
+
                 int index = header.IndexOf(':');
                 if (index == -1)
                 {
@@ -249,7 +254,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(ParsedSubscription common, out Subscription subscription)
     {
-        if ((common == null) ||
+        if ((common is null) ||
             string.IsNullOrEmpty(common.Id) ||
             string.IsNullOrEmpty(common.TopicUrl))
         {
@@ -297,17 +302,17 @@ public class SubscriptionConverter
             End = new DateTimeOffset(common.ExpirationTicks, TimeSpan.Zero),
         };
 
-        if (common.HeartbeatSeconds != null)
+        if (common.HeartbeatSeconds is not null)
         {
             subscription.Channel.AddExtension(_heartbeatPeriodUrl, new Integer(common.HeartbeatSeconds));
         }
 
-        if (common.TimeoutSeconds != null)
+        if (common.TimeoutSeconds is not null)
         {
             subscription.Channel.AddExtension(_timeoutUrl, new Integer(common.TimeoutSeconds));
         }
 
-        if (common.MaxEventsPerNotification != null)
+        if (common.MaxEventsPerNotification is not null)
         {
             subscription.Channel.AddExtension(_maxCountUrl, new Integer(common.MaxEventsPerNotification));
         }
@@ -322,7 +327,7 @@ public class SubscriptionConverter
         // add tags
         if (common.Tags.Count != 0)
         {
-            if (subscription.Meta == null)
+            if (subscription.Meta is null)
             {
                 subscription.Meta = new();
             }
@@ -374,7 +379,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object subscriptionStatus, string bundleId, out ParsedSubscriptionStatus common)
     {
-        if ((subscriptionStatus == null) ||
+        if ((subscriptionStatus is null) ||
             (subscriptionStatus is not Hl7.Fhir.Model.SubscriptionStatus status))
         {
             common = null!;
@@ -411,7 +416,12 @@ public class SubscriptionConverter
                         : null,
                     Timestamp = notificationEvent.Timestamp,
                     FocusReference = notificationEvent.Focus?.Reference ?? string.Empty,
-                    AdditionalContextReferences = notificationEvent.AdditionalContext?.Select(ac => ac.Reference) ?? Array.Empty<string>(),
+                    AdditionalContextReferences = notificationEvent.AdditionalContext is null
+                        ? Array.Empty<string>()
+                        : notificationEvent.AdditionalContext
+                            .Where(r => r?.Reference is not null)
+                            .Select(ac => ac.Reference!)
+                            .ToArray(),
                 });
             }
         }
@@ -422,11 +432,11 @@ public class SubscriptionConverter
             SubscriptionReference = status.Subscription?.Reference ?? string.Empty,
             SubscriptionTopicCanonical = status.Topic ?? string.Empty,
             Status = 
-                status.Status != null
+                status.Status is not null
                 ? Hl7.Fhir.Utility.EnumUtility.GetLiteral(status.Status)!
                 : string.Empty,
             NotificationType =
-                status.Type != null
+                status.Type is not null
                 ? Hl7.Fhir.Utility.EnumUtility.GetLiteral(status.Type)!.ToFhirEnum<ParsedSubscription.NotificationTypeCodes>()
                 : null,
             EventsSinceSubscriptionStart =

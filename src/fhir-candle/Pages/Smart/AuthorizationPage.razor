@@ -107,7 +107,7 @@ else
     {
         // _ = JsLogAsync($"Focused row item id: {row.Item?.Id}");
 
-        if (row?.Item != null)
+        if (row?.Item is not null)
         {
             if (_selected.Contains(row.Item.Scope))
             {
@@ -361,7 +361,7 @@ else
     /// </summary>
     public void Dispose()
     {
-        // if (_store != null)
+        // if (_store is not null)
         // {
         // }
     }

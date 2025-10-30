@@ -14,7 +14,7 @@ public record class ConfigurationOption
     public string EnvVarName { get; init; } = string.Empty;
 
     /// <summary>Gets or sets the default value.</summary>
-    public required object DefaultValue { get; init; }
+    public required object? DefaultValue { get; init; }
 
     /// <summary>Gets or initializes the CLI option.</summary>
     public required System.CommandLine.Option CliOption { get; init; }

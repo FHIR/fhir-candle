@@ -255,7 +255,7 @@ public class R4BTestsObservation : IClassFixture<R4BTests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -287,7 +287,7 @@ public class R4BTestsObservation : IClassFixture<R4BTests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -328,7 +328,7 @@ public class R4BTestsObservation : IClassFixture<R4BTests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -445,7 +445,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -477,7 +477,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -519,7 +519,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -555,7 +555,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -565,9 +565,9 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
         string getUrl;
         string postUrl;
 
-        bool hasSearchParams = search != null;
+        bool hasSearchParams = search is not null;
 
-        if (resourceType == null)
+        if (resourceType is null)
         {
             getUrl = hasSearchParams
                 ? $"{_fixture._store.Config.BaseUrl}/Patient/{id}/*?{search}"
@@ -600,7 +600,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
             DestinationFormat = "application/fhir+json",
         };
 
-        bool success = resourceType == null
+        bool success = resourceType is null
             ? _fixture._store.CompartmentSearch(ctx, out response)
             : _fixture._store.CompartmentTypeSearch(ctx, out response);
 
@@ -612,7 +612,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -641,7 +641,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
             DestinationFormat = "application/fhir+json",
         };
 
-        success = resourceType == null
+        success = resourceType is null
             ? _fixture._store.CompartmentSearch(ctx, out response)
             : _fixture._store.CompartmentTypeSearch(ctx, out response);
 
@@ -653,7 +653,7 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }

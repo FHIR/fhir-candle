@@ -72,24 +72,24 @@ public class ValidateTypeSearch : ICandleMcpTool
     /// <param name="storeName">The name of the FHIR store to operate on.</param>
     /// <param name="resourceName">The name of the FHIR resource type to validate against.</param>
     /// <param name="store">The FHIR store instance to use for validation.</param>
-    /// <returns>A <see cref="CallToolResponse"/> containing the validation results, including overall status and individual search parameter validation details.</returns>
-    public CallToolResponse RunTool(
+    /// <returns>A <see cref="CallToolResult"/> containing the validation results, including overall status and individual search parameter validation details.</returns>
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)
     {
-        if (storeName == null)
+        if (storeName is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.StoreNameArgRequired);
         }
 
-        if (store == null)
+        if (store is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.StoreNotResolved);
         }
 
-        if (resourceName == null)
+        if (resourceName is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.ResourceNameArgRequired);
         }
@@ -105,7 +105,7 @@ public class ValidateTypeSearch : ICandleMcpTool
             searchString = je.GetString();
         }
 
-        if (searchString == null)
+        if (searchString is null)
         {
             return CommonCandleMcp.GetResponse("Search string is missing or not provided and is required");
         }

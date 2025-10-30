@@ -18,7 +18,7 @@ public class TopicConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object topic, out ParsedSubscriptionTopic common)
     {
-        if ((topic == null) ||
+        if ((topic is null) ||
             (topic is not Hl7.Fhir.Model.SubscriptionTopic st) ||
             string.IsNullOrEmpty(st.Id) ||
             string.IsNullOrEmpty(st.Url))
@@ -33,16 +33,21 @@ public class TopicConverter
             Url = st.Url,
             Status = st.Status?.ToString() ?? string.Empty,
             Name = string.Empty,
-            Version = st.Version,
-            Title = st.Title,
+            Version = st.Version ?? string.Empty,
+            Title = st.Title ?? string.Empty,
             Date = st.Date?.ToString() ?? string.Empty,
-            Description = st.Description,
+            Description = st.Description ?? string.Empty,
         };
 
         if (st.ResourceTrigger?.Any() ?? false)
         {
             foreach (Hl7.Fhir.Model.SubscriptionTopic.ResourceTriggerComponent rt in st.ResourceTrigger)
             {
+                if (rt.Resource is null)
+                {
+                    continue;
+                }
+
                 string resourceType = rt.Resource.Contains('/') ? rt.Resource.Substring(rt.Resource.LastIndexOf('/') + 1) : rt.Resource;
 
                 if (!common.ResourceTriggers.ContainsKey(resourceType))
@@ -70,6 +75,11 @@ public class TopicConverter
         {
             foreach (Hl7.Fhir.Model.SubscriptionTopic.EventTriggerComponent et in st.EventTrigger)
             {
+                if (et.Resource is null)
+                {
+                    continue;
+                }
+
                 if (!common.EventTriggers.ContainsKey(et.Resource))
                 {
                     common.EventTriggers.Add(et.Resource, new());
@@ -100,6 +110,11 @@ public class TopicConverter
         {
             foreach (Hl7.Fhir.Model.SubscriptionTopic.CanFilterByComponent cf in st.CanFilterBy)
             {
+                if (cf.Resource is null)
+                {
+                    continue;
+                }
+
                 string resourceType = cf.Resource.Contains('/') ? cf.Resource.Substring(cf.Resource.LastIndexOf('/') + 1) : cf.Resource;
 
                 if (!common.AllowedFilters.ContainsKey(resourceType))
@@ -119,6 +134,11 @@ public class TopicConverter
         {
             foreach (Hl7.Fhir.Model.SubscriptionTopic.NotificationShapeComponent ns in st.NotificationShape)
             {
+                if (ns.Resource is null)
+                {
+                    continue;
+                }
+
                 string resourceType = ns.Resource.Contains('/') ? ns.Resource.Substring(ns.Resource.LastIndexOf('/') + 1) : ns.Resource;
 
                 if (!common.NotificationShapes.ContainsKey(resourceType))
@@ -128,8 +148,8 @@ public class TopicConverter
 
                 common.NotificationShapes[resourceType].Add(new(
                     resourceType,
-                    ns.Include?.Select(i => "_include=" + i.Replace("&iterate=", "&_include:iterate=", StringComparison.Ordinal)).ToList() ?? new(),
-                    ns.RevInclude?.Select(r => "_revinclude=" + r.Replace("&iterate=", "&_revinclude:iterate=", StringComparison.Ordinal)).ToList() ?? new()));
+                    ns.Include?.Select(i => "_include=" + i?.Replace("&iterate=", "&_include:iterate=", StringComparison.Ordinal)).ToList() ?? new(),
+                    ns.RevInclude?.Select(r => "_revinclude=" + r?.Replace("&iterate=", "&_revinclude:iterate=", StringComparison.Ordinal)).ToList() ?? new()));
             }
         }
 

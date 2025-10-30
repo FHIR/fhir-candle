@@ -60,7 +60,7 @@ public class FhirMcpTools
     //private List<Tool> buildToolList()
     //{
     //    // iterate across all the stores
-    //    if (FhirStoreManager.IInstance == null)
+    //    if (FhirStoreManager.IInstance is null)
     //    {
     //        return tools;
     //    }
@@ -134,11 +134,11 @@ public class FhirMcpTools
     public ValueTask<ListToolsResult> HandleListToolsRequest(RequestContext<ListToolsRequestParams> request, CancellationToken ct) =>
         new ValueTask<ListToolsResult>(new ListToolsResult() { Tools = _mcpTools, });
 
-    public ValueTask<CallToolResponse> HandleCallToolRequest(
+    public ValueTask<CallToolResult> HandleCallToolRequest(
         RequestContext<CallToolRequestParams> request,
         CancellationToken ct)
     {
-        if (request.Params?.Name == null)
+        if (request.Params?.Name is null)
         {
             return ValueTask.FromResult(CommonCandleMcp.GetResponse("Tool call without a function name specified!."));
         }
@@ -166,7 +166,7 @@ public class FhirMcpTools
             resourceName = resourceTypeJ.GetString();
         }
 
-        IFhirStore? store = (storeName != null) && (FhirStoreManager.IInstance?.TryGetValue(storeName, out IFhirStore? fhirStore) == true)
+        IFhirStore? store = (storeName is not null) && (FhirStoreManager.IInstance?.TryGetValue(storeName, out IFhirStore? fhirStore) == true)
             ? fhirStore
             : null;
 

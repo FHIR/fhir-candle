@@ -92,14 +92,14 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
 
     /// <summary>Adds a search parameter definition.</summary>
     /// <param name="spDefinition">The sp definition.</param>
-    void SetExecutableSearchParameter(Hl7.Fhir.Model.ModelInfo.SearchParamDefinition spDefinition);
+    void SetExecutableSearchParameter(Hl7.Fhir.Model.SearchParamDefinition spDefinition);
 
     /// <summary>Removes the executable search parameter described by name.</summary>
     /// <param name="name">The name.</param>
     void RemoveExecutableSearchParameter(string name);
 
     /// <summary>
-    /// Attempts to get search parameter definition a ModelInfo.SearchParamDefinition from the given
+    /// Attempts to get search parameter definition a SearchParamDefinition from the given
     /// string.
     /// </summary>
     /// <param name="name">        The name.</param>
@@ -107,14 +107,14 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>True if it succeeds, false if it fails.</returns>
     bool TryGetSearchParamDefinition(
         string name,
-        [NotNullWhen(true)] out Hl7.Fhir.Model.ModelInfo.SearchParamDefinition? spDefinition);
+        [NotNullWhen(true)] out Hl7.Fhir.Model.SearchParamDefinition? spDefinition);
 
     /// <summary>Gets the search parameter definitions known by this store</summary>
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search parameter definitions in
     /// this collection.
     /// </returns>
-    IEnumerable<Hl7.Fhir.Model.ModelInfo.SearchParamDefinition> GetSearchParamDefinitions();
+    IEnumerable<Hl7.Fhir.Model.SearchParamDefinition> GetSearchParamDefinitions();
 
     /// <summary>Gets the search includes supported by this store.</summary>
     /// <returns>
@@ -135,7 +135,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <param name="value"> The value.</param>
     /// <param name="r">     [out] The resolved resource process.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    bool TryResolveIdentifier(string system, string value, out Hl7.Fhir.Model.Resource? r);
+    bool TryResolveIdentifier(string? system, string? value, out Hl7.Fhir.Model.Resource? r);
 
     /// <summary>Sets executable subscription information.</summary>
     /// <param name="url">             URL of the resource.</param>

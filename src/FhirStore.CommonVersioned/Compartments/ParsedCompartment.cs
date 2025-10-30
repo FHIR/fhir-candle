@@ -62,17 +62,17 @@ public class ParsedCompartment
     [SetsRequiredMembers]
     public ParsedCompartment(Hl7.Fhir.Model.CompartmentDefinition cd)
     {
-        Url = cd.Url;
-        Name = cd.Name;
-        Version = cd.Version;
+        Url = cd.Url ?? Guid.NewGuid().ToString();
+        Name = cd.Name ?? cd.Id ?? string.Empty;
+        Version = cd.Version ?? string.Empty;
         CompartmentType = cd.Code.GetLiteral() ?? throw new Exception($"Cannot parse compartment definition without a code element!");
 
         IncludedResources = cd.Resource
-            .Where(r => (r.Code != null) && (r.Param.Count() > 0))
+            .Where(r => (r.Code is not null) && (r.Param.Count() > 0))
             .Select(r => new IncludedResource
             {
                 ResourceType = r.Code.GetLiteral()!,
-                SearchParamCodes = r.Param.Select(c => c == "{def}" ? "_id" : c).ToArray(),
+                SearchParamCodes = r.Param.Select(c => c == "{def}" ? "_id" : c ?? string.Empty).ToArray(),
             })
             .ToDictionary(ir => ir.ResourceType, ir => ir);
     }

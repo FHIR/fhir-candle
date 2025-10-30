@@ -93,7 +93,7 @@ else
     {
         if (e.Location.ToLowerInvariant().Contains("/subscriptions/local", StringComparison.Ordinal))
         {
-            if (_store != null)
+            if (_store is not null)
             {
                 _store.OnInstanceCreated -= Store_OnChanged;
                 _store.OnInstanceDeleted -= Store_OnChanged;
@@ -153,7 +153,7 @@ else
     /// </summary>
     public void Dispose()
     {
-        if (_store != null)
+        if (_store is not null)
         {
             _store.OnInstanceCreated -= Store_OnChanged;
             _store.OnInstanceDeleted -= Store_OnChanged;

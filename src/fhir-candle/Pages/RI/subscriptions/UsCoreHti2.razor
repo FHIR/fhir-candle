@@ -11,7 +11,7 @@
 @inject IDialogService DialogService
 @inject IMessageService MessageService
 @inject IHttpContextAccessor HttpContextAccessor
-@inject ProtectedLocalStorage BrowserStore
+@* @inject ProtectedLocalStorage BrowserStore *@
 
 @implements IDisposable
 @implements IPackagePage
@@ -30,8 +30,7 @@
 
     <FhirCandle.Ui.R4.Subscriptions.UsCoreHti2ContentsR4
         StoreName="@StoreName"
-        Store="@_store"
-        BrowserStore="@BrowserStore" />
+        Store="@_store" />
 
 </FluentStack>
 

@@ -259,7 +259,7 @@ public class R4TestsObservation : IClassFixture<R4Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -289,7 +289,7 @@ public class R4TestsObservation : IClassFixture<R4Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -329,7 +329,7 @@ public class R4TestsObservation : IClassFixture<R4Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -452,7 +452,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -484,7 +484,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -525,7 +525,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -561,7 +561,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -571,9 +571,9 @@ public class R4TestsPatient : IClassFixture<R4Tests>
         string getUrl;
         string postUrl;
 
-        bool hasSearchParams = search != null;
+        bool hasSearchParams = search is not null;
 
-        if (resourceType == null)
+        if (resourceType is null)
         {
             getUrl = hasSearchParams
                 ? $"{_fixture._store.Config.BaseUrl}/Patient/{id}/*?{search}"
@@ -606,7 +606,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             DestinationFormat = "application/fhir+json",
         };
 
-        bool success = resourceType == null
+        bool success = resourceType is null
             ? _fixture._store.CompartmentSearch(ctx, out response)
             : _fixture._store.CompartmentTypeSearch(ctx, out response);
 
@@ -618,7 +618,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -647,7 +647,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
             DestinationFormat = "application/fhir+json",
         };
 
-        success = resourceType == null
+        success = resourceType is null
             ? _fixture._store.CompartmentSearch(ctx, out response)
             : _fixture._store.CompartmentTypeSearch(ctx, out response);
 
@@ -659,7 +659,7 @@ public class R4TestsPatient : IClassFixture<R4Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -763,7 +763,7 @@ public class R4TestConditionals : IClassFixture<R4Tests>
             throw new ArgumentException($"Could not deserialize json: {json}");
         }
 
-        if (r == null)
+        if (r is null)
         {
             throw new ArgumentException($"Could not deserialize json: {json}");
         }

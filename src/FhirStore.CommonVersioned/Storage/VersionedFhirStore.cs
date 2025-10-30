@@ -188,7 +188,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="config">The configuration.</param>
     public void Init(TenantConfiguration config)
     {
-        if (config == null)
+        if (config is null)
         {
             throw new ArgumentNullException(nameof(config));
         }
@@ -206,7 +206,7 @@ public partial class VersionedFhirStore : IFhirStore
         _config = config;
         //_baseUri = new Uri(config.ControllerName);
 
-        if (_subscriptionConverter == null!)
+        if (_subscriptionConverter is null)
         {
             _subscriptionConverter = new(config.MaxSubscriptionExpirationMinutes);
         }
@@ -243,16 +243,16 @@ public partial class VersionedFhirStore : IFhirStore
                 _topicConverter,
                 _subscriptionConverter);
 
-            if (irs != null)
+            if (irs is not null)
             {
                 _store.Add(tn, irs);
             }
         }
 
         // create executable versions of known search parameters
-        foreach (ModelInfo.SearchParamDefinition spDefinition in ModelInfo.SearchParameters)
+        foreach (SearchParamDefinition spDefinition in ModelInfo.SearchParameters)
         {
-            if (spDefinition.Resource != null)
+            if (spDefinition.Resource is not null)
             {
                 if (_store.TryGetValue(spDefinition.Resource, out IVersionedResourceStore? rs))
                 {
@@ -268,7 +268,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // check for a load directory
-        if ((config.LoadDirectory != null) && _loadedSupplements.Add(config.LoadDirectory.FullName))
+        if ((config.LoadDirectory is not null) && _loadedSupplements.Add(config.LoadDirectory.FullName))
         {
             _hasProtected = config.ProtectLoadedContent;
             _loadReprocess = new();
@@ -290,7 +290,7 @@ public partial class VersionedFhirStore : IFhirStore
                                 out _,
                                 _loadState == LoadStateCodes.Read);
 
-                            success = sc.IsSuccessful() && (r != null);
+                            success = sc.IsSuccessful() && (r is not null);
                         }
                         break;
 
@@ -303,7 +303,7 @@ public partial class VersionedFhirStore : IFhirStore
                                 out _,
                                 _loadState == LoadStateCodes.Read);
 
-                            success = sc.IsSuccessful() && (r != null);
+                            success = sc.IsSuccessful() && (r is not null);
                         }
                         break;
 
@@ -404,7 +404,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             IFhirOperation? fhirOp = (IFhirOperation?)Activator.CreateInstance(opType);
 
-            if ((fhirOp == null) ||
+            if ((fhirOp is null) ||
                 (!fhirOp.CanonicalByFhirVersion.ContainsKey(_config.FhirVersion)))
             {
                 continue;
@@ -423,7 +423,7 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     Hl7.Fhir.Model.OperationDefinition? opDef = fhirOp.GetDefinition(_config.FhirVersion);
 
-                    if (opDef != null)
+                    if (opDef is not null)
                     {
                         _ = InstanceCreate(new FhirRequestContext(this, "POST", "OperationDefinition", opDef), out _);
                     }
@@ -448,7 +448,7 @@ public partial class VersionedFhirStore : IFhirStore
             IFhirInteractionHook? hook = (IFhirInteractionHook?)Activator.CreateInstance(hookType);
 
             // skip if not supported by this fhir version
-            if ((hook == null) ||
+            if ((hook is null) ||
                 ((hook.SupportedFhirVersions.Count != 0) && !hook.SupportedFhirVersions.Contains(_config.FhirVersion)))
             {
                 continue;
@@ -780,7 +780,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         resourceName = r.TypeName;
-        id = r.Id;
+        id = r.Id!;
         return true;
     }
 
@@ -1026,7 +1026,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="uri">     URI of the resource.</param>
     /// <param name="resource">[out] The resource.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool TryResolve(string uri, out ITypedElement? resource)
+    public bool TryResolve(string uri, out PocoNode? resource)
     {
         string[] components = uri.Split('/');
 
@@ -1047,13 +1047,13 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? resolved = rs.InstanceRead(id);
 
-        if (resolved == null)
+        if (resolved is null)
         {
             resource = null;
             return false;
         }
 
-        resource = resolved.ToTypedElement().ToScopedNode();
+        resource = resolved.ToPocoNode();
         return true;
     }
 
@@ -1089,15 +1089,14 @@ public partial class VersionedFhirStore : IFhirStore
 
         resource = rs.InstanceRead(id);
 
-        return resource != null;
+        return resource is not null;
     }
 
     /// <summary>Resolves the given URI into a resource.</summary>
     /// <exception cref="ArgumentException">Thrown when one or more arguments have unsupported or
     ///  illegal values.</exception>
     /// <param name="uri">URI of the resource.</param>
-    /// <returns>An ITypedElement.</returns>
-    public ITypedElement Resolve(string uri)
+    public PocoNode Resolve(string uri)
     {
         string[] components = uri.Split('/');
 
@@ -1119,8 +1118,9 @@ public partial class VersionedFhirStore : IFhirStore
             //throw new ArgumentException("Invalid URI - unsupported resource type", nameof(uri));
         }
 
-        return rs.InstanceRead(id)?.ToTypedElement().ToScopedNode() ?? null!;
+        return rs.InstanceRead(id)?.ToPocoNode() ?? null!;
     }
+
 
     /// <summary>Performs the interaction specified in the request.</summary>
     /// <param name="ctx">            The request context.</param>
@@ -1160,7 +1160,7 @@ public partial class VersionedFhirStore : IFhirStore
             case Common.StoreInteractionCodes.InstanceUpdate:
             case Common.StoreInteractionCodes.InstanceUpdateConditional:
                 {
-                    if (serializeReturn || (ctx.SourceObject == null) || (ctx.SourceObject is not Resource r))
+                    if (serializeReturn || (ctx.SourceObject is null) || (ctx.SourceObject is not Resource r))
                     {
                         return InstanceUpdate(ctx, out response);
                     }
@@ -1171,7 +1171,7 @@ public partial class VersionedFhirStore : IFhirStore
             case Common.StoreInteractionCodes.TypeCreate:
             case Common.StoreInteractionCodes.TypeCreateConditional:
                 {
-                    if (serializeReturn || (ctx.SourceObject == null) || (ctx.SourceObject is not Resource r))
+                    if (serializeReturn || (ctx.SourceObject is null) || (ctx.SourceObject is not Resource r))
                     {
                         return InstanceCreate(ctx, out response, forceAllowExistingId);
                     }
@@ -1211,7 +1211,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             case Common.StoreInteractionCodes.SystemBundle:
                 {
-                    if (serializeReturn || (ctx.SourceObject == null) || (ctx.SourceObject is not Bundle b))
+                    if (serializeReturn || (ctx.SourceObject is null) || (ctx.SourceObject is not Bundle b))
                     {
                         return ProcessBundle(ctx, out response);
                     }
@@ -1339,7 +1339,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out r,
                 out string exMessage);
 
-            if ((!sc.IsSuccessful()) || (r == null))
+            if ((!sc.IsSuccessful()) || (r is null))
             {
                 OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
@@ -1363,11 +1363,11 @@ public partial class VersionedFhirStore : IFhirStore
             out response,
             forceAllowExistingId);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -1439,14 +1439,14 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 content = (Resource)hr.Resource;
             }
@@ -1460,7 +1460,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext searchResp);
 
             if (success &&
-                searchResp.Resource is Bundle bundle)
+                (searchResp.Resource is Bundle bundle))
             {
                 switch (bundle.Total)
                 {
@@ -1471,15 +1471,25 @@ public partial class VersionedFhirStore : IFhirStore
                     // one match - return the match as if just stored except with OK instead of Created
                     case 1:
                         {
-                            Resource r = bundle.Entry[0].Resource;
+                            if (bundle.Entry[0].Resource is not Resource r)
+                            {
+                                response = new()
+                                {
+                                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                                        HttpStatusCode.PreconditionFailed,
+                                        $"If-None-Exist query returned an entry without a resource: {bundle.Entry[0].FullUrl}"),
+                                    StatusCode = HttpStatusCode.PreconditionFailed,
+                                };
+                                return false;
+                            }
 
                             response = new()
                             {
                                 Resource = r,
                                 ResourceType = r.TypeName,
-                                Id = r.Id,
+                                Id = r.Id!,
                                 ETag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"",
-                                LastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
+                                LastModified = r.Meta?.LastUpdated is null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
                                 Location = $"{getBaseUrl(ctx)}/{resourceType}/{r.Id}",
                                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.OK,
@@ -1534,14 +1544,14 @@ public partial class VersionedFhirStore : IFhirStore
                         out FhirResponseContext hr);
 
                 // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
+                if (hr.StatusCode is not null)
                 {
                     response = hr;
                     return true;
                 }
 
                 // if the hook modified the resource, use that moving forward
-                if (hr.Resource != null)
+                if (hr.Resource is not null)
                 {
                     sForHook = (Resource)hr.Resource;
                     stored = sForHook;
@@ -1549,7 +1559,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        if (stored == null)
+        if (stored is null)
         {
             response = new()
             {
@@ -1565,7 +1575,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             _protectedResources.Add(resourceType + "/" + stored.Id);
         }
-        else if (_maxResourceCount != 0)
+        else if ((_maxResourceCount != 0) && (stored.Meta?.VersionId is not null))
         {
             _resourceQ.Enqueue(resourceType + "/" + stored.Id + "/" + stored.Meta.VersionId);
         }
@@ -1574,9 +1584,9 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = stored,
             ResourceType = stored.TypeName,
-            Id = stored.Id,
+            Id = stored.Id!,
             ETag = string.IsNullOrEmpty(stored.Meta?.VersionId) ? string.Empty : $"W/\"{stored.Meta.VersionId}\"",
-            LastModified = stored.Meta?.LastUpdated == null ? string.Empty : stored.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
+            LastModified = stored.Meta?.LastUpdated is null ? string.Empty : stored.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
             Location = $"{getBaseUrl(ctx)}/{resourceType}/{stored.Id}",
             Outcome = SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.Created,
@@ -1610,7 +1620,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out r,
                 out string exMessage);
 
-            if ((!sc.IsSuccessful()) || (r == null))
+            if ((!sc.IsSuccessful()) || (r is null))
             {
                 OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
@@ -1651,11 +1661,11 @@ public partial class VersionedFhirStore : IFhirStore
             requestBundle,
             out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -1736,11 +1746,11 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -1791,7 +1801,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -1816,14 +1826,14 @@ public partial class VersionedFhirStore : IFhirStore
                         out FhirResponseContext hr);
 
                 // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
+                if (hr.StatusCode is not null)
                 {
                     response = hr;
                     return true;
                 }
 
                 // if the hook modified the resource, use that moving forward
-                if (hr.Resource != null)
+                if (hr.Resource is not null)
                 {
                     sForHook = (Resource)hr.Resource;
                     resource = sForHook;
@@ -1831,7 +1841,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        if (resource == null)
+        if (resource is null)
         {
             response = new()
             {
@@ -1847,7 +1857,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = resource,
             ResourceType = resource.TypeName,
-            Id = resource.Id,
+            Id = resource.Id!,
             Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Deleted {ctx.ResourceType}/{ctx.Id}"),
             StatusCode = HttpStatusCode.OK,
         };
@@ -1882,11 +1892,11 @@ public partial class VersionedFhirStore : IFhirStore
     {
         bool success = DoInstanceRead(ctx, out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -1963,7 +1973,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -1987,13 +1997,13 @@ public partial class VersionedFhirStore : IFhirStore
                         sForHook,
                         out FhirResponseContext hr);
 
-                if (hr.StatusCode != null)
+                if (hr.StatusCode is not null)
                 {
                     response = hr;
                     return true;
                 }
 
-                if (hr.Resource != null)
+                if (hr.Resource is not null)
                 {
                     sForHook = (Resource?)hr.Resource;
                     r = sForHook;
@@ -2001,7 +2011,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        if (r == null)
+        if (r is null)
         {
             response = new()
             {
@@ -2032,7 +2042,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        string lastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r");
+        string lastModified = r.Meta?.LastUpdated is null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r");
 
         if ((!string.IsNullOrEmpty(ctx.IfModifiedSince)) &&
             (string.Compare(lastModified, ctx.IfModifiedSince, StringComparison.Ordinal) < 0))
@@ -2084,7 +2094,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = r,
             ResourceType = r.TypeName,
-            Id = r.Id,
+            Id = r.Id!,
             ETag = eTag,
             LastModified = lastModified,
             Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{getBaseUrl(ctx)}/{r.TypeName}/{r.Id}",
@@ -2114,7 +2124,7 @@ public partial class VersionedFhirStore : IFhirStore
             out _,
             _loadState == LoadStateCodes.Read);
 
-        if ((!sc.IsSuccessful()) || (r == null))
+        if ((!sc.IsSuccessful()) || (r is null))
         {
             resourceType = string.Empty;
             id = string.Empty;
@@ -2214,7 +2224,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out Resource? deserializeResource,
                 out string exMessage);
 
-            if ((!sc.IsSuccessful()) || (deserializeResource == null))
+            if ((!sc.IsSuccessful()) || (deserializeResource is null))
             {
                 OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
                     sc,
@@ -2239,11 +2249,11 @@ public partial class VersionedFhirStore : IFhirStore
             r,
             out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -2275,7 +2285,7 @@ public partial class VersionedFhirStore : IFhirStore
             // allow empty ids during load
             if (string.IsNullOrEmpty(id))
             {
-                id = content.Id;
+                id = content.Id!;
             }
         }
 
@@ -2325,14 +2335,14 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 content = (Resource)hr.Resource;
             }
@@ -2348,7 +2358,7 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext searchResp);
 
             if (success &&
-                (searchResp.Resource != null) &&
+                (searchResp.Resource is not null) &&
                 (searchResp.Resource is Bundle bundle))
             {
                 switch (bundle?.Total)
@@ -2361,13 +2371,13 @@ public partial class VersionedFhirStore : IFhirStore
                     case 1:
                         {
                             if ((!string.IsNullOrEmpty(id)) &&
-                                (!bundle.Entry[0].Resource.Id.Equals(id, StringComparison.Ordinal)))
+                                (!bundle.Entry[0].Resource?.Id?.Equals(id, StringComparison.Ordinal) ?? false))
                             {
                                 response = new()
                                 {
                                     Outcome = SerializationUtils.BuildOutcomeForRequest(
                                         HttpStatusCode.PreconditionFailed,
-                                        $"Conditional update query returned a match with a id: {bundle.Entry[0].Resource.Id}, expected {id}"),
+                                        $"Conditional update query returned a match with a id: {bundle.Entry[0].Resource?.Id}, expected {id}"),
                                     StatusCode = HttpStatusCode.PreconditionFailed,
                                 };
                                 return false;
@@ -2426,14 +2436,14 @@ public partial class VersionedFhirStore : IFhirStore
                         out FhirResponseContext hr);
 
                 // check for the hook indicating processing is complete
-                if (hr.StatusCode != null)
+                if (hr.StatusCode is not null)
                 {
                     response = hr;
                     return true;
                 }
 
                 // if the hook modified the resource, use that moving forward
-                if (hr.Resource != null)
+                if (hr.Resource is not null)
                 {
                     sForHook = (Resource)hr.Resource;
                     resource = sForHook;
@@ -2441,7 +2451,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        if (resource == null)
+        if (resource is null)
         {
             response = new()
             {
@@ -2457,9 +2467,9 @@ public partial class VersionedFhirStore : IFhirStore
         {
             Resource = resource,
             ResourceType = resource.TypeName,
-            Id = resource.Id,
+            Id = resource.Id!,
             ETag = string.IsNullOrEmpty(resource.Meta?.VersionId) ? string.Empty : $"W/\"{resource.Meta.VersionId}\"",
-            LastModified = resource.Meta?.LastUpdated == null ? string.Empty : resource.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
+            LastModified = resource.Meta?.LastUpdated is null ? string.Empty : resource.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
             Location = $"{getBaseUrl(ctx)}/{resourceType}/{resource.Id}",
             Outcome = outcome,
             StatusCode = sc,
@@ -2526,7 +2536,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="resourceType">Type of the resource.</param>
     /// <param name="spDefinition">The sp definition.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool TrySetExecutableSearchParameter(string resourceType, ModelInfo.SearchParamDefinition spDefinition)
+    public bool TrySetExecutableSearchParameter(string resourceType, SearchParamDefinition spDefinition)
     {
         if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
@@ -2591,7 +2601,7 @@ public partial class VersionedFhirStore : IFhirStore
         string rn = resourceName ?? "Resource";
 
         // iterate over the all resource parameters
-        foreach (ModelInfo.SearchParamDefinition spd in ParsedSearchParameter._allResourceParameters.Values)
+        foreach (SearchParamDefinition spd in ParsedSearchParameter._allResourceParameters.Values)
         {
             results.Add((rn, spd.Name, spd.Code, spd.Description, EnumUtility.GetLiteral(spd.Type)));
         }
@@ -2603,7 +2613,7 @@ public partial class VersionedFhirStore : IFhirStore
             return results;
         }
 
-        foreach (ModelInfo.SearchParamDefinition spd in rs.GetSearchParamDefinitions())
+        foreach (SearchParamDefinition spd in rs.GetSearchParamDefinitions())
         {
             results.Add((resourceName, spd.Name, spd.Code, spd.Description, EnumUtility.GetLiteral(spd.Type)));
         }
@@ -2612,14 +2622,14 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>
-    /// Attempts to get search parameter definition a ModelInfo.SearchParamDefinition from the given
+    /// Attempts to get search parameter definition a SearchParamDefinition from the given
     /// string.
     /// </summary>
     /// <param name="resourceName">    [out] The resource.</param>
     /// <param name="spName">        The name.</param>
     /// <param name="spDefinition">[out] The sp definition.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool TryGetSearchParamDefinition(string resourceName, string spName, out ModelInfo.SearchParamDefinition? spDefinition)
+    public bool TryGetSearchParamDefinition(string resourceName, string spName, out SearchParamDefinition? spDefinition)
     {
         if (!_store.TryGetValue(resourceName, out IVersionedResourceStore? rs))
         {
@@ -2895,7 +2905,7 @@ public partial class VersionedFhirStore : IFhirStore
     {
         EventHandler<SubscriptionChangedEventArgs>? handler = OnSubscriptionsChanged;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -2913,7 +2923,7 @@ public partial class VersionedFhirStore : IFhirStore
     public void ChangeSubscriptionStatus(string id, string status)
     {
         if (!_subscriptions.TryGetValue(id, out ParsedSubscription? parsedSubscription) ||
-            (parsedSubscription == null))
+            (parsedSubscription is null))
         {
             return;
         }
@@ -2939,7 +2949,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         EventHandler<SubscriptionSendEventArgs>? handler = OnSubscriptionSendEvent;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -2977,7 +2987,7 @@ public partial class VersionedFhirStore : IFhirStore
     {
         EventHandler<ReceivedSubscriptionChangedEventArgs>? handler = OnReceivedSubscriptionChanged;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -3003,7 +3013,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         EventHandler<ReceivedSubscriptionEventArgs>? handler = OnReceivedSubscriptionEvent;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -3040,7 +3050,7 @@ public partial class VersionedFhirStore : IFhirStore
                 _config.BaseUrl,
                 contentLevel);
 
-            if (bundle == null)
+            if (bundle is null)
             {
                 return string.Empty;
             }
@@ -3137,12 +3147,14 @@ public partial class VersionedFhirStore : IFhirStore
         Bundle bundle)
     {
         if ((!bundle.Entry.Any()) ||
-            (bundle.Entry.First().Resource == null))
+            (bundle.Entry.First().Resource is null))
         {
             return null;
         }
 
-        if (!_subscriptionConverter.TryParse(bundle.Entry.First().Resource, bundle.Id, out ParsedSubscriptionStatus status))
+        if ((bundle.Entry.FirstOrDefault()?.Resource is not Resource r) ||
+            (!_subscriptionConverter.TryParse(r, bundle.Id ?? string.Empty, out ParsedSubscriptionStatus status)))
+
         {
             return null;
         }
@@ -3270,7 +3282,7 @@ public partial class VersionedFhirStore : IFhirStore
                     // TODO: validate this is working for generic parameters (e.g., _id)
 
                     // TODO: support inline-defined parameters
-                    if (!rs.TryGetSearchParamDefinition(filter.Name, out ModelInfo.SearchParamDefinition? spd))
+                    if (!rs.TryGetSearchParamDefinition(filter.Name, out SearchParamDefinition? spd))
                     {
                         Console.WriteLine($"Cannot apply filter with no search parameter definition {resourceName}?{filter.Name}");
                         continue;
@@ -3320,8 +3332,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out FhirResponseContext resp);
 
-        string sr = resp.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)resp.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = resp.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)resp.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = resp.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)resp.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = resp.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)resp.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = resp with
         {
@@ -3368,7 +3380,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? r = null;
 
-        if (ctx.SourceObject != null)
+        if (ctx.SourceObject is not null)
         {
             if (ctx.SourceObject is Resource resource)
             {
@@ -3424,14 +3436,14 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the content resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 r = (Resource)hr.Resource;
             }
@@ -3445,7 +3457,7 @@ public partial class VersionedFhirStore : IFhirStore
             r,
             out FhirResponseContext opResponse);
 
-        if ((opResponse.Resource != null) &&
+        if ((opResponse.Resource is not null) &&
             (opResponse.Resource is Resource))
         {
             r = (Resource)opResponse.Resource;
@@ -3467,14 +3479,14 @@ public partial class VersionedFhirStore : IFhirStore
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
+                    if (hr.Resource is not null)
                     {
                         sForHook = (Resource)hr.Resource;
                         r = sForHook;
@@ -3508,8 +3520,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3600,7 +3612,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? r = null;
 
-        if (ctx.SourceObject != null)
+        if (ctx.SourceObject is not null)
         {
             if (ctx.SourceObject is Resource resource)
             {
@@ -3656,14 +3668,14 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 r = (Resource)hr.Resource;
             }
@@ -3677,7 +3689,7 @@ public partial class VersionedFhirStore : IFhirStore
             r,
             out FhirResponseContext opResponse);
 
-        if ((opResponse.Resource != null) &&
+        if ((opResponse.Resource is not null) &&
             (opResponse.Resource is Resource responseResource))
         {
             r = responseResource;
@@ -3699,14 +3711,14 @@ public partial class VersionedFhirStore : IFhirStore
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
+                    if (hr.Resource is not null)
                     {
                         sForHook = (Resource)hr.Resource;
                         r = sForHook;
@@ -3740,8 +3752,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3829,7 +3841,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? r = null;
 
-        if (ctx.SourceObject != null)
+        if (ctx.SourceObject is not null)
         {
             if (ctx.SourceObject is Resource)
             {
@@ -3885,14 +3897,14 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 r = (Resource)hr.Resource;
             }
@@ -3929,14 +3941,14 @@ public partial class VersionedFhirStore : IFhirStore
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
+                    if (hr.Resource is not null)
                     {
                         sForHook = (Resource)hr.Resource;
                         r = sForHook;
@@ -3970,8 +3982,8 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -3995,7 +4007,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         // check for failed search
         if ((!success) ||
-            (searchResp.Resource == null) ||
+            (searchResp.Resource is null) ||
             (searchResp.Resource is not Bundle resultBundle))
         {
             response = new()
@@ -4036,7 +4048,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         Resource? match = resultBundle.Entry.First().Resource;
-        if (match == null)
+        if (match is null)
         {
             response = new()
             {
@@ -4079,20 +4091,20 @@ public partial class VersionedFhirStore : IFhirStore
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 match = (Resource)hr.Resource;
             }
         }
 
-        string id = match.Id;
+        string id = match.Id!;
 
         // attempt delete
         Resource? resource = rs.InstanceDelete(id, _protectedResources);
@@ -4112,14 +4124,14 @@ public partial class VersionedFhirStore : IFhirStore
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
+                    if (hr.Resource is not null)
                     {
                         sForHook = (Resource)hr.Resource;
                         resource = sForHook;
@@ -4128,7 +4140,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        if (resource == null)
+        if (resource is null)
         {
             response = new()
             {
@@ -4163,11 +4175,11 @@ public partial class VersionedFhirStore : IFhirStore
             ctx,
             out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -4219,7 +4231,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         // check for failed search
         if ((!success) ||
-            (searchResp.Resource == null) ||
+            (searchResp.Resource is null) ||
             (searchResp.Resource is not Bundle resultBundle))
         {
             response = new()
@@ -4261,7 +4273,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         Resource? match = resultBundle.Entry.First().Resource;
 
-        if (match == null)
+        if (match is null)
         {
             response = new()
             {
@@ -4296,21 +4308,21 @@ rs,
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
             }
 
             // if the hook modified the resource, use that moving forward
-            if (hr.Resource != null)
+            if (hr.Resource is not null)
             {
                 match = (Resource)hr.Resource;
             }
         }
 
         string resourceType = match.TypeName;
-        string id = match.Id;
+        string id = match.Id!;
 
         // attempt delete
         Resource? resource = rs.InstanceDelete(id, _protectedResources);
@@ -4331,14 +4343,14 @@ rs,
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
+                    if (hr.Resource is not null)
                     {
                         sForHook = (Resource)hr.Resource;
                         resource = sForHook;
@@ -4347,7 +4359,7 @@ rs,
             }
         }
 
-        if (resource == null)
+        if (resource is null)
         {
             response = new()
             {
@@ -4501,8 +4513,8 @@ rs,
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -4578,7 +4590,7 @@ rs,
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -4595,7 +4607,7 @@ rs,
         // execute search
         List<Resource> results = rs.TypeSearch(parameters).ToList();
 
-        if (ctx.Authorization != null)
+        if (ctx.Authorization is not null)
         {
             results = filterSearchResultsForAuth(ctx, results);
         }
@@ -4639,10 +4651,10 @@ rs,
             HashSet<string> addedIds = new();
             int resultCount = 0;
 
-            foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+            foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
             {
-                if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
-                    (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+                if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
+                    (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
                 {
                     break;
                 }
@@ -4651,10 +4663,11 @@ rs,
 
                 string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
-                if (addedIds.Contains(relativeUrl))
+                if (addedIds.Contains(relativeUrl) &&
+                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
                 {
                     // promote to match
-                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
                 }
                 else
                 {
@@ -4689,14 +4702,14 @@ rs,
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource != null) &&
+                    if ((hr.Resource is not null) &&
                         (hr.Resource is Bundle opBundle))
                     {
                         bundle = opBundle;
@@ -4727,11 +4740,11 @@ rs,
             ctx,
             out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -4747,7 +4760,7 @@ rs,
 
     private bool isAuthorizedAsSearchMatch(FhirRequestContext ctx, Resource r)
     {
-        if (ctx.Authorization == null)
+        if (ctx.Authorization is null)
         {
             return true;
         }
@@ -4795,13 +4808,13 @@ rs,
                 return true;
             }
 
-            ITypedElement te = r.ToTypedElement();
+            PocoNode pn = r.ToPocoNode();
 
             // check to see if this resource would be in the desired patient compartment
             foreach (string spCode in ir.SearchParamCodes)
             {
                 if (_searchTester.TestForMatch(
-                    te,
+                    pn,
                     ParsedSearchParameter.Parse($"?{spCode}={ctx.Authorization.LaunchPatient}", this, _store[r.TypeName], r.TypeName)))
                 {
                     return true;
@@ -4816,7 +4829,7 @@ rs,
     private List<Resource> filterSearchResultsForAuth(FhirRequestContext ctx, List<Resource> resources)
     {
         // if no authorization is required, return the unfiltered resources
-        if (ctx.Authorization == null)
+        if (ctx.Authorization is null)
         {
             return resources;
         }
@@ -4912,7 +4925,7 @@ rs,
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -4976,13 +4989,13 @@ rs,
             else
             {
                 // reduce based on compartment filters (OR)
-                results.AddRange(compartmentResults.Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf]))));
+                results.AddRange(compartmentResults.Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToPocoNode(), [cf]))));
             }
 
             appliedParameters.AddRange(parameters.Where(p => !p.IgnoredParameter));
         }
 
-        if (ctx.Authorization != null)
+        if (ctx.Authorization is not null)
         {
             results = filterSearchResultsForAuth(ctx, results);
         }
@@ -5026,10 +5039,10 @@ rs,
             HashSet<string> addedIds = new();
             int resultCount = 0;
 
-            foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+            foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
             {
-                if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
-                    (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+                if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
+                    (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
                 {
                     break;
                 }
@@ -5038,10 +5051,11 @@ rs,
 
                 string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
-                if (addedIds.Contains(relativeUrl))
+                if (addedIds.Contains(relativeUrl) &&
+                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
                 {
                     // promote to match
-                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
                 }
                 else
                 {
@@ -5076,14 +5090,14 @@ rs,
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource != null) &&
+                    if ((hr.Resource is not null) &&
                         (hr.Resource is Bundle opBundle))
                     {
                         bundle = opBundle;
@@ -5114,11 +5128,11 @@ rs,
             ctx,
             out response);
 
-        string sr = response.Resource == null
+        string sr = response.Resource is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
 
-        string so = response.Outcome == null
+        string so = response.Outcome is null
             ? string.Empty
             : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
@@ -5245,7 +5259,7 @@ rs,
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -5276,11 +5290,11 @@ rs,
         {
             // reduce based on compartment filters (OR)
             results = results
-                .Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToTypedElement(), [cf])))
+                .Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToPocoNode(), [cf])))
                 .ToList();
         }
 
-        if (ctx.Authorization != null)
+        if (ctx.Authorization is not null)
         {
             results = filterSearchResultsForAuth(ctx, results);
         }
@@ -5324,10 +5338,10 @@ rs,
             HashSet<string> addedIds = new();
             int resultCount = 0;
 
-            foreach (Resource resource in (IEnumerable<Resource>)(comparer == null ? results : results.OrderBy(r => r, comparer)))
+            foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
             {
-                if (((resultParameters.MaxResults != null) && (resultCount >= resultParameters.MaxResults)) ||
-                    (resultParameters.PageMatchCount != null) && (resultCount >= resultParameters.PageMatchCount))
+                if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
+                    (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
                 {
                     break;
                 }
@@ -5336,10 +5350,11 @@ rs,
 
                 string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
-                if (addedIds.Contains(relativeUrl))
+                if (addedIds.Contains(relativeUrl) &&
+                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
                 {
                     // promote to match
-                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
                 }
                 else
                 {
@@ -5374,14 +5389,14 @@ rs,
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource != null) &&
+                    if ((hr.Resource is not null) &&
                         (hr.Resource is Bundle opBundle))
                     {
                         bundle = opBundle;
@@ -5414,8 +5429,8 @@ rs,
             ctx,
             out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -5483,7 +5498,7 @@ rs,
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -5550,13 +5565,13 @@ rs,
                 ? null
                 : new(this, sortRequests);
 
-            foreach (Resource resource in (comparer == null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
+            foreach (Resource resource in (comparer is null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
             {
                 ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
                     ?? byResource.First().resultParameters;
 
-                if (((rpForResource.MaxResults != null) && (resultCount >= rpForResource.MaxResults)) ||
-                    ((rpForResource.PageMatchCount != null) && (resultCount >= rpForResource.PageMatchCount)))
+                if (((rpForResource.MaxResults is not null) && (resultCount >= rpForResource.MaxResults)) ||
+                    ((rpForResource.PageMatchCount is not null) && (resultCount >= rpForResource.PageMatchCount)))
                 {
                     // flag that we cannot use this total
                     resultCount = -1;
@@ -5564,7 +5579,7 @@ rs,
                 }
 
                 // skip resources we cannot include
-                if ((ctx.Authorization != null) && !isAuthorizedAsSearchMatch(ctx, resource))
+                if ((ctx.Authorization is not null) && !isAuthorizedAsSearchMatch(ctx, resource))
                 {
                     continue;
                 }
@@ -5573,10 +5588,11 @@ rs,
 
                 string relativeUrl = $"{resource.TypeName}/{resource.Id}";
 
-                if (addedIds.Contains(relativeUrl))
+                if (addedIds.Contains(relativeUrl) &&
+                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
                 {
                     // promote to match
-                    bundle.FindEntry(new ResourceReference(relativeUrl)).First().Search.Mode = Bundle.SearchEntryMode.Match;
+                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
                 }
                 else
                 {
@@ -5611,14 +5627,14 @@ rs,
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource != null) &&
+                    if ((hr.Resource is not null) &&
                         (hr.Resource is Bundle opBundle))
                     {
                         bundle = opBundle;
@@ -5665,14 +5681,14 @@ rs,
 
         string matchId = $"{focus.TypeName}/{focus.Id}";
 
-        foreach ((string reverseResourceType, List<ModelInfo.SearchParamDefinition> sps) in resultParameters.ReverseInclusions)
+        foreach ((string reverseResourceType, List<SearchParamDefinition> sps) in resultParameters.ReverseInclusions)
         {
             if (!_store.ContainsKey(reverseResourceType))
             {
                 continue;
             }
 
-            foreach (ModelInfo.SearchParamDefinition sp in sps)
+            foreach (SearchParamDefinition sp in sps)
             {
                 List<ParsedSearchParameter> parameters = new()
                 {
@@ -5737,7 +5753,7 @@ rs,
 
     /// <summary>Enumerates resolve inclusions in this collection.</summary>
     /// <param name="focus">           The focus.</param>
-    /// <param name="focusTE">         The focus te.</param>
+    /// <param name="focusPN">         The focus pn.</param>
     /// <param name="resultParameters">Options for controlling the result.</param>
     /// <param name="addedIds">        List of identifiers for the added.</param>
     /// <param name="fpContext">       The context.</param>
@@ -5746,7 +5762,7 @@ rs,
     /// </returns>
     internal IEnumerable<Resource> ResolveInclusions(
         Resource focus,
-        ITypedElement focusTE,
+        PocoNode focusPN,
         ParsedResultParameters resultParameters,
         HashSet<string> addedIds,
         FhirEvaluationContext? fpContext)
@@ -5757,11 +5773,11 @@ rs,
             return Array.Empty<Resource>();
         }
 
-        if (fpContext == null)
+        if (fpContext is null)
         {
             fpContext = new FhirEvaluationContext()
             {
-                Resource = focusTE,
+                Resource = focusPN,
                 TerminologyService = _terminology,
                 ElementResolver = Resolve,
             };
@@ -5769,51 +5785,47 @@ rs,
 
         List<Resource> inclusions = new();
 
-        foreach (ModelInfo.SearchParamDefinition sp in resultParameters.Inclusions[focus.TypeName])
+        foreach (SearchParamDefinition sp in resultParameters.Inclusions[focus.TypeName])
         {
             if (string.IsNullOrEmpty(sp.Expression))
             {
                 continue;
             }
 
-            IEnumerable<ITypedElement> extracted = GetCompiledSearchParameter(
+            IEnumerable<PocoNode> extracted = GetCompiledSearchParameter(
                 focus.TypeName,
                 sp.Name ?? string.Empty,
                 sp.Expression)
-                .Invoke(focusTE, fpContext);
+                .Invoke(focusPN, fpContext);
 
             if (!extracted.Any())
             {
                 continue;
             }
 
-            foreach (ITypedElement element in extracted)
+            foreach (PocoNode element in extracted)
             {
-                switch (element.InstanceType)
+                if ((element.Poco is not ResourceReference reference))
                 {
-                    case "Reference":
-                    case "ResourceReference":
-                        break;
-                    default:
-                        // skip non references
-                        Console.WriteLine($"AddInclusions <<< cannot include based on element of type {element.InstanceType}");
-                        continue;
+                    // skip non references
+                    Console.WriteLine($"AddInclusions <<< cannot include based on element of type {element.GetType().Name}");
+                    continue;
                 }
 
-                ResourceReference reference = element.ToPoco<ResourceReference>();
+                //ResourceReference reference = element.ToPoco<ResourceReference>();
                 Resource? resolved = null;
 
                 if ((!string.IsNullOrEmpty(reference.Reference)) &&
                     TryResolveAsResource(reference.Reference, out resolved) &&
-                    (resolved != null))
+                    (resolved is not null))
                 {
                     if (sp.Target?.Any() ?? false)
                     {
                         // verify this is a valid target type
                         Hl7.Fhir.Model.ResourceType? rt = ModelInfo.FhirTypeNameToResourceType(resolved.TypeName);
 
-                        if (rt == null ||
-                            !sp.Target.Contains(rt.Value))
+                        if (rt is null ||
+                            !sp.Target.Any(t => EnumUtility.GetLiteral(t) == resolved.TypeName))
                         {
                             continue;
                         }
@@ -5834,13 +5846,13 @@ rs,
                     continue;
                 }
 
-                if (reference.Identifier != null)
+                if (reference.Identifier is not null)
                 {
                     // check if a type was specified
                     if (!string.IsNullOrEmpty(reference.Type) && _store.ContainsKey(reference.Type))
                     {
                         if (_store[reference.Type].TryResolveIdentifier(reference.Identifier.System, reference.Identifier.Value, out resolved) &&
-                            (resolved != null))
+                            (resolved is not null))
                         {
                             string includedId = $"{resolved.TypeName}/{resolved.Id}";
                             if (addedIds.Contains(includedId))
@@ -5862,7 +5874,7 @@ rs,
                     foreach (string resourceType in _store.Keys)
                     {
                         if (_store[resourceType].TryResolveIdentifier(reference.Identifier.System, reference.Identifier.Value, out resolved) &&
-                            (resolved != null))
+                            (resolved is not null))
                         {
                             string includedId = $"{resolved.TypeName}/{resolved.Id}";
                             if (addedIds.Contains(includedId))
@@ -5905,16 +5917,16 @@ rs,
             return;
         }
 
-        ITypedElement resourceTE = resource.ToTypedElement();
+        PocoNode resourcePN = resource.ToPocoNode();
 
         FhirEvaluationContext fpContext = new FhirEvaluationContext()
         {
-            Resource = resourceTE,
+            Resource = resourcePN,
             TerminologyService = _terminology,
             ElementResolver = Resolve,
         };
 
-        IEnumerable<Resource> inclusions = ResolveInclusions(resource, resourceTE, resultParameters, addedIds, fpContext);
+        IEnumerable<Resource> inclusions = ResolveInclusions(resource, resourcePN, resultParameters, addedIds, fpContext);
 
         foreach (Resource inclusion in inclusions)
         {
@@ -5933,8 +5945,8 @@ rs,
     {
         bool success = DoGetMetadata(ctx, out response);
 
-        string sr = response.Resource == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
-        string so = response.Outcome == null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
         {
@@ -5983,7 +5995,7 @@ rs,
                 out FhirResponseContext hr);
 
             // check for the hook indicating processing is complete
-            if (hr.StatusCode != null)
+            if (hr.StatusCode is not null)
             {
                 response = hr;
                 return true;
@@ -6008,14 +6020,14 @@ rs,
                             out FhirResponseContext hr);
 
                     // check for the hook indicating processing is complete
-                    if (hr.StatusCode != null)
+                    if (hr.StatusCode is not null)
                     {
                         response = hr;
                         return true;
                     }
 
                     // if the hook modified the resource, use that moving forward
-                    if (hr.Resource != null)
+                    if (hr.Resource is not null)
                     {
                         sForHook = (Resource)hr.Resource;
                         r = sForHook;
@@ -6024,7 +6036,7 @@ rs,
             }
         }
 
-        if (r == null)
+        if (r is null)
         {
             response = new()
             {
@@ -6048,7 +6060,7 @@ rs,
                 $"Retrieved current CapabilityStatement",
                 OperationOutcome.IssueType.Success),
             ETag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"",
-            LastModified = r.Meta?.LastUpdated == null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
+            LastModified = r.Meta?.LastUpdated is null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
             Location = string.IsNullOrEmpty(r.Id) ? string.Empty : $"{getBaseUrl(ctx)}/{r.TypeName}/{r.Id}",
             StatusCode = HttpStatusCode.OK,
         };
@@ -6117,7 +6129,7 @@ rs,
                 {
                     Name = featureName,
                     Context = string.IsNullOrEmpty(context) ? null : context,
-                    Value = inputValue != null ? [ inputValue ] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [],
+                    Value = inputValue is not null ? [ inputValue ] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [],
                     Matches = null,
                     ProcessingStatus = "unknown",
                 };
@@ -6136,7 +6148,7 @@ rs,
     {
         // check for no or 'all' context and no value
         if ((string.IsNullOrEmpty(context) || (context == "*")) &&
-            (inputValue == null) &&
+            (inputValue is null) &&
             string.IsNullOrEmpty(inputRawValue))
         {
             // List<DataType> rValues = cs.Rest
@@ -6158,7 +6170,7 @@ rs,
         }
 
         // check for specific context and no value
-        if ((inputValue == null) &&
+        if ((inputValue is null) &&
             string.IsNullOrEmpty(inputRawValue))
         {
             // return allowed values
@@ -6188,13 +6200,13 @@ rs,
                 : null;
 
         // check for invalid values
-        if (testValue == null)
+        if (testValue is null)
         {
             response = new()
             {
                 Name = featureName,
                 Context = context,
-                Value = inputValue != null ? [ inputValue] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [],
+                Value = inputValue is not null ? [ inputValue] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [],
                 Matches = null,
                 ProcessingStatus = "invalid-value",
             };
@@ -6248,7 +6260,7 @@ rs,
             {
                 Name = featureName,
                 Context = context,
-                Value =  testBool != null ? [ new FhirBoolean(testBool) ] : [],
+                Value =  testBool is not null ? [ new FhirBoolean(testBool) ] : [],
                 Matches = null,
                 ProcessingStatus = "invalid-context",
             };
@@ -6256,13 +6268,13 @@ rs,
         }
 
         // check for enumeration request
-        if (string.IsNullOrEmpty(inputRawValue) && (inputValue == null))
+        if (string.IsNullOrEmpty(inputRawValue) && (inputValue is null))
         {
             List<DataType> rValues = cs.Instantiates.Select(i => (DataType)new Canonical(i)).ToList();
 
             if (rValues.Count == 0)
             {
-                rValues = inputValue != null ? [inputValue] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [];
+                rValues = inputValue is not null ? [inputValue] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [];
             }
 
             response = new()
@@ -6280,7 +6292,7 @@ rs,
         Canonical testCanonical = new Canonical(testValue);
 
         List<DataType> responseValues = cs.Instantiates
-            .Where(i => i.Equals(testValue, StringComparison.Ordinal))
+            .Where(i => i?.Equals(testValue, StringComparison.Ordinal) ?? false)
             .Select(i => (DataType)new Canonical(i))
             .ToList();
 
@@ -6336,7 +6348,7 @@ rs,
 
     private CapabilityStatement GetCapabilities(FhirRequestContext? ctx)
     {
-        if (_capabilitiesAreStale || (ctx?.Forwarded != null))
+        if (_capabilitiesAreStale || (ctx?.Forwarded is not null))
         {
             return generateCapabilities(ctx);
         }
@@ -6569,10 +6581,10 @@ rs,
             List<string> identifiers;
 
             // only need to process POS entries that have resources
-            if ((entry.Request == null) ||
-                (entry.Request.Method == null) ||
+            if ((entry.Request is null) ||
+                (entry.Request.Method is null) ||
                 (entry.Request.Method != Bundle.HTTPVerb.POST) ||
-                (entry.Resource == null))
+                (entry.Resource is null))
             {
                 continue;
             }
@@ -6606,7 +6618,7 @@ rs,
             lookupRecs.Add(new()
             {
                 OriginalId = entry.Resource.Id,
-                FullUrl = entry.FullUrl,
+                FullUrl = entry.FullUrl!,
                 Id = Guid.NewGuid().ToString(),
                 ResourceType = entry.Resource.TypeName,
                 Identifiers = identifiers,
@@ -6633,26 +6645,26 @@ rs,
         // iterate across the bundle entries
         foreach (Bundle.EntryComponent entry in bundle.Entry)
         {
-            if (entry.Request == null)
+            if (entry.Request is null)
             {
                 continue;
             }
 
             // check the URL to see if there is a reference to fix
-            string idSegment = entry.Request.Url.Split('/')[^1].Split('?')[0];
+            string idSegment = entry.Request.Url?.Split('/')[^1].Split('?')[0] ?? string.Empty;
             if (originalIdLookup.Contains(idSegment))
             {
-                entry.Request.Url = entry.Request.Url.Replace(idSegment, originalIdLookup[idSegment].First().Id);
+                entry.Request.Url = entry.Request.Url!.Replace(idSegment, originalIdLookup[idSegment].First().Id);
             }
 
             // if there is no resource, there is nothing else to check on this entry
-            if (entry.Resource == null)
+            if (entry.Resource is null)
             {
                 continue;
             }
 
             // fix the references in this resource
-            fixTransactionEntryReferencesRecurse(entry.FullUrl, entry.Resource, fullUrlLookup, originalIdLookup, identifierLookup, true);
+            fixTransactionEntryReferencesRecurse(entry.FullUrl!, entry.Resource, fullUrlLookup, originalIdLookup, identifierLookup, true);
         }
     }
 
@@ -6664,7 +6676,7 @@ rs,
         ILookup<string, TransactionResourceIdLookupRec> identifierLookup,
         bool isRoot = false)
     {
-        if (o == null)
+        if (o is null)
         {
             return;
         }
@@ -6689,7 +6701,7 @@ rs,
                     }
 
                     // iterate across all the child elements of the resource
-                    foreach (Base child in resource.Children)
+                    foreach ((string name, object child) in resource.EnumerateElements())
                     {
                         fixTransactionEntryReferencesRecurse(
                             entryFullUrl,
@@ -6711,21 +6723,21 @@ rs,
                     if (!string.IsNullOrEmpty(rr.Reference))
                     {
                         match = fullUrlLookup[rr.Reference].FirstOrDefault();
-                        if (match != null)
+                        if (match is not null)
                         {
                             rr.Reference = match.ResourceType + "/" + match.Id;
                             return;
                         }
 
                         match = originalIdLookup[rr.Reference].FirstOrDefault();
-                        if (match != null)
+                        if (match is not null)
                         {
                             rr.Reference = match.ResourceType + "/" + match.Id;
                             return;
                         }
 
                         match = identifierLookup[rr.Reference].FirstOrDefault();
-                        if (match != null)
+                        if (match is not null)
                         {
                             rr.Reference = match.ResourceType + "/" + match.Id;
                             return;
@@ -6772,7 +6784,7 @@ rs,
                             if ((identifierParameter?.Values.Length == 1))
                             {
                                 match = identifierLookup[identifierParameter.Values[0]].FirstOrDefault();
-                                if (match != null)
+                                if (match is not null)
                                 {
                                     rr.Reference = match.ResourceType + "/" + match.Id;
                                     rr.Type = match.ResourceType;
@@ -6790,7 +6802,7 @@ rs,
                             }
 
                             // see if we can make this an identifier-based reference
-                            if ((identifierParameter != null) &&
+                            if ((identifierParameter is not null) &&
                                 (identifierParameter.Values.Length == 1) &&
                                 (identifierParameter.ValueFhirCodes?.Length == 1))
                             {
@@ -6807,10 +6819,10 @@ rs,
                     }
 
                     // check for a specified identifier
-                    if (rr.Identifier != null)
+                    if (rr.Identifier is not null)
                     {
                         match = identifierLookup[rr.Identifier.System + "|" + rr.Identifier.Value].FirstOrDefault();
-                        if (match != null)
+                        if (match is not null)
                         {
                             rr.Reference = match.ResourceType + "/" + match.Id;
                             return;
@@ -6824,19 +6836,19 @@ rs,
                         if (parts.Length == 2)
                         {
                             match = fullUrlLookup[parts[0]].FirstOrDefault();
-                            if (match != null)
+                            if (match is not null)
                             {
                                 rr.Reference = match.ResourceType + "/" + match.Id + "#" + parts[1];
                                 return;
                             }
                             match = originalIdLookup[parts[0]].FirstOrDefault();
-                            if (match != null)
+                            if (match is not null)
                             {
                                 rr.Reference = match.ResourceType + "/" + match.Id + "#" + parts[1];
                                 return;
                             }
                             match = identifierLookup[parts[0]].FirstOrDefault();
-                            if (match != null)
+                            if (match is not null)
                             {
                                 rr.Reference = match.ResourceType + "/" + match.Id + "#" + parts[1];
                                 return;
@@ -6852,7 +6864,7 @@ rs,
                 }
 
             case Hl7.Fhir.Model.Base b:
-                foreach (Base child in b.Children)
+                foreach ((string name, object child) in b.EnumerateElements())
                 {
                     fixTransactionEntryReferencesRecurse(
                         entryFullUrl,
@@ -6902,7 +6914,7 @@ rs,
         }
 
         // check for entries without a request
-        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request == null))
+        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request is null))
         {
             response.Entry.Add(new Bundle.EntryComponent()
             {
@@ -6928,6 +6940,23 @@ rs,
             bool opSuccess;
             FhirResponseContext opResponse;
 
+            if (entry.Request is null)
+            {
+                response.Entry.Add(new()
+                {
+                    FullUrl = entry.FullUrl,
+                    Response = new()
+                    {
+                        Status = getResponseStatus(HttpStatusCode.BadRequest),
+                        Outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.UnprocessableEntity,
+                            "Entry is missing a request",
+                            OperationOutcome.IssueType.Required),
+                    },
+                });
+                return;
+            }
+
             FhirRequestContext entryCtx = new()
             {
                 TenantName = ctx.TenantName,
@@ -6936,7 +6965,7 @@ rs,
                 RequestHeaders = ctx.RequestHeaders,
                 Forwarded = ctx.Forwarded,
                 HttpMethod = entry.Request.Method?.ToString() ?? string.Empty,
-                Url = entry.Request.Url,
+                Url = entry.Request.Url ?? string.Empty,
                 IfMatch = entry.Request.IfMatch ?? string.Empty,
                 IfModifiedSince = entry.Request.IfModifiedSince?.ToFhirDateTime() ?? string.Empty,
                 IfNoneMatch = entry.Request.IfNoneMatch ?? string.Empty,
@@ -6945,7 +6974,7 @@ rs,
                 SourceObject = entry.Resource,
             };
 
-            if (entryCtx.Interaction == null)
+            if (entryCtx.Interaction is null)
             {
                 response.Entry.Add(new()
                 {
@@ -7003,7 +7032,7 @@ rs,
             }
             else
             {
-                if ((opResponse.Outcome == null) || (opResponse.Outcome is not OperationOutcome oo))
+                if ((opResponse.Outcome is null) || (opResponse.Outcome is not OperationOutcome oo))
                 {
                     oo = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.NotImplemented,
@@ -7049,7 +7078,7 @@ rs,
 
         foreach (Bundle.EntryComponent entry in batch.Entry)
         {
-            if (entry.Request == null)
+            if (entry.Request is null)
             {
                 response.Entry.Add(new()
                 {
@@ -7075,7 +7104,7 @@ rs,
                 RequestHeaders = ctx.RequestHeaders,
                 Forwarded = ctx.Forwarded,
                 HttpMethod = entry.Request.Method?.ToString() ?? string.Empty,
-                Url = entry.Request.Url,
+                Url = entry.Request.Url ?? string.Empty,
                 IfMatch = entry.Request.IfMatch ?? string.Empty,
                 IfModifiedSince = entry.Request.IfModifiedSince?.ToFhirDateTime() ?? string.Empty,
                 IfNoneMatch = entry.Request.IfNoneMatch ?? string.Empty,
@@ -7084,7 +7113,7 @@ rs,
                 SourceObject = entry.Resource,
             };
 
-            if (entryCtx.Interaction == null)
+            if (entryCtx.Interaction is null)
             {
                 response.Entry.Add(new()
                 {
@@ -7142,7 +7171,7 @@ rs,
             }
             else
             {
-                if ((opResponse.Outcome == null) || (opResponse.Outcome is not OperationOutcome oo))
+                if ((opResponse.Outcome is null) || (opResponse.Outcome is not OperationOutcome oo))
                 {
                     oo = SerializationUtils.BuildOutcomeForRequest(
                             HttpStatusCode.NotImplemented,
@@ -7178,7 +7207,7 @@ rs,
     {
         EventHandler<StoreInstanceEventArgs>? handler = OnInstanceCreated;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -7194,7 +7223,7 @@ rs,
     {
         EventHandler<StoreInstanceEventArgs>? handler = OnInstanceUpdated;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -7211,7 +7240,7 @@ rs,
     {
         EventHandler<StoreInstanceEventArgs>? handler = OnInstanceDeleted;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {

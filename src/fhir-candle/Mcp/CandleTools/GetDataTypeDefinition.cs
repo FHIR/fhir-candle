@@ -64,7 +64,7 @@ public class GetDataTypeDefinition : ICandleMcpTool
     /// - An error message if the data type name is null or the data type is not resolved
     /// - The definition of the requested data type, if available
     /// </returns>
-    public CallToolResponse RunTool(
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
@@ -76,7 +76,7 @@ public class GetDataTypeDefinition : ICandleMcpTool
             dtName = je.GetString();
         }
 
-        if (dtName == null)
+        if (dtName is null)
         {
             return CommonCandleMcp.GetResponse("Data type name is missing or not provided and is required");
         }

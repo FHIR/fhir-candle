@@ -44,7 +44,7 @@ namespace fhir.candle._ForPackages
         [JsonIgnore]
         public string? Author
         {
-            get => (AuthorInformation != null ? AuthorSerializer.Serialize(AuthorInformation) : null);
+            get => (AuthorInformation is not null ? AuthorSerializer.Serialize(AuthorInformation) : null);
             set
             {
                 if (value is not null)
@@ -283,15 +283,15 @@ namespace fhir.candle._ForPackages
         internal static string Serialize(AuthorInfo authorInfo)
         {
             var builder = new StringBuilder();
-            if (authorInfo.Name != null)
+            if (authorInfo.Name is not null)
             {
                 builder.Append(authorInfo.Name);
             }
-            if (authorInfo.Email != null)
+            if (authorInfo.Email is not null)
             {
                 builder.Append($" {EMAIL_START_CHAR}{authorInfo.Email}{EMAIL_END_CHAR}");
             }
-            if (authorInfo.Url != null)
+            if (authorInfo.Url is not null)
             {
                 builder.Append($" {URL_START_CHAR}{authorInfo.Url}{URL_END_CHAR}");
             }

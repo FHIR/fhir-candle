@@ -161,7 +161,7 @@ public class FhirNpmPackageDetails
         //catch (JsonException jex)
         //{
         //    Console.WriteLine($"FhirNpmPackageDetails.Parse <<< caught JSON exception in typed parse: {jex.Message}");
-        //    if (jex.InnerException != null)
+        //    if (jex.InnerException is not null)
         //    {
         //        Console.WriteLine($" <<< {jex.InnerException.Message}");
         //    }
@@ -169,13 +169,13 @@ public class FhirNpmPackageDetails
         //    details = null;
         //}
 
-        //if (details == null)
+        //if (details is null)
         //{
             try
             {
                 JsonNode? node = JsonNode.Parse(contents);
 
-                if (node == null)
+                if (node is null)
                 {
                     details = null;
                 }
@@ -208,7 +208,7 @@ public class FhirNpmPackageDetails
             catch (JsonException jex)
             {
                 Console.WriteLine($"FhirNpmPackageDetails.Parse <<< caught JSON exception in untyped parse: {jex.Message}");
-                if (jex.InnerException != null)
+                if (jex.InnerException is not null)
                 {
                     Console.WriteLine($" <<< {jex.InnerException.Message}");
                 }
@@ -278,7 +278,7 @@ public class FhirNpmPackageDetails
             }
         }
 
-        if (details.Dependencies == null)
+        if (details.Dependencies is null)
         {
             details.Dependencies = new();
         }
@@ -293,7 +293,7 @@ public class FhirNpmPackageDetails
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static Dictionary<string, string> StringDictFromNode(JsonNode? node, string prop)
     {
-        if (node?[prop] == null)
+        if (node?[prop] is null)
         {
             return new();
         }
@@ -304,7 +304,7 @@ public class FhirNpmPackageDetails
         {
             foreach ((string key, object? oNode) in obj)
             {
-                if (oNode == null)
+                if (oNode is null)
                 {
                     continue;
                 }
@@ -336,7 +336,7 @@ public class FhirNpmPackageDetails
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static IEnumerable<string> EnumerableStringFromNode(JsonNode? node, string prop)
     {
-        if (node?[prop] == null)
+        if (node?[prop] is null)
         {
             return Enumerable.Empty<string>();
         }
@@ -374,7 +374,7 @@ public class FhirNpmPackageDetails
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static string StringFromNode(JsonNode? node, string prop)
     {
-        if (node?[prop] == null)
+        if (node?[prop] is null)
         {
             return string.Empty;
         }

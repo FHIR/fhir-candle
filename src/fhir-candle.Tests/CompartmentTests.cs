@@ -13,6 +13,7 @@ using Resource = Hl7.Fhir.Model.Resource;
 using TenantConfiguration = FhirCandle.Models.TenantConfiguration;
 using Shouldly;
 using static FhirCandle.Storage.Common;
+using Hl7.Fhir.Serialization;
 
 namespace fhir.candle.Tests;
 
@@ -45,8 +46,8 @@ public class AuthCompartmentTests: IDisposable
     public void TestCompartmentTypeSearch(string json)
     {
         // load compartment
-        var jsonParser = new coreR4::Hl7.Fhir.Serialization.FhirJsonParser();
-        var compartmentDefinition = jsonParser.Parse(json) as coreR4::Hl7.Fhir.Model.CompartmentDefinition;
+        var jsonParser = coreR4::Hl7.Fhir.Serialization.FhirJsonDeserializer.OSTRICH;
+        var compartmentDefinition = jsonParser.DeserializeResource(json) as coreR4::Hl7.Fhir.Model.CompartmentDefinition;
         compartmentDefinition.ShouldNotBeNull();
 
         string path = Path.GetRelativePath(Directory.GetCurrentDirectory(), "data/r4");

@@ -34,14 +34,14 @@ public class SubscriptionConverter
     }
     public void UpdateResourceStatus(object subscription, string statusLiteral)
     {
-        if ((subscription == null) ||
+        if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub))
         {
             return;
         }
 
         SubscriptionStatusCodes? status = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<SubscriptionStatusCodes>(statusLiteral);
-        if (status == null)
+        if (status is null)
         {
             return;
         }
@@ -55,7 +55,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object subscription, out ParsedSubscription common)
     {
-        if ((subscription == null) ||
+        if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub) ||
             string.IsNullOrEmpty(sub.Id) ||
             string.IsNullOrEmpty(sub.Topic) ||
@@ -83,12 +83,12 @@ public class SubscriptionConverter
             Tags = tags,
             ChannelSystem = sub.ChannelType?.System ?? string.Empty,
             ChannelCode = sub.ChannelType?.Code ?? string.Empty,
-            Endpoint = sub.Endpoint,
+            Endpoint = sub.Endpoint ?? string.Empty,
             HeartbeatSeconds = sub.HeartbeatPeriod ?? 0,
             TimeoutSeconds = sub.Timeout ?? 0,
-            ContentType = sub.ContentType,
+            ContentType = sub.ContentType ?? string.Empty,
             ContentLevel =
-                sub.Content != null
+                sub.Content is not null
                 ? Hl7.Fhir.Utility.EnumUtility.GetLiteral(sub.Content)!
                 : string.Empty,
             MaxEventsPerNotification = sub.MaxCount ?? 0,
@@ -100,12 +100,17 @@ public class SubscriptionConverter
         {
             foreach (Hl7.Fhir.Model.Subscription.ParameterComponent param in sub.Parameter)
             {
+                if (param.Name is null)
+                {
+                    continue;
+                }
+
                 if (!common.Parameters.ContainsKey(param.Name))
                 {
                     common.Parameters.Add(param.Name, new());
                 }
 
-                common.Parameters[param.Name].Add(param.Value.ToString());
+                common.Parameters[param.Name].Add(param.Value?.ToString() ?? string.Empty);
             }
         }
 
@@ -123,10 +128,10 @@ public class SubscriptionConverter
 
                 common.Filters[key].Add(new(
                     filter.ResourceType ?? string.Empty,
-                    filter.FilterParameter,
+                    filter.FilterParameter ?? string.Empty,
                     filter.Comparator?.ToString() ?? string.Empty,
                     filter.Modifier?.ToString() ?? string.Empty,
-                    filter.Value));
+                    filter.Value ?? string.Empty));
             }
         }
 
@@ -137,7 +142,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(ParsedSubscription common, out Subscription subscription)
     {
-        if ((common == null) ||
+        if ((common is null) ||
             string.IsNullOrEmpty(common.Id) ||
             string.IsNullOrEmpty(common.TopicUrl))
         {
@@ -175,7 +180,7 @@ public class SubscriptionConverter
         // add tags
         if (common.Tags.Count != 0)
         {
-            if (subscription.Meta == null)
+            if (subscription.Meta is null)
             {
                 subscription.Meta = new();
             }
@@ -236,7 +241,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object subscriptionStatus, string bundleId, out ParsedSubscriptionStatus common)
     {
-        if ((subscriptionStatus == null) ||
+        if ((subscriptionStatus is null) ||
             (subscriptionStatus is not Hl7.Fhir.Model.SubscriptionStatus status))
         {
             common = null!;
@@ -271,7 +276,12 @@ public class SubscriptionConverter
                     EventNumber = notificationEvent.EventNumber,
                     Timestamp = notificationEvent.Timestamp,
                     FocusReference = notificationEvent.Focus?.Reference ?? string.Empty,
-                    AdditionalContextReferences = notificationEvent.AdditionalContext?.Select(ac => ac.Reference) ?? Array.Empty<string>(),
+                    AdditionalContextReferences = notificationEvent.AdditionalContext is null
+                        ? Array.Empty<string>()
+                        : notificationEvent.AdditionalContext
+                            .Where(r => r?.Reference is not null)
+                            .Select(ac => ac.Reference!)
+                            .ToArray(),
                 });
             }
         }
@@ -282,11 +292,11 @@ public class SubscriptionConverter
             SubscriptionReference = status.Subscription?.Reference ?? string.Empty,
             SubscriptionTopicCanonical = status.Topic ?? string.Empty,
             Status =
-                status.Status != null
+                status.Status is not null
                 ? Hl7.Fhir.Utility.EnumUtility.GetLiteral(status.Status)!
                 : string.Empty,
             NotificationType =
-                status.Type != null
+                status.Type is not null
                 ? Hl7.Fhir.Utility.EnumUtility.GetLiteral(status.Type)!.ToFhirEnum<ParsedSubscription.NotificationTypeCodes>()
                 : null,
             EventsSinceSubscriptionStart = status.EventsSinceSubscriptionStart,

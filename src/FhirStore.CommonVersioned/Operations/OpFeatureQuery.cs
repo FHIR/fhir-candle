@@ -111,7 +111,7 @@ public class OpFeatureQuery : IFhirOperation
         List<FeatureRequestRecord?> featureRequests = paramValues
             .Where(p => !_excludedParams.Contains(p))
             .Select(ParseFeatureRequestParam)
-            .Where(r => r != null)
+            .Where(r => r is not null)
             .ToList() ?? [];
         
         // check for feature request parameters
@@ -137,7 +137,7 @@ public class OpFeatureQuery : IFhirOperation
         // ask the server to test the features
         foreach (FeatureRequestRecord? req in featureRequests)
         {
-            if (req == null)
+            if (req is null)
             {
                 continue;
             }
@@ -169,7 +169,7 @@ public class OpFeatureQuery : IFhirOperation
                     Value = v,
                 }));
             }
-            else if (req.Value != null)
+            else if (req.Value is not null)
             {
                 parts.Add(new Parameters.ParameterComponent()
                 {
@@ -186,7 +186,7 @@ public class OpFeatureQuery : IFhirOperation
                 });
             }
             
-            if (fqr.Matches != null)
+            if (fqr.Matches is not null)
             {
                 parts.Add(new Parameters.ParameterComponent()
                 {

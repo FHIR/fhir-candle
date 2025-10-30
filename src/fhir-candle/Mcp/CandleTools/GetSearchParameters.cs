@@ -64,27 +64,27 @@ public class GetSearchParameters : ICandleMcpTool
     /// <param name="resourceName">The name of the FHIR resource type to get search parameters for.</param>
     /// <param name="store">The FHIR store instance to query for search parameters.</param>
     /// <returns>
-    /// A <see cref="CallToolResponse"/> containing either the search parameters formatted as a list
+    /// A <see cref="CallToolResult"/> containing either the search parameters formatted as a list
     /// of parameter names with their search types and descriptions, or an error message if the
     /// operation fails due to missing arguments or invalid store/resource references.
     /// </returns>
-    public CallToolResponse RunTool(
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)
     {
-        if (storeName == null)
+        if (storeName is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.StoreNameArgRequired);
         }
 
-        if (store == null)
+        if (store is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.StoreNotResolved);
         }
 
-        if (resourceName == null)
+        if (resourceName is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.ResourceNameArgRequired);
         }

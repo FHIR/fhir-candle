@@ -22,14 +22,14 @@ namespace System.Runtime.CompilerServices
         // For a value of type System.Range to be used in an array element access expression, the following member must be present:
         public static T[] GetSubArray<T>(T[] array, System.Range range)
         {
-            if (array == null)
+            if (array is null)
             {
                 throw new ArgumentNullException();
             }
 
             (int offset, int length) = range.GetOffsetAndLength(array.Length);
 
-            if (default(T)! != null || typeof(T[]) == array.GetType()) // default(T) == null warning (https://github.com/dotnet/roslyn/issues/34757)
+            if (default(T)! is not null || typeof(T[]) == array.GetType()) // default(T) is null warning (https://github.com/dotnet/roslyn/issues/34757)
             {
                 if (length == 0)
                 {

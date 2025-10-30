@@ -36,7 +36,7 @@ public class GetStoreList : ICandleMcpTool
     /// Gets the MCP tool definition for this tool.
     /// </summary>
     public Tool McpTool => _tool;
-    
+
     /// <summary>
     /// Executes the GetStoreList tool to retrieve information about all configured FHIR stores.
     /// </summary>
@@ -44,8 +44,8 @@ public class GetStoreList : ICandleMcpTool
     /// <param name="storeName">The name of the FHIR store to operate on (not used by this tool).</param>
     /// <param name="resourceName">The name of the FHIR resource type to operate on (not used by this tool).</param>
     /// <param name="store">The FHIR store instance to use for operations (not used by this tool).</param>
-    /// <returns>A <see cref="CallToolResponse"/> containing the list of FHIR stores with their URLs and versions.</returns>
-    public CallToolResponse RunTool(
+    /// <returns>A <see cref="CallToolResult"/> containing the list of FHIR stores with their URLs and versions.</returns>
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,

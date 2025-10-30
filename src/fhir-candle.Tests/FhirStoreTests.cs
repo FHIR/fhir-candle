@@ -483,7 +483,7 @@ public class TestResourceInvalidElement : IClassFixture<FhirStoreTests>
     [MemberData(nameof(Configurations))]
     public void ResourceWrongLocation(FhirReleases.FhirSequenceCodes version)
     {
-        string json = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + _id + "\",\"garbage\":true}";
+        string json = "{\"resourceType\":\"NOT-" + _resourceType + "\",\"id\":\"" + _id + "\",\"garbage\":true}";
 
         IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
 

@@ -12,7 +12,7 @@ public static class SearchModifierData
         string Description,
         string Examples)
     {
-        public override string ToString() => TargetFhirType == null
+        public override string ToString() => TargetFhirType is null
             ? $$$"""
                 [{{{TargetSearchType}}}]:{{{Code}}}=[{{{ParameterValueSearchType}}}]
                 * Definition:

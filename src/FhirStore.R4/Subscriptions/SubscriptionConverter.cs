@@ -55,14 +55,14 @@ public class SubscriptionConverter
 
     public void UpdateResourceStatus(object subscription, string statusLiteral)
     {
-        if ((subscription == null) ||
+        if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub))
         {
             return;
         }
 
         Subscription.SubscriptionStatus? status = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<Subscription.SubscriptionStatus>(statusLiteral);
-        if (status == null)
+        if (status is null)
         {
             return;
         }
@@ -76,7 +76,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object subscription, out ParsedSubscription common)
     {
-        if ((subscription == null) ||
+        if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub) ||
             string.IsNullOrEmpty(sub.Id) ||
             string.IsNullOrEmpty(sub.Criteria) ||
@@ -103,7 +103,7 @@ public class SubscriptionConverter
             TopicUrl = sub.Criteria,
             Tags = tags,
             ChannelSystem = string.Empty,
-            ChannelCode = sub.Channel.Type == null
+            ChannelCode = sub.Channel.Type is null
                 ? string.Empty
                 : Hl7.Fhir.Utility.EnumUtility.GetLiteral(sub.Channel.Type)!,
             Endpoint = sub.Channel.Endpoint ?? string.Empty,
@@ -113,7 +113,7 @@ public class SubscriptionConverter
 
         Hl7.Fhir.Model.Extension? ext;
         IEnumerable<Hl7.Fhir.Model.Extension> exts;
-        Dictionary<string, List<Hl7.Fhir.Model.DataType>> parsedExts;
+        Dictionary<string, List<Hl7.Fhir.Model.DataType?>> parsedExts;
         Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> nested;
         string stringVal;
 
@@ -139,18 +139,19 @@ public class SubscriptionConverter
         }
 
         ext = sub.Channel.TypeElement.GetExtension(_urlBackport + _channelType);
-        if ((ext != null) &&
-            (ext.Value != null) &&
+        if ((ext is not null) &&
+            (ext.Value is not null) &&
             (ext.Value is Hl7.Fhir.Model.Coding coding))
         {
-            common.ChannelSystem = coding.System;
-            common.ChannelCode = coding.Code;
+            common.ChannelSystem = coding.System ?? string.Empty;
+            common.ChannelCode = coding.Code ?? string.Empty;
         }
 
         ext = sub.Channel.PayloadElement.GetExtension(_urlBackport + _content);
-        if ((ext != null) &&
-            (ext.Value != null) &&
-            (ext.Value is Hl7.Fhir.Model.Code code))
+        if ((ext is not null) &&
+            (ext.Value is not null) &&
+            (ext.Value is Hl7.Fhir.Model.Code code) &&
+            (code.Value is not null))
         {
             common.ContentLevel = code.Value;
         }
@@ -158,8 +159,13 @@ public class SubscriptionConverter
         // add parameters
         if (sub.Channel.Header?.Any() ?? false)
         {
-            foreach (string header in sub.Channel.Header)
+            foreach (string? header in sub.Channel.Header)
             {
+                if (header is null)
+                {
+                    continue;
+                }
+
                 int index = header.IndexOf(':');
                 if (index == -1)
                 {
@@ -248,7 +254,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(ParsedSubscription common, out Subscription subscription)
     {
-        if ((common == null) ||
+        if ((common is null) ||
             string.IsNullOrEmpty(common.Id) ||
             string.IsNullOrEmpty(common.TopicUrl))
         {
@@ -296,17 +302,17 @@ public class SubscriptionConverter
             End = new DateTimeOffset(common.ExpirationTicks, TimeSpan.Zero),
         };
 
-        if (common.HeartbeatSeconds != null)
+        if (common.HeartbeatSeconds is not null)
         {
             subscription.Channel.AddExtension(_urlBackport + _heartbeatPeriod, new Integer(common.HeartbeatSeconds));
         }
 
-        if (common.TimeoutSeconds != null)
+        if (common.TimeoutSeconds is not null)
         {
             subscription.Channel.AddExtension(_urlBackport + _timeout, new Integer(common.TimeoutSeconds));
         }
 
-        if (common.MaxEventsPerNotification != null)
+        if (common.MaxEventsPerNotification is not null)
         {
             subscription.Channel.AddExtension(_urlBackport + _maxCount, new Integer(common.MaxEventsPerNotification));
         }
@@ -321,7 +327,7 @@ public class SubscriptionConverter
         // add tags
         if (common.Tags.Count != 0)
         {
-            if (subscription.Meta == null)
+            if (subscription.Meta is null)
             {
                 subscription.Meta = new();
             }
@@ -385,7 +391,7 @@ public class SubscriptionConverter
         {
             ParseParameters(
                 notEventParams,
-                out Dictionary<string, List<Hl7.Fhir.Model.DataType>> values,
+                out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> values,
                 out _);
 
             eventList.Add(new ParsedSubscriptionStatus.ParsedNotificationEvent()
@@ -412,7 +418,7 @@ public class SubscriptionConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object subscriptionStatus, string bundleId, out ParsedSubscriptionStatus common)
     {
-        if ((subscriptionStatus == null) ||
+        if ((subscriptionStatus is null) ||
             (subscriptionStatus is not Hl7.Fhir.Model.Parameters status))
         {
             common = null!;
@@ -421,7 +427,7 @@ public class SubscriptionConverter
 
         ParseParameters(
             status.Parameter,
-            out Dictionary<string, List<Hl7.Fhir.Model.DataType>> values,
+            out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> values,
             out Dictionary<string, List<List<Hl7.Fhir.Model.Parameters.ParameterComponent>>> nested);
 
         common = new()

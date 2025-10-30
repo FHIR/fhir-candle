@@ -136,23 +136,23 @@ public class OpSubscriptionEvents : IFhirOperation
         }
 
         // check for body parameters
-        if ((bodyResource != null) &&
+        if ((bodyResource is not null) &&
             (bodyResource is Hl7.Fhir.Model.Parameters bodyParams) &&
             (bodyParams.Parameter?.Any() ?? false))
         {
             eventsSince = bodyParams.Parameter
-                .Where(p => p.Name.Equals("eventsSinceNumber", StringComparison.Ordinal))?
-                .Select(p => p.Value.ToString() ?? string.Empty)
+                .Where(p => p.Name?.Equals("eventsSinceNumber", StringComparison.Ordinal) ?? false)?
+                .Select(p => p.Value?.ToString() ?? string.Empty)
                 .First() ?? string.Empty;
 
             eventsUntil = bodyParams.Parameter
-                .Where(p => p.Name.Equals("eventsUntilNumber", StringComparison.Ordinal))?
-                .Select(p => p.Value.ToString() ?? string.Empty)
+                .Where(p => p.Name?.Equals("eventsUntilNumber", StringComparison.Ordinal) ?? false)?
+                .Select(p => p.Value?.ToString() ?? string.Empty)
                 .First() ?? string.Empty;
 
             contentLevel = bodyParams.Parameter
-                .Where(p => p.Name.Equals("content", StringComparison.Ordinal))?
-                .Select(p => p.Value.ToString() ?? string.Empty)
+                .Where(p => p.Name?.Equals("content", StringComparison.Ordinal) ?? false)?
+                .Select(p => p.Value?.ToString() ?? string.Empty)
                 .First() ?? string.Empty;
         }
 

@@ -60,11 +60,11 @@ public class GetSearchTypeDefinition : ICandleMcpTool
     /// <param name="resourceName">The name of the FHIR resource type to get the definition for.</param>
     /// <param name="store">The FHIR store instance to retrieve the definition from. Must not be null.</param>
     /// <returns>
-    /// A <see cref="CallToolResponse"/> containing:
+    /// A <see cref="CallToolResult"/> containing:
     /// - An error message if the resource name is null or the resource is not resolved
     /// - The definition of the requested resource type, if available
     /// </returns>
-    public CallToolResponse RunTool(
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
@@ -76,7 +76,7 @@ public class GetSearchTypeDefinition : ICandleMcpTool
             searchType = je.GetString();
         }
 
-        if (searchType == null)
+        if (searchType is null)
         {
             return CommonCandleMcp.GetResponse("Search type is missing or not provided and is required");
         }

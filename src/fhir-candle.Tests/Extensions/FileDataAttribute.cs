@@ -56,7 +56,7 @@ public class FileDataAttribute : DataAttribute
     /// <inheritDoc />
     public override IEnumerable<object[]> GetData(MethodInfo testMethod)
     {
-        if (testMethod == null) { throw new ArgumentNullException(nameof(testMethod)); }
+        if (testMethod is null) { throw new ArgumentNullException(nameof(testMethod)); }
 
         List<object> contents = new();
 

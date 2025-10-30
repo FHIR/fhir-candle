@@ -194,7 +194,7 @@ public record class FhirRequestContext
         IfNoneExist = other.IfNoneExist;
         _errorMessage = other.ErrorMessage;
         RequestHeaders = other.RequestHeaders.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-        Forwarded = other.Forwarded == null ? null : other.Forwarded with { };
+        Forwarded = other.Forwarded is null ? null : other.Forwarded with { };
 
         // make sure to read interaction before other HTTP properties that can be parsed
         Interaction = other.Interaction;
@@ -300,7 +300,7 @@ public record class FhirRequestContext
     /// <summary>Gets a base URL to use when processing this request, if specified.</summary>
     public string? RequestBaseUrl(string baseUrl)
     {
-        if (_forwarded == null)
+        if (_forwarded is null)
         {
             return null;
         }
@@ -310,7 +310,7 @@ public record class FhirRequestContext
         string proto = _forwarded.Protocol ?? baseComponents[0];
         string? host = _forwarded.Host ?? (baseComponents.Length > 1 ? baseComponents[1] : null);
 
-        if (host == null)
+        if (host is null)
         {
             return null;
         }
@@ -342,7 +342,7 @@ public record class FhirRequestContext
     /// <returns>True if authorized, false if not.</returns>
     public bool IsAuthorized()
     {
-        if (Authorization == null)
+        if (Authorization is null)
         {
             if (Store.Config.SmartRequired)
             {
@@ -352,10 +352,10 @@ public record class FhirRequestContext
             return true;
         }
 
-        if (_interaction == null)
+        if (_interaction is null)
         {
             if ((!TryParseRequest()) ||
-                (_interaction == null))
+                (_interaction is null))
             {
                 return false;
             }
@@ -368,14 +368,14 @@ public record class FhirRequestContext
     /// <returns>True if it succeeds, false if it fails.</returns>
     internal bool TryParseRequest()
     {
-        if ((_store == null) ||
+        if ((_store is null) ||
             string.IsNullOrEmpty(_httpMethod) ||
-            (_url == null))
+            (_url is null))
         {
             return false;
         }
 
-        if (_interaction != null)
+        if (_interaction is not null)
         {
             return true;
         }

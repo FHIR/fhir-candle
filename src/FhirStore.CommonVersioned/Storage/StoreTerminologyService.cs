@@ -30,8 +30,13 @@ public class StoreTerminologyService : ITerminologyService
     /// <param name="system">The system.</param>
     /// <param name="code">  The code.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool VsContains(string vsUrl, string system, string code)
+    public bool VsContains(string? vsUrl, string? system, string? code)
     {
+        if ((vsUrl is null) || (code is null))
+        {
+            return false;
+        }
+
         if (!_valueSetContents.ContainsKey(vsUrl))
         {
             return false;
@@ -53,12 +58,22 @@ public class StoreTerminologyService : ITerminologyService
     {
         if (remove)
         {
+            if (vs.Url is null)
+            {
+                return true;
+            }
+
             if (_valueSetContents.ContainsKey(vs.Url))
             {
                 _ = _valueSetContents.TryRemove(vs.Url, out _);
             }
 
             return true;
+        }
+
+        if (vs.Url is null)
+        {
+            return false;
         }
 
         HashSet<string> codes = new();
@@ -78,6 +93,11 @@ public class StoreTerminologyService : ITerminologyService
                 {
                     foreach (ValueSet.ConceptReferenceComponent crc in csc.Concept)
                     {
+                        if (crc.Code is null)
+                        {
+                            continue;
+                        }
+
                         if (!codes.Contains(crc.Code))
                         {
                             codes.Add(crc.Code);
@@ -102,6 +122,11 @@ public class StoreTerminologyService : ITerminologyService
         {
             foreach (ValueSet.ContainsComponent c in contains)
             {
+                if (c.Code is null)
+                {
+                    continue;
+                }
+
                 if (!codes.Contains(c.Code))
                 {
                     codes.Add(c.Code);
@@ -134,16 +159,26 @@ public class StoreTerminologyService : ITerminologyService
 
         if (string.IsNullOrEmpty(vsUrl))
         {
-            ValueSet? vs = parameters.Where(p => p.Key == "valueSet").Select(p => p.Value as ValueSet).FirstOrDefault();
+            ValueSet? vs = parameters.Parameter
+                .Where(p => p.Name == "valueSet")
+                .Select(p => p.Resource as ValueSet)
+                .FirstOrDefault();
 
-            if (vs == null)
+            if (vs is null)
             {
                 retVal.Parameter.Add(new() { Name = "result", Value = new FhirBoolean(false) });
                 retVal.Parameter.Add(new() { Name = "message", Value = new FhirString("No value set specified") });
                 return System.Threading.Tasks.Task.FromResult(retVal);
             }
 
-            vsUrl = vs!.Url;
+            if (vs.Url is null)
+            {
+                retVal.Parameter.Add(new() { Name = "result", Value = new FhirBoolean(false) });
+                retVal.Parameter.Add(new() { Name = "message", Value = new FhirString("No value set specified") });
+                return System.Threading.Tasks.Task.FromResult(retVal);
+            }
+
+            vsUrl = vs.Url;
             StoreProcessValueSet(vs);
         }
 
@@ -155,12 +190,12 @@ public class StoreTerminologyService : ITerminologyService
 
         if (string.IsNullOrEmpty(code))
         {
-            if (coding != null)
+            if (coding is not null)
             {
-                system = coding.System;
-                code = coding.Code;
+                system = coding.System ?? string.Empty;
+                code = coding.Code ?? string.Empty;
             }
-            else if (concept != null)
+            else if (concept is not null)
             {
                 system = concept.Coding.FirstOrDefault()?.System ?? string.Empty;
                 code = concept.Coding.FirstOrDefault()?.Code ?? string.Empty;

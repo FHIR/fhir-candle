@@ -46,10 +46,10 @@ public class GetSearchTypeList : ICandleMcpTool
     /// <param name="resourceName">The name of the FHIR resource type from an argument. Ignored.</param>
     /// <param name="store">The FHIR store instance to retrieve the definition from. Ignored.</param>
     /// <returns>
-    /// A <see cref="CallToolResponse"/> containing:
+    /// A <see cref="CallToolResult"/> containing:
     /// - The list of the known search types
     /// </returns>
-    public CallToolResponse RunTool(
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,

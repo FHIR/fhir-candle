@@ -87,7 +87,7 @@ public class OpPasClaimSubmit : IFhirOperation
         Hl7.Fhir.Model.Resource? bodyResource,
         out FhirResponseContext opResponse)
     {
-        if ((bodyResource == null) ||
+        if ((bodyResource is null) ||
             (bodyResource is not Bundle cb))
         {
             opResponse = new FhirResponseContext()
@@ -134,7 +134,9 @@ public class OpPasClaimSubmit : IFhirOperation
             return false;
         }
 
-        IEnumerable<Resource> claims = cb.Entry.Select(e => e.Resource).Where(r => r is Claim);
+        IEnumerable<Resource> claims = (IEnumerable<Resource>)cb.Entry
+            .Select(e => e.Resource)
+            .Where(r => (r is not null) && (r is Claim));
 
         if (!claims.Any())
         {
@@ -202,7 +204,7 @@ public class OpPasClaimSubmit : IFhirOperation
             return false;
         }
 
-        if (c.Provider == null)
+        if (c.Provider is null)
         {
             responseOutcome.Issue.Add(new OperationOutcome.IssueComponent()
             {
@@ -307,7 +309,7 @@ public class OpPasClaimSubmit : IFhirOperation
             Use = ClaimUseCode.Preauthorization,
             Patient = c.Patient,
             Created = DateTime.UtcNow.ToString("o"),
-            Insurer = c.Insurer,
+            Insurer = c.Insurer ?? new ResourceReference() { Display = "Claim provided no insurer!" }, // TODO: file a ticket that optionality differs
             Request = new ResourceReference()
             {
                 Reference = $"Claim/{c.Id}",
@@ -389,7 +391,7 @@ public class OpPasClaimSubmit : IFhirOperation
         // copy items from the claim request bundle to the response bundle
         foreach (Bundle.EntryComponent e in cb.Entry)
         {
-            if (e.Resource == null)
+            if (e.Resource is null)
             {
                 continue;
             }

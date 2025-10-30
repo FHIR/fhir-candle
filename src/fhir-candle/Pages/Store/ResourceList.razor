@@ -2,12 +2,12 @@
 
 @page "/store/resource-list"
 
-@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@* @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage *@
 
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JS
 @inject IFhirStoreManager StoreManager
-@inject ProtectedLocalStorage BrowserStore
+@* @inject ProtectedLocalStorage BrowserStore *@
 
 @implements IDisposable
 
@@ -213,7 +213,7 @@
     /// <returns>The filtered items.</returns>
     private IQueryable<InstanceTableRec>? GetFilteredItems()
     {
-        if ((_resourceStore == null) ||
+        if ((_resourceStore is null) ||
             (!_resourceStore.Any()))
         {
             return null;
@@ -255,7 +255,7 @@
 
     private void ResetDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -271,7 +271,7 @@
 
     private void CancelDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -317,11 +317,11 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/store/resource-editor", StringComparison.Ordinal))
         {
-            // if (_store != null)
+            // if (_store is not null)
             // {
             // }
 
-            if (_resourceStore != null)
+            if (_resourceStore is not null)
             {
                 _resourceStore.OnInstanceCreated -= ResourceStore_OnChanged;
                 _resourceStore.OnInstanceUpdated -= ResourceStore_OnChanged;
@@ -363,11 +363,11 @@
 
         debounceTimer?.Dispose();
 
-        if (_store != null)
+        if (_store is not null)
         {
         }
 
-        if (_resourceStore != null)
+        if (_resourceStore is not null)
         {
             _resourceStore.OnInstanceCreated -= ResourceStore_OnChanged;
             _resourceStore.OnInstanceUpdated -= ResourceStore_OnChanged;

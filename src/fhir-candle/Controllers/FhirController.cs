@@ -59,7 +59,7 @@ public class FhirController : ControllerBase
         _smartAuthManager = smartAuthManager ?? throw new ArgumentNullException(nameof(smartAuthManager));
         _logger = logger;
 
-        //if (host != null)
+        //if (host is not null)
         //{
         //    ICollection<string> addresses = host.Features?.Get<IServerAddressesFeature>()?.Addresses ?? Array.Empty<string>();
         //    foreach (string address in addresses)
@@ -125,7 +125,7 @@ public class FhirController : ControllerBase
         string? forwardedProto = request.Headers.TryGetValue("X-Forwarded-Proto", out StringValues fp) ? fp.ToString() : null;
         string? forwardedPrefix = request.Headers.TryGetValue("X-Forwarded-Prefix", out StringValues fpr) ? fpr.ToString() : null;
 
-        if ((forwardedFor != null) || (forwardedHost != null) || (forwardedProto != null) || (forwardedPrefix != null))
+        if ((forwardedFor is not null) || (forwardedHost is not null) || (forwardedProto is not null) || (forwardedPrefix is not null))
         {
             return new FhirRequestContext.ForwardedInfo(forwardedFor, forwardedHost, forwardedProto, forwardedPrefix);
         }
@@ -191,7 +191,7 @@ public class FhirController : ControllerBase
         }
 
         Response.ContentType = opResponse.MimeType;
-        if (opResponse.StatusCode == null)
+        if (opResponse.StatusCode is null)
         {
             Response.StatusCode = success ? (int)HttpStatusCode.OK : (int)HttpStatusCode.InternalServerError;
         }
@@ -606,7 +606,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostInstanceOperation <<< caught: {ex.Message}" : $"PostInstanceOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostInstanceOperation <<< caught: {ex.Message}" : $"PostInstanceOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -708,7 +708,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostResourceTypeSearch <<< caught: {ex.Message}" : $"PostResourceTypeSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostResourceTypeSearch <<< caught: {ex.Message}" : $"PostResourceTypeSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -812,7 +812,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostResourceCompartmentSearch <<< caught: {ex.Message}" : $"PostResourceCompartmentSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostResourceCompartmentSearch <<< caught: {ex.Message}" : $"PostResourceCompartmentSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -925,7 +925,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostCompartmentTypeSearch <<< caught: {ex.Message}" : $"PostCompartmentTypeSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostCompartmentTypeSearch <<< caught: {ex.Message}" : $"PostCompartmentTypeSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1083,7 +1083,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostTypeOperation <<< caught: {ex.Message}" : $"PostTypeOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostTypeOperation <<< caught: {ex.Message}" : $"PostTypeOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1173,7 +1173,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostSystemSearch <<< caught: {ex.Message}" : $"PostSystemSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostSystemSearch <<< caught: {ex.Message}" : $"PostSystemSearch <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1246,7 +1246,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostSystemOperation <<< caught: {ex.Message}" : $"PostSystemOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostSystemOperation <<< caught: {ex.Message}" : $"PostSystemOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1312,7 +1312,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"GetSystemOperation <<< caught: {ex.Message}" : $"PostSystemOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"GetSystemOperation <<< caught: {ex.Message}" : $"PostSystemOperation <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1390,7 +1390,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostResourceType <<< caught: {ex.Message}" : $"PostResourceType <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostResourceType <<< caught: {ex.Message}" : $"PostResourceType <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1474,7 +1474,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PutResourceInstance <<< caught: {ex.Message}" : $"PutResourceInstance <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PutResourceInstance <<< caught: {ex.Message}" : $"PutResourceInstance <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1674,7 +1674,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"DeleteResourceConditional <<< caught: {ex.Message}" : $"DeleteResourceConditional <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"DeleteResourceConditional <<< caught: {ex.Message}" : $"DeleteResourceConditional <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1740,7 +1740,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostSystemBundle <<< caught: {ex.Message}" : $"PostSystemBundle <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostSystemBundle <<< caught: {ex.Message}" : $"PostSystemBundle <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }
@@ -1856,7 +1856,7 @@ public class FhirController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"DeleteSystemConditional <<< caught: {ex.Message}" : $"DeleteSystemConditional <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"DeleteSystemConditional <<< caught: {ex.Message}" : $"DeleteSystemConditional <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             await LogAndReturnError(Response, 500, msg);
             return;
         }

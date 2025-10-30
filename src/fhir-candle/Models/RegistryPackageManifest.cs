@@ -53,7 +53,7 @@ public class RegistryPackageManifest
         {
             RegistryPackageManifest? manifest = JsonSerializer.Deserialize<RegistryPackageManifest>(json);
 
-            if (manifest?.Versions == null)
+            if (manifest?.Versions is null)
             {
                 return null;
             }

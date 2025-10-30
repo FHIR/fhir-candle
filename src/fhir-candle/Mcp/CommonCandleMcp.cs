@@ -27,23 +27,21 @@ public static class CommonCandleMcp
     public const string ResourceNotResolved = "The provided resource name did not resolve into known resource type on this server";
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static CallToolResponse GetResponse(IEnumerable<string> responses) => new CallToolResponse()
+    public static CallToolResult GetResponse(IEnumerable<string> responses) => new()
     {
-        Content = responses.Select(r => new Content()
+        Content = responses.Select(r => new TextContentBlock()
         {
             Text = r,
-            Type = "text",
-        }).ToList(),
+        }).ToList<ContentBlock>(),
     };
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static CallToolResponse GetResponse(string response) => new CallToolResponse()
+    public static CallToolResult GetResponse(string response) => new()
     {
         Content = [
-            new Content
+            new TextContentBlock
             {
                 Text = response,
-                Type = "text",
             }
         ],
     };

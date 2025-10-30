@@ -79,10 +79,10 @@ public class OpSubscriptionHook : IFhirOperation
         Hl7.Fhir.Model.Resource? bodyResource,
         out FhirResponseContext opResponse)
     {
-        if ((bodyResource == null) ||
+        if ((bodyResource is null) ||
             (!(bodyResource is Hl7.Fhir.Model.Bundle bundle)) ||
             (!bundle.Entry.Any()) ||
-            (bundle.Entry.First().Resource == null))
+            (bundle.Entry.First().Resource is null))
         {
             opResponse = new()
             {
@@ -102,7 +102,7 @@ public class OpSubscriptionHook : IFhirOperation
 
         ParsedSubscriptionStatus? status = store.ParseNotificationBundle(bundle);
 
-        if (status == null)
+        if (status is null)
         {
             opResponse = new()
             {

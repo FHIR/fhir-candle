@@ -54,22 +54,22 @@ public class GetResourceList : ICandleMcpTool
     /// <param name="resourceName">The name of the FHIR resource type (not used by this tool).</param>
     /// <param name="store">The FHIR store instance to query for supported resource types.</param>
     /// <returns>
-    /// A <see cref="CallToolResponse"/> containing either:
+    /// A <see cref="CallToolResult"/> containing either:
     /// - An ordered list of supported FHIR resource type names if successful
     /// - An error message if the store name is not provided or the store cannot be resolved
     /// </returns>
-    public CallToolResponse RunTool(
+    public CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)
     {
-        if (storeName == null)
+        if (storeName is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.StoreNameArgRequired);
         }
 
-        if (store == null)
+        if (store is null)
         {
             return CommonCandleMcp.GetResponse(CommonCandleMcp.StoreNotResolved);
         }

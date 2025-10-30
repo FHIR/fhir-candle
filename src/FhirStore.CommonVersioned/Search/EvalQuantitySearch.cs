@@ -5,6 +5,8 @@
 
 using FhirCandle.Models;
 using Hl7.Fhir.ElementModel;
+using Hl7.Fhir.FhirPath;
+using Hl7.Fhir.Model;
 using static FhirCandle.Search.SearchDefinitions;
 
 namespace FhirCandle.Search;
@@ -39,24 +41,17 @@ public static class EvalQuantitySearch
     /// <param name="valueNode">The value node.</param>
     /// <param name="sp">       The sp.</param>
     /// <returns>True if the test passes, false if the test fails.</returns>
-    public static bool TestQuantity(ITypedElement valueNode, ParsedSearchParameter sp)
+    public static bool TestQuantity(PocoNode? valueNode, ParsedSearchParameter sp)
     {
-        if ((valueNode == null) ||
-            (valueNode.InstanceType != "Quantity"))
+        if ((valueNode?.Poco is not Quantity q) ||
+            (q.Value is null))
         {
             return false;
         }
 
-        Hl7.Fhir.Model.Quantity q = valueNode.ToPoco<Hl7.Fhir.Model.Quantity>();
+        decimal value = q.Value.Value;
 
-        if (q.Value == null)
-        {
-            return false;
-        }
-
-        decimal value = (decimal)q.Value!;
-
-        if (sp.ValueDecimals == null)
+        if (sp.ValueDecimals is null)
         {
             return false;
         }

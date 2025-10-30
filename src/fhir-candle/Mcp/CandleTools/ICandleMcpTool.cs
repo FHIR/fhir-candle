@@ -43,8 +43,8 @@ public interface ICandleMcpTool
     /// <param name="storeName">The name of the FHIR store to operate on, if applicable.</param>
     /// <param name="resourceName">The name of the FHIR resource type to operate on, if applicable.</param>
     /// <param name="store">The FHIR store instance to use for operations, if applicable.</param>
-    /// <returns>A <see cref="CallToolResponse"/> containing the result of the tool execution.</returns>
-    CallToolResponse RunTool(
+    /// <returns>A <see cref="CallToolResult"/> containing the result of the tool execution.</returns>
+    CallToolResult RunTool(
         IReadOnlyDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,

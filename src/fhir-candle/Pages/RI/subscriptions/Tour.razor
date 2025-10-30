@@ -367,7 +367,11 @@
 
         if (toStep < 9)
         {
-            _ = JS.InvokeVoidAsync("scrollElementIntoView", "element-step-" + toStep);
+            try
+            {
+                _ = JS.InvokeVoidAsync("scrollElementIntoView", "element-step-" + toStep);
+            }
+            catch { }
         }
 
         InvokeAsync(StateHasChanged);
@@ -506,7 +510,7 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/subscriptions/tour", StringComparison.Ordinal))
         {
-            if (_store != null)
+            if (_store is not null)
             {
                 _store.OnInstanceCreated -= Store_OnChanged;
                 _store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;
@@ -552,7 +556,7 @@
                 {
                     ParsedSubscriptionStatus? handshake = notifications.Where(n => n.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake)?.First() ?? null;
 
-                    if (handshake != null)
+                    if (handshake is not null)
                     {
                         handshakeBundleId = handshake.BundleId;
                     }
@@ -609,7 +613,7 @@
         _recheckTimer?.Change(Timeout.Infinite, 0);
         _recheckTimer?.Dispose();
 
-        if (_store != null)
+        if (_store is not null)
         {
             _store.OnInstanceCreated -= Store_OnChanged;
             _store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;

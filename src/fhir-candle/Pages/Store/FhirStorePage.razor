@@ -145,7 +145,7 @@
     /// <returns>The filtered items.</returns>
     private IQueryable<ResourceStoreInfo>? GetFilteredItems()
     {
-        if ((_store == null) ||
+        if ((_store is null) ||
             (!_store.Any()))
         {
             return null;
@@ -198,7 +198,7 @@
 
     private void ResetDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -214,7 +214,7 @@
 
     private void CancelDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -254,7 +254,7 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/store?", StringComparison.Ordinal))
         {
-            if (_store != null)
+            if (_store is not null)
             {
                 _store.OnInstanceCreated -= Store_OnChanged;
                 _store.OnInstanceDeleted -= Store_OnChanged;
@@ -290,7 +290,7 @@
     {
         debounceTimer?.Dispose();
 
-        if (_store != null)
+        if (_store is not null)
         {
             _store.OnInstanceCreated -= Store_OnChanged;
             _store.OnInstanceDeleted -= Store_OnChanged;

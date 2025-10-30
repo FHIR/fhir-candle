@@ -18,7 +18,7 @@ public static class FhirEnumExtensions
     /// <returns>Value as a string.</returns>
     public static string ToLiteral(this Enum fhirEnum)
     {
-        if (fhirEnum == null)
+        if (fhirEnum is null)
         {
             return string.Empty;
         }
@@ -52,7 +52,7 @@ public static class FhirEnumExtensions
         {
             FieldInfo? fieldInfo = type.GetField(value.ToString());
 
-            if (fieldInfo == null)
+            if (fieldInfo is null)
             {
                 continue;
             }
@@ -61,7 +61,7 @@ public static class FhirEnumExtensions
                 typeof(FhirLiteralAttribute),
                 false) as FhirLiteralAttribute[];
 
-            if ((attributes == null) || (attributes.Length == 0))
+            if ((attributes is null) || (attributes.Length == 0))
             {
                 continue;
             }

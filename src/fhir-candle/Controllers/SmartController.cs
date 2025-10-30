@@ -336,7 +336,7 @@ public class SmartController : ControllerBase
                     break;
             }
 
-            if (smart == null)
+            if (smart is null)
             {
                 _logger.LogWarning($"PostSmartTokenRequest <<< request for {grantType} failed!");
                 Response.StatusCode = 400;
@@ -351,7 +351,7 @@ public class SmartController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex.InnerException == null
+            _logger.LogError(ex.InnerException is null
                 ? $"PostSmartTokenRequest <<< caught: {ex.Message}"
                 : $"PostSmartTokenRequest <<< caught: {ex.Message}, inner: {ex.InnerException.Message}");
 
@@ -396,7 +396,7 @@ public class SmartController : ControllerBase
 
                 // pull any other elements
                 SmartClientRegistration? smartClientRegistration = System.Text.Json.JsonSerializer.Deserialize<SmartClientRegistration>(content);
-                if (smartClientRegistration == null)
+                if (smartClientRegistration is null)
                 {
                     Response.ContentType = "text/plain";
                     Response.StatusCode = (int)HttpStatusCode.BadRequest;
@@ -437,7 +437,7 @@ public class SmartController : ControllerBase
         }
         catch (Exception ex)
         {
-            string msg = ex.InnerException == null ? $"PostSmartRegistrationRequest <<< caught: {ex.Message}" : $"PostSmartRegistrationRequest <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            string msg = ex.InnerException is null ? $"PostSmartRegistrationRequest <<< caught: {ex.Message}" : $"PostSmartRegistrationRequest <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
             _logger.LogError(msg);
             Response.StatusCode = 500;
             return;
@@ -501,7 +501,7 @@ public class SmartController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex.InnerException == null
+            _logger.LogError(ex.InnerException is null
                 ? $"PostSmartTokenIntrospect <<< caught: {ex.Message}"
                 : $"PostSmartTokenIntrospect <<< caught: {ex.Message}, inner: {ex.InnerException.Message}");
 
