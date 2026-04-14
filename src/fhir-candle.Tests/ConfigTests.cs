@@ -1,44 +1,48 @@
-﻿using fhir.candle.Tests.Models;
-using System.Text.Json;
-using Xunit.Abstractions;
-using fhir.candle.Tests.Extensions;
-using Shouldly;
-using System.Net;
-using FhirCandle.Configuration;
-using Microsoft.Extensions.Configuration;
-using System.CommandLine;
-using System.CommandLine.Builder;
+﻿using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.ComponentModel.Design;
+using System.Net;
+using System.Text.Json;
+using fhir.candle.Tests.Extensions;
+using fhir.candle.Tests.Models;
+using FhirCandle.Configuration;
+using Microsoft.Extensions.Configuration;
+using ModelContextProtocol.Protocol;
+using Shouldly;
+using Xunit.Abstractions;
 
 namespace fhir.candle.Tests;
 
 public class ConfigTests
 {
+    private const string TestFhirCachePath = "/tmp/fhir-test-cache";
+
+    private static string[] WithFhirCache(params string[] args) =>
+        [.. args, "--fhir-package-cache", TestFhirCachePath];
+
+    public ConfigTests()
+    {
+        Directory.CreateDirectory(TestFhirCachePath);
+    }
+
     [Fact]
     public void TestParseCliInt()
     {
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        string[] args = WithFhirCache("--port", "8080");
 
-        // build our root command
-        RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        IConfiguration extConfig = new ConfigurationBuilder().Build();
+        RootCommand rootCommand = CliOptions.RootCommand;
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
+
+        if (rootCommand is not CliRootCommand crc)
+        {
+            throw new InvalidOperationException("Root command is not a CliRootCommand");
         }
 
-        Parser parser = new CommandLineBuilder(rootCommand).UseDefaults().Build();
-
-        string[] args = ["--port", "8080"];
-
-        // attempt a parse
-        ParseResult pr = parser.Parse(args);
-
-        CandleConfig config = new();
-
-        // parse the arguments into the configuration object
-        config.Parse(pr, null);
+        CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
         // check our value
         config.ListenPort.ShouldBe(8080);
@@ -47,27 +51,21 @@ public class ConfigTests
     [Fact]
     public void TestParseCliString()
     {
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        string[] args = WithFhirCache("--url", "http://test.me/");
 
-        // build our root command
-        RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        IConfiguration extConfig = new ConfigurationBuilder().Build();
+        RootCommand rootCommand = CliOptions.RootCommand;
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
+
+        if (rootCommand is not CliRootCommand crc)
+        {
+            throw new InvalidOperationException("Root command is not a CliRootCommand");
         }
 
-        Parser parser = new CommandLineBuilder(rootCommand).UseDefaults().Build();
-
-        string[] args = ["--url", "http://test.me/"];
-
-        // attempt a parse
-        ParseResult pr = parser.Parse(args);
-
-        CandleConfig config = new();
-
-        // parse the arguments into the configuration object
-        config.Parse(pr, null);
+        CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
         // check our value
         config.PublicUrl.ShouldBe("http://test.me/");
@@ -76,27 +74,21 @@ public class ConfigTests
     [Fact]
     public void TestParseCliBool()
     {
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        string[] args = WithFhirCache("--open-browser");
 
-        // build our root command
-        RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        IConfiguration extConfig = new ConfigurationBuilder().Build();
+        RootCommand rootCommand = CliOptions.RootCommand;
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
+
+        if (rootCommand is not CliRootCommand crc)
+        {
+            throw new InvalidOperationException("Root command is not a CliRootCommand");
         }
 
-        Parser parser = new CommandLineBuilder(rootCommand).UseDefaults().Build();
-
-        string[] args = ["--open-browser"];
-
-        // attempt a parse
-        ParseResult pr = parser.Parse(args);
-
-        CandleConfig config = new();
-
-        // parse the arguments into the configuration object
-        config.Parse(pr, null);
+        CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
         // check our value
         config.OpenBrowser.ShouldBe(true);
@@ -105,27 +97,21 @@ public class ConfigTests
     [Fact]
     public void TestParseCliBoolTrue()
     {
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        string[] args = WithFhirCache("--open-browser", "true");
 
-        // build our root command
-        RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        IConfiguration extConfig = new ConfigurationBuilder().Build();
+        RootCommand rootCommand = CliOptions.RootCommand;
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
+
+        if (rootCommand is not CliRootCommand crc)
+        {
+            throw new InvalidOperationException("Root command is not a CliRootCommand");
         }
 
-        Parser parser = new CommandLineBuilder(rootCommand).UseDefaults().Build();
-
-        string[] args = ["--open-browser", "true"];
-
-        // attempt a parse
-        ParseResult pr = parser.Parse(args);
-
-        CandleConfig config = new();
-
-        // parse the arguments into the configuration object
-        config.Parse(pr, null);
+        CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
         // check our value
         config.OpenBrowser.ShouldBe(true);
@@ -135,27 +121,21 @@ public class ConfigTests
     [Fact]
     public void TestParseCliBoolFalse()
     {
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        string[] args = WithFhirCache("--open-browser", "false");
 
-        // build our root command
-        RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        IConfiguration extConfig = new ConfigurationBuilder().Build();
+        RootCommand rootCommand = CliOptions.RootCommand;
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
+
+        if (rootCommand is not CliRootCommand crc)
+        {
+            throw new InvalidOperationException("Root command is not a CliRootCommand");
         }
 
-        Parser parser = new CommandLineBuilder(rootCommand).UseDefaults().Build();
-
-        string[] args = ["--open-browser", "false"];
-
-        // attempt a parse
-        ParseResult pr = parser.Parse(args);
-
-        CandleConfig config = new();
-
-        // parse the arguments into the configuration object
-        config.Parse(pr, null);
+        CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
         // check our value
         config.OpenBrowser.ShouldBe(false);
@@ -164,27 +144,21 @@ public class ConfigTests
     [Fact]
     public void TestParseCliStringArray()
     {
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        string[] args = WithFhirCache("--additional-fhir-registry-urls", "http://a.co/", "--additional-fhir-registry-urls", "http://b.co");
 
-        // build our root command
-        RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        IConfiguration extConfig = new ConfigurationBuilder().Build();
+        RootCommand rootCommand = CliOptions.RootCommand;
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
+
+        if (rootCommand is not CliRootCommand crc)
+        {
+            throw new InvalidOperationException("Root command is not a CliRootCommand");
         }
 
-        Parser parser = new CommandLineBuilder(rootCommand).UseDefaults().Build();
-
-        string[] args = ["--additional-fhir-registry-urls", "http://a.co/", "--additional-fhir-registry-urls", "http://b.co"];
-
-        // attempt a parse
-        ParseResult pr = parser.Parse(args);
-
-        CandleConfig config = new();
-
-        // parse the arguments into the configuration object
-        config.Parse(pr, null);
+        CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
         // check our value
         config.AdditionalFhirRegistryUrls.Length.ShouldBe(2);

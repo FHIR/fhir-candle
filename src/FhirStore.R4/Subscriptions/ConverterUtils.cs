@@ -22,7 +22,7 @@ internal static class ConverterUtils
     /// <param name="nested">    [out] The nested extension values.</param>
     internal static void ParseExtensions(
         IEnumerable<Hl7.Fhir.Model.Extension> extensions,
-        out Dictionary<string, List<Hl7.Fhir.Model.DataType>> values,
+        out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> values,
         out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> nested)
     {
         values = new();
@@ -69,7 +69,7 @@ internal static class ConverterUtils
                 values.Add(name, new());
             }
 
-            if (ext.Value != null)
+            if (ext.Value is not null)
             {
                 values[name].Add(ext.Value);
             }
@@ -82,7 +82,7 @@ internal static class ConverterUtils
     /// <param name="nested">    [out] The nested.</param>
     internal static void ParseParameters(
         IEnumerable<Hl7.Fhir.Model.Parameters.ParameterComponent> components,
-        out Dictionary<string, List<Hl7.Fhir.Model.DataType>> values,
+        out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> values,
         out Dictionary<string, List<List<Hl7.Fhir.Model.Parameters.ParameterComponent>>> nested)
     {
         values = new();
@@ -120,7 +120,7 @@ internal static class ConverterUtils
     /// <param name="values">The parsed values dictionary.</param>
     /// <param name="name">  The name of the element to retrieve.</param>
     /// <returns>The string or empty if not found.</returns>
-    internal static string GetString(Dictionary<string, List<Hl7.Fhir.Model.DataType>> values, string name)
+    internal static string GetString(Dictionary<string, List<Hl7.Fhir.Model.DataType?>> values, string name)
     {
         if (!values.ContainsKey(name))
         {
@@ -133,14 +133,14 @@ internal static class ConverterUtils
                 return valRef.Reference?.ToString() ?? string.Empty;
         }
 
-        return values[name].First().ToString() ?? string.Empty;
+        return values[name].FirstOrDefault()?.ToString() ?? string.Empty;
     }
 
     /// <summary>Gets a single boolean value from a parsed set.</summary>
     /// <param name="values">The parsed values dictionary.</param>
     /// <param name="name">  The name of the element to retrieve.</param>
     /// <returns>The boolean value or false if not found.</returns>
-    internal static bool GetBool(Dictionary<string, List<Hl7.Fhir.Model.DataType>> values, string name)
+    internal static bool GetBool(Dictionary<string, List<Hl7.Fhir.Model.DataType?>> values, string name)
     {
         if (!values.ContainsKey(name))
         {
@@ -153,7 +153,7 @@ internal static class ConverterUtils
                 return vb.Value ?? false;
         }
 
-        if (bool.TryParse(values[name].First().ToString() ?? string.Empty, out bool val))
+        if (bool.TryParse(values[name].FirstOrDefault()?.ToString() ?? string.Empty, out bool val))
         {
             return val;
         }
@@ -167,7 +167,7 @@ internal static class ConverterUtils
     /// <returns>
     /// An enumerator that allows foreach to be used to process the strings in this collection.
     /// </returns>
-    internal static IEnumerable<string> GetStrings(Dictionary<string, List<Hl7.Fhir.Model.DataType>> extensions, string name)
+    internal static IEnumerable<string> GetStrings(Dictionary<string, List<Hl7.Fhir.Model.DataType?>> extensions, string name)
     {
         if (!extensions.ContainsKey(name))
         {
@@ -180,6 +180,6 @@ internal static class ConverterUtils
                 return extensions[name].Select(e => (e as ResourceReference)?.Reference ?? string.Empty);
         }
 
-        return extensions[name].Select(e => e.ToString() ?? string.Empty);
+        return extensions[name].Select(e => e?.ToString() ?? string.Empty);
     }
 }

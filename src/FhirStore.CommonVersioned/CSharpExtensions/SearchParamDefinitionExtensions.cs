@@ -11,11 +11,11 @@ namespace FhirCandle.Extensions;
 public static class SearchParamDefinitionExtensions
 {
     /// <summary>
-    /// A ModelInfo.SearchParamDefinition extension method that makes a deep copy of this object.
+    /// A SearchParamDefinition extension method that makes a deep copy of this object.
     /// </summary>
     /// <param name="sp">The sp.</param>
     /// <returns>A copy of this object.</returns>
-    public static ModelInfo.SearchParamDefinition Clone(this ModelInfo.SearchParamDefinition sp)
+    public static SearchParamDefinition Clone(this SearchParamDefinition sp)
     {
         return new()
         {
@@ -32,13 +32,13 @@ public static class SearchParamDefinitionExtensions
         };
     }
 
-    /// <summary>A ModelInfo.SearchParamDefinition extension method that clone with.</summary>
+    /// <summary>A SearchParamDefinition extension method that clone with.</summary>
     /// <param name="sp">    The sp.</param>
     /// <param name="target">(Optional) Target for the.</param>
-    /// <returns>A ModelInfo.SearchParamDefinition.</returns>
-    public static ModelInfo.SearchParamDefinition CloneWith(
-        this ModelInfo.SearchParamDefinition sp,
-        ResourceType[]? target = null)
+    /// <returns>A SearchParamDefinition.</returns>
+    public static SearchParamDefinition CloneWith(
+        this SearchParamDefinition sp,
+        VersionIndependentResourceTypesAll[]? target = null)
     {
         return new()
         {

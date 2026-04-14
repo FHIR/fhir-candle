@@ -1,27 +1,28 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\fhir-candle.props" />
+	<Import Project="..\fhir-candle.props" />
 
 	<PropertyGroup>
       <IsPackable>false</IsPackable>
       <RootNamespace>fhir.candle.Tests</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
 		<PackageReference Include="Shouldly" Version="4.3.0" />
 		<PackageReference Include="xunit" Version="2.9.3" />
-		<PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
+		<PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>
 		</PackageReference>
-		<PackageReference Include="coverlet.collector" Version="6.0.4">
+		<PackageReference Include="coverlet.collector" Version="8.0.1">
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 			<PrivateAssets>all</PrivateAssets>
 		</PackageReference>
-		<PackageReference Include="Hl7.Fhir.R4" Version="5.11.4" Aliases="coreR4" />
-		<PackageReference Include="Hl7.Fhir.R4B" Version="5.11.4" Aliases="coreR4B" />
-		<PackageReference Include="Hl7.Fhir.R5" Version="5.11.4" Aliases="coreR5" />
-        <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-        <PackageReference Include="System.CommandLine.NamingConventionBinder" Version="2.0.0-beta4.22272.1" />
+		<PackageReference Include="Hl7.Fhir.R4" Version="6.1.1" Aliases="coreR4" />
+		<PackageReference Include="Hl7.Fhir.R4B" Version="6.1.1" Aliases="coreR4B" />
+		<PackageReference Include="Hl7.Fhir.R5" Version="6.1.1" Aliases="coreR5" />
+		<PackageReference Include="Hl7.Fhir.R6" Version="6.1.1" Aliases="coreR6" />
+        <PackageReference Include="System.CommandLine" Version="2.0.6" />
+        <PackageReference Include="System.CommandLine.NamingConventionBinder" Version="2.0.0-beta5.25306.1" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="data\r4-synthea\Bundle-transaction-01.json" />

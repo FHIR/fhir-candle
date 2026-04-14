@@ -36,7 +36,7 @@ public class DirectoryContentsDataAttribute : DataAttribute
     /// <inheritDoc />
     public override IEnumerable<object[]> GetData(MethodInfo testMethod)
     {
-        if (testMethod == null) { throw new ArgumentNullException(nameof(testMethod)); }
+        if (testMethod is null) { throw new ArgumentNullException(nameof(testMethod)); }
 
         // Get the absolute path to the directory
         string path = Path.IsPathRooted(_path)

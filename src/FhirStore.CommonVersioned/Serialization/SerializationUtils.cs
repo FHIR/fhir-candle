@@ -4,68 +4,67 @@
 // </copyright>
 
 
-using Hl7.Fhir.Model;
-using Hl7.Fhir.Serialization;
-using System.Text.Json;
-using System.Xml.Serialization;
-using System.Xml;
-using System.Net;
-using Hl7.Fhir.Rest;
-using Hl7.Fhir.Language.Debugging;
-using Hl7.Fhir.Utility;
 using System.Diagnostics;
+using System.Net;
+using System.Text.Json;
+using System.Xml;
+using System.Xml.Serialization;
+using Hl7.Fhir.Language.Debugging;
+using Hl7.Fhir.Model;
+using Hl7.Fhir.Rest;
+using Hl7.Fhir.Serialization;
+using Hl7.Fhir.Utility;
+using Newtonsoft.Json;
 
 namespace FhirCandle.Serialization;
 
 /// <summary>Serialization utilities.</summary>
 public static class SerializationUtils
 {
-    private static JsonSerializerOptions _jsonParseOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoDeserializerSettings()
-    {
-        DisableBase64Decoding = false,
-    });
+    private static FhirJsonDeserializer _jsonParser = FhirJsonDeserializer.BACKWARDSCOMPATIBLE;
+    private static FhirJsonDeserializer _jsonParserLenient = FhirJsonDeserializer.OSTRICH;
 
-    private static JsonSerializerOptions _jsonParseLinientOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoDeserializerSettings()
-    {
-        DisableBase64Decoding = false,
-        Validator = null,
-    });
+    private static FhirJsonSerializer _jsonSerializer = FhirJsonSerializer.Default;
 
-    private static JsonSerializerOptions _jsonSerializerFullOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
-    {
-        SummaryFilter = null,
-    });
+    //private static JsonSerializerOptions _jsonParseOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoDeserializerSettings()
+    //{
+    //    DisableBase64Decoding = false,
+    //});
 
-    private static JsonSerializerOptions _jsonSerializerDataOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
-    {
-        SummaryFilter = SerializationFilter.ForData(),
-    });
+    //private static JsonSerializerOptions _jsonParseLinientOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoDeserializerSettings()
+    //{
+    //    DisableBase64Decoding = false,
+    //    Validator = null,
+    //});
 
-    private static JsonSerializerOptions _jsonSerializerTextOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
-    {
-        SummaryFilter = SerializationFilter.ForText(),
-    });
+    //private static JsonSerializerOptions _jsonSerializerFullOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
+    //{
+    //    SummaryFilter = null,
+    //});
 
-    private static JsonSerializerOptions _jsonSerializerSummaryOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
-    {
-        SummaryFilter = SerializationFilter.ForSummary(),
-    });
+    //private static JsonSerializerOptions _jsonSerializerDataOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
+    //{
+    //    SummaryFilter = SerializationFilter.ForData(),
+    //});
+
+    //private static JsonSerializerOptions _jsonSerializerTextOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
+    //{
+    //    SummaryFilter = SerializationFilter.ForText(),
+    //});
+
+    //private static JsonSerializerOptions _jsonSerializerSummaryOptions = new JsonSerializerOptions().ForFhir(ModelInfo.ModelInspector, new FhirJsonPocoSerializerSettings()
+    //{
+    //    SummaryFilter = SerializationFilter.ForSummary(),
+    //});
 
     /// <summary>The XML parser.</summary>
-    private static FhirXmlPocoDeserializer _xmlParser = new(new FhirXmlPocoDeserializerSettings()
-    {
-        DisableBase64Decoding = false,
-    });
+    private static FhirXmlDeserializer _xmlParser = FhirXmlDeserializer.BACKWARDSCOMPATIBLE;
 
     /// <summary>The XML parser lenient.</summary>
-    private static FhirXmlPocoDeserializer _xmlParserLenient = new(new FhirXmlPocoDeserializerSettings()
-    {
-        DisableBase64Decoding = false,
-        Validator = null,
-    });
+    private static FhirXmlDeserializer _xmlParserLenient = FhirXmlDeserializer.OSTRICH;
 
     /// <summary>The XML serializer.</summary>
-    private static FhirXmlPocoSerializer _xmlSerializer = new();
+    private static FhirXmlSerializer _xmlSerializer = new();
 
     /// <summary>Builds outcome for request.</summary>
     /// <param name="sc">       The screen.</param>
@@ -186,7 +185,7 @@ public static class SerializationUtils
         //    }
         //}
 
-        //if (utf8Content == null)
+        //if (utf8Content is null)
         //{
         //    utf8Content = content;
         //}
@@ -200,10 +199,10 @@ public static class SerializationUtils
                 try
                 {
                     TResource? r = lenient
-                        ? JsonSerializer.Deserialize<TResource>(content, _jsonParseLinientOptions)
-                        : JsonSerializer.Deserialize<TResource>(content, _jsonParseOptions);
+                        ? _jsonParserLenient.Deserialize<TResource>(content)
+                        : _jsonParser.Deserialize<TResource>(content);
 
-                    if (r == null)
+                    if (r is null)
                     {
                         resource = null;
                         exMessage = string.Empty;
@@ -217,7 +216,7 @@ public static class SerializationUtils
                 catch (Exception ex)
                 {
                     resource = null;
-                    exMessage = ex.InnerException == null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
+                    exMessage = ex.InnerException is null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
                     return HttpStatusCode.UnprocessableEntity;
                 }
 
@@ -246,7 +245,7 @@ public static class SerializationUtils
                 catch (Exception ex)
                 {
                     resource = null;
-                    exMessage = ex.InnerException == null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
+                    exMessage = ex.InnerException is null ? ex.Message : ex.Message + "\n\n" + ex.InnerException.Message;
                     return HttpStatusCode.UnprocessableEntity;
                 }
 
@@ -327,6 +326,33 @@ public static class SerializationUtils
         //    }
         //}
 
+        Func<SerializationFilter>? serializationFilter;
+
+        switch (summaryFlag.ToLowerInvariant())
+        {
+            case "":
+            case "false":
+            default:
+                serializationFilter = null;
+                break;
+
+            case "true":
+                serializationFilter = SerializationFilter.ForSummary;
+                break;
+
+            case "text":
+                serializationFilter = SerializationFilter.ForText;
+                break;
+
+            case "data":
+                serializationFilter = SerializationFilter.ForData;
+                break;
+
+            case "count":
+                serializationFilter = SerializationFilter.ForCount;
+                break;
+        }
+
         switch (formatComponents[0])
         {
             case "xml":
@@ -334,127 +360,40 @@ public static class SerializationUtils
             case "application/xml":
             case "application/fhir+xml":
                 {
-                    SerializationFilter? serializationFilter;
-
-                    switch (summaryFlag.ToLowerInvariant())
-                    {
-                        case "":
-                        case "false":
-                        default:
-                            serializationFilter = null;
-                            break;
-
-                        case "true":
-                            serializationFilter = SerializationFilter.ForSummary();
-                            break;
-
-                        case "text":
-                            serializationFilter = SerializationFilter.ForText();
-                            break;
-
-                        case "data":
-                            serializationFilter = SerializationFilter.ForData();
-                            break;
-                    }
-
-                    if (pretty || (encoding != System.Text.Encoding.UTF8))
+                    if (encoding != System.Text.Encoding.UTF8)
                     {
                         using (MemoryStream ms = new MemoryStream())
                         using (System.Xml.XmlWriter writer = XmlWriter.Create(ms, new XmlWriterSettings() { Encoding = encoding, Indent = pretty }))
                         {
-                            _xmlSerializer.Serialize(instance, writer, serializationFilter);
+                            _xmlSerializer.Serialize(instance, writer, filterFactory: serializationFilter);
                             writer.Flush();
                             return encoding.GetString(ms.ToArray());
                         }
                     }
 
-                    return _xmlSerializer.SerializeToString(instance, serializationFilter);
+                    return _xmlSerializer.SerializeToString(instance, pretty: pretty, filterFactory: serializationFilter);
                 }
 
             // default to JSON
             default:
                 {
-                    switch (summaryFlag.ToLowerInvariant())
+                    if (encoding != System.Text.Encoding.UTF8)
                     {
-                        case "":
-                        case "false":
-                        default:
-                            if (pretty || (encoding != System.Text.Encoding.UTF8))
-                            {
-                                using (MemoryStream ms = new MemoryStream())
-                                using (Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions()
-                                {
-                                    SkipValidation = true,
-                                    Indented = pretty,
-                                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                                }))
-                                {
-                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerFullOptions);
-                                    writer.Flush();
-                                    return encoding.GetString(ms.ToArray());
-                                }
-                            }
-
-                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerFullOptions);
-
-                        case "true":
-                            if (pretty || (encoding != System.Text.Encoding.UTF8))
-                            {
-                                using (MemoryStream ms = new MemoryStream())
-                                using (Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions()
-                                {
-                                    SkipValidation = true,
-                                    Indented = pretty,
-                                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                                }))
-                                {
-                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerSummaryOptions);
-                                    writer.Flush();
-                                    return encoding.GetString(ms.ToArray());
-                                }
-                            }
-
-                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerSummaryOptions);
-
-                        case "text":
-                            if (pretty || (encoding != System.Text.Encoding.UTF8))
-                            {
-                                using (MemoryStream ms = new MemoryStream())
-                                using (Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions()
-                                {
-                                    SkipValidation = true,
-                                    Indented = pretty,
-                                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                                }))
-                                {
-                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerTextOptions);
-                                    writer.Flush();
-                                    return encoding.GetString(ms.ToArray());
-                                }
-                            }
-
-                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerTextOptions);
-                            //return _jsonSerializerText.SerializeToString(instance);
-
-                        case "data":
-                            if (pretty || (encoding != System.Text.Encoding.UTF8))
-                            {
-                                using (MemoryStream ms = new MemoryStream())
-                                using (Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions()
-                                {
-                                    SkipValidation = true,
-                                    Indented = pretty,
-                                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                                }))
-                                {
-                                    JsonSerializer.Serialize<TResource>(writer, instance, _jsonSerializerDataOptions);
-                                    writer.Flush();
-                                    return encoding.GetString(ms.ToArray());
-                                }
-                            }
-
-                            return JsonSerializer.Serialize<TResource>(instance, _jsonSerializerDataOptions);
+                        using (MemoryStream ms = new MemoryStream())
+                        using (Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions()
+                        {
+                            SkipValidation = true,
+                            Indented = pretty,
+                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                        }))
+                        {
+                            _jsonSerializer.Serialize(instance, writer, filterFactory: serializationFilter);
+                            writer.Flush();
+                            return encoding.GetString(ms.ToArray());
+                        }
                     }
+
+                    return _jsonSerializer.SerializeToString(instance, pretty: pretty, filterFactory: serializationFilter);
                 }
                 //return instance.ToJson(_jsonSerializerSettings);
         }

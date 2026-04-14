@@ -5,6 +5,8 @@
 
 using FhirCandle.Models;
 using Hl7.Fhir.ElementModel;
+using Hl7.Fhir.FhirPath;
+using Hl7.Fhir.Model;
 using static FhirCandle.Search.SearchDefinitions;
 
 namespace FhirCandle.Search;
@@ -16,34 +18,39 @@ public static class EvalNumberSearch
     /// <param name="valueNode">The value node.</param>
     /// <param name="sp">       The sp.</param>
     /// <returns>True if the test passes, false if the test fails.</returns>
-    public static bool TestNumberAgainstLong(ITypedElement valueNode, ParsedSearchParameter sp)
+    public static bool TestNumberAgainstLong(PocoNode? valueNode, ParsedSearchParameter sp)
     {
-        if (valueNode?.Value == null)
+        if (valueNode?.Poco is null)
         {
             return false;
         }
 
-        long elementValue;
+        long? elementValue;
 
-        switch (valueNode.Value)
+        switch (valueNode.Poco)
         {
-            case int valueI:
-                elementValue = valueI;
+            case Integer fi:
+                elementValue = fi.Value;
                 break;
 
-            case uint valueUI:
-                elementValue = valueUI;
+            case UnsignedInt fui:
+                elementValue = fui.Value;
                 break;
 
-            case long valueL:
-                elementValue = valueL;
+            case PositiveInt fpi:
+                elementValue = fpi.Value;
+                break;
+
+            case Integer64 fl:
+                elementValue = fl.Value;
                 break;
 
             default:
                 return false;
         }
 
-        if (sp.ValueInts == null)
+        if ((elementValue is null) ||
+            (sp.ValueInts is null))
         {
             return false;
         }
@@ -122,7 +129,7 @@ public static class EvalNumberSearch
                     break;
 
                 case SearchPrefixCodes.Approximately:
-                    if (Math.Abs(elementValue - sp.ValueInts[i]) <= 1)
+                    if (Math.Abs((double)(elementValue - sp.ValueInts[i])) <= 1.0)
                     {
                         return true;
                     }
@@ -138,16 +145,20 @@ public static class EvalNumberSearch
     /// <param name="valueNode">The value node.</param>
     /// <param name="sp">       The sp.</param>
     /// <returns>True if the test passes, false if the test fails.</returns>
-    public static bool TestNumberAgainstDecimal(ITypedElement valueNode, ParsedSearchParameter sp)
+    public static bool TestNumberAgainstDecimal(PocoNode? valueNode, ParsedSearchParameter sp)
     {
-        if (valueNode?.Value == null)
+        if (valueNode?.Poco is null)
         {
             return false;
         }
 
-        decimal elementValue = (decimal)(valueNode?.Value ?? 0);
+        if ((valueNode.Poco is not FhirDecimal fd) ||
+            (fd.Value is not decimal elementValue))
+        {
+            return false;
+        }
 
-        if (sp.ValueDecimals == null)
+        if (sp.ValueDecimals is null)
         {
             return false;
         }

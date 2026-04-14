@@ -184,7 +184,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
 
         response.ShouldNotBeNull();
 
-        if (response == null)
+        if (response is null)
         {
             return;
         }
@@ -211,7 +211,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         };
 
         if (!_fixture.AuthR4.SmartClients.TryGetValue(iss, out ClientInfo? clientInfo) ||
-            (clientInfo == null))
+            (clientInfo is null))
         {
             success = _fixture.AuthR4.TryRegisterClient(
                     clientRegistration,
@@ -277,7 +277,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         };
 
         if (!_fixture.AuthR4.SmartClients.TryGetValue(iss, out ClientInfo? clientInfo) ||
-            (clientInfo == null))
+            (clientInfo is null))
         {
             success = _fixture.AuthR4.TryRegisterClient(
                     clientRegistration,
@@ -308,7 +308,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         JsonWebKey? signingKey = privateKeySet.Keys.Where(wk => wk.KeyOps.Contains("sign")).FirstOrDefault();
 
         signingKey.ShouldNotBeNull("there should be a 'sign' capable key in the private set");
-        if (signingKey == null)
+        if (signingKey is null)
         {
             return;
         }

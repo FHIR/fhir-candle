@@ -140,7 +140,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     public Dictionary<string, PackageCacheRecord> PackagesByDirective => _packagesByDirective;
 
     /// <summary>Gets a value indicating whether this object is available.</summary>
-    public bool IsConfigured => _cache != null;
+    public bool IsConfigured => _cache is not null;
 
     /// <summary>Gets a value indicating whether the package service is ready.</summary>
     public bool IsReady => _isInitialized;
@@ -162,7 +162,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return;
         }
 
-        if (_config.FhirCacheDirectory == null)
+        if (_config.FhirCacheDirectory is null)
         {
             _config.FhirCacheDirectory = Platform.GetFhirPackageRoot();
         }
@@ -218,7 +218,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     /// <returns>An asynchronous result.</returns>
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
-        if (_cache == null)
+        if (_cache is null)
         {
             _logger.LogInformation("Disabling FhirPackageService, --fhir-package-cache set to empty.");
             return Task.CompletedTask;
@@ -273,7 +273,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return [];
         }
 
-        if (_cache == null)
+        if (_cache is null)
         {
             _logger.LogError("InstallPackages <<< Packages have been requested, but no cache has been configured!");
             return [];
@@ -289,7 +289,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
             PackageReference packageReference = PackageReference.Parse(directive);
 
-            if (packageReference.Name == null)
+            if (packageReference.Name is null)
             {
                 _logger.LogWarning($"InstallPackages <<< Failed to parse package reference: {directive}");
                 continue;
@@ -307,7 +307,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                         // resolve the version via Firely Packages so that we have access to the actual version number
                         (PackageReference pr, IPackageServer? _) = await ResolveLatest(packageReference.Name);
 
-                        if ((pr == PackageReference.None) || (pr.Name == null))
+                        if ((pr == PackageReference.None) || (pr.Name is null))
                         {
                             throw new Exception($"Failed to resolve latest version of {packageReference.Name} ({directive})");
                         }
@@ -448,7 +448,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     /// <returns>A task representing the asynchronous operation. The task result contains a boolean value indicating whether the package was installed successfully.</returns>
     private async Task<bool> InstallPackage(PackageReference packageReference)
     {
-        if (_cache == null)
+        if (_cache is null)
         {
             return false;
         }
@@ -483,7 +483,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
     private async Task<bool> PackageExists(string packageId)
     {
-        if (_cache == null)
+        if (_cache is null)
         {
             return false;
         }
@@ -515,7 +515,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     /// <returns>A list of FHIR sequence codes representing the supported versions.</returns>
     public async Task<List<FhirReleases.FhirSequenceCodes>?> InstalledPackageFhirVersions(PackageReference packageReference)
     {
-        if (_cache == null)
+        if (_cache is null)
         {
             return null;
         }
@@ -537,7 +537,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     /// <returns>The content directory for the package, or null if the cache is not configured.</returns>
     public string? GetPackageContentDirectory(PackageReference packageReference)
     {
-        if (_cache == null)
+        if (_cache is null)
         {
             return null;
         }
@@ -551,7 +551,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     /// <param name="packageDirective">The package directive specifying the package to delete.</param>
     public void DeletePackage(string packageDirective)
     {
-        if (_cache == null)
+        if (_cache is null)
         {
             return;
         }

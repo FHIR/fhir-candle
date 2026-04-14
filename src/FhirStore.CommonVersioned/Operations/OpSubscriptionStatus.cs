@@ -117,17 +117,17 @@ public class OpSubscriptionStatus : IFhirOperation
         }
 
         // check for body parameters
-        if ((bodyResource != null) &&
+        if ((bodyResource is not null) &&
             (bodyResource is Hl7.Fhir.Model.Parameters bodyParams) &&
             (bodyParams.Parameter?.Any() ?? false))
         {
             subscriptionIds.AddRange(bodyParams.Parameter
-                .Where(p => p.Name.Equals("id", StringComparison.Ordinal))?
-                .Select(p => p.Value.ToString() ?? string.Empty) ?? Array.Empty<string>());
+                .Where(p => p.Name?.Equals("id", StringComparison.Ordinal) ?? false)?
+                .Select(p => p.Value?.ToString() ?? string.Empty) ?? Array.Empty<string>());
 
             statusFilters.AddRange(bodyParams.Parameter
-                .Where(p => p.Name.Equals("status", StringComparison.Ordinal))?
-                .Select(p => p.Value.ToString() ?? string.Empty) ?? Array.Empty<string>());
+                .Where(p => p.Name?.Equals("status", StringComparison.Ordinal) ?? false)?
+                .Select(p => p.Value?.ToString() ?? string.Empty) ?? Array.Empty<string>());
         }
 
         Dictionary<string, Hl7.Fhir.Model.Resource> subscriptionStatuses = new();
@@ -138,7 +138,7 @@ public class OpSubscriptionStatus : IFhirOperation
             foreach (string id in store._subscriptions.Keys)
             {
                 Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(id, "query-status");
-                if (s != null)
+                if (s is not null)
                 {
                     subscriptionStatuses.Add(id, s);
                 }
@@ -157,7 +157,7 @@ public class OpSubscriptionStatus : IFhirOperation
                 }
 
                 Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(sub.Id, "query-status");
-                if (s != null)
+                if (s is not null)
                 {
                     subscriptionStatuses.Add(sub.Id, s);
                 }
@@ -170,7 +170,7 @@ public class OpSubscriptionStatus : IFhirOperation
             foreach (string id in subscriptionIds.Distinct())
             {
                 Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(id, "query-status");
-                if (s != null)
+                if (s is not null)
                 {
                     subscriptionStatuses.Add(id, s);
                 }
@@ -190,7 +190,7 @@ public class OpSubscriptionStatus : IFhirOperation
                 }
 
                 Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(id, "query-status");
-                if (s != null)
+                if (s is not null)
                 {
                     subscriptionStatuses.Add(id, s);
                 }

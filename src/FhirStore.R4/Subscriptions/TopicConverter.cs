@@ -18,14 +18,14 @@ public class TopicConverter
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParse(object topic, out ParsedSubscriptionTopic common)
     {
-        if ((topic == null) ||
+        if ((topic is null) ||
             (topic is not Hl7.Fhir.Model.Basic st) ||
             string.IsNullOrEmpty(st.Id) ||
-            (st.Code == null) ||
-            (st.Code.Coding == null) ||
-            (!st.Code.Coding.Any(c =>
-                c.Code.Equals("SubscriptionTopic", StringComparison.Ordinal) &&
-                c.System.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal))))
+            (st.Code is null) ||
+            (st.Code.Coding is null) ||
+            !st.Code.Coding.Any(c =>
+                (c.Code?.Equals("SubscriptionTopic", StringComparison.Ordinal) ?? false) &&
+                (c.System?.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal) ?? false)))
         {
             common = null!;
             return false;
@@ -33,12 +33,12 @@ public class TopicConverter
 
         ParseExtensions(
             st.ModifierExtension,
-            out Dictionary<string, List<Hl7.Fhir.Model.DataType>> modifierExts,
+            out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> modifierExts,
             out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> modifierNested);
 
         ParseExtensions(
             st.Extension,
-            out Dictionary<string, List<Hl7.Fhir.Model.DataType>> exts,
+            out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> exts,
             out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> nested);
 
         common = new()
@@ -59,7 +59,7 @@ public class TopicConverter
             {
                 ParseExtensions(
                     rtExtensions,
-                    out Dictionary<string, List<Hl7.Fhir.Model.DataType>> rt,
+                    out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> rt,
                     out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> rtNested);
 
                 string resourceType = GetString(rt, "resource");
@@ -80,7 +80,7 @@ public class TopicConverter
                     interactions.Add(i);
                 }
 
-                Dictionary<string, List<Hl7.Fhir.Model.DataType>> qc;
+                Dictionary<string, List<Hl7.Fhir.Model.DataType?>> qc;
                 if (rtNested.ContainsKey("queryCriteria"))
                 {
                     ParseExtensions(rtNested["queryCriteria"].First(), out qc, out _);
@@ -112,7 +112,7 @@ public class TopicConverter
             {
                 ParseExtensions(
                     etExtensions,
-                    out Dictionary<string, List<Hl7.Fhir.Model.DataType>> et,
+                    out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> et,
                     out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> etNested);
 
                 string resourceType = GetString(et, "resource");
@@ -148,7 +148,7 @@ public class TopicConverter
             {
                 ParseExtensions(
                     cfExtensions,
-                    out Dictionary<string, List<Hl7.Fhir.Model.DataType>> cf,
+                    out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> cf,
                     out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> cfNested);
 
                 string resourceType = GetString(cf, "resource");
@@ -178,7 +178,7 @@ public class TopicConverter
             {
                 ParseExtensions(
                     nsExtensions,
-                    out Dictionary<string, List<Hl7.Fhir.Model.DataType>> ns,
+                    out Dictionary<string, List<Hl7.Fhir.Model.DataType?>> ns,
                     out Dictionary<string, List<List<Hl7.Fhir.Model.Extension>>> nsNested);
 
                 string resourceType = GetString(ns, "resource");

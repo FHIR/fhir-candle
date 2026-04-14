@@ -201,7 +201,7 @@
     /// <returns>The filtered items.</returns>
     private IQueryable<InstanceTableRec>? GetFilteredItems()
     {
-        if ((ResourceStore == null) ||
+        if ((ResourceStore is null) ||
             (!ResourceStore.Any()))
         {
             return null;
@@ -234,7 +234,7 @@
 
         if (AllowMultipleSelection)
         {
-            if (row?.Item != null)
+            if (row?.Item is not null)
             {
                 if (SelectedIds.Contains(row.Item.Id))
                 {
@@ -249,7 +249,7 @@
         else
         {
             SelectedIds.Clear();
-            if (row?.Item != null)
+            if (row?.Item is not null)
             {
                 SelectedIds.Add(row.Item.Id);
             }
@@ -285,7 +285,7 @@
 
     private void ResetDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -301,7 +301,7 @@
 
     private void CancelDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -345,11 +345,11 @@
     {
         debounceTimer?.Dispose();
 
-        if (Store != null)
+        if (Store is not null)
         {
         }
 
-        if (ResourceStore != null)
+        if (ResourceStore is not null)
         {
             ResourceStore.OnInstanceCreated -= ResourceStore_OnChanged;
             ResourceStore.OnInstanceUpdated -= ResourceStore_OnChanged;

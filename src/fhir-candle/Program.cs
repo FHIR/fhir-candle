@@ -4,8 +4,6 @@
 // </copyright>
 
 using System.CommandLine;
-using System.CommandLine.Builder;
-using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -14,9 +12,12 @@ using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Utils;
+using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
+using Microsoft.Extensions.Configuration;
 using Microsoft.FluentUI.AspNetCore.Components;
+using Microsoft.JSInterop;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -32,79 +33,110 @@ public static partial class Program
     [GeneratedRegex("(http[s]*:\\/\\/.*(:\\d+)*)")]
     private static partial Regex InputUrlFormatRegex();
 
+    private static int _retVal = 0;
+
     /// <summary>Main entry-point for this application.</summary>
     /// <param name="args">An array of command-line argument strings.</param>
     public static async Task<int> Main(string[] args)
     {
         // set up our configuration (command line > environment > appsettings.json)
-        IConfiguration envConfig = new ConfigurationBuilder()
+        IConfiguration extConfig = new ConfigurationBuilder()
             .AddJsonFile("appsettings.json", optional: true)
+            .AddEnvironmentVariables("Candle")
             .AddEnvironmentVariables()
             .Build();
 
-        //Dictionary<string, SCL.Option> options = BuildCliOptions(typeof(CandleConfig), envConfig: envConfig);
-        ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
-        List<string> envArgs = [];
+        RootCommand root = CliOptions.RootCommand;
+        root.SetAction(async (ParseResult pr) => await RunServer(pr, extConfig));
 
-        // build our root command
-        SCL.RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        SCL.RootCommand envCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
-        foreach (ConfigurationOption co in configurationOptions)
+        ParseResult pr = root.Parse(args, new ParserConfiguration()
         {
-            // note that 'global' here is just recursive DOWNWARD
-            rootCommand.AddGlobalOption(co.CliOption);
-            envCommand.AddGlobalOption(co.CliOption);
+            ResponseFileTokenReplacer = null,
+        });
 
-            if (string.IsNullOrEmpty(co.EnvVarName))
-            {
-                continue;
-            }
+        await pr.InvokeAsync();
 
-            IConfigurationSection section = envConfig.GetSection(co.EnvVarName);
+        return _retVal;
 
-            if (!section.Exists())
-            {
-                continue;
-            }
 
-            string? value = (section.Value ?? null) ?? string.Join(',', section.GetChildren().Select(c => c.Value));
+        //// Create commands from CliOptions.Commands so the list is defined in one place
+        ////foreach ((string name, Command cmd) in CliOptions.Commands)
+        ////{
+        ////    // set the handlers for each command
+        ////    switch (name)
+        ////    {
+        ////        case CliLoadXmlCommand.CommandName:
+        ////            cmd.SetAction((ParseResult pr) => loadCommandHandler(pr, configuration));
+        ////            break;
+        ////    }
 
-            if (string.IsNullOrEmpty(value))
-            {
-                continue;
-            }
+        ////    root.Add(cmd);
+        ////}
 
-            if (value.Contains(' '))
-            {
-                value = $"\"{value}\"";
-            }
 
-            if (co.CliOption.Aliases.Any())
-            {
-                envArgs.Add(co.CliOption.Aliases.First());
-                envArgs.Add(value);
-                continue;
-            }
+        ////Dictionary<string, SCL.Option> options = BuildCliOptions(typeof(CandleConfig), envConfig: envConfig);
+        //ConfigurationOption[] configurationOptions = (new CandleConfig()).GetOptions();
+        //List<string> envArgs = [];
 
-            if (!string.IsNullOrEmpty(co.CliOption.Name))
-            {
-                envArgs.Add(co.CliOption.Name);
-                envArgs.Add(value);
-                continue;
-            }
-        }
+        //// build our root command
+        //SCL.RootCommand rootCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
+        //SCL.RootCommand envCommand = new("A lightweight in-memory FHIR server, for when a small FHIR will do.");
+        //foreach (ConfigurationOption co in configurationOptions)
+        //{
+        //    // note that 'global' here is just recursive DOWNWARD
+        //    rootCommand.AddGlobalOption(co.CliOption);
+        //    envCommand.AddGlobalOption(co.CliOption);
 
-        // build a parser for our environment arguments
-        SCL.Parsing.Parser envParser = new CommandLineBuilder(envCommand).UseDefaults().Build();
+        //    if (string.IsNullOrEmpty(co.EnvVarName))
+        //    {
+        //        continue;
+        //    }
 
-        // attempt a parse
-        SCL.Parsing.ParseResult envParseResult = envParser.Parse(string.Join(' ', envArgs));
+        //    IConfigurationSection section = envConfig.GetSection(co.EnvVarName);
 
-        // set our command handler
-        rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, envParseResult, context.GetCancellationToken()));
+        //    if (!section.Exists())
+        //    {
+        //        continue;
+        //    }
 
-        // run whatever the caller requested
-        return await rootCommand.InvokeAsync(args);
+        //    string? value = (section.Value ?? null) ?? string.Join(',', section.GetChildren().Select(c => c.Value));
+
+        //    if (string.IsNullOrEmpty(value))
+        //    {
+        //        continue;
+        //    }
+
+        //    if (value.Contains(' '))
+        //    {
+        //        value = $"\"{value}\"";
+        //    }
+
+        //    if (co.CliOption.Aliases.Any())
+        //    {
+        //        envArgs.Add(co.CliOption.Aliases.First());
+        //        envArgs.Add(value);
+        //        continue;
+        //    }
+
+        //    if (!string.IsNullOrEmpty(co.CliOption.Name))
+        //    {
+        //        envArgs.Add(co.CliOption.Name);
+        //        envArgs.Add(value);
+        //        continue;
+        //    }
+        //}
+
+        //// build a parser for our environment arguments
+        //SCL.Parsing.Parser envParser = new CommandLineBuilder(envCommand).UseDefaults().Build();
+
+        //// attempt a parse
+        //SCL.Parsing.ParseResult envParseResult = envParser.Parse(string.Join(' ', envArgs));
+
+        //// set our command handler
+        //rootCommand.SetHandler(async (context) => await RunServer(context.ParseResult, envParseResult, context.GetCancellationToken()));
+
+        //// run whatever the caller requested
+        //return await rootCommand.InvokeAsync(args);
     }
 
     /// <summary>Executes the server operation.</summary>
@@ -112,17 +144,19 @@ public static partial class Program
     /// <param name="envPR">The parsed configuration data from environment variables</param>
     /// <param name="cancellationToken">A token that allows processing to be cancelled.</param>
     /// <returns>An asynchronous result that yields an int.</returns>
-    public static async Task<int> RunServer(
-        SCL.Parsing.ParseResult pr,
-        SCL.Parsing.ParseResult envPR,
+    public static async Task RunServer(
+        SCL.ParseResult pr,
+        IConfiguration extConfig,
         CancellationToken? cancellationToken = null)
     {
         try
         {
-            CandleConfig config = new();
+            if (pr.RootCommandResult.Command is not CliRootCommand crc)
+            {
+                throw new InvalidOperationException("Root command is not a CliRootCommand");
+            }
 
-            // parse the arguments into the configuration object
-            config.Parse(pr, envPR);
+            CandleConfig config = new(crc.CommandCliOptions, pr, extConfig);
 
             if (string.IsNullOrEmpty(config.PublicUrl))
             {
@@ -183,18 +217,20 @@ public static partial class Program
             // if we didn't find a web root, use the default
             builder ??= WebApplication.CreateBuilder();
 
+            StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
+            builder.WebHost.UseStaticWebAssets();
+
             string appCacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "fhir-candle-key-store");
             if (!Directory.Exists(appCacheDir))
             {
                 Directory.CreateDirectory(appCacheDir);
             }
 
-            StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
-            builder.WebHost.UseStaticWebAssets();
-
             builder.Services.AddDataProtection()
                 .SetApplicationName("fhir-candle")
+                //.SetDefaultKeyLifetime(TimeSpan.FromDays(90))
                 .PersistKeysToFileSystem(new DirectoryInfo(appCacheDir));
+
             builder.Services.AddCors();
 
             // setup open telemetry if necessary
@@ -237,13 +273,14 @@ public static partial class Program
             builder.Services.AddControllers();
             builder.Services.AddHttpClient();
 
-            if (config.DisableUi == true)
+            if (config.Headless == true)
             {
                 // check for any SMART-enabled tenants - *requires* UI
                 if (config.SmartRequiredTenants.Any() || config.SmartOptionalTenants.Any())
                 {
                     Console.WriteLine("fhir-candle <<< ERROR: Cannot disable UI when SMART is configured.");
-                    return -1;
+                    _retVal = -1;
+                    return;
                 }
 
                 builder.Services.AddAntiforgery();
@@ -286,7 +323,7 @@ public static partial class Program
             // this is developer tooling - always respond with as much detail as we can
             app.UseDeveloperExceptionPage();
 
-            if (config.DisableUi != true)
+            if (config.Headless != true)
             {
                 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
                 //app.MapRazorComponents<Components.App>()
@@ -319,16 +356,19 @@ public static partial class Program
             AfterServerStart(app, config);
             await app.WaitForShutdownAsync((CancellationToken)cancellationToken);
 
-            return 0;
+            _retVal = 0;
+            return;
         }
         catch (OperationCanceledException)
         {
-            return 0;
+            _retVal = 0;
+            return;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"fhir-candle <<< caught exception: {ex.Message}");
-            return -1;
+            _retVal = ex.HResult;
+            return;
         }
     }
 
@@ -400,7 +440,7 @@ public static partial class Program
             "logs",
             protocol);
 
-        if (logsEndpoint != null)
+        if (logsEndpoint is not null)
         {
             builder.Logging.AddOpenTelemetry(options =>
             {
@@ -417,7 +457,7 @@ public static partial class Program
             });
         }
 
-        if ((traceEndpoint != null) && (metricsEndpoint != null))
+        if ((traceEndpoint is not null) && (metricsEndpoint is not null))
         {
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource => resource.AddService("fhir-candle"))
@@ -438,7 +478,7 @@ public static partial class Program
                         exporterOptions.Protocol = protocol;
                     }));
         }
-        else if (traceEndpoint != null)
+        else if (traceEndpoint is not null)
         {
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource => resource.AddService("fhir-candle"))
@@ -451,7 +491,7 @@ public static partial class Program
                         exporterOptions.Protocol = protocol;
                     }));
         }
-        else if (metricsEndpoint != null)
+        else if (metricsEndpoint is not null)
         {
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource => resource.AddService("fhir-candle"))
@@ -597,7 +637,7 @@ public static partial class Program
             }
         }
 
-        if (loadDir != null)
+        if (loadDir is not null)
         {
             foreach (TenantConfiguration tenant in tenants.Values)
             {

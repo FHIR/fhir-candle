@@ -1,6 +1,5 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using Hl7.Fhir.Utility;
-@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 
 @inject IHttpContextAccessor HttpContextAccessor
 
@@ -8,42 +7,43 @@
 
 <FluentAccordion>
     <FluentAccordionItem Heading="Patient Selection" Expanded="true">
-        <FluentAutocomplete Id="patient-selector"
-        @ref="PatientSelector"
-        TOption="Hl7.Fhir.Model.Patient"
-        Width="100%"
-        Placeholder="search"
-        MaximumSelectedOptions="1"
-        KeepOpen="false"
-        OnOptionsSearch="@OnPatientSearch"
-        OptionText="@(item => displayFor(item))"
-        OptionStyle="min-height: 40px;"
-        @bind-SelectedOptions="@SelectedPatients">
+         <FluentAutocomplete Id="patient-selector"
+                @ref="PatientSelector"
+                TOption="Hl7.Fhir.Model.Patient"
+                Width="100%"
+                Placeholder="search"
+                MaximumSelectedOptions="1"
+                KeepOpen="false"
+                OnOptionsSearch="@OnPatientSearch"
+                OptionText="@(item => displayFor(item))"
+                OptionStyle="min-height: 40px;"
+                @bind-SelectedOptions="@SelectedPatients">
             <LabelTemplate>
                 Select a patient
                 <FluentIcon Value="@(new Icons.Regular.Size20.Person())" Style="margin: 0 4px;" />
             </LabelTemplate>
             <SelectedOptionTemplate>
                 <FluentPersona Name="@(displayFor(context))"
-                Style="height: 26px; background: var(--neutral-fill-secondary-hover)"
-                ImageSize="24px"
-                Initials="@(getInitials(context.Name))"
-                DismissTitle="Remove"
-                Status="PresenceStatus.Available"
-                OnDismissClick="@(async () => ((List<Hl7.Fhir.Model.Patient>)SelectedPatients).Clear())" />
+                        Style="height: 26px; background: var(--neutral-fill-secondary-hover)"
+                        ImageSize="24px"
+                        Initials="@(getInitials(context.Name))"
+                        DismissTitle="Remove"
+                        Status="PresenceStatus.Available"
+                        OnDismissClick="@(async () => SelectedPatients = [])" />
             </SelectedOptionTemplate>
             <OptionTemplate>
-                <FluentPersona ImageSize="32px"
-                Initials="@(getInitials(context.Name))"
-                Status="PresenceStatus.Available"
-                StatusSize="PresenceBadgeSize.Small"
-                Name="@(displayFor(context))" />
+                <FluentPersona
+                    ImageSize="32px"
+                    Initials="@(getInitials(context.Name))"
+                    Status="PresenceStatus.Available"
+                    StatusSize="PresenceBadgeSize.Small"
+                    Name="@(displayFor(context))" />
             </OptionTemplate>
             <MaximumSelectedOptionsMessage>
                 Only one patient can be selected.
             </MaximumSelectedOptionsMessage>
             <FooterContent>
-                @if (!context.Any())
+                @if (!context.Items.Any())
                 {
                     <FluentLabel Style="font-size: 11px; text-align: center; width: 200px;">
                         No results found
@@ -67,23 +67,22 @@
             </FluentLabel>
 
             <FluentTextField @bind-Value="UserTag" Label="User Tag" />
-
             <FluentAutocomplete Id="subscription-selector"
-            Label="Select Subscription"
-            TOption="ParsedSubscription"
-            Width="100%"
-            Placeholder="Select a subscription"
-            MaximumSelectedOptions="1"
-            KeepOpen="false"
-            OnOptionsSearch="@OnSubscriptionSearch"
-            OptionText="@(item => displayFor(item))"
-            OptionStyle="min-height: 40px;"
-            @bind-SelectedOptions="@SelectedSubscriptions">
+                    Label="Select Subscription"
+                    TOption="ParsedSubscription"
+                    Width="100%"
+                    Placeholder="Select a subscription"
+                    MaximumSelectedOptions="1"
+                    KeepOpen="false"
+                    OnOptionsSearch="@OnSubscriptionSearch"
+                    OptionText="@(item => displayFor(item))"
+                    OptionStyle="min-height: 40px;"
+                    @bind-SelectedOptions="@SelectedSubscriptions">
                 <MaximumSelectedOptionsMessage>
                     Only one subscription can be selected.
                 </MaximumSelectedOptionsMessage>
                 <FooterContent>
-                    @if (!context.Any())
+                    @if (!context.Items.Any())
                     {
                         <FluentLabel Style="font-size: 11px; text-align: center; width: 200px;">
                             No results found
@@ -205,7 +204,7 @@
     [Parameter]
     public IFhirStore Store { get; set; } = null!;
 
-    [Parameter]
+    [CascadingParameter]
     public ProtectedLocalStorage BrowserStore { get; set; } = null!;
 
     private ParsedSubscription _editingSubscription = new()
@@ -257,7 +256,7 @@
                             Name = "_id",
                             Comparator = string.Empty,
                             Modifier = string.Empty,
-                            Value = _selectedPatients[0].Id,
+                            Value = _selectedPatients[0].Id!,
                         }]);
             }
         }
@@ -327,7 +326,7 @@
                             Name = "_id",
                             Comparator = string.Empty,
                             Modifier = string.Empty,
-                            Value = _selectedPatients[0].Id,
+                            Value = _selectedPatients[0].Id!,
                         }]);
                 }
             }
@@ -364,7 +363,7 @@
     private async Task LoadStateAsync()
     {
         ProtectedBrowserStorageResult<string> result = await BrowserStore.GetAsync<string>(nameof(UserTag));
-        if (result.Value != null)
+        if (result.Value is not null)
         {
             _userTag = result.Value;
         }
@@ -372,7 +371,7 @@
 
     private void configureStores()
     {
-        if (_patientStore != null)
+        if (_patientStore is not null)
         {
             _patientStore.OnInstanceCreated -= PatientStore_OnChanged;
             _patientStore.OnInstanceDeleted -= PatientStore_OnChanged;
@@ -401,7 +400,7 @@
 
     private void OnPatientSearch(OptionsSearchEventArgs<Hl7.Fhir.Model.Patient> e)
     {
-        if (_patientStore == null)
+        if (_patientStore is null)
         {
             e.Items = [];
             return;
@@ -417,7 +416,7 @@
 
     private void OnSubscriptionSearch(OptionsSearchEventArgs<ParsedSubscription> e)
     {
-        if (Store == null)
+        if (Store is null)
         {
             e.Items = [];
             return;
@@ -451,18 +450,18 @@
     {
         Hl7.Fhir.Model.HumanName? name = names.FirstOrDefault();
 
-        if (name == null)
+        if (name is null)
         {
             return string.Empty;
         }
 
-        return string.Join("", name.Given.Select(gn => gn.FirstOrDefault().ToString() ?? string.Empty)) +
+        return string.Join("", name.Given.Select(gn => gn?.FirstOrDefault().ToString() ?? string.Empty)) +
             name.Family?.FirstOrDefault().ToString() ?? string.Empty;
     }
 
     private bool testForSearch(string text, object o)
     {
-        if (o == null)
+        if (o is null)
         {
             return false;
         }
@@ -471,9 +470,9 @@
         {
             case Hl7.Fhir.Model.Patient p:
                 return
-                    p.Id.Contains(text, StringComparison.OrdinalIgnoreCase) ||
-                    p.Name.Any(n => n.Family.StartsWith(text, StringComparison.OrdinalIgnoreCase) ||
-                                    n.Given.Any(g => g.StartsWith(text, StringComparison.OrdinalIgnoreCase)));
+                    p.Id!.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                    p.Name.Any(n => (n.Family?.StartsWith(text, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                                    n.Given.Any(g => g?.StartsWith(text, StringComparison.OrdinalIgnoreCase) ?? false));
 
             case ParsedSubscription parsedSubscription:
                 return
@@ -488,7 +487,7 @@
 
     private string displayFor(object o)
     {
-        if (o == null)
+        if (o is null)
         {
             return string.Empty;
         }
@@ -508,10 +507,10 @@
                 return $"{hn.Family}, {string.Join(' ', hn.Given)}";
 
             case Hl7.Fhir.Model.FhirString s:
-                return s.Value;
+                return s.Value ?? string.Empty;
 
             case Hl7.Fhir.Model.Code c:
-                return c.Value;
+                return c.Value ?? string.Empty;
 
             case Hl7.Fhir.Model.Coding coding:
                 return string.IsNullOrEmpty(coding.Display) ? $"{coding.System}|{coding.Code}" : coding.Display;
@@ -526,7 +525,7 @@
                         return $"{i.System}|{i.Value}";
                     }
 
-                    if (i.Type != null)
+                    if (i.Type is not null)
                     {
                         return displayFor(i.Type);
                     }
@@ -545,7 +544,7 @@
                         return rr.Reference;
                     }
 
-                    if (rr.Identifier != null)
+                    if (rr.Identifier is not null)
                     {
                         displayFor(rr.Identifier);
                     }
@@ -573,7 +572,7 @@
     {
         // debounceTimer?.Dispose();
 
-        // if (_taskStore != null)
+        // if (_taskStore is not null)
         // {
         //     _taskStore.OnInstanceCreated -= ResourceStore_OnChanged;
         //     _taskStore.OnInstanceDeleted -= ResourceStore_OnChanged;

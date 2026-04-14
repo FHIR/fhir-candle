@@ -147,7 +147,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
     {
         EventHandler<EventArgs>? handler = OnChanged;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, EventArgs.Empty);
         }
@@ -567,7 +567,7 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
             foreach ((string tenantName, TenantConfiguration config) in _tenants)
             {
                 // if this package lists FHIR versions and it doesn't include the tenant's version, skip it
-                if ((packageFhirVersions != null) &&
+                if ((packageFhirVersions is not null) &&
                     !packageFhirVersions.Contains(config.FhirVersion))
                 {
                     continue;

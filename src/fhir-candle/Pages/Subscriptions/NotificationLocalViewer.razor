@@ -105,7 +105,7 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/subscriptions/notification-local-viewer", StringComparison.Ordinal))
         {
-            if (_store != null)
+            if (_store is not null)
             {
                 _store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;
             }
@@ -141,7 +141,7 @@
     /// </summary>
     public void Dispose()
     {
-        if (_store != null)
+        if (_store is not null)
         {
             _store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;
         }

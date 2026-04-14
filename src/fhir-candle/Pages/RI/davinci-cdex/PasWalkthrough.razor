@@ -107,14 +107,14 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/davinci-pas/walkthrough", StringComparison.Ordinal))
         {
-            if (_provider != null)
+            if (_provider is not null)
             {
                 _provider.OnInstanceCreated -= Store_OnChanged;
                 _provider.OnInstanceUpdated -= Store_OnChanged;
                 _provider.OnInstanceDeleted -= Store_OnChanged;
             }
 
-            if (_payer != null)
+            if (_payer is not null)
             {
                 _payer.OnInstanceCreated -= Store_OnChanged;
                 _payer.OnInstanceUpdated -= Store_OnChanged;
@@ -165,14 +165,14 @@
     /// </summary>
     public void Dispose()
     {
-        if (_provider != null)
+        if (_provider is not null)
         {
             _provider.OnInstanceCreated -= Store_OnChanged;
             _provider.OnInstanceUpdated -= Store_OnChanged;
             _provider.OnInstanceDeleted -= Store_OnChanged;
         }
 
-        if (_payer != null)
+        if (_payer is not null)
         {
             _payer.OnInstanceCreated -= Store_OnChanged;
             _payer.OnInstanceUpdated -= Store_OnChanged;

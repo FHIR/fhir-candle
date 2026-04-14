@@ -3,7 +3,7 @@
 
 @page "/store/resource-viewer"
 
-@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@* @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage *@
 @using BlazorMonaco
 @using BlazorMonaco.Editor
 
@@ -12,7 +12,7 @@
 @inject IJSRuntime JS
 @inject IFhirStoreManager StoreManager
 @inject ISmartAuthManager AuthManager
-@inject ProtectedLocalStorage BrowserStore
+@* @inject ProtectedLocalStorage BrowserStore *@
 @inject IHttpContextAccessor HttpContextAccessor
 
 @implements IDisposable
@@ -216,7 +216,7 @@
         {
         }
 
-        if (NavTracker != null)
+        if (NavTracker is not null)
         {
             // notify of store root in case user clicked here directly
             NavTracker.NotifyNav(_navPages);
@@ -234,7 +234,7 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/store/resource-editor", StringComparison.Ordinal))
         {
-            if (_store != null)
+            if (_store is not null)
             {
             }
 
@@ -243,7 +243,7 @@
             {
             }
 
-            if (NavTracker != null)
+            if (NavTracker is not null)
             {
                 // notify of store root in case user clicked here directly
                 NavTracker.NotifyNav(_navPages);
@@ -261,7 +261,7 @@
     {
         NavigationManager.LocationChanged -= HandleLocationChanged;
 
-        if (_store != null)
+        if (_store is not null)
         {
         }
     }

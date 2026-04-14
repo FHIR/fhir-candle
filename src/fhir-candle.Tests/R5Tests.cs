@@ -34,10 +34,10 @@ public class R5Tests
     internal readonly Dictionary<string, AuthorizationInfo> _authorizations;
 
     /// <summary>(Immutable) The total number of patients.</summary>
-    internal const int _patientCount = 5;
+    internal const int _patientCount = 6;
 
     /// <summary>(Immutable) The number of patients coded as male.</summary>
-    internal const int _patientsMale = 3;
+    internal const int _patientsMale = 4;
 
     /// <summary>(Immutable) The number of patients coded as female.</summary>
     internal const int _patientsFemale = 1;
@@ -244,7 +244,7 @@ public class R5TestsEncounter : IClassFixture<R5Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -276,7 +276,7 @@ public class R5TestsEncounter : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -363,7 +363,7 @@ public class R5TestsObservation : IClassFixture<R5Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -395,7 +395,7 @@ public class R5TestsObservation : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -437,7 +437,7 @@ public class R5TestsObservation : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -476,13 +476,13 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "_id=AnIdThatDoesNotExist", 0)]
     [InlineData(null, "_id=example", 1)]
     [InlineData(null, "_id=example&_revinclude=Observation:patient", 1, (R5Tests._observationsWithSubjectExample + 1))]
-    [InlineData(null, "name=peter", 1)]
+    [InlineData(null, "name=peter", 2)]
     [InlineData(null, "name=not-present,another-not-present", 0)]
-    [InlineData(null, "name=peter,not-present", 1)]
-    [InlineData(null, "name=not-present,peter", 1)]
-    [InlineData(null, "name:contains=eter", 1)]
+    [InlineData(null, "name=peter,not-present", 2)]
+    [InlineData(null, "name=not-present,peter", 2)]
+    [InlineData(null, "name:contains=eter", 2)]
     [InlineData(null, "name:contains=zzrot", 0)]
-    [InlineData(null, "name:exact=Peter", 1)]
+    [InlineData(null, "name:exact=Peter", 2)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
     [InlineData(null, "_profile:missing=true", R5Tests._patientCount)]
@@ -499,15 +499,15 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "gender=male,female", (R5Tests._patientsMale + R5Tests._patientsFemale))]
     [InlineData(null, "name-use=official", R5Tests._patientCount)]
     [InlineData(null, "name-use=invalid-name-use", 0)]
-    [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
-    [InlineData(null, "identifier=|12345", 1)]
+    [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 2)]
+    [InlineData(null, "identifier=|12345", 2)]
     [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|ValueThatDoesNotExist", 0)]
     [InlineData(null, "active=true", R5Tests._patientCount)]
     [InlineData(null, "active=false", 0)]
     [InlineData(null, "active=garbage", 0)]
-    [InlineData(null, "telecom=phone|(03) 5555 6473", 1)]
-    [InlineData(null, "telecom=|(03) 5555 6473", 1)]
-    [InlineData(null, "telecom=phone|", 1)]
+    [InlineData(null, "telecom=phone|(03) 5555 6473", 2)]
+    [InlineData(null, "telecom=|(03) 5555 6473", 2)]
+    [InlineData(null, "telecom=phone|", 2)]
     [InlineData(null, "_id=example&name=peter", 1)]
     [InlineData(null, "_id=example&name=not-present", 0)]
     [InlineData(null, "_id=example&_profile:missing=false", 0)]
@@ -553,7 +553,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -585,7 +585,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -627,7 +627,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -663,7 +663,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     {
         AuthorizationInfo? authInfo = null;
 
-        if ((authKey != null) &&
+        if ((authKey is not null) &&
             !_fixture._authorizations.TryGetValue(authKey, out authInfo))
         {
             throw new InvalidOperationException($"Authorization key '{authKey}' not found");
@@ -673,9 +673,9 @@ public class R5TestsPatient : IClassFixture<R5Tests>
         string getUrl;
         string postUrl;
 
-        bool hasSearchParams = search != null;
+        bool hasSearchParams = search is not null;
 
-        if (resourceType == null)
+        if (resourceType is null)
         {
             getUrl = hasSearchParams
                 ? $"{_fixture._store.Config.BaseUrl}/Patient/{id}/*?{search}"
@@ -708,7 +708,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
             DestinationFormat = "application/fhir+json",
         };
 
-        bool success = resourceType == null
+        bool success = resourceType is null
             ? _fixture._store.CompartmentSearch(ctx, out response)
             : _fixture._store.CompartmentTypeSearch(ctx, out response);
 
@@ -720,7 +720,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }
@@ -749,7 +749,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
             DestinationFormat = "application/fhir+json",
         };
 
-        success = resourceType == null
+        success = resourceType is null
             ? _fixture._store.CompartmentSearch(ctx, out response)
             : _fixture._store.CompartmentTypeSearch(ctx, out response);
 
@@ -761,7 +761,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
 
         results.ShouldNotBeNull();
         results!.Total.ShouldBe(matchCount);
-        if (entryCount != null)
+        if (entryCount is not null)
         {
             results!.Entries.ShouldHaveCount((int)entryCount);
         }

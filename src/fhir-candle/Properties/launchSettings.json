@@ -8,7 +8,7 @@
   "profiles": {
     "candle": {
       "commandName": "Project",
-      "commandLineArgs": "--enable-mcp --r4 r4 --smart-optional * --fhir-source ~/fhirData --load-package hl7.fhir.r4.core",
+      "commandLineArgs": "--enable-mcp --r5 r5 --smart-optional * --fhir-source ~/fhirData --load-package hl7.fhir.r5.core",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {
@@ -26,7 +26,7 @@
     },
     "candle-test-data": {
       "commandName": "Project",
-      "commandLineArgs": "--fhir-source src/fhir-candle.Tests/data",
+      "commandLineArgs": "--fhir-source src/fhir-candle.Tests/data --enable-mcp",
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5826",
       "environmentVariables": {

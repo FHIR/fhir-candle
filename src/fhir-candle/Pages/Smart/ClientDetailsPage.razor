@@ -15,7 +15,7 @@
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
 
-    @if ((SmartClient == null) || (SmartClient.ClientId == null) || (ClientKey == null))
+    @if ((SmartClient is null) || (SmartClient.ClientId is null) || (ClientKey is null))
     {
         <FluentProgress></FluentProgress>
     }
@@ -159,7 +159,7 @@
                 SmartClient = client;
                 ClientKey = client.Registration?.KeySet?.Keys?.FirstOrDefault();
 
-                if (ClientKey != null)
+                if (ClientKey is not null)
                 {
                     JsonJwks = System.Text.Json.JsonSerializer.Serialize(ClientKey, new System.Text.Json.JsonSerializerOptions()
                     {
@@ -169,7 +169,7 @@
             }
         }
 
-        if (SmartClient == null)
+        if (SmartClient is null)
         {
             SmartClient = new()
             {
@@ -179,7 +179,7 @@
             };
         }
 
-        if (ClientKey == null)
+        if (ClientKey is null)
         {
             ClientKey = new()
             {
@@ -378,7 +378,7 @@
     /// </summary>
     public void Dispose()
     {
-        // if (_store != null)
+        // if (_store is not null)
         // {
         // }
     }

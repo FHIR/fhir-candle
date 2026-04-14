@@ -128,7 +128,7 @@ namespace fhir.candle._ForPackages
             // iterate over the QAS records and add them to a dictionary
             foreach (FhirCiQaRecord qas in updatedQAs)
             {
-                if (qas.PackageId == null)
+                if (qas.PackageId is null)
                 {
                     continue;
                 }
@@ -194,7 +194,7 @@ namespace fhir.candle._ForPackages
             List<FhirCiQaRecord>? qas = JsonConvert.DeserializeObject<List<FhirCiQaRecord>>(json);
 
             // if we do not have records, we are done
-            if (qas == null)
+            if (qas is null)
             {
                 return null;
             }
@@ -236,7 +236,7 @@ namespace fhir.candle._ForPackages
 
             CiBranchRecord[]? coreBranches = JsonConvert.DeserializeObject<CiBranchRecord[]>(json);
 
-            if (coreBranches == null)
+            if (coreBranches is null)
             {
                 return qas;
             }
@@ -244,7 +244,7 @@ namespace fhir.candle._ForPackages
             // traverse the core branches to build their records
             foreach (CiBranchRecord ciBranchRec in coreBranches)
             {
-                if ((ciBranchRec.Name == null) ||
+                if ((ciBranchRec.Name is null) ||
                     string.IsNullOrEmpty(ciBranchRec.Name) ||
                     string.IsNullOrEmpty(ciBranchRec.Url))
                 {
@@ -406,7 +406,7 @@ namespace fhir.candle._ForPackages
                 ?? qa.BuildDate?.ToUniversalTime().ToString(_ciVersionDateFormat);
 
             // if we do not have a date, mangle the branch info
-            if (buildMeta == null)
+            if (buildMeta is null)
             {
                 (string? branchName, bool isDefaultBranch) = GetBranchNameRepoLiteral(qa.RepositoryUrl);
 
@@ -476,7 +476,7 @@ namespace fhir.candle._ForPackages
                 });
             }
 
-            if ((listing?.DistTags == null) && (listing?.Versions?.Count > 0))
+            if ((listing?.DistTags is null) && (listing?.Versions?.Count > 0))
             {
                 listing.DistTags ??= new();
 
@@ -484,7 +484,7 @@ namespace fhir.candle._ForPackages
                 {
                     (string? branchName, bool isDefaultBranch) = GetBranchNameRepoLiteral(qa.RepositoryUrl);
 
-                    string tag = branchName == null
+                    string tag = branchName is null
                         ? "current"
                         : "current$" + branchName;
 
@@ -537,7 +537,7 @@ namespace fhir.candle._ForPackages
         /// <returns>The branch name extracted from the repository URL, or null if the branch name cannot be determined.</returns>
         public static (string? branchName, bool isDefaultBranch) GetBranchNameRepoLiteral(string? partialRepoLiteral)
         {
-            if ((partialRepoLiteral == null) ||
+            if ((partialRepoLiteral is null) ||
                 string.IsNullOrEmpty(partialRepoLiteral))
             {
                 return (null, false);
@@ -587,28 +587,28 @@ namespace fhir.candle._ForPackages
             HashSet<string> usedIds = new();
 
             // remove any trailing slashes from the site URL - QAs.json does not have them
-            if ((site != null) && site.EndsWith("/"))
+            if ((site is not null) && site.EndsWith("/"))
             {
                 site = site.Substring(0, site.Length - 1);
             }
 
             // sanitize any repository URL - QAs.json does not repeat the GitHub URL portion
-            if ((repo != null) && repo.StartsWith("http://github.com/"))
+            if ((repo is not null) && repo.StartsWith("http://github.com/"))
             {
                 repo = repo.Substring(18);
             }
-            else if ((repo != null) && repo.StartsWith("https://github.com/"))
+            else if ((repo is not null) && repo.StartsWith("https://github.com/"))
             {
                 repo = repo.Substring(19);
             }
 
-            if ((branch != null) && (!branch.Contains('/')))
+            if ((branch is not null) && (!branch.Contains('/')))
             {
                 branch = "/branches/" + branch + "/qa.json";
             }
 
             // if there was a package name provided, we can use our dictionary for lookup
-            if (pkgname != null)
+            if (pkgname is not null)
             {
                 if (!qasByPackageId.TryGetValue(pkgname, out List<FhirCiQaRecord>? qasRecs))
                 {
@@ -624,22 +624,22 @@ namespace fhir.candle._ForPackages
                         continue;
                     }
 
-                    if ((fhirversion != null) && (qa.FhirVersion != fhirversion))
+                    if ((fhirversion is not null) && (qa.FhirVersion != fhirversion))
                     {
                         continue;
                     }
 
-                    if ((site != null) && (qa.Url != site))
+                    if ((site is not null) && (qa.Url != site))
                     {
                         continue;
                     }
 
-                    if ((repo != null) && (!qa.RepositoryUrl?.StartsWith(repo) ?? false))
+                    if ((repo is not null) && (!qa.RepositoryUrl?.StartsWith(repo) ?? false))
                     {
                         continue;
                     }
 
-                    if ((branch != null) && (!qa.RepositoryUrl?.EndsWith(branch) ?? false))
+                    if ((branch is not null) && (!qa.RepositoryUrl?.EndsWith(branch) ?? false))
                     {
                         continue;
                     }
@@ -666,22 +666,22 @@ namespace fhir.candle._ForPackages
                     continue;
                 }
 
-                if ((fhirversion != null) && (qa.FhirVersion != fhirversion))
+                if ((fhirversion is not null) && (qa.FhirVersion != fhirversion))
                 {
                     continue;
                 }
 
-                if ((site != null) && (qa.Url != site))
+                if ((site is not null) && (qa.Url != site))
                 {
                     continue;
                 }
 
-                if ((repo != null) && (!qa.RepositoryUrl?.StartsWith(repo) ?? false))
+                if ((repo is not null) && (!qa.RepositoryUrl?.StartsWith(repo) ?? false))
                 {
                     continue;
                 }
 
-                if ((branch != null) && (!qa.RepositoryUrl?.EndsWith(branch) ?? false))
+                if ((branch is not null) && (!qa.RepositoryUrl?.EndsWith(branch) ?? false))
                 {
                     continue;
                 }
@@ -754,7 +754,7 @@ namespace fhir.candle._ForPackages
             {
                 PackageListing? listing = listingFromQaRecs(qaRecs);
 
-                if (listing != null)
+                if (listing is not null)
                 {
                     // check for a tag
                     if ((listing.DistTags?.TryGetValue(requestedVersion, out string? tagVersion) == true) &&
@@ -809,7 +809,7 @@ namespace fhir.candle._ForPackages
             // find our package in the QA listings
             qa ??= await getQaRecord(reference.Name, reference.Version);
 
-            if (qa == null)
+            if (qa is null)
             {
                 throw new Exception($"Cannot resolve {reference.Moniker} in CI Build QA records!");
             }
@@ -853,7 +853,7 @@ namespace fhir.candle._ForPackages
             // find our package in the QA listings
             qa ??= await getQaRecord(name, versionDiscriminator);
 
-            if (qa == null)
+            if (qa is null)
             {
                 return PackageReference.None;
             }
@@ -861,7 +861,7 @@ namespace fhir.candle._ForPackages
             (string? branchName, bool isDefaultBranch) = GetBranchNameRepoLiteral(qa.RepositoryUrl);
 
             string tag;
-            if ((branchName == null) ||
+            if ((branchName is null) ||
                 (isDefaultBranch && (!versionDiscriminator?.Contains(branchName) ?? true)))
             {
                 tag = "current";
@@ -886,7 +886,7 @@ namespace fhir.candle._ForPackages
             // find our package in the QA listings
             qa ??= await getQaRecord(name, versionDiscriminator);
 
-            if (qa == null)
+            if (qa is null)
             {
                 return PackageReference.None;
             }
@@ -918,7 +918,7 @@ namespace fhir.candle._ForPackages
         public async Task<Versions?> GetVersions(string name)
         {
             PackageListing? listing = await DownloadListingAsync(name);
-            if (listing == null)
+            if (listing is null)
             {
                 return new();
             }
@@ -961,7 +961,7 @@ namespace fhir.candle._ForPackages
             // find our package in the QA listings
             FhirCiQaRecord? qa = await getQaRecord(reference.Name, reference.Version);
 
-            if (qa == null)
+            if (qa is null)
             {
                 return null;
             }
@@ -988,7 +988,7 @@ namespace fhir.candle._ForPackages
             // get the manifest from the local copy
             PackageManifest? installedManifest = await diskCache.ReadManifestEx(taggedReference);
 
-            if (installedManifest == null)
+            if (installedManifest is null)
             {
                 return true;
             }
@@ -1012,7 +1012,7 @@ namespace fhir.candle._ForPackages
             // find our package in the QA listings
             FhirCiQaRecord? qa = await getQaRecord(reference.Name, reference.Version);
 
-            if (qa == null)
+            if (qa is null)
             {
                 throw new Exception($"Could not resolve {reference.Moniker} on the CI server");
             }

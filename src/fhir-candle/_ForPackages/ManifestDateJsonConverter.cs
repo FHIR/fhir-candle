@@ -41,7 +41,7 @@ namespace fhir.candle._ForPackages
             {
                 serializer.Serialize(writer, dto.ToUniversalTime().ToString("yyyyMMddHHmmss"));
             }
-            else if (value != null)
+            else if (value is not null)
             {
                 serializer.Serialize(writer, value);
             }

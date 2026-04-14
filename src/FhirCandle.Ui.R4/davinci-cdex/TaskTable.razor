@@ -1,5 +1,6 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using Hl7.Fhir.Utility;
+@using static Hl7.Fhir.Model.BaseExtensions;
 
 @inject IHttpContextAccessor HttpContextAccessor
 
@@ -31,7 +32,7 @@
         </ColumnOptions>
     </PropertyColumn>
 
-    <PropertyColumn Title="Code" Property="@(t => string.Join(',', t.Code.Coding.Select(c => c.Code)))" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(CodeFilter)" Tooltip="true">
+    <PropertyColumn Title="Code" Property="@(t => string.Join(',', t.Code!.Coding.Select(c => c.Code)))" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(CodeFilter)" Tooltip="true">
         <ColumnOptions>
             <div class="search-box">
                 <FluentSearch Autofocus="true"
@@ -128,7 +129,7 @@
     /// <returns>The filtered items.</returns>
     private IQueryable<Hl7.Fhir.Model.Task>? GetFilteredItems()
     {
-        if ((_taskStore == null) ||
+        if ((_taskStore is null) ||
             (!_taskStore.Any()))
         {
             return null;
@@ -149,9 +150,9 @@
         return _taskStore
             .Values
             .Select(o => (Hl7.Fhir.Model.Task)o)
-            .Where(r => string.IsNullOrWhiteSpace(_idFilter) ? true : r.Id.Contains(_idFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(r => string.IsNullOrWhiteSpace(_idFilter) ? true : r.Id!.Contains(_idFilter, StringComparison.OrdinalIgnoreCase))
             .Where(r => string.IsNullOrWhiteSpace(_statusFilter) ? true : r.Status?.GetLiteral()?.Contains(_statusFilter, StringComparison.OrdinalIgnoreCase) ?? false)
-            .Where(r => string.IsNullOrWhiteSpace(_codeFilter) ? true : r.Code?.Coding?.Any(c => c.Code.Contains(StatusFilter, StringComparison.OrdinalIgnoreCase)) ?? false)
+            .Where(r => string.IsNullOrWhiteSpace(_codeFilter) ? true : r.Code?.Coding?.Any(c => c.Code!.Contains(StatusFilter, StringComparison.OrdinalIgnoreCase)) ?? false)
             .AsQueryable<Hl7.Fhir.Model.Task>();
     }
 
@@ -170,7 +171,7 @@
 
     private void ResetDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -186,7 +187,7 @@
 
     private void CancelDebounce()
     {
-        if (debounceTimer != null)
+        if (debounceTimer is not null)
         {
             debounceTimer.Enabled = false;
             debounceTimer.Elapsed -= TimerElapsed_TickAsync;
@@ -206,17 +207,17 @@
     /// <param name="status">The status.</param>
     private void SetTaskStatus(Hl7.Fhir.Model.Task? task, string status)
     {
-        if ((task == null) ||
+        if ((task is null) ||
             string.IsNullOrEmpty(task.Id) || 
             string.IsNullOrEmpty(status) ||
-            (_taskStore == null))
+            (_taskStore is null))
         {
             return;
         }
 
         Hl7.Fhir.Model.Task.TaskStatus? ts = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<Hl7.Fhir.Model.Task.TaskStatus>(status);
 
-        if (ts == null)
+        if (ts is null)
         {
             return;
         }
@@ -253,7 +254,7 @@
 
     private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
     {
-        if (_taskStore != null)
+        if (_taskStore is not null)
         {
             _taskStore.OnInstanceCreated -= ResourceStore_OnChanged;
             _taskStore.OnInstanceDeleted -= ResourceStore_OnChanged;
@@ -278,7 +279,7 @@
     {
         debounceTimer?.Dispose();
 
-        if (_taskStore != null)
+        if (_taskStore is not null)
         {
             _taskStore.OnInstanceCreated -= ResourceStore_OnChanged;
             _taskStore.OnInstanceDeleted -= ResourceStore_OnChanged;

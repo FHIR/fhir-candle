@@ -115,7 +115,7 @@ public class FhirStoreTestsR4: IDisposable
 
         bundle.Entries.All(validateEntries).ShouldBeTrue();
 
-        ILookup<string, MinimalBundle.MinimalEntry> entryLookup = bundle.Entries.Where(e => e.Resource != null).ToLookup(e => e.Resource!.ResourceType);
+        ILookup<string, MinimalBundle.MinimalEntry> entryLookup = bundle.Entries.Where(e => e.Resource is not null).ToLookup(e => e.Resource!.ResourceType);
 
         entryLookup["Patient"].ShouldHaveCount(_t01_patientCount);
         entryLookup["Encounter"].ShouldHaveCount(_t01_encounterCount);

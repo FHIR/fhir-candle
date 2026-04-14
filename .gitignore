@@ -386,3 +386,6 @@ msbuild.wrn
 /temp
 /secrets
 /local
+/scratch
+
+*.local.json

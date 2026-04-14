@@ -30,7 +30,7 @@
                             <FluentTextField ReadOnly="true" Label="Client Name" Value="@smartClient.ClientName" />
                             <FluentTextField ReadOnly="true" Label="Client ID" Value="@smartClient.ClientId" />
 
-                            @if (smartClient.Registration != null)
+                            @if (smartClient.Registration is not null)
                             {
                                 @if (!string.IsNullOrEmpty(smartClient.Registration.JwksUri))
                                 {
@@ -101,7 +101,7 @@
     /// </summary>
     public void Dispose()
     {
-        // if (_store != null)
+        // if (_store is not null)
         // {
         // }
     }

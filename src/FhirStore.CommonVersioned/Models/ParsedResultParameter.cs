@@ -6,6 +6,7 @@
 using FhirCandle.Extensions;
 using FhirCandle.Storage;
 using Hl7.Fhir.Model;
+using Hl7.Fhir.Utility;
 using Hl7.FhirPath;
 
 namespace FhirCandle.Models;
@@ -30,13 +31,13 @@ public class ParsedResultParameters
     ];
 
     /// <summary>Gets or sets the inclusion FHIRpath extractions, keyed by resource.</summary>
-    public Dictionary<string, List<ModelInfo.SearchParamDefinition>> Inclusions { get; private set; } = [];
+    public Dictionary<string, List<SearchParamDefinition>> Inclusions { get; private set; } = [];
 
     /// <summary>Gets or sets the iterative inclusion FHIRpath extractions, keyed by resource.</summary>
     public Dictionary<string, List<string>> IterativeInclusions { get; private set; } = [];
 
     /// <summary>Gets or sets the reverse inclusion search parameter definitions, keyed by resource.</summary>
-    public Dictionary<string, List<ModelInfo.SearchParamDefinition>> ReverseInclusions { get; private set; } = [];
+    public Dictionary<string, List<SearchParamDefinition>> ReverseInclusions { get; private set; } = [];
 
     /// <summary>
     /// Represents a request to sort search results by a specific search parameter.
@@ -163,7 +164,7 @@ public class ParsedResultParameters
                         {
                             string[] components = val.Split(':');
 
-                            ResourceType? rt = null;
+                            VersionIndependentResourceTypesAll? rt = null;
 
                             switch (components.Length)
                             {
@@ -173,7 +174,8 @@ public class ParsedResultParameters
 
                                 // _include=[resource]:[parameter]:[targetType]
                                 case 3:
-                                    rt = ModelInfo.FhirTypeNameToResourceType(components[2]);
+
+                                    rt = EnumUtility.ParseLiteral<VersionIndependentResourceTypesAll>(components[2]);
                                     break;
 
                                 // invalid / unknown
@@ -181,8 +183,8 @@ public class ParsedResultParameters
                                     continue;
                             }
 
-                            if ((!store.TryGetSearchParamDefinition(components[0], components[1], out ModelInfo.SearchParamDefinition? spDefinition)) ||
-                                (spDefinition == null))
+                            if ((!store.TryGetSearchParamDefinition(components[0], components[1], out SearchParamDefinition? spDefinition)) ||
+                                (spDefinition is null))
                             {
                                 continue;
                             }
@@ -198,10 +200,10 @@ public class ParsedResultParameters
                             }
 
                             // if we have a third component, it's a resource type
-                            if (rt != null)
+                            if (rt is not null)
                             {
                                 // override the default allowed targets to only the one specified
-                                spDefinition = spDefinition.CloneWith(new ResourceType[] { (ResourceType)rt });
+                                spDefinition = spDefinition.CloneWith([ rt.Value ]);
                             }
 
                             Inclusions[components[0]].Add(spDefinition);
@@ -222,8 +224,8 @@ public class ParsedResultParameters
                                 continue;
                             }
 
-                            if ((!store.TryGetSearchParamDefinition(components[0], components[1], out ModelInfo.SearchParamDefinition? spDefinition)) ||
-                                (spDefinition == null))
+                            if ((!store.TryGetSearchParamDefinition(components[0], components[1], out SearchParamDefinition? spDefinition)) ||
+                                (spDefinition is null))
                             {
                                 continue;
                             }
@@ -264,7 +266,7 @@ public class ParsedResultParameters
 
                             string[] components = val.Split(':');
 
-                            ResourceType? rt = null;
+                            VersionIndependentResourceTypesAll? rt = null;
 
                             switch (components.Length)
                             {
@@ -274,7 +276,8 @@ public class ParsedResultParameters
 
                                 // _revinclude=[resource]:[parameter]:[targetType]
                                 case 3:
-                                    rt = ModelInfo.FhirTypeNameToResourceType(components[2]);
+                                    //rt = ModelInfo.FhirTypeNameToResourceType(components[2]);
+                                    rt = EnumUtility.ParseLiteral<VersionIndependentResourceTypesAll>(components[2]);
                                     break;
 
                                 // invalid / unknown
@@ -282,8 +285,8 @@ public class ParsedResultParameters
                                     continue;
                             }
 
-                            if ((!store.TryGetSearchParamDefinition(components[0], components[1], out ModelInfo.SearchParamDefinition? spDefinition)) ||
-                                (spDefinition == null))
+                            if ((!store.TryGetSearchParamDefinition(components[0], components[1], out SearchParamDefinition? spDefinition)) ||
+                                (spDefinition is null))
                             {
                                 continue;
                             }
@@ -294,10 +297,10 @@ public class ParsedResultParameters
                             }
 
                             // if we have a third component, it's a resource type
-                            if (rt != null)
+                            if (rt is not null)
                             {
                                 // override the default allowed targets to only the one specified
-                                spDefinition = spDefinition.CloneWith(new ResourceType[] { (ResourceType)rt });
+                                spDefinition = spDefinition.CloneWith([ rt.Value ]);
                             }
 
                             if (!ReverseInclusions.ContainsKey(components[0]))
@@ -339,13 +342,13 @@ public class ParsedResultParameters
 
                             string? modifier = components.Length > 1 ? components[1] : null;
 
-                            if (!resourceStore.TryGetSearchParamDefinition(name, out ModelInfo.SearchParamDefinition? spDefinition))
+                            if (!resourceStore.TryGetSearchParamDefinition(name, out SearchParamDefinition? spDefinition))
                             {
                                 continue;
                             }
 
                             // do not sort on composite search parameters
-                            if ((spDefinition.Component != null) && (spDefinition.Component.Any()))
+                            if ((spDefinition.Component is not null) && (spDefinition.Component.Any()))
                             {
                                 continue;
                             }
@@ -353,7 +356,7 @@ public class ParsedResultParameters
                             string selectExpression = spDefinition.Expression ?? string.Empty;
                             CompiledExpression? compiled = store.GetCompiledSearchParameter(spDefinition.Resource ?? resourceType, name, selectExpression);
 
-                            if (compiled == null)
+                            if (compiled is null)
                             {
                                 continue;
                             }

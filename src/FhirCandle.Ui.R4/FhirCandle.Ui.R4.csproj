@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
-  <Import Project="..\..\fhir-candle.props" />
-  <Import Project="..\..\fhir-candle-ui.props" />
+  <Import Project="..\fhir-candle.props" />
+  <Import Project="..\fhir-candle-ui.props" />
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

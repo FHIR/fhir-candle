@@ -30,17 +30,17 @@ public class FhirSortComparer : IComparer<Resource>
 
     public int Compare(Resource? x, Resource? y)
     {
-        if ((x == null) && (y == null))
+        if ((x is null) && (y is null))
         {
             return 0;
         }
 
-        if (x == null)
+        if (x is null)
         {
             return -1;
         }
 
-        if (y == null)
+        if (y is null)
         {
             return 1;
         }
@@ -51,46 +51,44 @@ public class FhirSortComparer : IComparer<Resource>
             return 1;
         }
 
-        ITypedElement xTE = x.ToTypedElement();
+        PocoNode xPN = x.ToPocoNode();
         FhirEvaluationContext xFpc = new()
         {
-            Resource = xTE,
+            Resource = xPN,
             TerminologyService = _store.Terminology,
             ElementResolver = _store.Resolve,
         };
 
-        ITypedElement yTE = y.ToTypedElement();
+        PocoNode yPN = y.ToPocoNode();
         FhirEvaluationContext yFpc = new()
         {
-            Resource = yTE,
+            Resource = yPN,
             TerminologyService = _store.Terminology,
             ElementResolver = _store.Resolve,
         };
 
         foreach (ParsedResultParameters.SortRequest sr in _sorting)
         {
-            ITypedElement? xValue = sr.Compiled.Invoke(xTE, xFpc).FirstOrDefault();
-            ITypedElement? yValue = sr.Compiled.Invoke(yTE, yFpc).FirstOrDefault();
+            PocoNode? xValue = sr.Compiled.Invoke(xPN, xFpc).FirstOrDefault();
+            PocoNode? yValue = sr.Compiled.Invoke(yPN, yFpc).FirstOrDefault();
 
-            if ((xValue == null) && (yValue == null))
+            if ((xValue is null) && (yValue is null))
             {
                 continue;
             }
 
-            if (xValue == null)
+            if (xValue is null)
             {
                 return sr.Ascending ? -1 : 1;
             }
 
-            if (yValue == null)
+            if (yValue is null)
             {
                 return sr.Ascending ? 1 : -1;
             }
 
-            if ((xValue.Value != null) &&
-                (xValue.Value is IComparable xComp) &&
-                (yValue.Value != null) &&
-                (yValue.Value is IComparable yComp))
+            if ((xValue.Poco is IComparable xComp) &&
+                (yValue.Poco is IComparable yComp))
             {
                 int result = xComp.CompareTo(yComp);
                 if (result != 0)
@@ -136,7 +134,7 @@ public class FhirSortComparer : IComparer<Resource>
                     case HumanName xHN:
                         if (yFvp.FhirValue is HumanName yHN)
                         {
-                            if ((xHN.Text != null) && (yHN.Text != null))
+                            if ((xHN.Text is not null) && (yHN.Text is not null))
                             {
                                 int result = xHN.Text.CompareTo(yHN.Text);
                                 if (result != 0)
@@ -145,7 +143,7 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xHN.Family != null) && (yHN.Family != null))
+                            if ((xHN.Family is not null) && (yHN.Family is not null))
                             {
                                 int result = xHN.Family.CompareTo(yHN.Family);
                                 if (result != 0)
@@ -154,10 +152,10 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xHN.Given != null) && xHN.Given.Any() &&
-                                (yHN.Given != null) && yHN.Given.Any())
+                            if ((xHN.Given?.Any() == true) &&
+                                (yHN.Given?.Any() == true))
                             {
-                                int result = xHN.Given.First().CompareTo(yHN.Given.First());
+                                int result = string.Join(' ', xHN.Given).CompareTo(string.Join(' ', yHN.Given));
                                 if (result != 0)
                                 {
                                     return sr.Ascending ? result : -result;
@@ -169,7 +167,7 @@ public class FhirSortComparer : IComparer<Resource>
                     case Address xAddress:
                         if (yFvp.FhirValue is Address yAddress)
                         {
-                            if ((xAddress.Text != null) && (yAddress.Text != null))
+                            if ((xAddress.Text is not null) && (yAddress.Text is not null))
                             {
                                 int result = xAddress.Text.CompareTo(yAddress.Text);
                                 if (result != 0)
@@ -178,7 +176,7 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xAddress.City != null) && (yAddress.City != null))
+                            if ((xAddress.City is not null) && (yAddress.City is not null))
                             {
                                 int result = xAddress.City.CompareTo(yAddress.City);
                                 if (result != 0)
@@ -187,7 +185,7 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xAddress.State != null) && (yAddress.State != null))
+                            if ((xAddress.State is not null) && (yAddress.State is not null))
                             {
                                 int result = xAddress.State.CompareTo(yAddress.State);
                                 if (result != 0)
@@ -196,7 +194,7 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xAddress.PostalCode != null) && (yAddress.PostalCode != null))
+                            if ((xAddress.PostalCode is not null) && (yAddress.PostalCode is not null))
                             {
                                 int result = xAddress.PostalCode.CompareTo(yAddress.PostalCode);
                                 if (result != 0)
@@ -205,7 +203,7 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xAddress.Country != null) && (yAddress.Country != null))
+                            if ((xAddress.Country is not null) && (yAddress.Country is not null))
                             {
                                 int result = xAddress.Country.CompareTo(yAddress.Country);
                                 if (result != 0)
@@ -219,7 +217,7 @@ public class FhirSortComparer : IComparer<Resource>
                     case ResourceReference xRR:
                         if (yFvp.FhirValue is ResourceReference yRR)
                         {
-                            if ((xRR.Display != null) && (yRR.Display != null))
+                            if ((xRR.Display is not null) && (yRR.Display is not null))
                             {
                                 int result = xRR.Display.CompareTo(yRR.Display);
                                 if (result != 0)
@@ -228,7 +226,7 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xRR.Reference != null) && (yRR.Reference != null))
+                            if ((xRR.Reference is not null) && (yRR.Reference is not null))
                             {
                                 int result = xRR.Reference.CompareTo(yRR.Reference);
                                 if (result != 0)
@@ -237,10 +235,10 @@ public class FhirSortComparer : IComparer<Resource>
                                 }
                             }
 
-                            if ((xRR.Identifier != null) && (yRR.Identifier != null))
+                            if ((xRR.Identifier is not null) && (yRR.Identifier is not null))
                             {
-                                int sResult = xRR.Identifier.System.CompareTo(yRR.Identifier.System);
-                                int vResult = xRR.Identifier.Value.CompareTo(yRR.Identifier.Value);
+                                int sResult = (xRR.Identifier.System ?? string.Empty).CompareTo(yRR.Identifier.System ?? string.Empty);
+                                int vResult = (xRR.Identifier.Value ?? string.Empty).CompareTo(yRR.Identifier.Value ?? string.Empty);
 
                                 if ((sResult == 0) && (vResult != 0))
                                 {

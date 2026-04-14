@@ -170,6 +170,8 @@ Note: items are unsorted within their priorities
 * Resource editor design improvements
 * Add loading packages/profiles to CapabilityStatement
 * Configuration and content loading via GH repos
+* SQL-on-FHIR ViewDefinition and runner support
+* Additional MCP support
 
 ## Mid Priority
 * Complete SMART support
@@ -182,6 +184,7 @@ Note: items are unsorted within their priorities
     * Use Native AOT deployment
 * Add 'core' operations (e.g., `$meta-add`).
 * Add support for operaions within `transaction` bundles
+* CQL support
 
 ## The long tail
 * Versioned Resource support

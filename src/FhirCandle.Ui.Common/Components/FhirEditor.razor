@@ -95,7 +95,7 @@
     /// <returns>An asynchronous result.</returns>
     private async Task EditorOnDidInit()
     {
-        if (_editor == null)
+        if (_editor is null)
         {
             return;
         }
@@ -109,7 +109,7 @@
     /// <returns>An asynchronous result.</returns>
     private async Task UpdateTheme()
     {
-        if (_editor == null)
+        if (_editor is null)
         {
             return;
         }
@@ -122,7 +122,7 @@
     /// <summary>Sets hightlight language.</summary>
     private async Task SetHightlightLanguage()
     {
-        if (_editor == null)
+        if (_editor is null)
         {
             return;
         }

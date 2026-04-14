@@ -24,7 +24,7 @@ public class CandleClient
     /// <summary>Creates an underlying FHIR client if needed.</summary>
     private void CreateClientIfNeeded()
     {
-        if (_client != null)
+        if (_client is not null)
         {
             return;
         }

@@ -5,7 +5,7 @@
         FHIR R4 endpoint at <code class="copy-click">@Store.Config.BaseUrl</code>
     </FluentLabel>
 
-    @if (AdditionalContent != null)
+    @if (AdditionalContent is not null)
     {
         <DynamicComponent Type="@AdditionalContent" Parameters="@_contentParams" />
     }
@@ -104,7 +104,7 @@
     {
         base.OnInitialized();
 
-        if (AdditionalContent != null)
+        if (AdditionalContent is not null)
         {
             _contentParams.Add("StoreName", StoreName);
             _contentParams.Add("Store", Store);

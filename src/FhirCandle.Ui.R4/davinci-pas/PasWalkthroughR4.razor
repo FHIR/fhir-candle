@@ -1,5 +1,6 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using System.Diagnostics.CodeAnalysis;
+@using static Hl7.Fhir.Model.BaseExtensions;
 
 @inject IJSRuntime JS
 @inject IHttpContextAccessor HttpContextAccessor
@@ -86,7 +87,7 @@
                     </MudSelect>
                 </MudCardContent>
                 <MudCardActions>
-                    <MudButton Variant="Variant.Outlined" Disabled="@(_patient == null)" OnClick="@(() => MoveToStep(3))">Use patient: @_patient?.Id</MudButton>
+                    <MudButton Variant="Variant.Outlined" Disabled="@(_patient is null)" OnClick="@(() => MoveToStep(3))">Use patient: @_patient?.Id</MudButton>
                 </MudCardActions>
             </MudCard>
         </ItemContent>
@@ -254,7 +255,7 @@
                     }
                 </MudCardContent>
                 <MudCardActions>
-                    <MudButton Variant="Variant.Outlined" Disabled="@(_claim == null)" OnClick="@(() => MoveToStep(5))">Submit!</MudButton>
+                    <MudButton Variant="Variant.Outlined" Disabled="@(_claim is null)" OnClick="@(() => MoveToStep(5))">Submit!</MudButton>
                 </MudCardActions>
             </MudCard>
         </ItemContent>
@@ -329,7 +330,7 @@
 
         bool IEquatable<ResourceInfo?>.Equals(ResourceInfo? obj)
         {
-            if (obj == null)
+            if (obj is null)
             {
                 return false;
             }
@@ -344,7 +345,7 @@
 
         public int CompareTo(ResourceInfo? other)
         {
-            if (other == null)
+            if (other is null)
             {
                 return 1;
             }
@@ -453,7 +454,11 @@
 
         if (toStep < 9)
         {
-            _ = JS.InvokeVoidAsync("scrollElementIntoView", "element-step-" + toStep);
+            try
+            {
+                _ = JS.InvokeVoidAsync("scrollElementIntoView", "element-step-" + toStep);
+            }
+            catch { }
         }
 
         // call any additional functions
@@ -477,28 +482,28 @@
 
     private void BuildClaim()
     {
-        if (_patient == null)
+        if (_patient is null)
         {
             errorAtStep = 4;
             errorMessage = "Cannot build a Claim without a patient.";
             return;
         }
 
-        if (_insurer == null)
+        if (_insurer is null)
         {
             errorAtStep = 4;
             errorMessage = $"Insurer is REQUIRED - see PAS Claim Base profile.";
             return;
         }
 
-        if (_requestor == null)
+        if (_requestor is null)
         {
             errorAtStep = 4;
             errorMessage = $"Requestor is REQUIRED - see PAS Claim Base profile.";
             return;
         }
 
-        if (_insurance == null)
+        if (_insurance is null)
         {
             errorAtStep = 4;
             errorMessage = $"Insurance is REQUIRED - see PAS Claim Base profile.";
@@ -644,7 +649,7 @@
         };
 
         // check for a focal encounter as an extension
-        if (_focalEncounter != null)
+        if (_focalEncounter is not null)
         {
             _claim.Extension.Add(new ()
             {
@@ -697,14 +702,14 @@
     private bool ValidateClaimData()
     {
         // validate data
-        if (_patient == null)
+        if (_patient is null)
         {
             errorAtStep = 3;
             errorMessage = "Cannot build a Claim without a patient.";
             return false;
         }
 
-        if (_insurer == null)
+        if (_insurer is null)
         {
             errorAtStep = 3;
             errorMessage = $"Insurer is REQUIRED - see PAS Claim Base profile.";
@@ -725,7 +730,7 @@
             return false;
         }
 
-        if (insurer.Active == null)
+        if (insurer.Active is null)
         {
             errorAtStep = 3;
             errorMessage = "Insurer must have 'active' element.";
@@ -739,7 +744,7 @@
             return false;
         }
 
-        if (_requestor == null)
+        if (_requestor is null)
         {
             errorAtStep = 3;
             errorMessage = $"Requestor is REQUIRED - see PAS Claim Base profile.";
@@ -760,7 +765,7 @@
             return false;
         }
 
-        if (requestor.Active == null)
+        if (requestor.Active is null)
         {
             errorAtStep = 3;
             errorMessage = "Requestor must have 'active' element.";
@@ -791,7 +796,7 @@
         List<ResourceInfo> patients = new();
 
         if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", "Patient", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out FhirResponseContext opResponse) &&
-            (opResponse.Resource != null) &&
+            (opResponse.Resource is not null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle patientBundle))
         {
             foreach (Hl7.Fhir.Model.Bundle.EntryComponent entry in patientBundle.Entry)
@@ -801,7 +806,7 @@
                     patients.Add(new ResourceInfo
                         {
                             ResourceType = r.TypeName,
-                            Id = r.Id,
+                            Id = r.Id!,
                             Resource = r,
                             Display = DisplayFor(r),
                         });
@@ -814,7 +819,7 @@
 
     private void GetCurrentRequestResources()
     {
-        if (_patient == null)
+        if (_patient is null)
         {
             _encounters = Enumerable.Empty<ResourceInfo>();
             _claimSupportingData = Enumerable.Empty<ResourceInfo>();
@@ -830,7 +835,7 @@
         string query;
 
         if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", $"Encounter?patient={_patient.Id}", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out FhirResponseContext opResponse) &&
-            (opResponse.Resource != null) &&
+            (opResponse.Resource is not null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle encounterBundle))
         {
             foreach (Hl7.Fhir.Model.Bundle.EntryComponent entry in encounterBundle.Entry)
@@ -840,7 +845,7 @@
                     encounters.Add(new ResourceInfo
                         {
                             ResourceType = r.TypeName,
-                            Id = r.Id,
+                            Id = r.Id!,
                             Resource = r,
                             Display = DisplayFor(r),
                         });
@@ -849,7 +854,7 @@
         }
 
         if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", $"Coverage?patient={_patient.Id}", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out opResponse) &&
-            (opResponse.Resource != null) &&
+            (opResponse.Resource is not null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle coverageBundle))
         {
             foreach (Hl7.Fhir.Model.Bundle.EntryComponent entry in coverageBundle.Entry)
@@ -859,7 +864,7 @@
                     coverages.Add(new ResourceInfo
                         {
                             ResourceType = r.TypeName,
-                            Id = r.Id,
+                            Id = r.Id!,
                             Resource = r,
                             Display = DisplayFor(r),
                         });
@@ -870,7 +875,7 @@
         query = $"?patient={_patient.Id}&_type={string.Join(',', _allowedPatientRequestTypes)}";
 
         if (ProviderStore.SystemSearch(new FhirRequestContext(ProviderStore, "GET", query, HttpContextAccessor.HttpContext?.Request.Host.ToString()), out opResponse) &&
-            (opResponse.Resource != null) &&
+            (opResponse.Resource is not null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle patientBundle))
         {
             foreach (Hl7.Fhir.Model.Bundle.EntryComponent entry in patientBundle.Entry)
@@ -880,7 +885,7 @@
                     data.Add(new ResourceInfo
                     {
                         ResourceType = r.TypeName,
-                        Id = r.Id,
+                        Id = r.Id!,
                         Resource = r,
                         Display = DisplayFor(r),
                     });
@@ -889,7 +894,7 @@
         }
 
         if (ProviderStore.TypeSearch(new FhirRequestContext(ProviderStore, "GET", "Organization", HttpContextAccessor.HttpContext?.Request.Host.ToString()), out opResponse) &&
-            (opResponse.Resource != null) &&
+            (opResponse.Resource is not null) &&
             (opResponse.Resource is Hl7.Fhir.Model.Bundle relatedBundle))
         {
             foreach (Hl7.Fhir.Model.Bundle.EntryComponent entry in relatedBundle.Entry)
@@ -899,7 +904,7 @@
                     orgs.Add(new ResourceInfo
                     {
                         ResourceType = r.TypeName,
-                        Id = r.Id,
+                        Id = r.Id!,
                         Resource = r,
                         Display = DisplayFor(r),
                     });
@@ -927,9 +932,9 @@
         _ => resource.TypeName + "/" + resource.Id,
     };
 
-    private string DisplayFor(Hl7.Fhir.Model.DataType dt)
+    private string DisplayFor(Hl7.Fhir.Model.DataType? dt)
     {
-        if (dt == null)
+        if (dt is null)
         {
             return string.Empty;
         }
@@ -937,10 +942,10 @@
         switch (dt)
         {
             case Hl7.Fhir.Model.FhirString s:
-                return s.Value;
+                return s.Value ?? string.Empty;
 
             case Hl7.Fhir.Model.Code c:
-                return c.Value;
+                return c.Value ?? string.Empty;
 
             case Hl7.Fhir.Model.Coding coding:
                 return string.IsNullOrEmpty(coding.Display) ? $"{coding.System}|{coding.Code}" : coding.Display;
@@ -952,7 +957,7 @@
                         return $"{i.System}|{i.Value}";
                     }
 
-                    if (i.Type != null)
+                    if (i.Type is not null)
                     {
                         return DisplayFor(i.Type);
                     }
@@ -971,7 +976,7 @@
                         return rr.Reference;
                     }
 
-                    if (rr.Identifier != null)
+                    if (rr.Identifier is not null)
                     {
                         DisplayFor(rr.Identifier);
                     }

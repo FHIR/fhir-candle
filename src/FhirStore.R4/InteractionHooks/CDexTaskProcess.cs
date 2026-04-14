@@ -65,7 +65,7 @@ public class CDexTaskProcess : IFhirInteractionHook
         out FhirResponseContext hookResponse)
     {
         // filter resources we don't care about
-        if ((resource == null) ||
+        if ((resource is null) ||
             (resource is not Hl7.Fhir.Model.Task task))
         {
             hookResponse = new()
@@ -156,7 +156,7 @@ public class CDexTaskProcess : IFhirInteractionHook
                 return false;
             }
 
-            string query = fs.Value;
+            string? query = fs.Value;
 
             if (string.IsNullOrEmpty(query))
             {
@@ -181,7 +181,7 @@ public class CDexTaskProcess : IFhirInteractionHook
             FhirRequestContext queryRequest = new(store, "GET", query);
 
             if ((!store.PerformInteraction(queryRequest, out FhirResponseContext queryResponse, false)) ||
-                (queryResponse.Resource == null) ||
+                (queryResponse.Resource is null) ||
                 (queryResponse.Resource is not Bundle resultBundle))
             {
                 hookResponse = new()

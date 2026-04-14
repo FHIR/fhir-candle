@@ -94,7 +94,7 @@
     {
         if (e.Location.ToLowerInvariant().Contains("/davinci-cdex/tasks", StringComparison.Ordinal))
         {
-            if (_store != null)
+            if (_store is not null)
             {
                 _store.OnInstanceCreated -= Store_OnChanged;
                 _store.OnInstanceUpdated -= Store_OnChanged;
@@ -128,7 +128,7 @@
     /// </summary>
     public void Dispose()
     {
-        if (_store != null)
+        if (_store is not null)
         {
             _store.OnInstanceCreated -= Store_OnChanged;
             _store.OnInstanceUpdated -= Store_OnChanged;

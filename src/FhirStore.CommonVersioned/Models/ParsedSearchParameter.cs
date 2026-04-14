@@ -14,7 +14,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using static FhirCandle.Search.SearchDefinitions;
-using Newtonsoft.Json.Linq;
 using System.Runtime.Versioning;
 
 namespace FhirCandle.Models;
@@ -23,7 +22,7 @@ namespace FhirCandle.Models;
 public class ParsedSearchParameter : ICloneable
 {
     /// <summary>(Immutable) Options for controlling all resource.</summary>
-    internal static readonly Dictionary<string, ModelInfo.SearchParamDefinition> _allResourceParameters = new()
+    internal static readonly Dictionary<string, SearchParamDefinition> _allResourceParameters = new()
     {
         {"_content", new()
             {
@@ -260,8 +259,8 @@ public class ParsedSearchParameter : ICloneable
         IgnoredParameter = other.IgnoredParameter;
         IgnoredReason = other.IgnoredReason;
         ChainedParameters = other.ChainedParameters?.DeepCopy();
-        ReverseChainedParameterLink = ReverseChainedParameterLink == null ? null : new ParsedSearchParameter(ReverseChainedParameterLink);
-        ReverseChainedParameterFilter = ReverseChainedParameterFilter == null ? null : new ParsedSearchParameter(ReverseChainedParameterFilter);
+        ReverseChainedParameterLink = ReverseChainedParameterLink is null ? null : new ParsedSearchParameter(ReverseChainedParameterLink);
+        ReverseChainedParameterFilter = ReverseChainedParameterFilter is null ? null : new ParsedSearchParameter(ReverseChainedParameterFilter);
         CompositeComponents = other.CompositeComponents?.Select(c => new ParsedSearchParameter(c)).ToArray();
         ValueDateStarts = other.ValueDateStarts?.Select(v => v).ToArray();
         ValueDateEnds = other.ValueDateEnds?.Select(v => v).ToArray();
@@ -302,15 +301,15 @@ public class ParsedSearchParameter : ICloneable
         string modifierLiteral,
         SearchModifierCodes modifierCode,
         string value,
-        ModelInfo.SearchParamDefinition? spd,
-        ModelInfo.SearchParamComponent? component = null)
+        SearchParamDefinition? spd,
+        SearchParamComponent? component = null)
     {
         Name = name;
         ResourceType = resourceType;
         Modifier = modifierCode;
         ModifierLiteral = modifierLiteral;
 
-        if ((spd == null) || string.IsNullOrEmpty(spd.Expression))
+        if ((spd is null) || string.IsNullOrEmpty(spd.Expression))
         {
             ParamType = spd?.Type ?? SearchParamType.Special;
             SelectExpression = string.Empty;
@@ -321,13 +320,13 @@ public class ParsedSearchParameter : ICloneable
             return;
         }
 
-        ModelInfo.SearchParamDefinition definition = spd;
+        SearchParamDefinition definition = spd;
 
         // use the component first
-        if (component != null)
+        if (component is not null)
         {
             // need to resolve component URL
-            if (!resourceStore.TryGetSearchParamDefinition(component.Value.Definition, out ModelInfo.SearchParamDefinition? componentDefinition))
+            if (!resourceStore.TryGetSearchParamDefinition(component.Value.Definition, out SearchParamDefinition? componentDefinition))
             {
                 // ignore this parameter
                 ParamType = SearchParamType.Special;
@@ -450,8 +449,8 @@ public class ParsedSearchParameter : ICloneable
         RequestedValueLiteral = requestValueLiteral;
 
         // check for reverse chained parameters - short circuit the constructor logic
-        if ((parseResult.ReverseLinkKey != null) &&
-            (parseResult.ReverseLinkFilter != null))
+        if ((parseResult.ReverseLinkKey is not null) &&
+            (parseResult.ReverseLinkFilter is not null))
         {
             ReverseChainedParameterLink = new ParsedSearchParameter(
                 store,
@@ -478,7 +477,7 @@ public class ParsedSearchParameter : ICloneable
             return;
         }
 
-        if ((parseResult.SearchParameterDefinition == null) ||
+        if ((parseResult.SearchParameterDefinition is null) ||
             string.IsNullOrEmpty(parseResult.SearchParameterDefinition.Expression))
         {
             ParamType = parseResult.SearchParameterDefinition?.Type ?? SearchParamType.Special;
@@ -529,7 +528,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // check for chained parameters - short circuit the constructor logic
-        if (parseResult.ChainedKeys != null)
+        if (parseResult.ChainedKeys is not null)
         {
             ChainedParameters = new();
             foreach (SearchKeyParseResult ck in parseResult.ChainedKeys)
@@ -585,7 +584,7 @@ public class ParsedSearchParameter : ICloneable
             return string.Empty;
         }
 
-        if ((RequestedKeyLiteral != null) && (RequestedValueLiteral != null))
+        if ((RequestedKeyLiteral is not null) && (RequestedValueLiteral is not null))
         {
             return $"{RequestedKeyLiteral}={RequestedValueLiteral}";
         }
@@ -667,7 +666,7 @@ public class ParsedSearchParameter : ICloneable
                 sb.Append(',');
             }
 
-            if ((Prefixes.Length > i) && (Prefixes[i] != null))
+            if ((Prefixes.Length > i) && (Prefixes[i] is not null))
             {
                 sb.Append(Prefixes[i]!.ToLiteral() ?? string.Empty);
             }
@@ -682,7 +681,7 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="modifierCode"></param>
-    /// <param name="value">        The http-paramter value string.</param>
+    /// <param name="value">        The http-parameter value string.</param>
     /// <param name="resourceType"></param>
     /// <param name="spd"></param>
     /// <param name="modifierLiteral"></param>
@@ -692,7 +691,7 @@ public class ParsedSearchParameter : ICloneable
         VersionedFhirStore store,
         IVersionedResourceStore resourceStore,
         string resourceType,
-        ModelInfo.SearchParamDefinition spd,
+        SearchParamDefinition spd,
         string modifierLiteral,
         SearchModifierCodes modifierCode,
         string value,
@@ -732,7 +731,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // note this is wrong - composite parameters do not contain the name of the parameter
-        //// work backwards through the composite values so we can understand multivalued components
+        //// work backwards through the composite values so we can understand multi-valued components
         //for (int i = split.Length - 1; i >= 0; i--)
         //{
         //    int delimIndex = split[i].IndexOf('$');
@@ -763,7 +762,7 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="spd">  The search parameter definition.</param>
     private void ExtractValues(
         string value,
-        ModelInfo.SearchParamDefinition spd)
+        SearchParamDefinition spd)
     {
         List<SearchPrefixCodes?> prefixes = new();
         List<string> values = new();
@@ -845,7 +844,7 @@ public class ParsedSearchParameter : ICloneable
     /// </summary>
     /// <param name="value">The value.</param>
     /// <param name="spd">  The search parameter definition.</param>
-    private void ProcessTypedValues(string value, ModelInfo.SearchParamDefinition spd)
+    private void ProcessTypedValues(string value, SearchParamDefinition spd)
     {
         if (!(Values?.Any() ?? false))
         {
@@ -1083,7 +1082,7 @@ public class ParsedSearchParameter : ICloneable
             }
 
             SearchKeyParseResult? parseResult = tryParseKey(key, store, resourceStore, resourceType);
-            if (parseResult == null)
+            if (parseResult is null)
             {
                 if (ParsedResultParameters.SearchResultParameters.Contains(key))
                 {
@@ -1123,7 +1122,7 @@ public class ParsedSearchParameter : ICloneable
         string SearchParameterName,
         string ModifierLiteral,
         SearchModifierCodes ModifierCode,
-        ModelInfo.SearchParamDefinition? SearchParameterDefinition,
+        SearchParamDefinition? SearchParameterDefinition,
         SearchKeyParseResult[]? ChainedKeys,
         SearchKeyParseResult? ReverseLinkKey,
         SearchKeyParseResult? ReverseLinkFilter);
@@ -1147,7 +1146,7 @@ public class ParsedSearchParameter : ICloneable
         string spName;
         string modifierLiteral;
         SearchModifierCodes modifierCode;
-        ModelInfo.SearchParamDefinition? spDefinition;
+        SearchParamDefinition? spDefinition;
         string chainedKey;
         SearchKeyParseResult[]? chainedResults;
 
@@ -1189,7 +1188,7 @@ public class ParsedSearchParameter : ICloneable
                     return null;
                 }
 
-                ModelInfo.SearchParamDefinition? linkDefinition;
+                SearchParamDefinition? linkDefinition;
 
                 if (_allResourceParameters.ContainsKey(revLinkParamName))
                 {
@@ -1285,7 +1284,7 @@ public class ParsedSearchParameter : ICloneable
                     return null;
                 }
 
-                ModelInfo.SearchParamDefinition? linkDefinition;
+                SearchParamDefinition? linkDefinition;
 
                 if (_allResourceParameters.ContainsKey(revLinkParamName))
                 {
@@ -1308,16 +1307,16 @@ public class ParsedSearchParameter : ICloneable
                     null,
                     null);
 
-                int contintuationStart = colonIndex + 1 + revResourceName.Length + revLinkParamName.Length + 2;
+                int continuationStart = colonIndex + 1 + revResourceName.Length + revLinkParamName.Length + 2;
 
-                if (contintuationStart >= key.Length)
+                if (continuationStart >= key.Length)
                 {
                     Console.WriteLine($"Unable to parse _has parameter: {key}");
                     return null;
                 }
 
                 SearchKeyParseResult? reverseLinkFilter = tryParseKey(
-                    key.Substring(contintuationStart),
+                    key.Substring(continuationStart),
                     store,
                     (IVersionedResourceStore)store[revResourceName],
                     revResourceName);
@@ -1338,7 +1337,7 @@ public class ParsedSearchParameter : ICloneable
             if (!store.ContainsKey(modifierLiteral))
             {
                 // TODO: need to fail query
-                throw new Exception($"unacceptalbe modifier used in chaining query: {modifierLiteral} ({key})");
+                throw new Exception($"unacceptable modifier used in chaining query: {modifierLiteral} ({key})");
             }
 
             modifierCode = SearchModifierCodes.ResourceType;
@@ -1370,7 +1369,7 @@ public class ParsedSearchParameter : ICloneable
             return null;
         }
 
-        if (_allResourceParameters.TryGetValue(spName, out ModelInfo.SearchParamDefinition? parameter))
+        if (_allResourceParameters.TryGetValue(spName, out SearchParamDefinition? parameter))
         {
             spDefinition = parameter;
         }
@@ -1387,7 +1386,7 @@ public class ParsedSearchParameter : ICloneable
         }
         else
         {
-            List<SearchKeyParseResult> perResourceChains = new();
+            List<SearchKeyParseResult> perResourceChains = [];
 
             if ((modifierCode == SearchModifierCodes.ResourceType) &&
                 store.ContainsKey(modifierLiteral))
@@ -1398,16 +1397,18 @@ public class ParsedSearchParameter : ICloneable
                     (IVersionedResourceStore)store[modifierLiteral],
                     modifierLiteral);
 
-                if (res != null)
+                if (res is not null)
                 {
                     perResourceChains.Add(res);
                 }
             }
             else if (spDefinition?.Target?.Any() ?? false)
             {
-                foreach (ResourceType rt in spDefinition.Target)
+                foreach (VersionIndependentResourceTypesAll spTarget in spDefinition.Target)
                 {
-                    string rtName = rt.ToString();
+                    string rtName = spTarget is Enum te
+                        ? EnumUtility.GetLiteral(te)
+                        : spTarget.ToString();
 
                     if (store.ContainsKey(rtName))
                     {
@@ -1417,7 +1418,7 @@ public class ParsedSearchParameter : ICloneable
                             (IVersionedResourceStore)store[rtName],
                             rtName);
 
-                        if (res != null)
+                        if (res is not null)
                         {
                             perResourceChains.Add(res);
                         }
@@ -1571,7 +1572,7 @@ public class ParsedSearchParameter : ICloneable
                 end = start.AddMinutes(1).AddTicks(-1);
                 break;
 
-            // Note: servers are allowed to ignore fractional seconds - I am chosing to do so.
+            // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
 
             // YYYY-MM-DDThh:mm:ss
             case 19:
@@ -1601,6 +1602,104 @@ public class ParsedSearchParameter : ICloneable
             default:
                 Console.WriteLine($"Invalid date format: {dateString}");
                 IgnoredReason ??= $"Invalid date format: {dateString}";
+                start = DateTimeOffset.MinValue;
+                end = DateTimeOffset.MaxValue;
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Attempts to parse a date string.</summary>
+    /// <param name="dateString">The date string.</param>
+    /// <param name="start">     [out] The start.</param>
+    /// <param name="end">       [out] The end.</param>
+    /// <returns>True if it succeeds, false if it fails.</returns>
+    public static bool TryParseFhirDate(string? dateString, out DateTimeOffset start, out DateTimeOffset end)
+    {
+        if (string.IsNullOrEmpty(dateString))
+        {
+            start = DateTimeOffset.MinValue;
+            end = DateTimeOffset.MaxValue;
+            return false;
+        }
+
+        // need to check for just year because DateTime refuses to parse that
+        if (dateString.Length == 4)
+        {
+            start = new DateTimeOffset(int.Parse(dateString), 1, 1, 0, 0, 0, TimeSpan.Zero);
+            end = start.AddYears(1).AddTicks(-1);
+            return true;
+        }
+
+        // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
+        if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
+        {
+            Console.WriteLine($"Failed to parse date: {dateString}");
+            start = DateTimeOffset.MinValue;
+            end = DateTimeOffset.MaxValue;
+            return false;
+        }
+
+        start = new DateTimeOffset(dt, TimeSpan.Zero);
+
+        switch (dateString.Length)
+        {
+            // YYYY
+            case 4:
+                end = start.AddYears(1).AddTicks(-1);
+                break;
+
+            // YYYY-MM
+            case 7:
+                end = start.AddMonths(1).AddTicks(-1);
+                break;
+
+            // YYYY-MM-DD
+            case 10:
+                end = start.AddDays(1).AddTicks(-1);
+                break;
+
+            // Note: this is not defined as valid, but wanted to support it
+            // YYYY-MM-DDThh
+            case 13:
+                end = start.AddHours(1).AddTicks(-1);
+                break;
+
+            // YYYY-MM-DDThh:mm
+            case 16:
+                end = start.AddMinutes(1).AddTicks(-1);
+                break;
+
+            // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
+
+            // YYYY-MM-DDThh:mm:ss
+            case 19:
+            // YYYY-MM-DDThh:mm:ssZ
+            case 20:
+            // YYYY-MM-DDThh:mm:ss+zz
+            // YYYY-MM-DDThh:mm:ss.fZ
+            case 22:
+            // YYYY-MM-DDThh:mm:ss.ffZ
+            case 23:
+            // YYYY-MM-DDThh:mm:ss.fffZ
+            case 24:
+            // YYYY-MM-DDThh:mm:ss+zz:zz
+            // YYYY-MM-DDThh:mm:ss.ffffZ
+            case 25:
+            // YYYY-MM-DDThh:mm:ss.f+zz:zz
+            case 27:
+            // YYYY-MM-DDThh:mm:ss.ff+zz:zz
+            case 28:
+            // YYYY-MM-DDThh:mm:ss.fff+zz:zz
+            case 29:
+            // YYYY-MM-DDThh:mm:ss.ffff+zz:zz
+            case 30:
+                end = start.AddSeconds(1).AddTicks(-1);
+                break;
+
+            default:
+                Console.WriteLine($"Invalid date format: {dateString}");
                 start = DateTimeOffset.MinValue;
                 end = DateTimeOffset.MaxValue;
                 return false;

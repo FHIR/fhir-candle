@@ -36,7 +36,7 @@ namespace fhir.candle._ForPackages
         {
             List<string> fhirVersions = new();
 
-            if (packages == null)
+            if (packages is null)
             {
                 return fhirVersions;
             }

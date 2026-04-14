@@ -242,7 +242,7 @@ public class NotificationManager : INotificationManager
             };
 
             // check for additional headers
-            if ((e.Subscription.Parameters != null) && e.Subscription.Parameters.Any())
+            if ((e.Subscription.Parameters is not null) && e.Subscription.Parameters.Any())
             {
                 // add headers
                 foreach ((string param, List<string> values) in e.Subscription.Parameters)
@@ -293,7 +293,7 @@ public class NotificationManager : INotificationManager
         }
         finally
         {
-            if (request != null)
+            if (request is not null)
             {
                 request.Dispose();
             }
@@ -328,7 +328,7 @@ public class NotificationManager : INotificationManager
         {
             zulip_cs_lib.ZulipClient client = ZulipClientPool.GetOrCreateClient(zulipSite, zulipEmail, zulipKey);
 
-            if (client == null)
+            if (client is null)
             {
                 return false;
             }
@@ -344,7 +344,7 @@ public class NotificationManager : INotificationManager
                         continue;
                     }
 
-                    (bool success, string details, ulong messageId) result = await client.Messages.TrySendStream(
+                    (bool success, string? details, ulong messageId) result = await client.Messages.TrySendStream(
                         messageText,
                         "Subscription Notification",
                         new int[] { id });
@@ -360,7 +360,7 @@ public class NotificationManager : INotificationManager
                         continue;
                     }
 
-                    (bool success, string details, ulong messageId) result = await client.Messages.TrySendPrivate(
+                    (bool success, string? details, ulong messageId) result = await client.Messages.TrySendPrivate(
                         messageText,
                         new int[] { id });
                 }
@@ -667,7 +667,7 @@ public class NotificationManager : INotificationManager
         while (_notificationRequestQ.Any())
         {
             if ((!_notificationRequestQ.TryDequeue(out NotificationRequest? req)) ||
-                (req == null))
+                (req is null))
             {
                 return;
             }
@@ -689,7 +689,7 @@ public class NotificationManager : INotificationManager
             foreach (ParsedSubscription sub in store.CurrentSubscriptions)
             {
                 if ((!sub.CurrentStatus.Equals("active", StringComparison.Ordinal)) ||
-                    (sub.HeartbeatSeconds == null) ||
+                    (sub.HeartbeatSeconds is null) ||
                     (sub.HeartbeatSeconds <= 0))
                 {
                     continue;
@@ -763,7 +763,7 @@ public class NotificationManager : INotificationManager
         // check for a new subscription
         if (e.SendHandshake)
         {
-            if (e.ChangedSubscription == null)
+            if (e.ChangedSubscription is null)
             {
                 return;
             }
@@ -781,7 +781,7 @@ public class NotificationManager : INotificationManager
         }
 
         // check for a changed subscription
-        if (e.ChangedSubscription != null)
+        if (e.ChangedSubscription is not null)
         {
             // TODO: Check for changes to the heartbeat interval
         }

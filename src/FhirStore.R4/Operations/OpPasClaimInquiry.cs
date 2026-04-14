@@ -4,13 +4,14 @@
 // </copyright>
 
 
+using System.Collections.Generic;
+using System.Net;
 using FhirCandle.Extensions;
 using FhirCandle.Models;
 using FhirCandle.Subscriptions;
 using FhirCandle.Versioned;
 using Hl7.Fhir.Model;
 using Hl7.Fhir.Utility;
-using System.Net;
 using static Hl7.Fhir.Model.OperationOutcome;
 
 namespace FhirCandle.Operations;
@@ -84,7 +85,7 @@ public class OpPasClaimInquiry : IFhirOperation
         Hl7.Fhir.Model.Resource? bodyResource,
         out FhirResponseContext opResponse)
     {
-        if ((bodyResource == null) ||
+        if ((bodyResource is null) ||
             (bodyResource is not Bundle b))
         {
             opResponse = new FhirResponseContext()
@@ -131,7 +132,9 @@ public class OpPasClaimInquiry : IFhirOperation
             return false;
         }
 
-        IEnumerable<Resource> claims = b.Entry.Select(e => e.Resource).Where(r => r is Claim);
+        IEnumerable<Resource> claims = (IEnumerable<Resource>)b.Entry
+            .Select(e => e.Resource)
+            .Where(r => (r is not null) && (r is Claim));
 
         if (!claims.Any())
         {
@@ -183,7 +186,7 @@ public class OpPasClaimInquiry : IFhirOperation
                 Use = c.Use,
                 Patient = c.Patient,
                 Created = c.Created,
-                Insurer = c.Insurer,
+                Insurer = c.Insurer ?? new ResourceReference() { Display = "Claim provided no insurer!" }, // TODO: file a ticket that optionality differs
                 Requestor = c.Provider,
                 Request = new ResourceReference()
                 {

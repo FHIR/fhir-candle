@@ -105,7 +105,7 @@ public class OpTestIfFhir : IFhirOperation
             return false;
         }
 
-        if (bodyResource == null)
+        if (bodyResource is null)
         {
             opResponse = new()
             {

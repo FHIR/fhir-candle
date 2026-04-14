@@ -74,7 +74,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     public required SubscriptionConverter _subscriptionConverter;
 
     /// <summary>The search parameters for this resource, by Name.</summary>
-    private Dictionary<string, ModelInfo.SearchParamDefinition> _searchParameters = new();
+    private Dictionary<string, SearchParamDefinition> _searchParameters = new();
 
     /// <summary>List of names of the search parameter urls toes.</summary>
     private Dictionary<string, string> _searchParamUrlsToNames = new();
@@ -208,8 +208,8 @@ public class ResourceStore<T> : IVersionedResourceStore
         _topicConverter = topicConverter;
         _subscriptionConverter = subscriptionConverter;
 
-        _tIsConformanceResource = typeof(T).GetInterface("IConformanceResource") != null;
-        _tIsIdentifiable = typeof(T).GetInterface("IIdentifiable") != null;
+        _tIsConformanceResource = typeof(T).GetInterface("IConformanceResource") is not null;
+        _tIsIdentifiable = typeof(T).GetInterface("IIdentifiable") is not null;
         _tHasName = typeof(T).GetProperties().Any(p => p.Name == "Name");
     }
 
@@ -293,9 +293,9 @@ public class ResourceStore<T> : IVersionedResourceStore
         }).AsQueryable();
     }
 
-    private string DisplayFor(object o)
+    private string DisplayFor(object? o)
     {
-        if (o == null)
+        if (o is null)
         {
             return string.Empty;
         }
@@ -312,10 +312,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                 return $"{hn.Family}, {string.Join(' ', hn.Given)}";
 
             case Hl7.Fhir.Model.FhirString s:
-                return s.Value;
+                return s.Value ?? string.Empty;
 
             case Hl7.Fhir.Model.Code c:
-                return c.Value;
+                return c.Value ?? string.Empty;
 
             case Hl7.Fhir.Model.Coding coding:
                 return string.IsNullOrEmpty(coding.Display) ? $"{coding.System}|{coding.Code}" : coding.Display;
@@ -330,7 +330,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                         return $"{i.System}|{i.Value}";
                     }
 
-                    if (i.Type != null)
+                    if (i.Type is not null)
                     {
                         return DisplayFor(i.Type);
                     }
@@ -349,7 +349,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                         return rr.Reference;
                     }
 
-                    if (rr.Identifier != null)
+                    if (rr.Identifier is not null)
                     {
                         DisplayFor(rr.Identifier);
                     }
@@ -463,7 +463,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="value"> The value.</param>
     /// <param name="r">     [out] The resolved resource process.</param>
     /// <returns>True if identifier, false if not.</returns>
-    public bool TryResolveIdentifier(string system, string value, out Hl7.Fhir.Model.Resource? r)
+    public bool TryResolveIdentifier(string? system, string? value, out Hl7.Fhir.Model.Resource? r)
     {
         if (_identifierToId.TryGetValue($"{system}|{value}", out string? id) &&
             !string.IsNullOrEmpty(id) &&
@@ -510,7 +510,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         Resource source,
         bool allowExistingId)
     {
-        if ((source == null) ||
+        if ((source is null) ||
             (source is not T))
         {
             return null;
@@ -556,40 +556,40 @@ public class ResourceStore<T> : IVersionedResourceStore
                         // if there is authorization info, check to see if this is a patient launch
                         if (ctx.Authorization?.UserId.StartsWith("Patient", StringComparison.Ordinal) ?? false)
                         {
-                            if (source.Meta == null)
+                            if (source.Meta is null)
                             {
                                 source.Meta = new Meta();
                             }
 
-                            if (source.Meta.Tag == null)
+                            if (source.Meta.Tag is null)
                             {
                                 source.Meta.Tag = new List<Coding>();
                             }
 
                             if (!source.Meta.Tag.Any(c =>
-                                c.System.Equals("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", StringComparison.Ordinal) &&
-                                c.Code.Equals("patient-supplied")))
+                                (c.System?.Equals("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", StringComparison.Ordinal) ?? false) &&
+                                (c.Code?.Equals("patient-supplied") ?? false)))
                             {
                                 source.Meta.Tag.Add(new Coding("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", "patient-supplied"));
                             }
                         }
 
                         // check for the performer being the subject
-                        if (obs.Performer.Any(r => r.Reference.Equals(obs.Subject.Reference, StringComparison.Ordinal)))
+                        if (obs.Performer.Any(r => r.Reference?.Equals(obs.Subject?.Reference ?? string.Empty, StringComparison.Ordinal) ?? false))
                         {
-                            if (source.Meta == null)
+                            if (source.Meta is null)
                             {
                                 source.Meta = new Meta();
                             }
 
-                            if (source.Meta.Tag == null)
+                            if (source.Meta.Tag is null)
                             {
                                 source.Meta.Tag = new List<Coding>();
                             }
 
                             if (!source.Meta.Tag.Any(c =>
-                                c.System.Equals("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", StringComparison.Ordinal) &&
-                                c.Code.Equals("patient-supplied")))
+                                (c.System?.Equals("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", StringComparison.Ordinal) ?? false) &&
+                                (c.Code?.Equals("patient-supplied") ?? false)))
                             {
                                 source.Meta.Tag.Add(new Coding("http://hl7.org/fhir/us/core/CodeSystem/us-core-tags", "patient-supplied"));
                             }
@@ -622,7 +622,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 return null;
             }
 
-            if (source.Meta == null)
+            if (source.Meta is null)
             {
                 source.Meta = new Meta();
             }
@@ -651,7 +651,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             foreach (Identifier i in sil.Identifier)
             {
-                if (sil.Identifier != null)
+                if (sil.Identifier is not null)
                 {
                     _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
                 }
@@ -659,7 +659,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
         else if (source is IIdentifiable<Identifier> si)
         {
-            if (si.Identifier != null)
+            if (si.Identifier is not null)
             {
                 _ = _identifierToId.TryAdd(GetIdentifierKey(si.Identifier), source.Id);
             }
@@ -667,12 +667,12 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         TestCreateAgainstSubscriptions((T)source);
 
-        if (parsedSubscriptionTopic != null)
+        if (parsedSubscriptionTopic is not null)
         {
             _ = _store.StoreProcessSubscriptionTopic(parsedSubscriptionTopic);
         }
 
-        if (parsedSubscription != null)
+        if (parsedSubscription is not null)
         {
             _ = _store.StoreProcessSubscription(parsedSubscription);
         }
@@ -713,7 +713,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         out HttpStatusCode sc,
         out OperationOutcome outcome)
     {
-        if ((source == null) ||
+        if ((source is null) ||
             (source is not T))
         {
             outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.BadRequest, $"Invalid resource content for {_resourceName}");
@@ -728,7 +728,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             return null;
         }
 
-        if (source.Meta == null)
+        if (source.Meta is null)
         {
             source.Meta = new Meta();
         }
@@ -751,9 +751,9 @@ public class ResourceStore<T> : IVersionedResourceStore
                     // fail the request if this fails
                     if ((source is Hl7.Fhir.Model.Basic b) &&
                         (b.Code?.Coding?.Any() ?? false) &&
-                        (b.Code.Coding.Any(c =>
-                            c.Code.Equals("SubscriptionTopic", StringComparison.Ordinal) &&
-                            c.System.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal))))
+                        b.Code.Coding.Any(c =>
+                            (c.Code?.Equals("SubscriptionTopic", StringComparison.Ordinal) ?? false) &&
+                            (c.System?.Equals("http://hl7.org/fhir/fhir-types", StringComparison.Ordinal) ?? false)))
                     {
                         if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
                         {
@@ -835,11 +835,11 @@ public class ResourceStore<T> : IVersionedResourceStore
 
             if (!string.IsNullOrEmpty(ifNoneMatch))
             {
-                if (ifNoneMatch.Equals($"W/\"{previous?.Meta.VersionId ?? string.Empty}\"", StringComparison.Ordinal))
+                if (ifNoneMatch.Equals($"W/\"{previous?.Meta?.VersionId ?? string.Empty}\"", StringComparison.Ordinal))
                 {
                     outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
-                        $"Conditional update query returned a match with version: {previous?.Meta.VersionId}, If-None-Match: {ifNoneMatch}");
+                        $"Conditional update query returned a match with version: {previous?.Meta?.VersionId}, If-None-Match: {ifNoneMatch}");
                     sc = HttpStatusCode.PreconditionFailed;
                     return null;
                 }
@@ -847,11 +847,11 @@ public class ResourceStore<T> : IVersionedResourceStore
 
             if (!string.IsNullOrEmpty(ifMatch))
             {
-                if (!ifMatch.Equals($"W/\"{previous?.Meta.VersionId}\"", StringComparison.Ordinal))
+                if (!ifMatch.Equals($"W/\"{previous?.Meta?.VersionId}\"", StringComparison.Ordinal))
                 {
                     outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
-                        $"Conditional update query returned a match with version: {previous?.Meta.VersionId}, If-Match: {ifNoneMatch}");
+                        $"Conditional update query returned a match with version: {previous?.Meta?.VersionId}, If-Match: {ifNoneMatch}");
                     sc = HttpStatusCode.PreconditionFailed;
                     return null;
                 }
@@ -899,7 +899,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        if (previous == null)
+        if (previous is null)
         {
             TestCreateAgainstSubscriptions((T)source);
         }
@@ -908,12 +908,12 @@ public class ResourceStore<T> : IVersionedResourceStore
             TestUpdateAgainstSubscriptions((T)source, previous);
         }
 
-        if (parsedSubscriptionTopic != null)
+        if (parsedSubscriptionTopic is not null)
         {
             _ = _store.StoreProcessSubscriptionTopic(parsedSubscriptionTopic);
         }
 
-        if (parsedSubscription != null)
+        if (parsedSubscription is not null)
         {
             _ = _store.StoreProcessSubscription(parsedSubscription);
         }
@@ -966,7 +966,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             _ = _resourceStore.TryRemove(id, out previous);
         }
 
-        if (previous == null)
+        if (previous is null)
         {
             return null;
         }
@@ -996,7 +996,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             case "CompartmentDefinition":
                 {
-                    if ((previous is CompartmentDefinition cd) && (cd.Code != null))
+                    if ((previous is CompartmentDefinition cd) && (cd.Code is not null))
                     {
                         _store.RemoveCompartmentDefinition(cd.Code.GetLiteral()!);
                     }
@@ -1120,13 +1120,13 @@ public class ResourceStore<T> : IVersionedResourceStore
 
     /// <summary>Performs the subscription test action.</summary>
     /// <param name="current">  The current resource POCO</param>
-    /// <param name="currentTE">The current resource ITypedElement.</param>
+    /// <param name="currentPN">The current resource ITypedElement.</param>
     /// <param name="fpContext">The FHIRPath evaluation context.</param>
     private void PerformSubscriptionTest(
         T? current,
-        ITypedElement? currentTE,
+        PocoNode? currentPN,
         T? previous,
-        ITypedElement? previousTE,
+        PocoNode? previousPN,
         FhirEvaluationContext fpContext,
         ExecutableSubscriptionInfo.InteractionTypes interaction)
     {
@@ -1134,26 +1134,26 @@ public class ResourceStore<T> : IVersionedResourceStore
         switch (interaction)
         {
             case ExecutableSubscriptionInfo.InteractionTypes.Create:
-                if ((current == null) ||
-                    (currentTE == null))
+                if ((current is null) ||
+                    (currentPN is null))
                 {
                     return;
                 }
                 break;
 
             case ExecutableSubscriptionInfo.InteractionTypes.Update:
-                if ((current == null) ||
-                    (currentTE == null) ||
-                    (previous == null) ||
-                    (previousTE == null))
+                if ((current is null) ||
+                    (currentPN is null) ||
+                    (previous is null) ||
+                    (previousPN is null))
                 {
                     return;
                 }
                 break;
 
             case ExecutableSubscriptionInfo.InteractionTypes.Delete:
-                if ((previous == null) ||
-                    (previousTE == null))
+                if ((previous is null) ||
+                    (previousPN is null))
                 {
                     return;
                 }
@@ -1217,14 +1217,14 @@ public class ResourceStore<T> : IVersionedResourceStore
                     {
                         bool result;
 
-                        if (currentTE != null)
+                        if (currentPN is not null)
                         {
-                            result = cfp.FhirPathTrigger.IsTrue(currentTE, fpContext);
+                            result = cfp.FhirPathTrigger.IsTrue(currentPN, fpContext);
                         }
-                        else if (previousTE != null)
+                        else if (previousPN is not null)
                         {
-                            //result = cfp.FhirPathTrigger.IsTrue(previousTE, fpContext).First() ?? null;
-                            result = cfp.FhirPathTrigger.IsTrue(previousTE, fpContext);
+                            //result = cfp.FhirPathTrigger.IsTrue(previousPN, fpContext).First() ?? null;
+                            result = cfp.FhirPathTrigger.IsTrue(previousPN, fpContext);
                         }
                         else
                         {
@@ -1236,8 +1236,8 @@ public class ResourceStore<T> : IVersionedResourceStore
                             continue;
                         }
 
-                        //if ((result == null) ||
-                        //    (result.Value == null) ||
+                        //if ((result is null) ||
+                        //    (result.Value is null) ||
                         //    (!(result.Value is bool val)) ||
                         //    (val == false))
                         //{
@@ -1257,7 +1257,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                             topicErrors.Add(topicUrl, new());
                         }
 
-                        if (ex.InnerException == null)
+                        if (ex.InnerException is null)
                         {
                             topicErrors[topicUrl].Add($"Error while evaluating FhirPath trigger for topic {topicUrl} on resource {_resourceName}: {ex.Message}");
                         }
@@ -1298,7 +1298,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
                                     previousPassed = cq.CreateAutoPasses;
                                     currentPassed = _searchTester.TestForMatch(
-                                        currentTE!,
+                                        currentPN!,
                                         cq.CurrentTest,
                                         fpContext);
                                 }
@@ -1312,11 +1312,11 @@ public class ResourceStore<T> : IVersionedResourceStore
                                     }
 
                                     previousPassed = _searchTester.TestForMatch(
-                                        previousTE!,
+                                        previousPN!,
                                         cq.PreviousTest,
                                         fpContext);
                                     currentPassed = _searchTester.TestForMatch(
-                                        currentTE!,
+                                        currentPN!,
                                         cq.CurrentTest,
                                         fpContext);
                                 }
@@ -1330,7 +1330,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                                     }
 
                                     previousPassed = _searchTester.TestForMatch(
-                                        previousTE!,
+                                        previousPN!,
                                         cq.PreviousTest,
                                         fpContext);
                                     currentPassed = cq.DeleteAutoPasses;
@@ -1347,7 +1347,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                             topicErrors.Add(topicUrl, new());
                         }
 
-                        if (ex.InnerException == null)
+                        if (ex.InnerException is null)
                         {
                             topicErrors[topicUrl].Add($"Error while evaluating Query trigger for topic {topicUrl} on resource {_resourceName}: {ex.Message}");
                         }
@@ -1376,7 +1376,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
 
         Resource focus = current ?? previous!;
-        ITypedElement focusTE = currentTE ?? previousTE!;
+        PocoNode focusPN = currentPN ?? previousPN!;
 
         Dictionary<string, List<string>> subscriptionErrors = new();
 
@@ -1394,20 +1394,20 @@ public class ResourceStore<T> : IVersionedResourceStore
                 }
 
                 if ((!filters.Any()) ||
-                    (_searchTester.TestForMatch(focusTE, filters, fpContext)))
+                    (_searchTester.TestForMatch(focusPN, filters, fpContext)))
                 {
                     notifiedSubscriptions.Add(subscriptionId);
 
                     List<object> additionalContext = new();
 
-                    if (additions != null)
+                    if (additions is not null)
                     {
                         HashSet<string> addedIds = new();
                         addedIds.Add($"{focus.TypeName}/{focus.Id}");
 
                         IEnumerable<Resource> inclusions = _store.ResolveInclusions(
                             focus,
-                            focusTE,
+                            focusPN,
                             additions,
                             addedIds,
                             fpContext);
@@ -1472,23 +1472,23 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         try
         {
-            ITypedElement currentTE = current.ToTypedElement();
+            PocoNode currentPN = current.ToPocoNode();
 
             FhirEvaluationContext fpContext = new FhirEvaluationContext()
             {
-                Resource = currentTE,
+                Resource = currentPN,
                 TerminologyService = _store.Terminology,
                 ElementResolver = _store.Resolve,
-                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                Environment = new Dictionary<string, IEnumerable<PocoNode>>()
                 {
-                    { "current", [currentTE] },
+                    { "current", [currentPN] },
                     { "previous", [] },
                 },
             };
 
             PerformSubscriptionTest(
                 current,
-                currentTE,
+                currentPN,
                 null,
                 null,
                 fpContext,
@@ -1497,7 +1497,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         catch (Exception ex)
         {
             Console.WriteLine($"ResourceStore[{_resourceName}] <<< TestCreateAgainstSubscriptions caught: {ex.Message}");
-            if (ex.InnerException != null)
+            if (ex.InnerException is not null)
             {
                 Console.WriteLine($"ResourceStore[{_resourceName}] <<< TestCreateAgainstSubscriptions caught: {ex.InnerException.Message}");
             }
@@ -1518,18 +1518,18 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         try
         {
-            ITypedElement currentTE = current.ToTypedElement();
-            ITypedElement previousTE = previous.ToTypedElement();
+            PocoNode currentPN = current.ToPocoNode();
+            PocoNode previousPN = previous.ToPocoNode();
 
             FhirEvaluationContext fpContext = new FhirEvaluationContext()
             {
-                Resource = currentTE,
+                Resource = currentPN,
                 TerminologyService = _store.Terminology,
                 ElementResolver = _store.Resolve,
-                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                Environment = new Dictionary<string, IEnumerable<PocoNode>>()
                 {
-                    { "current", [currentTE] },
-                    { "previous", [previousTE] },
+                    { "current", [currentPN] },
+                    { "previous", [previousPN] },
                 },
             };
 
@@ -1538,15 +1538,15 @@ public class ResourceStore<T> : IVersionedResourceStore
 
             PerformSubscriptionTest(
                 current,
-                currentTE,
+                currentPN,
                 previous,
-                previousTE,
+                previousPN,
                 fpContext, ExecutableSubscriptionInfo.InteractionTypes.Update);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"ResourceStore[{_resourceName}] <<< TestUpdateAgainstSubscriptions caught: {ex.Message}");
-            if (ex.InnerException != null)
+            if (ex.InnerException is not null)
             {
                 Console.WriteLine($"ResourceStore[{_resourceName}] <<< TestUpdateAgainstSubscriptions caught: {ex.InnerException.Message}");
             }
@@ -1566,17 +1566,17 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         try
         {
-            ITypedElement previousTE = previous.ToTypedElement();
+            PocoNode previousPN = previous.ToPocoNode();
 
             FhirEvaluationContext fpContext = new FhirEvaluationContext()
             {
-                Resource = previousTE,
+                Resource = previousPN,
                 TerminologyService = _store.Terminology,
                 ElementResolver = _store.Resolve,
-                Environment = new Dictionary<string, IEnumerable<ITypedElement>>()
+                Environment = new Dictionary<string, IEnumerable<PocoNode>>()
                 {
                     { "current", [] },
-                    { "previous", [ previousTE ] },
+                    { "previous", [ previousPN ] },
                 },
             };
 
@@ -1584,14 +1584,14 @@ public class ResourceStore<T> : IVersionedResourceStore
                 null,
                 null,
                 previous,
-                previousTE,
+                previousPN,
                 fpContext,
                 ExecutableSubscriptionInfo.InteractionTypes.Delete);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"ResourceStore[{_resourceName}] <<< TestDeleteAgainstSubscriptions caught: {ex.Message}");
-            if (ex.InnerException != null)
+            if (ex.InnerException is not null)
             {
                 Console.WriteLine($"ResourceStore[{_resourceName}] <<< TestDeleteAgainstSubscriptions caught: {ex.InnerException.Message}");
             }
@@ -1603,23 +1603,23 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="delete">(Optional) True to delete.</param>
     private void SetExecutableSearchParameter(SearchParameter sp)
     {
-        if ((sp == null) ||
-            (sp.Type == null))
+        if ((sp is null) ||
+            (sp.Type is null))
         {
             return;
         }
 
-        string name = sp.Code ?? sp.Name ?? sp.Id;
+        string name = sp.Code ?? sp.Name ?? sp.Id!;
 
-        ModelInfo.SearchParamDefinition spDefinition = new()
+        SearchParamDefinition spDefinition = new()
         {
             Name = name,
             Url = sp.Url,
             Description = sp.Description,
             Expression = sp.Expression,
-            Target = ResourceTypeExtensions.CopyTargetsToRt(sp.Target),
+            Target = ResourceTypeExtensions.CopyTargetsForSp(sp.Target),
             Type = (SearchParamType)sp.Type!,
-            Component = sp.Component?.Select(cp => new ModelInfo.SearchParamComponent(cp.Definition, cp.Expression)).ToArray(),
+            Component = sp.Component?.Select(cp => new SearchParamComponent(cp.Definition ?? string.Empty, cp.Expression ?? string.Empty)).ToArray(),
         };
 
         foreach (ResourceType rt in ResourceTypeExtensions.CopyTargetsToRt(sp.Base) ?? Array.Empty<ResourceType>())
@@ -1640,13 +1640,13 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="sp">The sp.</param>
     private void RemoveExecutableSearchParameter(SearchParameter sp)
     {
-        if ((sp == null) ||
-            (sp.Type == null))
+        if ((sp is null) ||
+            (sp.Type is null))
         {
             return;
         }
 
-        string name = sp.Code ?? sp.Name ?? sp.Id;
+        string name = sp.Code ?? sp.Name ?? sp.Id!;
 
         foreach (ResourceType rt in ResourceTypeExtensions.CopyTargetsToRt(sp.Base) ?? Array.Empty<ResourceType>())
         {
@@ -1663,7 +1663,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             return;
         }
 
-        if (_searchParameters.TryGetValue(name, out ModelInfo.SearchParamDefinition? spd))
+        if (_searchParameters.TryGetValue(name, out SearchParamDefinition? spd))
         {
             if ((!string.IsNullOrEmpty(spd.Url)) &&
                 _searchParamUrlsToNames.ContainsKey(spd.Url))
@@ -1677,7 +1677,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
     /// <summary>Adds a search parameter definition.</summary>
     /// <param name="spDefinition">The sp definition.</param>
-    public void SetExecutableSearchParameter(ModelInfo.SearchParamDefinition spDefinition)
+    public void SetExecutableSearchParameter(SearchParamDefinition spDefinition)
     {
         if (string.IsNullOrEmpty(spDefinition?.Name))
         {
@@ -1722,7 +1722,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         //    {
         //        sp.Component = new();
 
-        //        foreach (ModelInfo.SearchParamComponent component in spDefinition.Component)
+        //        foreach (SearchParamComponent component in spDefinition.Component)
         //        {
         //            sp.Component.Add(new()
         //            {
@@ -1735,13 +1735,13 @@ public class ResourceStore<T> : IVersionedResourceStore
     }
 
     /// <summary>
-    /// Attempts to get search parameter definition a ModelInfo.SearchParamDefinition from the given
+    /// Attempts to get search parameter definition a SearchParamDefinition from the given
     /// string.
     /// </summary>
     /// <param name="name">        The name.</param>
     /// <param name="spDefinition">[out] The sp definition.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool TryGetSearchParamDefinition(string name, [NotNullWhen(true)] out ModelInfo.SearchParamDefinition? spDefinition)
+    public bool TryGetSearchParamDefinition(string name, [NotNullWhen(true)] out SearchParamDefinition? spDefinition)
     {
         if (ParsedSearchParameter._allResourceParameters.ContainsKey(name))
         {
@@ -1767,7 +1767,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// An enumerator that allows foreach to be used to process the search parameter definitions in
     /// this collection.
     /// </returns>
-    public IEnumerable<ModelInfo.SearchParamDefinition> GetSearchParamDefinitions() => _searchParameters.Values;
+    public IEnumerable<SearchParamDefinition> GetSearchParamDefinitions() => _searchParameters.Values;
 
     /// <summary>Gets the search includes supported by this store.</summary>
     /// <returns>
@@ -1776,7 +1776,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// </returns>
     public IEnumerable<string> GetSearchIncludes() => _searchParameters.Values
         .Where(sp => sp.Type == SearchParamType.Reference)
-        .Where(sp => sp.Name != null)
+        .Where(sp => sp.Name is not null)
         .Select(sp => this._resourceName + ":" + sp.Name!)
         .Order();
 
@@ -1803,7 +1803,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             foreach (T resource in _resourceStore.Values)
             {
-                ITypedElement r = resource.ToTypedElement();
+                PocoNode r = resource.ToPocoNode();
 
                 if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
                 {
@@ -1817,7 +1817,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             {
                 foreach (T resource in _resourceStore.Values)
                 {
-                    ITypedElement r = resource.ToTypedElement();
+                    PocoNode r = resource.ToPocoNode();
 
                     if (_searchTester.TestForMatch(r, parameters))
                     {
@@ -1890,11 +1890,11 @@ public class ResourceStore<T> : IVersionedResourceStore
                 break;
         }
 
-        if (source == null)
+        if (source is null)
         {
             foreach (T resource in _resourceStore.Values)
             {
-                ITypedElement r = resource.ToTypedElement();
+                PocoNode r = resource.ToPocoNode();
 
                 if (_searchTester.TestForMatch(r, [link, filter]))
                 {
@@ -1906,7 +1906,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             foreach (T resource in source)
             {
-                ITypedElement r = resource.ToTypedElement();
+                PocoNode r = resource.ToPocoNode();
 
                 if (_searchTester.TestForMatch(r, [link]))
                 {
@@ -1925,7 +1925,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     {
         EventHandler<StoreInstanceEventArgs>? handler = OnInstanceCreated;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -1941,7 +1941,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     {
         EventHandler<StoreInstanceEventArgs>? handler = OnInstanceUpdated;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {
@@ -1958,7 +1958,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     {
         EventHandler<StoreInstanceEventArgs>? handler = OnInstanceDeleted;
 
-        if (handler != null)
+        if (handler is not null)
         {
             handler(this, new()
             {

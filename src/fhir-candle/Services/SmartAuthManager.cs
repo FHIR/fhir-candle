@@ -350,7 +350,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             return false;
         }
 
-        if (local.Response == null)
+        if (local.Response is null)
         {
             string msg = $"TrySmartRefresh <<< {key} does not have an issued refresh token.";
             local.Activity.Add(new()
@@ -416,7 +416,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     {
         // any request to a tenant without SMART is authorized
         if ((!_tenants.TryGetValue(ctx.TenantName, out TenantConfiguration? tConfig)) ||
-            (tConfig == null) ||
+            (tConfig is null) ||
             ((tConfig.SmartRequired == false) && (tConfig.SmartAllowed == false)))
         {
             return true;
@@ -429,13 +429,13 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         }
 
         // a request without auth is ok if SMART is optional
-        if (tConfig.SmartAllowed && (ctx.Authorization == null))
+        if (tConfig.SmartAllowed && (ctx.Authorization is null))
         {
             return true;
         }
 
         // other requests without auth fail
-        if (ctx.Authorization == null)
+        if (ctx.Authorization is null)
         {
             _logger.LogWarning($"IsAuthorized <<< request {ctx.HttpMethod} {ctx.Url} requires authorization.");
             return false;
@@ -777,7 +777,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                 break;
         }
 
-        if (resolvedKey == null)
+        if (resolvedKey is null)
         {
             string msg = $"TryRegisterClient <<< request {clientName}:{webKey.Alg} could not be resolved and will not be available.";
             messages.Add(msg);
@@ -1026,7 +1026,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         }
 
         if (!_tenants.TryGetValue(tenantName, out TenantConfiguration? tenant) ||
-            (tenant == null))
+            (tenant is null))
         {
             string msg = $"TryClientAssertionExchange <<< request {clientAssertion} has an unknown tenant {tenantName}.";
             messages.Add(msg);
@@ -1099,7 +1099,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
 
         // check to see if there is a keyset url
         if (jwtToken.TryGetHeaderValue("jku", out object? jku) &&
-            (jku != null) &&
+            (jku is not null) &&
             (jku is string keySetUrl))
         {
             try
@@ -1110,7 +1110,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                     string keySetJson = client.GetStringAsync(keySetUrl).Result;
                     JsonWebKeySet clientKeys = new(keySetJson);
 
-                    if (clientKeys == null)
+                    if (clientKeys is null)
                     {
                         string msg = $"TryClientAssertionExchange <<< failed to parse key set from: {keySetUrl}: retrieved {keySetJson}";
                         messages.Add(msg);
@@ -1137,7 +1137,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         }
 
         if (!jwtToken.TryGetHeaderValue("kid", out object? kid) ||
-            (kid == null) ||
+            (kid is null) ||
             (kid is not string signingKeyId))
         {
             if (!string.IsNullOrEmpty(keySetUrl))
@@ -1180,7 +1180,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         }
 
         if (!smartClient.Keys.TryGetValue(signingKeyId, out SecurityKey? signingKey) ||
-            (signingKey == null))
+            (signingKey is null))
         {
             string msg = $"TryClientAssertionExchange <<< client assertion signing key id (kid) {signingKeyId} was not found in client {clientId}.";
             messages.Add(msg);
@@ -1217,7 +1217,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             if (!valdiationResult.IsValid)
             {
                 tokenIsValid = false;
-                string msg = valdiationResult.Exception.InnerException == null
+                string msg = valdiationResult.Exception.InnerException is null
                     ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
                     : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
                 messages.Add(msg);
@@ -1227,7 +1227,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         catch (Exception ex)
         {
             tokenIsValid = false;
-            string msg = ex.InnerException == null
+            string msg = ex.InnerException is null
                 ? $"TryClientAssertionExchange <<< token validation failed: {ex.Message}."
                 : $"TryClientAssertionExchange <<< token validation failed: {ex.Message}:{ex.InnerException.Message}.";
             messages.Add(msg);
@@ -1250,7 +1250,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             if (!valdiationResult.IsValid)
             {
                 tokenIsValid = false;
-                string msg = valdiationResult.Exception.InnerException == null
+                string msg = valdiationResult.Exception.InnerException is null
                     ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
                     : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
                 messages.Add(msg);
@@ -1260,7 +1260,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         catch (Exception ex)
         {
             tokenIsValid = false;
-            string msg = ex.InnerException == null
+            string msg = ex.InnerException is null
                 ? $"TryClientAssertionExchange <<< token validation failed: {ex.Message}."
                 : $"TryClientAssertionExchange <<< token validation failed: {ex.Message}:{ex.InnerException.Message}.";
             messages.Add(msg);
@@ -1283,7 +1283,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             if (!valdiationResult.IsValid)
             {
                 tokenIsValid = false;
-                string msg = valdiationResult.Exception.InnerException == null
+                string msg = valdiationResult.Exception.InnerException is null
                     ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
                     : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
                 messages.Add(msg);
@@ -1293,7 +1293,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         catch (Exception ex)
         {
             tokenIsValid = false;
-            string msg = ex.InnerException == null
+            string msg = ex.InnerException is null
                 ? $"TryClientAssertionExchange <<< token validation failed: {ex.Message}."
                 : $"TryClientAssertionExchange <<< token validation failed: {ex.Message}:{ex.InnerException.Message}.";
             messages.Add(msg);
@@ -1316,7 +1316,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             if (!valdiationResult.IsValid)
             {
                 tokenIsValid = false;
-                string msg = valdiationResult.Exception.InnerException == null
+                string msg = valdiationResult.Exception.InnerException is null
                     ? $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}."
                     : $"TryClientAssertionExchange <<< token validation failed: {valdiationResult.Exception.Message}:{valdiationResult.Exception.InnerException.Message}.";
                 messages.Add(msg);
@@ -1326,7 +1326,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
         catch (Exception ex)
         {
             tokenIsValid = false;
-            string msg = ex.InnerException == null
+            string msg = ex.InnerException is null
                 ? $"TryClientAssertionExchange <<< token validation failed: {ex.Message}."
                 : $"TryClientAssertionExchange <<< token validation failed: {ex.Message}:{ex.InnerException.Message}.";
             messages.Add(msg);
@@ -1579,7 +1579,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             return false;
         }
 
-        if (local.Response == null)
+        if (local.Response is null)
         {
             string msg = $"TryIntrospection <<< {key} has not retrieved an access token.";
             local.Activity.Add(new()
