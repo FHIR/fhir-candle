@@ -824,6 +824,17 @@ public record class FhirRequestContext
                 {
                     switch (pathComponents.Length)
                     {
+                        case 1:
+                            {
+                                if (hasValidResourceType && hasQueryParameters)
+                                {
+                                    _interaction = StoreInteractionCodes.InstanceUpdateConditional;
+
+                                    return true;
+                                }
+                            }
+                            break;
+
                         case 2:
                             {
                                 if (hasValidResourceType &&

@@ -14,7 +14,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using static FhirCandle.Search.SearchDefinitions;
-using Newtonsoft.Json.Linq;
 using System.Runtime.Versioning;
 
 namespace FhirCandle.Models;
@@ -682,7 +681,7 @@ public class ParsedSearchParameter : ICloneable
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="modifierCode"></param>
-    /// <param name="value">        The http-paramter value string.</param>
+    /// <param name="value">        The http-parameter value string.</param>
     /// <param name="resourceType"></param>
     /// <param name="spd"></param>
     /// <param name="modifierLiteral"></param>
@@ -732,7 +731,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // note this is wrong - composite parameters do not contain the name of the parameter
-        //// work backwards through the composite values so we can understand multivalued components
+        //// work backwards through the composite values so we can understand multi-valued components
         //for (int i = split.Length - 1; i >= 0; i--)
         //{
         //    int delimIndex = split[i].IndexOf('$');
@@ -1308,16 +1307,16 @@ public class ParsedSearchParameter : ICloneable
                     null,
                     null);
 
-                int contintuationStart = colonIndex + 1 + revResourceName.Length + revLinkParamName.Length + 2;
+                int continuationStart = colonIndex + 1 + revResourceName.Length + revLinkParamName.Length + 2;
 
-                if (contintuationStart >= key.Length)
+                if (continuationStart >= key.Length)
                 {
                     Console.WriteLine($"Unable to parse _has parameter: {key}");
                     return null;
                 }
 
                 SearchKeyParseResult? reverseLinkFilter = tryParseKey(
-                    key.Substring(contintuationStart),
+                    key.Substring(continuationStart),
                     store,
                     (IVersionedResourceStore)store[revResourceName],
                     revResourceName);
@@ -1338,7 +1337,7 @@ public class ParsedSearchParameter : ICloneable
             if (!store.ContainsKey(modifierLiteral))
             {
                 // TODO: need to fail query
-                throw new Exception($"unacceptalbe modifier used in chaining query: {modifierLiteral} ({key})");
+                throw new Exception($"unacceptable modifier used in chaining query: {modifierLiteral} ({key})");
             }
 
             modifierCode = SearchModifierCodes.ResourceType;
@@ -1573,7 +1572,7 @@ public class ParsedSearchParameter : ICloneable
                 end = start.AddMinutes(1).AddTicks(-1);
                 break;
 
-            // Note: servers are allowed to ignore fractional seconds - I am chosing to do so.
+            // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
 
             // YYYY-MM-DDThh:mm:ss
             case 19:
@@ -1672,7 +1671,7 @@ public class ParsedSearchParameter : ICloneable
                 end = start.AddMinutes(1).AddTicks(-1);
                 break;
 
-            // Note: servers are allowed to ignore fractional seconds - I am chosing to do so.
+            // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
 
             // YYYY-MM-DDThh:mm:ss
             case 19:

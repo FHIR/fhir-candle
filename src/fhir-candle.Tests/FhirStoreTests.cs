@@ -602,6 +602,7 @@ public class TestBundleRequestParsing : IClassFixture<FhirStoreTests>
     [InlineData("PUT", "Patient", null)]
     [InlineData("PUT", "Patient/id", StoreInteractionCodes.InstanceUpdate)]
     [InlineData("PUT", "Patient/$test", null)]
+    [InlineData("PUT", "Patient?identifier=test", StoreInteractionCodes.InstanceUpdateConditional)]
     [InlineData("PATCH", "", null)]
     [InlineData("PATCH", "?withParams=true", null)]
     [InlineData("PATCH", "_search", null)]

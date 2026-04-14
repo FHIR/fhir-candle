@@ -1453,10 +1453,14 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // check for conditional create
-        if (!string.IsNullOrEmpty(ctx.IfNoneExist))
+        string conditionalQuery = !string.IsNullOrEmpty(ctx.IfNoneExist)
+            ? ctx.IfNoneExist
+            : ctx.UrlQuery;
+
+        if (!string.IsNullOrEmpty(conditionalQuery))
         {
             bool success = DoTypeSearch(
-                ctx with { UrlQuery = ctx.IfNoneExist },
+                ctx with { UrlQuery = conditionalQuery },
                 out FhirResponseContext searchResp);
 
             if (success &&
@@ -2365,22 +2369,42 @@ public partial class VersionedFhirStore : IFhirStore
                 {
                     // no matches - continue with update as create
                     case 0:
+                        {
+                            // conditional update with 0 matches → create the resource
+                            if (string.IsNullOrEmpty(content.Id))
+                            {
+                                content.Id = Guid.NewGuid().ToString("N");
+                            }
+
+                            id = content.Id;
+                        }
                         break;
 
                     // one match - check extra conditions and continue with update if they pass
                     case 1:
                         {
-                            if ((!string.IsNullOrEmpty(id)) &&
-                                (!bundle.Entry[0].Resource?.Id?.Equals(id, StringComparison.Ordinal) ?? false))
+                            string matchedId = bundle.Entry[0].Resource?.Id ?? string.Empty;
+
+                            if (!string.IsNullOrEmpty(id))
                             {
-                                response = new()
+                                // explicit id was provided — verify it matches
+                                if (!matchedId.Equals(id, StringComparison.Ordinal))
                                 {
-                                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                                        HttpStatusCode.PreconditionFailed,
-                                        $"Conditional update query returned a match with a id: {bundle.Entry[0].Resource?.Id}, expected {id}"),
-                                    StatusCode = HttpStatusCode.PreconditionFailed,
-                                };
-                                return false;
+                                    response = new()
+                                    {
+                                        Outcome = SerializationUtils.BuildOutcomeForRequest(
+                                            HttpStatusCode.PreconditionFailed,
+                                            $"Conditional update query returned a match with a id: {matchedId}, expected {id}"),
+                                        StatusCode = HttpStatusCode.PreconditionFailed,
+                                    };
+                                    return false;
+                                }
+                            }
+                            else
+                            {
+                                // no id in URL (conditional update) — adopt the matched resource's id
+                                id = matchedId;
+                                content.Id = matchedId;
                             }
                         }
                         break;

@@ -975,6 +975,860 @@ public class R4TestConditionals : IClassFixture<R4Tests>
     }
 }
 
+/// <summary>Tests for conditional update operations.</summary>
+public class R4TestConditionalUpdates : IClassFixture<R4Tests>
+{
+    /// <summary>(Immutable) The test output helper.</summary>
+    private readonly ITestOutputHelper _testOutputHelper;
+
+    /// <summary>Information describing the conditional.</summary>
+    public static IEnumerable<object[]> ConditionalData;
+
+    /// <summary>(Immutable) The fixture.</summary>
+    private readonly R4Tests _fixture;
+
+    /// <summary>
+    /// Initializes a new instance of the R4TestConditionalUpdates class.
+    /// </summary>
+    /// <param name="fixture">         (Immutable) The fixture.</param>
+    /// <param name="testOutputHelper">(Immutable) The test output helper.</param>
+    public R4TestConditionalUpdates(R4Tests fixture, ITestOutputHelper testOutputHelper)
+    {
+        _fixture = fixture;
+        _testOutputHelper = testOutputHelper;
+    }
+
+    /// <summary>
+    /// Initializes static members of the R4TestConditionalUpdates class.
+    /// </summary>
+    static R4TestConditionalUpdates()
+    {
+        ConditionalData = new List<object[]>()
+        {
+            new object[] { "Patient", GetContents("data/r4/patient-example.json") },
+        };
+    }
+
+    /// <summary>Gets the contents.</summary>
+    /// <exception cref="ArgumentException">Thrown when one or more arguments have unsupported or
+    ///  illegal values.</exception>
+    /// <param name="filePath">Full pathname of the file.</param>
+    /// <returns>The contents.</returns>
+    private static string GetContents(string filePath)
+    {
+        string path = Path.IsPathRooted(filePath)
+            ? filePath
+            : Path.GetRelativePath(Directory.GetCurrentDirectory(), filePath);
+
+        if (!File.Exists(path))
+        {
+            throw new ArgumentException($"Could not find file at path: {path}");
+        }
+
+        return File.ReadAllText(path);
+    }
+
+    /// <summary>Change identifier.</summary>
+    /// <param name="json">The JSON.</param>
+    /// <param name="id">  The identifier.</param>
+    /// <returns>A string.</returns>
+    private static string ChangeId(string json, string id)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            throw new ArgumentNullException(nameof(json));
+        }
+
+        if (string.IsNullOrEmpty(id))
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        HttpStatusCode sc = candleR4.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
+            json,
+            "application/fhir+json",
+            out Hl7.Fhir.Model.Resource? r,
+            out _);
+
+        if (sc != HttpStatusCode.OK)
+        {
+            throw new ArgumentException($"Could not deserialize json: {json}");
+        }
+
+        if (r is null)
+        {
+            throw new ArgumentException($"Could not deserialize json: {json}");
+        }
+
+        r.Id = id;
+
+        return candleR4.FhirCandle.Serialization.SerializationUtils.SerializeFhir(r, "application/fhir+json", false);
+    }
+
+    /// <summary>Conditional update with no match creates the resource.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalUpdateNoMatch(string resourceType, string json)
+    {
+        string id = Guid.NewGuid().ToString();
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "PUT",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceUpdate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.LastModified.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldContain($"{resourceType}/{id}");
+    }
+
+    /// <summary>Conditional update with one match updates the resource.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalUpdateOneMatch(string resourceType, string json)
+    {
+        string id = Guid.NewGuid().ToString();
+
+        // first, create the resource
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx,
+            out FhirResponseContext createResp);
+
+        success.ShouldBeTrue();
+        createResp.StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        // now, conditional update with search matching that resource
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "PUT",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.InstanceUpdate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"2\"");
+        response.LastModified.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldContain($"{resourceType}/{id}");
+    }
+
+    /// <summary>Conditional update with multiple matches returns 412.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalUpdateMultipleMatches(string resourceType, string json)
+    {
+        string id1 = Guid.NewGuid().ToString();
+        string id2 = Guid.NewGuid().ToString();
+
+        // create two resources
+        FhirRequestContext createCtx1 = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id1),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx1,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        FhirRequestContext createCtx2 = createCtx1 with
+        {
+            SourceContent = ChangeId(json, id2),
+        };
+
+        success = _fixture._store.InstanceCreate(
+            createCtx2,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        // conditional update matching both
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "PUT",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id1},{id2}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id1),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.InstanceUpdate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+    }
+
+    /// <summary>Conditional update with one match and matching body id succeeds.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalUpdateOneMatchIdInBody(string resourceType, string json)
+    {
+        string id = Guid.NewGuid().ToString();
+
+        // create the resource
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        // conditional update with body id matching the matched resource
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "PUT",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.InstanceUpdate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"2\"");
+        response.Location.ShouldContain($"{resourceType}/{id}");
+    }
+
+    /// <summary>Conditional update with one match and mismatched body id returns 412.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalUpdateOneMatchIdMismatch(string resourceType, string json)
+    {
+        string id = Guid.NewGuid().ToString();
+        string wrongId = Guid.NewGuid().ToString();
+
+        // create the resource
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        // conditional update with id in URL path that mismatches the search result
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "PUT",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}/{wrongId}?_id={id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, wrongId),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.InstanceUpdate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+    }
+}
+
+/// <summary>Tests for conditional create via URL query operations.</summary>
+public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
+{
+    /// <summary>(Immutable) The test output helper.</summary>
+    private readonly ITestOutputHelper _testOutputHelper;
+
+    /// <summary>Information describing the conditional.</summary>
+    public static IEnumerable<object[]> ConditionalData;
+
+    /// <summary>(Immutable) The fixture.</summary>
+    private readonly R4Tests _fixture;
+
+    /// <summary>
+    /// Initializes a new instance of the R4TestConditionalCreateViaUrlQuery class.
+    /// </summary>
+    /// <param name="fixture">         (Immutable) The fixture.</param>
+    /// <param name="testOutputHelper">(Immutable) The test output helper.</param>
+    public R4TestConditionalCreateViaUrlQuery(R4Tests fixture, ITestOutputHelper testOutputHelper)
+    {
+        _fixture = fixture;
+        _testOutputHelper = testOutputHelper;
+    }
+
+    /// <summary>
+    /// Initializes static members of the R4TestConditionalCreateViaUrlQuery class.
+    /// </summary>
+    static R4TestConditionalCreateViaUrlQuery()
+    {
+        ConditionalData = new List<object[]>()
+        {
+            new object[] { "Patient", GetContents("data/r4/patient-example.json") },
+        };
+    }
+
+    /// <summary>Gets the contents.</summary>
+    /// <exception cref="ArgumentException">Thrown when one or more arguments have unsupported or
+    ///  illegal values.</exception>
+    /// <param name="filePath">Full pathname of the file.</param>
+    /// <returns>The contents.</returns>
+    private static string GetContents(string filePath)
+    {
+        string path = Path.IsPathRooted(filePath)
+            ? filePath
+            : Path.GetRelativePath(Directory.GetCurrentDirectory(), filePath);
+
+        if (!File.Exists(path))
+        {
+            throw new ArgumentException($"Could not find file at path: {path}");
+        }
+
+        return File.ReadAllText(path);
+    }
+
+    /// <summary>Change identifier.</summary>
+    /// <param name="json">The JSON.</param>
+    /// <param name="id">  The identifier.</param>
+    /// <returns>A string.</returns>
+    private static string ChangeId(string json, string id)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            throw new ArgumentNullException(nameof(json));
+        }
+
+        if (string.IsNullOrEmpty(id))
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        HttpStatusCode sc = candleR4.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
+            json,
+            "application/fhir+json",
+            out Hl7.Fhir.Model.Resource? r,
+            out _);
+
+        if (sc != HttpStatusCode.OK)
+        {
+            throw new ArgumentException($"Could not deserialize json: {json}");
+        }
+
+        if (r is null)
+        {
+            throw new ArgumentException($"Could not deserialize json: {json}");
+        }
+
+        r.Id = id;
+
+        return candleR4.FhirCandle.Serialization.SerializationUtils.SerializeFhir(r, "application/fhir+json", false);
+    }
+
+    /// <summary>Conditional create via URL query with no match creates the resource.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalCreateViaUrlQueryNoMatch(string resourceType, string json)
+    {
+        string id = Guid.NewGuid().ToString();
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.LastModified.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldContain($"{resourceType}/{id}");
+    }
+
+    /// <summary>Conditional create via URL query with one match returns existing.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalCreateViaUrlQueryOneMatch(string resourceType, string json)
+    {
+        string id = Guid.NewGuid().ToString();
+
+        // first, create the resource
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx,
+            out FhirResponseContext createResp);
+
+        success.ShouldBeTrue();
+        createResp.StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        // now attempt conditional create via URL query (no IfNoneExist)
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.InstanceCreate(
+            ctx,
+            out FhirResponseContext response);
+
+        // should return the existing resource
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.ETag.ShouldBe("W/\"1\"");
+        response.LastModified.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldContain($"{resourceType}/{id}");
+    }
+
+    /// <summary>Conditional create via URL query with multiple matches returns 412.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalCreateViaUrlQueryMultipleMatches(string resourceType, string json)
+    {
+        string id1 = Guid.NewGuid().ToString();
+        string id2 = Guid.NewGuid().ToString();
+        string id3 = Guid.NewGuid().ToString();
+
+        // create two resources
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id1),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            ctx,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        ctx = ctx with
+        {
+            SourceContent = ChangeId(json, id2),
+        };
+
+        success = _fixture._store.InstanceCreate(
+            ctx,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        // conditional create via URL query matching both
+        ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={id1},{id2}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, id3),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.InstanceCreate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+    }
+
+    /// <summary>IfNoneExist takes precedence over URL query.</summary>
+    /// <param name="resourceType">Type of the resource.</param>
+    /// <param name="json">        The JSON.</param>
+    [Theory]
+    [MemberData(nameof(ConditionalData))]
+    public void ConditionalCreateViaUrlQueryWithIfNoneExist(string resourceType, string json)
+    {
+        string existingId = Guid.NewGuid().ToString();
+        string newId = Guid.NewGuid().ToString();
+
+        // create a resource
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, existingId),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        // conditional create with both IfNoneExist (matching existing) and URL query (no match)
+        // IfNoneExist should take precedence, returning existing resource
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/{resourceType}?_id={newId}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = ChangeId(json, newId),
+            DestinationFormat = "application/fhir+json",
+            IfNoneExist = $"_id={existingId}",
+        };
+
+        success = _fixture._store.InstanceCreate(
+            ctx,
+            out FhirResponseContext response);
+
+        // IfNoneExist found a match, so should return the existing resource
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Location.ShouldContain($"{resourceType}/{existingId}");
+    }
+}
+
+/// <summary>Tests for bundle conditional operations.</summary>
+public class R4TestBundleConditionals : IClassFixture<R4Tests>
+{
+    /// <summary>(Immutable) The test output helper.</summary>
+    private readonly ITestOutputHelper _testOutputHelper;
+
+    /// <summary>(Immutable) The fixture.</summary>
+    private readonly R4Tests _fixture;
+
+    /// <summary>
+    /// Initializes a new instance of the R4TestBundleConditionals class.
+    /// </summary>
+    /// <param name="fixture">         (Immutable) The fixture.</param>
+    /// <param name="testOutputHelper">(Immutable) The test output helper.</param>
+    public R4TestBundleConditionals(R4Tests fixture, ITestOutputHelper testOutputHelper)
+    {
+        _fixture = fixture;
+        _testOutputHelper = testOutputHelper;
+    }
+
+    /// <summary>Bundle conditional create via URL query - first creates, second returns existing.</summary>
+    [Fact]
+    public void BundleConditionalCreateViaUrlQuery()
+    {
+        string id = Guid.NewGuid().ToString();
+
+        string bundleJson = @"{
+            ""resourceType"": ""Bundle"",
+            ""type"": ""transaction"",
+            ""entry"": [
+                {
+                    ""fullUrl"": ""urn:uuid:" + id + @""",
+                    ""resource"": {
+                        ""resourceType"": ""Patient"",
+                        ""id"": """ + id + @""",
+                        ""identifier"": [{""system"": ""http://test"", ""value"": """ + id + @"""}]
+                    },
+                    ""request"": {
+                        ""method"": ""POST"",
+                        ""url"": ""Patient?identifier=http://test|" + id + @"""
+                    }
+                }
+            ]
+        }";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = bundleJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        // first submission — should create
+        bool success = _fixture._store.ProcessBundle(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // second submission — should not duplicate
+        ctx = ctx with
+        {
+            SourceContent = bundleJson,
+        };
+
+        success = _fixture._store.ProcessBundle(
+            ctx,
+            out FhirResponseContext response2);
+
+        success.ShouldBeTrue();
+        response2.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>Bundle conditional update with no prior match creates a resource.</summary>
+    [Fact]
+    public void BundleConditionalUpdateNoMatch()
+    {
+        string id = Guid.NewGuid().ToString();
+
+        string bundleJson = @"{
+            ""resourceType"": ""Bundle"",
+            ""type"": ""transaction"",
+            ""entry"": [
+                {
+                    ""fullUrl"": ""urn:uuid:" + id + @""",
+                    ""resource"": {
+                        ""resourceType"": ""Patient"",
+                        ""id"": """ + id + @""",
+                        ""identifier"": [{""system"": ""http://test"", ""value"": """ + id + @"""}]
+                    },
+                    ""request"": {
+                        ""method"": ""PUT"",
+                        ""url"": ""Patient?identifier=http://test|" + id + @"""
+                    }
+                }
+            ]
+        }";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = bundleJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.ProcessBundle(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>Bundle conditional update with one prior match updates the resource.</summary>
+    [Fact]
+    public void BundleConditionalUpdateOneMatch()
+    {
+        string id = Guid.NewGuid().ToString();
+
+        // first, create a patient directly
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = @"{
+                ""resourceType"": ""Patient"",
+                ""id"": """ + id + @""",
+                ""identifier"": [{""system"": ""http://test"", ""value"": """ + id + @"""}]
+            }",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.InstanceCreate(
+            createCtx,
+            out FhirResponseContext _);
+
+        success.ShouldBeTrue();
+
+        // now submit a bundle with conditional update matching that patient
+        string bundleJson = @"{
+            ""resourceType"": ""Bundle"",
+            ""type"": ""transaction"",
+            ""entry"": [
+                {
+                    ""resource"": {
+                        ""resourceType"": ""Patient"",
+                        ""id"": """ + id + @""",
+                        ""identifier"": [{""system"": ""http://test"", ""value"": """ + id + @"""}],
+                        ""name"": [{""family"": ""Updated""}]
+                    },
+                    ""request"": {
+                        ""method"": ""PUT"",
+                        ""url"": ""Patient?identifier=http://test|" + id + @"""
+                    }
+                }
+            ]
+        }";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._store.Config.BaseUrl}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = bundleJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = _fixture._store.ProcessBundle(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+}
+
 /// <summary>A test subscription internals.</summary>
 public class R4TestSubscriptions : IClassFixture<R4Tests>
 {

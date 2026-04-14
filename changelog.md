@@ -4,6 +4,8 @@
   * Added explicit tracking of `affectsState` for operations.
   * Updated to FHIR SDK v6 series
   * Added stubs for FHIR R6 support (not yet functional).
+  * Fix issue #21: Conditional Updates using POST not PUT
+  * Fix issue #43: Conditional Update Should be Supported
   * Added `net10.0` target framework
   * Updated NuGet Dependencies
     * `[net10.0]`

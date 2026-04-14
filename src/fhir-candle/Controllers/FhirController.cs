@@ -1480,6 +1480,94 @@ public class FhirController : ControllerBase
         }
     }
 
+    /// <summary>(An Action that handles HTTP PUT requests) puts resource conditional.</summary>
+    /// <param name="storeName">   The store.</param>
+    /// <param name="resourceName">Name of the resource.</param>
+    /// <param name="format">      Describes the format to use.</param>
+    /// <param name="pretty">      The pretty.</param>
+    /// <param name="prefer">      The prefer.</param>
+    /// <param name="ifMatch">     A match specifying if.</param>
+    /// <param name="ifNoneMatch"> A match specifying if none.</param>
+    /// <param name="authHeader">  The authentication header.</param>
+    /// <returns>An asynchronous result.</returns>
+    [HttpPut, Route("{storeName}/{resourceName}")]
+    [Consumes("application/fhir+json", new[] { "application/fhir+xml", "application/json", "application/xml" })]
+    public async Task PutResourceConditional(
+        [FromRoute] string storeName,
+        [FromRoute] string resourceName,
+        [FromQuery(Name = "_format")] string? format,
+        [FromQuery(Name = "_pretty")] string? pretty,
+        [FromHeader(Name = "Prefer")] string? prefer,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
+        [FromHeader(Name = "If-None-Match")] string? ifNoneMatch,
+        [FromHeader(Name = "Authorization")] string? authHeader)
+    {
+        if (!_fhirStoreManager.TryGetValue(storeName, out IFhirStore? store))
+        {
+            await LogAndReturnError(Response, 404, $"PutResourceConditional <<< no tenant at {storeName}!");
+            return;
+        }
+
+        if (!store.SupportsResource(resourceName))
+        {
+            await LogAndReturnError(Response, 404, $"PutResourceConditional <<< tenant {storeName} does not support resource {resourceName}!");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(Request.QueryString.Value))
+        {
+            await LogAndReturnError(Response, 400, $"PutResourceConditional <<< conditional update requires search parameters!");
+            return;
+        }
+
+        try
+        {
+            // read the post body to process
+            using StreamReader reader = new StreamReader(Request.Body);
+            string content = await reader.ReadToEndAsync();
+
+            FhirRequestContext ctx = new()
+            {
+                TenantName = storeName,
+                Store = store,
+                HttpMethod = Request.Method.ToUpperInvariant(),
+                Url = Request.GetDisplayUrl(),
+                UrlPath = Request.Path,
+                UrlQuery = Request.QueryString.ToString(),
+                RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                Forwarded = getForwardedInfo(Request),
+                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                DestinationFormat = getMimeType(format, Request),
+                SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
+                Interaction = Common.StoreInteractionCodes.InstanceUpdateConditional,
+                ResourceType = resourceName,
+                Id = string.Empty,
+                IfMatch = ifMatch ?? string.Empty,
+                IfNoneMatch = ifNoneMatch ?? string.Empty,
+                SourceFormat = Request.ContentType ?? string.Empty,
+                SourceContent = content,
+            };
+
+            if (!_smartAuthManager.IsAuthorized(ctx))
+            {
+                Response.StatusCode = 401;
+                return;
+            }
+
+            bool success = store.InstanceUpdate(
+                ctx,
+                out FhirResponseContext opResponse);
+
+            await AddFhirResponse(Response, prefer, success, opResponse);
+        }
+        catch (Exception ex)
+        {
+            string msg = ex.InnerException is null ? $"PutResourceConditional <<< caught: {ex.Message}" : $"PutResourceConditional <<< caught: {ex.Message}, inner: {ex.InnerException.Message}";
+            await LogAndReturnError(Response, 500, msg);
+            return;
+        }
+    }
+
     /// <summary>
     /// (An Action that handles HTTP DELETE requests) deletes the resource instance.
     /// </summary>
