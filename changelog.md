@@ -4,56 +4,61 @@
   * Added explicit tracking of `affectsState` for operations.
   * Updated to FHIR SDK v6 series
   * Added stubs for FHIR R6 support (not yet functional).
+  * Added `net10.0` target framework
   * Updated NuGet Dependencies
+    * `[net10.0]`
+        * `Microsoft.AspNetCore.Components.Web                      10.0.6`
+        * `Microsoft.Extensions.Configuration                       10.0.6`
+        * `Microsoft.Extensions.Configuration.EnvironmentVariables  10.0.6`
+        * `Microsoft.Extensions.Configuration.Json                  10.0.6`
+        * `Microsoft.Extensions.Hosting.Abstractions                10.0.6`
     * `[net9.0]`
         * `BlazorMonaco                                             3.3.0  -> 3.4.0`
-        * `Firely.Fhir.Packages                                     4.9.0 -> 5.0.0`
-        * `Hl7.Fhir.R4                                              5.11.4 -> 6.0.1`
-        * `Hl7.Fhir.R4B                                             5.11.4 -> 6.0.1`
-        * `Hl7.Fhir.R5                                              5.11.4 -> 6.0.1`
-        * `MailKit                                                  4.11.0 -> 4.14.1`
-        * `Microsoft.AspNetCore.Components.Web                      9.0.3 -> 9.0.4`
-        * `Microsoft.Extensions.Configuration                       9.0.3 -> 9.0.4`
-        * `Microsoft.Extensions.Configuration.EnvironmentVariables  9.0.3 -> 9.0.4`
-        * `Microsoft.Extensions.Configuration.Json                  9.0.3 -> 9.0.4`
-        * `Microsoft.Extensions.Logging                             9.0.3 -> 9.0.4`
-        * `Microsoft.Extensions.Hosting.Abstractions                9.0.3 -> 9.0.4`
-        * `Microsoft.FluentUI.AspNetCore.Components                 4.11.7 -> 4.13.0`
-        * `Microsoft.FluentUI.AspNetCore.Components.Emoji           4.11.7 -> 4.13.0`
-        * `Microsoft.FluentUI.AspNetCore.Components.Icons           4.11.7 -> 4.13.0`
-        * `ModelContextProtocol                                     0.2.0-preview.2 -> 0.4.0-preview.3`
-        * `ModelContextProtocol.AspNetCore                          0.2.0-preview.2 -> 0.4.0-preview.3`
-        * `OpenTelemetry                                            1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Exporter.Console                           1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Exporter.OpenTelemetryProtocol             1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Extensions.Hosting                         1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Instrumentation.AspNetCore                 1.11.1 -> 1.13.0`
-        * `System.CommandLine                                       2.0.0-beta4.22272.1 -> 2.0.0-rc.2.25502.107`
+        * `Firely.Fhir.Packages                                     4.9.0 -> 5.0.2`
+        * `Hl7.Fhir.R4                                              5.11.4 -> 6.1.1`
+        * `Hl7.Fhir.R4B                                             5.11.4 -> 6.1.1`
+        * `Hl7.Fhir.R5                                              5.11.4 -> 6.1.1`
+        * `MailKit                                                  4.11.0 -> 4.15.1`
+        * `Microsoft.AspNetCore.Components.Web                      9.0.3 -> 9.0.15`
+        * `Microsoft.Extensions.Configuration                       9.0.3 -> 10.0.6`
+        * `Microsoft.Extensions.Configuration.EnvironmentVariables  9.0.3 -> 10.0.6`
+        * `Microsoft.Extensions.Configuration.Json                  9.0.3 -> 10.0.6`
+        * `Microsoft.Extensions.Hosting.Abstractions                9.0.3 -> 10.0.6`
+        * `Microsoft.FluentUI.AspNetCore.Components                 4.11.7 -> 4.14.0`
+        * `Microsoft.FluentUI.AspNetCore.Components.Emoji           4.11.7 -> 4.14.0`
+        * `Microsoft.FluentUI.AspNetCore.Components.Icons           4.11.7 -> 4.14.0`
+        * `ModelContextProtocol                                     0.2.0-preview.2 -> 1.2.0`
+        * `ModelContextProtocol.AspNetCore                          0.2.0-preview.2 -> 1.2.0`
+        * `OpenTelemetry                                            1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Exporter.Console                           1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Exporter.OpenTelemetryProtocol             1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Extensions.Hosting                         1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Instrumentation.AspNetCore                 1.11.1 -> 1.15.1`
+        * `System.CommandLine                                       2.0.0-beta4.22272.1 -> 2.0.6`
         * `System.CommandLine.NamingConventionBinder                2.0.0-beta4.22272.1 -> 2.0.0-beta5.25306.1`
     * `[net8.0]`
         * `BlazorMonaco                                             3.3.0  -> 3.4.0`
-        * `Firely.Fhir.Packages                                     4.9.0 -> 5.0.0`
-        * `Hl7.Fhir.R4                                              5.11.4 -> 6.0.1`
-        * `Hl7.Fhir.R4B                                             5.11.4 -> 6.0.1`
-        * `Hl7.Fhir.R5                                              5.11.4 -> 6.0.1`
-        * `MailKit                                                  4.11.0 -> 4.14.1`
-        * `Microsoft.AspNetCore.Components.Web                      8.0.14 -> 8.0.15`
-        * `Microsoft.Extensions.Configuration                       8.0.14 -> 8.0.15`
-        * `Microsoft.Extensions.Configuration.EnvironmentVariables  8.0.14 -> 8.0.15`
-        * `Microsoft.Extensions.Configuration.Json                  8.0.14 -> 8.0.15`
-        * `Microsoft.Extensions.Logging                             8.0.14 -> 8.0.15`
-        * `Microsoft.Extensions.Hosting.Abstractions                8.0.14 -> 8.0.15`
-        * `Microsoft.FluentUI.AspNetCore.Components                 4.11.7 -> 4.13.0`
-        * `Microsoft.FluentUI.AspNetCore.Components.Emoji           4.11.7 -> 4.13.0`
-        * `Microsoft.FluentUI.AspNetCore.Components.Icons           4.11.7 -> 4.13.0`
-        * `ModelContextProtocol                                     0.2.0-preview.2 -> 0.4.0-preview.3`
-        * `ModelContextProtocol.AspNetCore                          0.2.0-preview.2 -> 0.4.0-preview.3`
-        * `OpenTelemetry                                            1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Exporter.Console                           1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Exporter.OpenTelemetryProtocol             1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Extensions.Hosting                         1.11.2 -> 1.13.1`
-        * `OpenTelemetry.Instrumentation.AspNetCore                 1.11.1 -> 1.13.0`
-        * `System.CommandLine                                       2.0.0-beta4.22272.1 -> 2.0.0-rc.2.25502.107`
+        * `Firely.Fhir.Packages                                     4.9.0 -> 5.0.2`
+        * `Hl7.Fhir.R4                                              5.11.4 -> 6.1.1`
+        * `Hl7.Fhir.R4B                                             5.11.4 -> 6.1.1`
+        * `Hl7.Fhir.R5                                              5.11.4 -> 6.1.1`
+        * `MailKit                                                  4.11.0 -> 4.15.1`
+        * `Microsoft.AspNetCore.Components.Web                      8.0.14 -> 8.0.26`
+        * `Microsoft.Extensions.Configuration                       8.0.14 -> 10.0.6`
+        * `Microsoft.Extensions.Configuration.EnvironmentVariables  8.0.14 -> 10.0.6`
+        * `Microsoft.Extensions.Configuration.Json                  8.0.14 -> 10.0.6`
+        * `Microsoft.Extensions.Hosting.Abstractions                8.0.14 -> 10.0.6`
+        * `Microsoft.FluentUI.AspNetCore.Components                 4.11.7 -> 4.14.0`
+        * `Microsoft.FluentUI.AspNetCore.Components.Emoji           4.11.7 -> 4.14.0`
+        * `Microsoft.FluentUI.AspNetCore.Components.Icons           4.11.7 -> 4.14.0`
+        * `ModelContextProtocol                                     0.2.0-preview.2 -> 1.2.0`
+        * `ModelContextProtocol.AspNetCore                          0.2.0-preview.2 -> 1.2.0`
+        * `OpenTelemetry                                            1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Exporter.Console                           1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Exporter.OpenTelemetryProtocol             1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Extensions.Hosting                         1.11.2 -> 1.15.2`
+        * `OpenTelemetry.Instrumentation.AspNetCore                 1.11.1 -> 1.15.1`
+        * `System.CommandLine                                       2.0.0-beta4.22272.1 -> 2.0.6`
         * `System.CommandLine.NamingConventionBinder                2.0.0-beta4.22272.1 -> 2.0.0-beta5.25306.1`
 
 * v2025.331
