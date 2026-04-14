@@ -56,8 +56,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 		.github\workflows\ghcr-docker-min.yml = .github\workflows\ghcr-docker-min.yml
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "fhir-candle-minimal", "src\fhir-candle-minimal\fhir-candle-minimal.csproj", "{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

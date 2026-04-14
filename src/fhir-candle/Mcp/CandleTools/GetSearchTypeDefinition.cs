@@ -65,7 +65,7 @@ public class GetSearchTypeDefinition : ICandleMcpTool
     /// - The definition of the requested resource type, if available
     /// </returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

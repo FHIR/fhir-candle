@@ -69,7 +69,7 @@ public class GetSearchParameters : ICandleMcpTool
     /// operation fails due to missing arguments or invalid store/resource references.
     /// </returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

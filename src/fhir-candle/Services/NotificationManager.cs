@@ -344,7 +344,7 @@ public class NotificationManager : INotificationManager
                         continue;
                     }
 
-                    (bool success, string details, ulong messageId) result = await client.Messages.TrySendStream(
+                    (bool success, string? details, ulong messageId) result = await client.Messages.TrySendStream(
                         messageText,
                         "Subscription Notification",
                         new int[] { id });
@@ -360,7 +360,7 @@ public class NotificationManager : INotificationManager
                         continue;
                     }
 
-                    (bool success, string details, ulong messageId) result = await client.Messages.TrySendPrivate(
+                    (bool success, string? details, ulong messageId) result = await client.Messages.TrySendPrivate(
                         messageText,
                         new int[] { id });
                 }

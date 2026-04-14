@@ -46,7 +46,7 @@ public class GetStoreList : ICandleMcpTool
     /// <param name="store">The FHIR store instance to use for operations (not used by this tool).</param>
     /// <returns>A <see cref="CallToolResult"/> containing the list of FHIR stores with their URLs and versions.</returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

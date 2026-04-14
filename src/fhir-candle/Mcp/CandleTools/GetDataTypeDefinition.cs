@@ -65,7 +65,7 @@ public class GetDataTypeDefinition : ICandleMcpTool
     /// - The definition of the requested data type, if available
     /// </returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

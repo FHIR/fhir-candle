@@ -74,7 +74,7 @@ public class ValidateTypeSearch : ICandleMcpTool
     /// <param name="store">The FHIR store instance to use for validation.</param>
     /// <returns>A <see cref="CallToolResult"/> containing the validation results, including overall status and individual search parameter validation details.</returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

@@ -50,7 +50,7 @@ public class GetSearchTypeList : ICandleMcpTool
     /// - The list of the known search types
     /// </returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

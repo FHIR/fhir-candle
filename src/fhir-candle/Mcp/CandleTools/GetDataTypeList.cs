@@ -60,7 +60,7 @@ public class GetDataTypeList : ICandleMcpTool
     /// - An error message if the store name is not provided or the store cannot be resolved
     /// </returns>
     public CallToolResult RunTool(
-        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IDictionary<string, JsonElement>? arguments,
         string? storeName,
         string? resourceName,
         IFhirStore? store)

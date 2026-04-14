@@ -151,7 +151,7 @@ public class StoreTerminologyService : ITerminologyService
     /// <param name="id">        The identifier.</param>
     /// <param name="useGet">    True to use get.</param>
     /// <returns>An asynchronous result that yields the Parameters.</returns>
-    Task<Parameters> ICodeValidationTerminologyService.ValueSetValidateCode(Parameters parameters, string id, bool useGet)
+    Task<Parameters> ICodeValidationTerminologyService.ValueSetValidateCode(Parameters parameters, string? id, bool useGet)
     {
         Parameters retVal = new();
 
@@ -224,7 +224,7 @@ public class StoreTerminologyService : ITerminologyService
     /// <param name="id">        The identifier.</param>
     /// <param name="useGet">    True to use get.</param>
     /// <returns>An asynchronous result that yields the Parameters.</returns>
-    Task<Parameters> ICodeValidationTerminologyService.Subsumes(Parameters parameters, string id, bool useGet)
+    Task<Parameters> ICodeValidationTerminologyService.Subsumes(Parameters parameters, string? id, bool useGet)
     {
         throw new NotImplementedException();
     }
@@ -234,7 +234,7 @@ public class StoreTerminologyService : ITerminologyService
     /// <param name="id">        The identifier.</param>
     /// <param name="useGet">    True to use get.</param>
     /// <returns>An asynchronous result that yields the Parameters.</returns>
-    Task<Parameters> ICodeSystemTerminologyService.CodeSystemValidateCode(Parameters parameters, string id, bool useGet)
+    Task<Parameters> ICodeSystemTerminologyService.CodeSystemValidateCode(Parameters parameters, string? id, bool useGet)
     {
         throw new NotImplementedException();
     }
@@ -253,7 +253,7 @@ public class StoreTerminologyService : ITerminologyService
     /// <param name="id">        The identifier.</param>
     /// <param name="useGet">    True to use get.</param>
     /// <returns>An asynchronous result that yields the Parameters.</returns>
-    Task<Parameters> IMappingTerminologyService.Translate(Parameters parameters, string id, bool useGet)
+    Task<Parameters> IMappingTerminologyService.Translate(Parameters parameters, string? id, bool useGet)
     {
         throw new NotImplementedException();
     }
@@ -272,7 +272,7 @@ public class StoreTerminologyService : ITerminologyService
     /// <param name="id">        The identifier.</param>
     /// <param name="useGet">    True to use get.</param>
     /// <returns>An asynchronous result that yields a Resource.</returns>
-    Task<Resource> IExpandingTerminologyService.Expand(Parameters parameters, string id, bool useGet)
+    Task<Resource> IExpandingTerminologyService.Expand(Parameters parameters, string? id, bool useGet)
     {
         throw new NotImplementedException();
     }
