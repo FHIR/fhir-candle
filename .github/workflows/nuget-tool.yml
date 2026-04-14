@@ -29,7 +29,7 @@ jobs:
         dotnet pack -c Release ./src/fhir-candle/fhir-candle.csproj
         mv ./src/fhir-candle/bin/Release/net8.0/publish/wwwroot ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets
         mv ./src/fhir-candle/bin/Release/net9.0/publish/wwwroot ./src/fhir-candle/bin/Release/net9.0/publish/staticwebassets
-        mv ./src/fhir-candle/bin/Release/net9.0/publish/wwwroot ./src/fhir-candle/bin/Release/net10.0/publish/staticwebassets
+        mv ./src/fhir-candle/bin/Release/net10.0/publish/wwwroot ./src/fhir-candle/bin/Release/net10.0/publish/staticwebassets
         7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets/
         7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net9.0/publish/staticwebassets/
         7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net10.0/publish/staticwebassets/
