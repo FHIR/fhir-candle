@@ -457,7 +457,12 @@ public record class CandleConfig
 
         if (string.IsNullOrEmpty(dir))
         {
-            dir = FindRelativeDir(string.Empty, "~/.fhir/packages");
+            // Resolve the default path without requiring it to exist yet;
+            // FhirPackageService.Init() will create it when needed.
+            dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".fhir",
+                "packages");
         }
         else if (!Path.IsPathRooted(dir))
         {

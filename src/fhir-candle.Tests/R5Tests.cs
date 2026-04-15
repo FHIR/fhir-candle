@@ -451,6 +451,118 @@ public class R5TestsObservation : IClassFixture<R5Tests>
             selfLink.ShouldContain(searchPart);
         }
     }
+
+    [Theory]
+    [InlineData("_sort=date")]
+    [InlineData("_sort=-date")]
+    [InlineData("_sort=status")]
+    [InlineData("_sort=-status")]
+    [InlineData("_sort=_lastUpdated")]
+    [InlineData("_sort=-_lastUpdated")]
+    public void ObservationSortOrder(string search)
+    {
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "GET",
+            Url = _fixture._store.Config.BaseUrl + "/Observation?" + search,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.TypeSearch(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(
+            response.SerializedResource);
+        results.ShouldNotBeNull();
+        results.Entries.ShouldNotBeNull();
+
+        // Verify self link includes _sort
+        string selfLink = results.Links!.First(l => l.Relation == "self").Url;
+        selfLink.ShouldContain("_sort=");
+
+        bool descending = search.StartsWith("_sort=-", StringComparison.OrdinalIgnoreCase);
+
+        string? lastSortValue = null;
+        string? currentSortValue = null;
+        int nullCount = 0;
+        int valuedCount = 0;
+
+        // traverse the bundle and check behavior based on sort key and direction
+        foreach (MinimalBundle.MinimalEntry entry in results!.Entries!)
+        {
+            if ((entry.Search?.Mode != "match") ||
+                (entry.Resource is null))
+            {
+                continue;
+            }
+
+            switch (search)
+            {
+                case "_sort=date":
+                case "_sort=-date":
+                    currentSortValue = entry.Resource.EffectiveDateTime;
+                    break;
+                case "_sort=status":
+                case "_sort=-status":
+                    currentSortValue = entry.Resource.Status?.ToString();
+                    break;
+                case "_sort=_lastUpdated":
+                case "_sort=-_lastUpdated":
+                    currentSortValue = entry.Resource.Meta?.LastUpdated;
+                    break;
+            }
+
+            // check sort consistency
+            if (descending)
+            {
+                // should not have a non-null value after a null value
+                if ((currentSortValue is null) && (nullCount > 0))
+                {
+                    lastSortValue.ShouldBeNull("NULL values should be last");
+                }
+
+                // if we have a current and a previous value, the current should be equal or lower
+                if ((currentSortValue is not null) &&
+                    (lastSortValue is not null))
+                {
+                    currentSortValue.CompareTo(lastSortValue).ShouldBeLessThanOrEqualTo(0);
+                }
+            }
+            else
+            {
+                // should not have a non-null value after a null value
+                if ((currentSortValue is null) && (nullCount > 0))
+                {
+                    lastSortValue.ShouldBeNull("NULL values should be last");
+                }
+
+                // if we have a current and a previous value, the current should be higher
+                if ((currentSortValue is not null) &&
+                    (lastSortValue is not null))
+                {
+                    currentSortValue.CompareTo(lastSortValue).ShouldBeGreaterThanOrEqualTo(0);
+                }
+            }
+
+            if (currentSortValue is null)
+            {
+                nullCount++;
+            }
+            else
+            {
+                valuedCount++;
+            }
+
+            lastSortValue = currentSortValue;
+        }
+    }
 }
 
 /// <summary>Test R5 Patient searches.</summary>
@@ -773,6 +885,112 @@ public class R5TestsPatient : IClassFixture<R5Tests>
         foreach (string searchPart in search.Split('&'))
         {
             selfLink.ShouldContain(searchPart);
+        }
+    }
+
+    [Theory]
+    [InlineData("_sort=birthdate")]
+    [InlineData("_sort=-birthdate")]
+    [InlineData("_sort=_lastUpdated")]
+    [InlineData("_sort=-_lastUpdated")]
+    public void PatientSortOrder(string search)
+    {
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "GET",
+            Url = _fixture._store.Config.BaseUrl + "/Patient?" + search,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = _fixture._store.TypeSearch(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(
+            response.SerializedResource);
+        results.ShouldNotBeNull();
+        results.Entries.ShouldNotBeNull();
+
+        // Verify self link includes _sort
+        string selfLink = results.Links!.First(l => l.Relation == "self").Url;
+        selfLink.ShouldContain("_sort=");
+
+        bool descending = search.StartsWith("_sort=-", StringComparison.OrdinalIgnoreCase);
+
+        string? lastSortValue = null;
+        string? currentSortValue = null;
+        int nullCount = 0;
+        int valuedCount = 0;
+
+        // traverse the bundle and check behavior based on sort key and direction
+        foreach (MinimalBundle.MinimalEntry entry in results!.Entries!)
+        {
+            if ((entry.Search?.Mode != "match") ||
+                (entry.Resource is null))
+            {
+                continue;
+            }
+
+            switch (search)
+            {
+                case "_sort=birthdate":
+                case "_sort=-birthdate":
+                    currentSortValue = entry.Resource.BirthDate;
+                    break;
+                case "_sort=_lastUpdated":
+                case "_sort=-_lastUpdated":
+                    currentSortValue = entry.Resource.Meta?.LastUpdated;
+                    break;
+            }
+
+            // check sort consistency
+            if (descending)
+            {
+                // should not have a non-null value after a null value
+                if ((currentSortValue is null) && (nullCount > 0))
+                {
+                    lastSortValue.ShouldBeNull("NULL values should be last");
+                }
+
+                // if we have a current and a previous value, the current should be equal or lower
+                if ((currentSortValue is not null) &&
+                    (lastSortValue is not null))
+                {
+                    currentSortValue.CompareTo(lastSortValue).ShouldBeLessThanOrEqualTo(0, $"{lastSortValue} should be >= {currentSortValue}");
+                }
+            }
+            else
+            {
+                // should not have a non-null value after a null value
+                if ((currentSortValue is null) && (nullCount > 0))
+                {
+                    lastSortValue.ShouldBeNull("NULL values should be last");
+                }
+
+                // if we have a current and a previous value, the current should be higher
+                if ((currentSortValue is not null) &&
+                    (lastSortValue is not null))
+                {
+                    currentSortValue.CompareTo(lastSortValue).ShouldBeGreaterThanOrEqualTo(0, $"{lastSortValue} should be <= {currentSortValue}");
+                }
+            }
+
+            if (currentSortValue is null)
+            {
+                nullCount++;
+            }
+            else
+            {
+                valuedCount++;
+            }
+
+            lastSortValue = currentSortValue;
         }
     }
 }

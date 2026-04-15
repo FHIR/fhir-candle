@@ -53,7 +53,11 @@ public class ResourceStore<T> : IVersionedResourceStore
     internal readonly ConcurrentDictionary<string, string> _identifierToId = new();
 
     /// <summary>The lock object.</summary>
+#if NET9_0_OR_GREATER
+    private Lock _lockObject = new();
+#else
     private object _lockObject = new();
+#endif
 
     /// <summary>Occurs when On Instance Created.</summary>
     public event EventHandler<StoreInstanceEventArgs>? OnInstanceCreated;
@@ -1799,10 +1803,22 @@ public class ResourceStore<T> : IVersionedResourceStore
     {
         Dictionary<string, Resource[]> reverseChainCache = [];
 
+        string[] keys;
+
+        lock (_lockObject)
+        {
+            keys = _resourceStore.Keys.ToArray();
+        }
+
         if (isNestedSearch)
         {
-            foreach (T resource in _resourceStore.Values)
+            foreach (string key in keys)
             {
+                if (!_resourceStore.TryGetValue(key, out T? resource))
+                {
+                    continue;
+                }
+
                 PocoNode r = resource.ToPocoNode();
 
                 if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
@@ -1813,16 +1829,18 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
         else
         {
-            lock (_lockObject)
+            foreach (string key in keys)
             {
-                foreach (T resource in _resourceStore.Values)
+                if (!_resourceStore.TryGetValue(key, out T? resource))
                 {
-                    PocoNode r = resource.ToPocoNode();
+                    continue;
+                }
 
-                    if (_searchTester.TestForMatch(r, parameters))
-                    {
-                        yield return resource;
-                    }
+                PocoNode r = resource.ToPocoNode();
+
+                if (_searchTester.TestForMatch(r, parameters))
+                {
+                    yield return resource;
                 }
             }
         }

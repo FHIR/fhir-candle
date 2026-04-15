@@ -1,4 +1,8 @@
 * Work in Progress
+  * Fix issue #46: Regression caused by CLI directory handling (docker images failing to find FHIR directory)
+  * Fix issue #47: Regression caused by SDK 6.x migration (Search sort not working)
+
+* v2026.414.2234
   * Added initial support for Model Context Protocol (MCP), currently focused on use to build FHIR Search requests.
   * Added implementation of a system-level `$reset-store` operation. The operation will delete all non-protected resources, but can optionally retain all conformance resources.
   * Added explicit tracking of `affectsState` for operations.

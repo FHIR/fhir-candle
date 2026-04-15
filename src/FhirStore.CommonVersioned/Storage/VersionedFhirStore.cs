@@ -75,7 +75,12 @@ public partial class VersionedFhirStore : IFhirStore
     private readonly Dictionary<string, ParsedCompartment> _compartments = [];
 
     /// <summary>The sp lock object.</summary>
-    private readonly object _spLockObject = new();
+#if NET9_0_OR_GREATER
+    private Lock _spLockObject = new();
+#else
+    private object _spLockObject = new();
+#endif
+
 
     /// <summary>The subscription topic converter.</summary>
     internal readonly static TopicConverter _topicConverter = new();
@@ -6585,9 +6590,6 @@ rs,
         public required List<string> Identifiers { get; init; }
     }
 
-    private static int _identifierCount = 0;
-    private static HashSet<string> _identifiers = [];
-
     private List<TransactionResourceIdLookupRec> buildTransactionResourceLookup(Bundle bundle)
     {
         if (bundle.Type != Bundle.BundleType.Transaction)
@@ -6595,8 +6597,8 @@ rs,
             return [];
         }
 
-        _identifierCount = 0;
-        _identifiers = [];
+        int _identifierCount = 0;
+        HashSet<string> _identifiers = [];
 
         List<TransactionResourceIdLookupRec> lookupRecs = [];
 

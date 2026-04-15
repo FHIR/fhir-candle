@@ -15,20 +15,10 @@ namespace fhir.candle.Tests;
 
 public class ConfigTests
 {
-    private const string TestFhirCachePath = "/tmp/fhir-test-cache";
-
-    private static string[] WithFhirCache(params string[] args) =>
-        [.. args, "--fhir-package-cache", TestFhirCachePath];
-
-    public ConfigTests()
-    {
-        Directory.CreateDirectory(TestFhirCachePath);
-    }
-
     [Fact]
     public void TestParseCliInt()
     {
-        string[] args = WithFhirCache("--port", "8080");
+        string[] args = ["--port", "8080"];
 
         IConfiguration extConfig = new ConfigurationBuilder().Build();
         RootCommand rootCommand = CliOptions.RootCommand;
@@ -51,7 +41,7 @@ public class ConfigTests
     [Fact]
     public void TestParseCliString()
     {
-        string[] args = WithFhirCache("--url", "http://test.me/");
+        string[] args = ["--url", "http://test.me/"];
 
         IConfiguration extConfig = new ConfigurationBuilder().Build();
         RootCommand rootCommand = CliOptions.RootCommand;
@@ -74,7 +64,7 @@ public class ConfigTests
     [Fact]
     public void TestParseCliBool()
     {
-        string[] args = WithFhirCache("--open-browser");
+        string[] args = ["--open-browser"];
 
         IConfiguration extConfig = new ConfigurationBuilder().Build();
         RootCommand rootCommand = CliOptions.RootCommand;
@@ -97,7 +87,7 @@ public class ConfigTests
     [Fact]
     public void TestParseCliBoolTrue()
     {
-        string[] args = WithFhirCache("--open-browser", "true");
+        string[] args = ["--open-browser", "true"];
 
         IConfiguration extConfig = new ConfigurationBuilder().Build();
         RootCommand rootCommand = CliOptions.RootCommand;
@@ -121,7 +111,7 @@ public class ConfigTests
     [Fact]
     public void TestParseCliBoolFalse()
     {
-        string[] args = WithFhirCache("--open-browser", "false");
+        string[] args = ["--open-browser", "false"];
 
         IConfiguration extConfig = new ConfigurationBuilder().Build();
         RootCommand rootCommand = CliOptions.RootCommand;
@@ -144,7 +134,7 @@ public class ConfigTests
     [Fact]
     public void TestParseCliStringArray()
     {
-        string[] args = WithFhirCache("--additional-fhir-registry-urls", "http://a.co/", "--additional-fhir-registry-urls", "http://b.co");
+        string[] args = ["--additional-fhir-registry-urls", "http://a.co/", "--additional-fhir-registry-urls", "http://b.co"];
 
         IConfiguration extConfig = new ConfigurationBuilder().Build();
         RootCommand rootCommand = CliOptions.RootCommand;
