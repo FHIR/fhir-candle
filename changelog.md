@@ -1,4 +1,7 @@
 * Work in Progress
+  * Fix issue #41: Incorrect link to subscriptions backport IG.
+
+* v2026.415.1643
   * Fix issue #46: Regression caused by CLI directory handling (docker images failing to find FHIR directory)
   * Fix issue #47: Regression caused by SDK 6.x migration (Search sort not working)
 
