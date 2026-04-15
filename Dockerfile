@@ -16,6 +16,7 @@ RUN dotnet publish --framework net10.0 -a $TARGETARCH src/fhir-candle/fhir-candl
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 EXPOSE 5826
 WORKDIR /app
+RUN mkdir -p ~/.fhir/packages
 COPY --from=build-env /app/out .
 ENTRYPOINT ["dotnet", "fhir-candle.dll"]
 CMD ["-m", "1000"]
