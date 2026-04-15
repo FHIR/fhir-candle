@@ -57,7 +57,6 @@ public class MinimalBundle
             [JsonPropertyName("meta")]
             public MinimalMeta? Meta { get; set; } = null;
 
-            // notification status R5 properties
             [JsonPropertyName("status")]
             public object? Status { get; set; } = null;
 
@@ -66,6 +65,14 @@ public class MinimalBundle
 
             [JsonPropertyName("eventsSinceSubscriptionStart")]
             public object? EventsSinceSubscriptionStart { get; set; } = null;
+
+            [JsonPropertyName("birthDate")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public string? BirthDate { get; set; } = null;
+
+            [JsonPropertyName("effectiveDateTime")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public string? EffectiveDateTime { get; set; } = null;
         }
 
         public class MinimalIssue
