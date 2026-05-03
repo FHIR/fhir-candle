@@ -936,9 +936,14 @@ public class ResourceStore<T> : IVersionedResourceStore
                 _ = _store.Terminology.StoreProcessValueSet(vs);
                 break;
         }
-
-        outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Updated {_resourceName}/{source.Id} to version {source.Meta.VersionId}");
-        sc = HttpStatusCode.OK;
+        
+        if (previous == null){
+          sc = HttpStatusCode.Created;
+          outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Created {_resourceName}/{source.Id} to version {source.Meta.VersionId}");
+        }else{
+          sc = HttpStatusCode.OK;
+          outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Updated {_resourceName}/{source.Id} to version {source.Meta.VersionId}");
+        }                
         return source;
     }
 
