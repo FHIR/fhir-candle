@@ -32,9 +32,7 @@ There are many ways to contribute:
 * Engage with users and developers on the [dotnet stream on FHIR Zulip](https://chat.fhir.org/#narrow/stream/179171-dotnet)
 * Contribute features or bug fixes - see [Contributing](CONTRIBUTING.MD) for details.
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+To ensure a welcoming environment, we follow the [HL7 Code of Conduct](https://www.hl7.org/legal/code-of-conduct.cfm) and expect contributors to do the same.
 
 
 ### Security
@@ -195,7 +193,5 @@ Note: items are unsorted within their priorities
 * GraphQL support
 
 ## More Information
-
-
 
 FHIR&reg; is the registered trademark of HL7 and is used with the permission of HL7. 
