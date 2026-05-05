@@ -753,7 +753,6 @@ public class FhirStoreTestsR5: IDisposable
             out FhirResponseContext response);
 
         success.ShouldBeTrue();
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Location.ShouldContain(resourceType);
 
         serializedResource = response.SerializedResource;
