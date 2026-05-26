@@ -1310,7 +1310,7 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
             out FhirResponseContext response);
 
         success.ShouldBeTrue();
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
         response.SerializedResource.ShouldNotBeNullOrEmpty();
         response.SerializedOutcome.ShouldNotBeNullOrEmpty();
         response.ETag.ShouldBe("W/\"1\"");
