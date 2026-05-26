@@ -502,7 +502,7 @@ public class FhirStoreTestsR5: IDisposable
 
         encounterJson = encounterJson.Replace("in-progress", "completed");
 
-        DoUpdate(
+        var firstUpdateResponse = DoUpdate(
             "Encounter",
             "virtual-in-progress",
             encounterJson,
@@ -512,6 +512,8 @@ public class FhirStoreTestsR5: IDisposable
             out eTag,
             out lastModified,
             out location);
+
+        firstUpdateResponse.ShouldBe(HttpStatusCode.Created, "This update request should have been treated as Create since we are creating the first version.");
 
         notification = fhirStore.SerializeSubscriptionEvents(
             "encounter-complete-fhirpath",
@@ -529,6 +531,19 @@ public class FhirStoreTestsR5: IDisposable
         resource.ShouldNotBeNull();
         resource.EventsSinceSubscriptionStart.ShouldNotBeNull();
         resource.EventsSinceSubscriptionStart.ToString().ShouldBeEquivalentTo("1");
+
+        var secondUpdateResponse = DoUpdate(
+            "Encounter",
+            "virtual-in-progress",
+            encounterJson,
+            fhirStore,
+            out serializedResource,
+            out serializedOutcome,
+            out eTag,
+            out lastModified,
+            out location);
+        
+        secondUpdateResponse.ShouldBe(HttpStatusCode.OK, "This update request should have been treated as Update since we are updating the second version.");
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -604,7 +619,7 @@ public class FhirStoreTestsR5: IDisposable
 
         encounterJson = encounterJson.Replace("in-progress", "completed");
 
-        DoUpdate(
+        var firstUpdateResponse = DoUpdate(
             "Encounter",
             "virtual-in-progress",
             encounterJson,
@@ -614,6 +629,8 @@ public class FhirStoreTestsR5: IDisposable
             out eTag,
             out lastModified,
             out location);
+
+        firstUpdateResponse.ShouldBe(HttpStatusCode.Created, "This update request should have been treated as Create since we are creating the first version.");
 
         notification = fhirStore.SerializeSubscriptionEvents(
             "encounter-complete-query",
@@ -631,6 +648,19 @@ public class FhirStoreTestsR5: IDisposable
         resource.ShouldNotBeNull();
         resource.EventsSinceSubscriptionStart.ShouldNotBeNull();
         resource.EventsSinceSubscriptionStart.ToString().ShouldBeEquivalentTo("1");
+
+        var secondUpdateResponse = DoUpdate(
+            "Encounter",
+            "virtual-in-progress",
+            encounterJson,
+            fhirStore,
+            out serializedResource,
+            out serializedOutcome,
+            out eTag,
+            out lastModified,
+            out location);
+
+        secondUpdateResponse.ShouldBe(HttpStatusCode.OK, "This update request should have been treated as Update since we are updating the second version.");
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -723,7 +753,6 @@ public class FhirStoreTestsR5: IDisposable
             out FhirResponseContext response);
 
         success.ShouldBeTrue();
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Location.ShouldContain(resourceType);
 
         serializedResource = response.SerializedResource;
