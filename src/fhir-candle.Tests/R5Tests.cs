@@ -594,6 +594,8 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "name=not-present,peter", 2)]
     [InlineData(null, "name:contains=eter", 2)]
     [InlineData(null, "name:contains=zzrot", 0)]
+    [InlineData(null, "name:contains=eter&name:contains=zzrot", 0)]
+    [InlineData(null, "name:contains=ete&name:contains=ter", 2)]
     [InlineData(null, "name:exact=Peter", 2)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]

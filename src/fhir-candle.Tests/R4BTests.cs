@@ -485,6 +485,8 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     [InlineData(null, "name=not-present,peter", 1)]
     [InlineData(null, "name:contains=eter", 1)]
     [InlineData(null, "name:contains=zzrot", 0)]
+    [InlineData(null, "name:contains=eter&name:contains=zzrot", 0)]
+    [InlineData(null, "name:contains=ete&name:contains=ter", 1)]
     [InlineData(null, "name:exact=Peter", 1)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
