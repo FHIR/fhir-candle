@@ -7050,9 +7050,9 @@ rs,
                     {
                         Status = getResponseStatus(opResponse.StatusCode ?? HttpStatusCode.OK),
                         Outcome = (Resource?)opResponse.Outcome,
-                        Etag = opResponse.ETag ?? string.Empty,
+                        Etag = string.IsNullOrEmpty(opResponse.ETag) ? null : opResponse.ETag,
                         LastModified = ((Resource?)opResponse.Resource)?.Meta?.LastUpdated ?? null,
-                        Location = opResponse.Location ?? string.Empty,
+                        Location = string.IsNullOrEmpty(opResponse.Location) ? null : opResponse.Location,
                     },
                 });
             }
@@ -7189,9 +7189,9 @@ rs,
                     {
                         Status = getResponseStatus(opResponse.StatusCode ?? HttpStatusCode.OK),
                         Outcome = (Resource?)opResponse.Outcome,
-                        Etag = opResponse.ETag ?? string.Empty,
+                        Etag = string.IsNullOrEmpty(opResponse.ETag) ? null : opResponse.ETag,
                         LastModified = ((Resource?)opResponse.Resource)?.Meta?.LastUpdated ?? null,
-                        Location = opResponse.Location ?? string.Empty,
+                        Location = string.IsNullOrEmpty(opResponse.Location) ? null : opResponse.Location,
                     },
                 });
             }
