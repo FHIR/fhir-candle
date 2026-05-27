@@ -93,4 +93,55 @@ public class FromIssueTestsR4
         entry.Response.ShouldNotBeNull();
         entry.Response.Status.ShouldBe("201 Created");
     }
+
+    /// <summary>
+    /// Tests that a POST creating a resource whose client-supplied id collides
+    /// with an existing one returns 409 Conflict, not 500 Internal Server Error.
+    ///
+    /// When `AllowExistingId=true`, candle preserves the client-supplied id on
+    /// POST. A subsequent POST with the same id collides and currently returns
+    /// 500 with a generic "Failed to create resource" diagnostic. Per FHIR R4
+    /// and HTTP semantics, a state conflict on create should surface as 409.
+    /// </summary>
+    [Fact]
+    public void PostWithExistingIdShouldReturn409NotServerError()
+    {
+        TenantConfiguration config = new()
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
+            ControllerName = "r4",
+            BaseUrl = "http://localhost/fhir/r4",
+            LoadDirectory = null,
+            AllowExistingId = true,
+            AllowCreateAsUpdate = true,
+        };
+
+        IFhirStore store = new VersionedFhirStore();
+        store.Init(config);
+
+        const string body = """{"resourceType":"Questionnaire","id":"dup-id","status":"active"}""";
+
+        FhirRequestContext FirstCtx() => new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "POST",
+            Url = store.Config.BaseUrl + "/Questionnaire",
+            Forwarded = null,
+            Authorization = null,
+            SourceContent = body,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+            ResourceType = "Questionnaire",
+        };
+
+        store.InstanceCreate(FirstCtx(), out FhirResponseContext firstResponse).ShouldBeTrue();
+        firstResponse.StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        // Second POST with the same client-supplied id.
+        store.InstanceCreate(FirstCtx(), out FhirResponseContext secondResponse);
+        secondResponse.StatusCode.ShouldBe(
+            HttpStatusCode.Conflict,
+            "POST that collides on a client-supplied id should return 409 Conflict, not 500");
+    }
 }
