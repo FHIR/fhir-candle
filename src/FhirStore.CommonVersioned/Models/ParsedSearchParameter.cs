@@ -1094,13 +1094,23 @@ public class ParsedSearchParameter : ICloneable
                 continue;
             }
 
-            results.Add(new ParsedSearchParameter(
-                store,
-                resourceStore,
-                parseResult,
-                query[key] ?? string.Empty,
-                key,
-                query[key]));
+            string[] values = query.GetValues(key) ?? [];
+
+            if (values.Length == 0)
+            {
+                values = [query[key] ?? string.Empty];
+            }
+
+            foreach (string value in values)
+            {
+                results.Add(new ParsedSearchParameter(
+                    store,
+                    resourceStore,
+                    parseResult,
+                    value,
+                    key,
+                    value));
+            }
 
             continue;
         }
