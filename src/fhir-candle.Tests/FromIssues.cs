@@ -93,4 +93,81 @@ public class FromIssueTestsR4
         entry.Response.ShouldNotBeNull();
         entry.Response.Status.ShouldBe("201 Created");
     }
+
+    /// <summary>
+    /// Tests that repeated occurrences of the same search parameter in the query
+    /// string are combined with AND semantics (per FHIR R4 §3.1.1.5.7) rather than
+    /// being collapsed into a comma-separated OR list.
+    ///
+    /// Reproduction: create two Organizations and search with both
+    /// `?name:contains=Foo&amp;name:contains=ZZZNoMatchExpected`. No Organization
+    /// has a name containing both substrings, so the result should be empty.
+    /// Currently candle returns the Foo-matching Organization, indicating the
+    /// repeated parameter is being treated as OR.
+    /// </summary>
+    [Fact]
+    public void RepeatedSearchParameterShouldUseAndSemantics()
+    {
+        TenantConfiguration config = new()
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
+            ControllerName = "r4",
+            BaseUrl = "http://localhost/fhir/r4",
+            LoadDirectory = null,
+            AllowExistingId = true,
+            AllowCreateAsUpdate = true,
+        };
+
+        IFhirStore store = new VersionedFhirStore();
+        store.Init(config);
+
+        // Seed two Organizations with disjoint name tokens.
+        foreach (string orgJson in new[]
+        {
+            """{"resourceType":"Organization","id":"org-foo-bar","name":"Foo Bar Hospital"}""",
+            """{"resourceType":"Organization","id":"org-baz","name":"Baz Hospital"}""",
+        })
+        {
+            FhirRequestContext seedCtx = new()
+            {
+                TenantName = store.Config.ControllerName,
+                Store = store,
+                HttpMethod = "PUT",
+                Url = store.Config.BaseUrl + "/Organization",
+                Forwarded = null,
+                Authorization = null,
+                SourceContent = orgJson,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+                ResourceType = "Organization",
+            };
+            store.InstanceUpdate(seedCtx, out _).ShouldBeTrue();
+        }
+
+        // Query with two repeated `name:contains` constraints. No organization
+        // satisfies both, so the searchset bundle should have total = 0.
+        FhirRequestContext searchCtx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "GET",
+            Url = store.Config.BaseUrl + "/Organization",
+            UrlQuery = "name:contains=Foo&name:contains=ZZZNoMatchExpected",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+            ResourceType = "Organization",
+        };
+
+        store.TypeSearch(searchCtx, out FhirResponseContext searchResponse).ShouldBeTrue();
+        searchResponse.SerializedResource.ShouldNotBeNullOrEmpty();
+
+        MinimalBundle? bundle = JsonSerializer.Deserialize<MinimalBundle>(searchResponse.SerializedResource);
+        bundle.ShouldNotBeNull();
+        bundle.BundleType.ShouldBe("searchset");
+        bundle.Total.ShouldBe(
+            0,
+            "repeated `name:contains` parameters must be combined with AND (FHIR R4 §3.1.1.5.7); no Organization contains both 'Foo' and 'ZZZNoMatchExpected'");
+    }
 }
