@@ -587,6 +587,8 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "_id:not=example", (R5Tests._patientCount - 1))]
     [InlineData(null, "_id=AnIdThatDoesNotExist", 0)]
     [InlineData(null, "_id=example", 1)]
+    [InlineData(null, "_id=example&_id=example", 1)]
+    [InlineData(null, "_id=example&_id=AnIdThatDoesNotExist", 0)]
     [InlineData(null, "_id=example&_revinclude=Observation:patient", 1, (R5Tests._observationsWithSubjectExample + 1))]
     [InlineData(null, "name=peter", 2)]
     [InlineData(null, "name=not-present,another-not-present", 0)]
