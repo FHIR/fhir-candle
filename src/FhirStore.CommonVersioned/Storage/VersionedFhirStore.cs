@@ -1536,7 +1536,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // create the resource
-        Resource? stored = rs.InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId);
+        Resource? stored = rs.InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId, out _, out _);
         Resource? sForHook = null;
 
         foreach (IFhirInteractionHook hook in hooks)

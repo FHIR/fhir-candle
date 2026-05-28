@@ -508,15 +508,23 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="ctx">            The context.</param>
     /// <param name="source">         [out] The resource.</param>
     /// <param name="allowExistingId">True to allow, false to suppress the existing identifier.</param>
+    /// <param name="statusCode">     [out] The status code.</param>
+    /// <param name="outcome">        [out] The outcome.</param>
     /// <returns>The created resource, or null if it could not be created.</returns>
     public Resource? InstanceCreate(
         FhirRequestContext ctx,
         Resource source,
-        bool allowExistingId)
+        bool allowExistingId,
+        out HttpStatusCode statusCode,
+        out OperationOutcome outcome)
     {
         if ((source is null) ||
             (source is not T))
         {
+            statusCode = HttpStatusCode.BadRequest;
+            outcome = SerializationUtils.BuildOutcomeForRequest(
+                statusCode,
+                $"Invalid resource content for {_resourceName}");
             return null;
         }
 
@@ -535,6 +543,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                 {
                     if (source is not Basic b)
                     {
+                        statusCode = HttpStatusCode.BadRequest;
+                        outcome = SerializationUtils.BuildOutcomeForRequest(
+                            statusCode,
+                            $"Invalid resource content for {_resourceName}");
                         return null;
                     }
 
@@ -545,6 +557,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                         case "SubscriptionTopic":
                             if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
                             {
+                                statusCode = HttpStatusCode.BadRequest;
+                                outcome = SerializationUtils.BuildOutcomeForRequest(
+                                    statusCode,
+                                    $"Basic-wrapped SubscriptionTopic could not be parsed!");
                                 return null;
                             }
                             break;
@@ -606,6 +622,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                 // fail the request if this fails
                 if (!_topicConverter.TryParse(source, out parsedSubscriptionTopic))
                 {
+                    statusCode = HttpStatusCode.BadRequest;
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
+                        statusCode,
+                        $"SubscriptionTopic could not be parsed!");
                     return null;
                 }
                 break;
@@ -614,6 +634,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                 // fail the request if this fails
                 if (!_subscriptionConverter.TryParse((Subscription)source, out parsedSubscription))
                 {
+                    statusCode = HttpStatusCode.BadRequest;
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
+                        statusCode,
+                        $"Subscription could not be parsed!");
                     return null;
                 }
                 break;
@@ -623,6 +647,11 @@ public class ResourceStore<T> : IVersionedResourceStore
         {
             if (_resourceStore.ContainsKey(source.Id))
             {
+                statusCode = HttpStatusCode.Conflict;
+                outcome = SerializationUtils.BuildOutcomeForRequest(
+                    statusCode,
+                    $"Resource {source.TypeName}/{source.Id} already exists; POST-base create interaction cannot overwrite existing resources",
+                    OperationOutcome.IssueType.Duplicate);
                 return null;
             }
 
@@ -636,6 +665,10 @@ public class ResourceStore<T> : IVersionedResourceStore
 
             if (!_resourceStore.TryAdd(source.Id, (T)source))
             {
+                statusCode = HttpStatusCode.InternalServerError;
+                outcome = SerializationUtils.BuildOutcomeForRequest(
+                    statusCode,
+                    $"Failed to create resource {source.TypeName}/{source.Id}");
                 return null;
             }
         }
@@ -696,6 +729,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                 break;
         }
 
+        statusCode = HttpStatusCode.Created;
+        outcome = SerializationUtils.BuildOutcomeForRequest(
+            statusCode,
+            $"Created {_resourceName}/{source.Id}");
         return source;
     }
 

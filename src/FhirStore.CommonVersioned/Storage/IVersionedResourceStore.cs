@@ -40,11 +40,15 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <param name="ctx">            The context.</param>
     /// <param name="source">         [out] The resource.</param>
     /// <param name="allowExistingId">True to allow, false to suppress the existing identifier.</param>
+    /// <param name="statusCode">     [out] The status code.</param>
+    /// <param name="outcome">        [out] The outcome.</param>
     /// <returns>The created resource, or null if it could not be created.</returns>
     Hl7.Fhir.Model.Resource? InstanceCreate(
         FhirRequestContext ctx,
         Hl7.Fhir.Model.Resource source,
-        bool allowExistingId);
+        bool allowExistingId,
+        out HttpStatusCode statusCode,
+        out OperationOutcome outcome);
 
     /// <summary>Update a specific instance of a resource.</summary>
     /// <param name="source">            [out] The resource.</param>
