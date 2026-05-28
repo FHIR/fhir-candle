@@ -117,10 +117,26 @@ public class OpSubscriptionHook : IFhirOperation
 
         // TODO: Clean up interfaces and types so we can avoid casts like this
         // store this bundle in our store
-        Hl7.Fhir.Model.Resource? r = ((IVersionedResourceStore)((IFhirStore)store)["Bundle"]).InstanceCreate(ctx, bundle, true, out _, out _);
+        Hl7.Fhir.Model.Resource? r = ((IVersionedResourceStore)((IFhirStore)store)["Bundle"]).InstanceCreate(
+            ctx,
+            bundle,
+            true,
+            out HttpStatusCode createStatus,
+            out Hl7.Fhir.Model.OperationOutcome createOutcome);
+
+        if (r is null)
+        {
+            opResponse = new()
+            {
+                StatusCode = createStatus,
+                Outcome = createOutcome,
+            };
+
+            return false;
+        }
 
         // register the notification received event
-        store.RegisterReceivedNotification(r?.Id ?? bundle.Id, status);
+        store.RegisterReceivedNotification(r.Id ?? bundle.Id, status);
 
         opResponse = new()
         {
