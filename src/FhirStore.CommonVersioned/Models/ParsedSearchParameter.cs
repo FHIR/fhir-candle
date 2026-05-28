@@ -1094,6 +1094,8 @@ public class ParsedSearchParameter : ICloneable
                 continue;
             }
 
+            // GetValues preserves repeated query-parameter occurrences so downstream search combines
+            // each occurrence with AND, while comma-separated values within one occurrence remain OR.
             string[] values = query.GetValues(key) ?? [];
 
             if (values.Length == 0)
