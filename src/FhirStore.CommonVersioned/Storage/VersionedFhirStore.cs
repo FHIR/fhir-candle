@@ -3535,7 +3535,7 @@ public partial class VersionedFhirStore : IFhirStore
             Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                 opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
                 $"System-Level Operation {ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
-            StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
+            StatusCode = opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
         };
         return success;
     }
@@ -3767,7 +3767,7 @@ public partial class VersionedFhirStore : IFhirStore
             Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                 opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
                 $"Type-Level Operation {ctx.ResourceType}/{ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
-            StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
+            StatusCode = opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
         };
         return success;
     }
@@ -3997,7 +3997,7 @@ public partial class VersionedFhirStore : IFhirStore
             Outcome = opResponse.Outcome ?? SerializationUtils.BuildOutcomeForRequest(
                 opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
                 $"Instance-Level Operation {ctx.ResourceType}/{ctx.Id}/{ctx.OperationName} {(success ? "succeeded" : "failed")}: {opResponse.StatusCode}"),
-            StatusCode = success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError,
+            StatusCode = opResponse.StatusCode ?? (success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError),
         };
         return success;
     }
