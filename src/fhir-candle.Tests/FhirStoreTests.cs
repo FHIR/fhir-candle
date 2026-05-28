@@ -406,6 +406,76 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
     }
 }
 
+/// <summary>Ensure that duplicate explicit-ID create returns a client error.</summary>
+public class TestDuplicateExplicitIdCreate : IClassFixture<FhirStoreTests>
+{
+    /// <summary>Gets the configurations.</summary>
+    public static IEnumerable<object[]> Configurations => FhirStoreTests.TestConfigurations;
+
+    private const string _resourceType = "Organization";
+
+    /// <summary>(Immutable) The fixture.</summary>
+    private readonly FhirStoreTests _fixture;
+
+    public TestDuplicateExplicitIdCreate(FhirStoreTests fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void DuplicateExplicitIdCreateReturnsConflict(FhirReleases.FhirSequenceCodes version)
+    {
+        string id = $"duplicate-explicit-id-{version.ToString().ToLowerInvariant()}";
+        string json = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + id + "\",\"name\":\"Test Hospital\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/{_resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceCreate(
+            ctx,
+            out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/{_resourceType}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        success = fhirStore.InstanceCreate(
+            ctx,
+            out response);
+
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        response.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response.SerializedOutcome.ShouldContain($"{_resourceType}/{id}");
+        response.SerializedOutcome.ShouldContain("POST-base create interaction cannot overwrite existing resources");
+    }
+}
+
 /// <summary>Ensure that storing a Patient in the Observation endpoint fails.</summary>
 public class TestResourceWrongLocation: IClassFixture<FhirStoreTests>
 {

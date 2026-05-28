@@ -482,6 +482,8 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "_id:not=example", (R4Tests._patientCount - 1))]
     [InlineData(null, "_id=AnIdThatDoesNotExist", 0)]
     [InlineData(null, "_id=example", 1)]
+    [InlineData(null, "_id=example&_id=example", 1)]
+    [InlineData(null, "_id=example&_id=AnIdThatDoesNotExist", 0)]
     [InlineData(null, "_id=example&_revinclude=Observation:patient", 1, (R4Tests._observationsWithSubjectExample + 1))]
     [InlineData(null, "name=peter", 1)]
     [InlineData(null, "name=not-present,another-not-present", 0)]
@@ -489,6 +491,9 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "name=not-present,peter", 1)]
     [InlineData(null, "name:contains=eter", 1)]
     [InlineData(null, "name:contains=zzrot", 0)]
+    [InlineData(null, "name:contains=eter&name:contains=zzrot", 0)]
+    [InlineData(null, "name:contains=ete&name:contains=ter", 1)]
+    [InlineData(null, "name:contains=zzrot,ete&name:contains=ter", 1)]
     [InlineData(null, "name:exact=Peter", 1)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
@@ -2309,6 +2314,97 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
 
             subscription.ClearEvents();
         }
+    }
+
+    /// <summary>
+    /// Regression: posting the same notification Bundle twice through
+    /// $subscription-hook must surface the store's conflict response on the
+    /// second call and must not register a second received-notification entry
+    /// for the subscription.
+    /// </summary>
+    /// <param name="json">The handshake bundle JSON.</param>
+    [Theory]
+    [FileData("data/r4/Bundle-notification-handshake.json")]
+    public void SubscriptionHookDuplicateBundleCreateFailureReturnsFailure(string json)
+    {
+        HttpStatusCode parseSc = candleR4.FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
+            json,
+            "application/fhir+json",
+            out Hl7.Fhir.Model.Resource? parsed,
+            out _);
+
+        parseSc.ShouldBe(HttpStatusCode.OK);
+        parsed.ShouldNotBeNull();
+        parsed!.ShouldBeOfType<Hl7.Fhir.Model.Bundle>();
+
+        Hl7.Fhir.Model.Bundle bundle = (Hl7.Fhir.Model.Bundle)parsed;
+        bundle.Id = "hook-dup-handshake";
+
+        VersionedFhirStore versionedStore = (VersionedFhirStore)_fixture._store;
+
+        ParsedSubscriptionStatus? parsedStatus = versionedStore.ParseNotificationBundle(bundle);
+        parsedStatus.ShouldNotBeNull();
+        string subscriptionReference = parsedStatus!.SubscriptionReference;
+
+        int baselineCount = versionedStore.ReceivedNotifications.TryGetValue(
+            subscriptionReference,
+            out List<ParsedSubscriptionStatus>? baselineList)
+            ? baselineList.Count
+            : 0;
+
+        FhirRequestContext ctx1 = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._config.BaseUrl}/$subscription-hook",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceObject = bundle,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool firstSuccess = _fixture._store.SystemOperation(ctx1, out FhirResponseContext response1);
+
+        firstSuccess.ShouldBeTrue();
+        response1.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        int countAfterFirst = versionedStore.ReceivedNotifications.TryGetValue(
+            subscriptionReference,
+            out List<ParsedSubscriptionStatus>? listAfterFirst)
+            ? listAfterFirst.Count
+            : 0;
+        countAfterFirst.ShouldBe(baselineCount + 1);
+
+        FhirRequestContext ctx2 = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = $"{_fixture._config.BaseUrl}/$subscription-hook",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceObject = bundle,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool secondSuccess = _fixture._store.SystemOperation(ctx2, out FhirResponseContext response2);
+
+        secondSuccess.ShouldBeFalse();
+        response2.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        response2.Outcome.ShouldNotBeNull();
+        response2.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        response2.SerializedOutcome.ShouldContain("Bundle/hook-dup-handshake");
+        response2.SerializedOutcome.ShouldContain("POST-base create interaction cannot overwrite existing resources");
+
+        int countAfterSecond = versionedStore.ReceivedNotifications.TryGetValue(
+            subscriptionReference,
+            out List<ParsedSubscriptionStatus>? listAfterSecond)
+            ? listAfterSecond.Count
+            : 0;
+        countAfterSecond.ShouldBe(countAfterFirst);
     }
 }
 

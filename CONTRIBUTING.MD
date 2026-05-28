@@ -2,6 +2,10 @@
 
 This document describes guidelines for contributing to this repo.
 
+To ensure a welcoming environment, we follow the [HL7 Code of Conduct](https://www.hl7.org/legal/code-of-conduct.cfm) and expect contributors to do the same.
+
+Before making a contribution, please familiarize yourself with this document, as well as our [LICENSE](LICENSE) and [README](README.md).
+
 ## Submitting Pull Requests
 
 - **DO** submit all changes via pull requests (PRs). They will be reviewed and potentially be merged by maintainers after a peer review that includes at least one of the team members.

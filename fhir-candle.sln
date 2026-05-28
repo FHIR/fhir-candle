@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.4.33122.133
+# Visual Studio Version 18
+VisualStudioVersion = 18.6.11819.183 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "fhir-candle", "src\fhir-candle\fhir-candle.csproj", "{B9B4F2F7-D077-4E85-A9FF-711549BC7169}"
 EndProject
@@ -19,17 +19,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Common", "src\Fh
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8B6BFF93-0260-40D3-BF26-175BC295D77B}"
 	ProjectSection(SolutionItems) = preProject
-		.editorconfig = .editorconfig
-		.gitignore = .gitignore
-		changelog.md = changelog.md
-		CONTRIBUTING.MD = CONTRIBUTING.MD
-		Dockerfile = Dockerfile
-		fhir-candle-ui.props = src\fhir-candle-ui.props
-		fhir-candle.props = src\fhir-candle.props
-		LICENSE = LICENSE
-		README.md = README.md
-		THIRDPARTYNOTICES.md = THIRDPARTYNOTICES.md
-		Dockerfile_chiseled = Dockerfile_chiseled
+		src\fhir-candle-ui.props = src\fhir-candle-ui.props
+		src\fhir-candle.props = src\fhir-candle.props
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Ui.R4", "src\FhirCandle.Ui.R4\FhirCandle.Ui.R4.csproj", "{34A8DC55-57B2-4AF5-9A9D-6C764EE9507B}"
@@ -51,9 +42,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 	ProjectSection(SolutionItems) = preProject
 		.github\workflows\argo-ris.yml = .github\workflows\argo-ris.yml
 		.github\workflows\build-and-test.yml = .github\workflows\build-and-test.yml
+		.github\workflows\ghcr-docker-min.yml = .github\workflows\ghcr-docker-min.yml
 		.github\workflows\ghcr-docker.yml = .github\workflows\ghcr-docker.yml
 		.github\workflows\nuget-tool.yml = .github\workflows\nuget-tool.yml
-		.github\workflows\ghcr-docker-min.yml = .github\workflows\ghcr-docker-min.yml
 	EndProjectSection
 EndProject
 Global
@@ -102,10 +93,6 @@ Global
 		{2276D057-68A6-4639-A821-0C028D8449D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2276D057-68A6-4639-A821-0C028D8449D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2276D057-68A6-4639-A821-0C028D8449D0}.Release|Any CPU.Build.0 = Release|Any CPU
-		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{71FEE4F6-463E-4927-B213-BAD8D15E5C2D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
