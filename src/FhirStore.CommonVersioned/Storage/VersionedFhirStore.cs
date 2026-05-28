@@ -1536,7 +1536,12 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // create the resource
-        Resource? stored = rs.InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId, out _, out _);
+        Resource? stored = rs.InstanceCreate(
+            ctx,
+            content,
+            forceExistingId || _config.AllowExistingId,
+            out HttpStatusCode createStatusCode,
+            out OperationOutcome createOutcome);
         Resource? sForHook = null;
 
         foreach (IFhirInteractionHook hook in hooks)
@@ -1572,10 +1577,8 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.InternalServerError,
-                    "Failed to create resource"),
-                StatusCode = HttpStatusCode.InternalServerError,
+                Outcome = createOutcome,
+                StatusCode = createStatusCode,
             };
             return false;
         }
