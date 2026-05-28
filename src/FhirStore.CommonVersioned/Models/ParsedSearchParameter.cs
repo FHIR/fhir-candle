@@ -1094,15 +1094,37 @@ public class ParsedSearchParameter : ICloneable
                 continue;
             }
 
-            results.Add(new ParsedSearchParameter(
-                store,
-                resourceStore,
-                parseResult,
-                query[key] ?? string.Empty,
-                key,
-                query[key]));
+            // Per FHIR R4 §3.1.1.5.7, repeated occurrences of the same parameter
+            // are AND-combined while comma-separated values within a single
+            // occurrence are OR-combined. NameValueCollection.GetValues returns the
+            // distinct occurrences (as separate strings), so emit one
+            // ParsedSearchParameter per occurrence; downstream evaluation already
+            // AND-combines parameter instances of the same name. Falling back to
+            // `query[key]` (which is the comma-joined concatenation) would conflate
+            // the two semantics.
+            string[]? values = query.GetValues(key);
+            if (values is null || values.Length == 0)
+            {
+                results.Add(new ParsedSearchParameter(
+                    store,
+                    resourceStore,
+                    parseResult,
+                    string.Empty,
+                    key,
+                    null));
+                continue;
+            }
 
-            continue;
+            foreach (string value in values)
+            {
+                results.Add(new ParsedSearchParameter(
+                    store,
+                    resourceStore,
+                    parseResult,
+                    value ?? string.Empty,
+                    key,
+                    value));
+            }
         }
 
         return results.ToArray();
