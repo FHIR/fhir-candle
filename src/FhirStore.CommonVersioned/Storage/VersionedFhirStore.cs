@@ -1535,8 +1535,28 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
+        // When AllowExistingId is on, the resource store preserves the client-supplied
+        // id. If that id already exists, surface that explicitly as 409 Conflict rather
+        // than the generic 500 the catch-all "stored is null" branch would otherwise
+        // produce.
+        bool useExistingId = forceExistingId || _config.AllowExistingId;
+        if (useExistingId
+            && !string.IsNullOrEmpty(content.Id)
+            && ((IReadOnlyDictionary<string, Resource>)rs).ContainsKey(content.Id))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.Conflict,
+                    $"Resource {resourceType}/{content.Id} already exists",
+                    OperationOutcome.IssueType.Duplicate),
+                StatusCode = HttpStatusCode.Conflict,
+            };
+            return false;
+        }
+
         // create the resource
-        Resource? stored = rs.InstanceCreate(ctx, content, forceExistingId || _config.AllowExistingId);
+        Resource? stored = rs.InstanceCreate(ctx, content, useExistingId);
         Resource? sForHook = null;
 
         foreach (IFhirInteractionHook hook in hooks)
