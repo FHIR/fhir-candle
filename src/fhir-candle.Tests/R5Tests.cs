@@ -363,6 +363,12 @@ public class R5TestsObservation : IClassFixture<R5Tests>
     [InlineData(null, "date=ap2016", 3)]
     [InlineData(null, "date=ap2012-09-17", 3)]
     [InlineData(null, "date=ap2030", 0)]
+    // Phase 6 (M4): offset-aware date normalization.
+    [InlineData(null, "date=ge2017-05-03T19:54:26Z", 1)]
+    [InlineData(null, "date=lt2017-05-03T19:54:26Z", 5)]
+    // Phase 6 (M6): instant-boundary gt/ge semantics at 2016-05-18T22:33:22Z.
+    [InlineData(null, "date=gt2016-05-18T22:33:22Z", 1)]
+    [InlineData(null, "date=ge2016-05-18T22:33:22Z", 2)]
     [InlineData("PatientExampleFull", "subject=Patient/example", R5Tests._observationsWithSubjectExample)]
     [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
     [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
@@ -795,6 +801,83 @@ public class R5TestsPatient : IClassFixture<R5Tests>
         {
             selfLink.ShouldContain(searchPart);
         }
+    }
+
+    /// <summary>
+    /// Phase 6 (M3) — falsifiable :not-on-absent regression. Inline-creates a Patient
+    /// with no gender element, asserts that gender:not=male returns the original count
+    /// plus one, then deletes the patient.
+    /// </summary>
+    [Fact]
+    public void PatientSearchNotModifierMatchesAbsentElement()
+    {
+        string newId = $"no-gender-r5-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+        string newPatientJson = "{\"resourceType\":\"Patient\",\"id\":\"" + newId + "\",\"name\":[{\"family\":\"NoGenderTest\"}]}";
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = newPatientJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        try
+        {
+            _fixture._store.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+                .ShouldBeTrue();
+
+            int expected = (R5Tests._patientCount - R5Tests._patientsMale) + 1;
+            AssertGenderNotMatches("gender:not=male", expected, newId);
+
+            int expectedFemale = (R5Tests._patientCount - R5Tests._patientsFemale) + 1;
+            AssertGenderNotMatches("gender:not=female", expectedFemale, newId);
+        }
+        finally
+        {
+            FhirRequestContext deleteCtx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "DELETE",
+                Url = _fixture._store.Config.BaseUrl + $"/Patient/{newId}",
+                Forwarded = null,
+                Authorization = null,
+                ResourceType = "Patient",
+                Id = newId,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+            _fixture._store.InstanceDelete(deleteCtx, out FhirResponseContext _);
+        }
+    }
+
+    private void AssertGenderNotMatches(string search, int expectedCount, string expectedId)
+    {
+        FhirRequestContext searchCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "GET",
+            Url = _fixture._store.Config.BaseUrl + "/Patient?" + search,
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        _fixture._store.TypeSearch(searchCtx, out FhirResponseContext response).ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource!);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(expectedCount, $"expected {search} to match {expectedCount} patients (including the inline-created no-gender patient)");
+        response.SerializedResource.ShouldContain(expectedId, Case.Sensitive, $"expected {search} response to include the inline-created no-gender patient '{expectedId}'");
     }
 
 

@@ -260,6 +260,15 @@ public class R4TestsObservation : IClassFixture<R4Tests>
     [InlineData(null, "date=ap2016", 3)]
     [InlineData(null, "date=ap2012-09-17", 3)]
     [InlineData(null, "date=ap2030", 0)]
+    // Phase 6 (M4): offset-aware date normalization. effectiveDateTime
+    // 2017-05-03T15:54:26-04:00 equals UTC 2017-05-03T19:54:26Z; reverting
+    // the ToUniversalTime() normalization would shift these counts.
+    [InlineData(null, "date=ge2017-05-03T19:54:26Z", 1)]
+    [InlineData(null, "date=lt2017-05-03T19:54:26Z", 5)]
+    // Phase 6 (M6): instant-boundary gt/ge semantics at an observation's instant
+    // (2016-05-18T22:33:22Z). gt excludes the boundary observation, ge includes it.
+    [InlineData(null, "date=gt2016-05-18T22:33:22Z", 1)]
+    [InlineData(null, "date=ge2016-05-18T22:33:22Z", 2)]
     [InlineData("PatientExampleFull", "subject=Patient/example", R4Tests._observationsWithSubjectExample)]
     [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
     [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
