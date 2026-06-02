@@ -18,31 +18,15 @@ namespace FhirCandle.Search;
 public static class EvalStringSearch
 {
     /// <summary>
-    /// Folds a string for case- and accent-insensitive comparison: NFD-normalize,
-    /// drop combining marks, recompose. Per FHIR R4 § 3.1.1.3, default string searches
-    /// are both case- and accent-insensitive; this helper is applied to non-exact paths only.
+    /// Folds a string for case- and accent-insensitive comparison. Forwards to the
+    /// shared implementation on <see cref="ParsedSearchParameter"/>; resource-side
+    /// strings (HumanName.Family, Address.City, etc.) are folded per-resource via
+    /// this helper, while search-side values are pre-folded into
+    /// <see cref="ParsedSearchParameter.FoldedValues"/> at parse time.
     /// </summary>
     /// <param name="s">The input string.</param>
-    /// <returns>The folded form, or the input unchanged if null/empty.</returns>
-    private static string FoldForSearch(string? s)
-    {
-        if (string.IsNullOrEmpty(s))
-        {
-            return s ?? string.Empty;
-        }
-
-        string normalized = s.Normalize(NormalizationForm.FormD);
-        StringBuilder sb = new(normalized.Length);
-        foreach (char c in normalized)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
-            {
-                sb.Append(c);
-            }
-        }
-
-        return sb.ToString().Normalize(NormalizationForm.FormC);
-    }
+    /// <returns>The folded form, or empty if null/empty.</returns>
+    private static string FoldForSearch(string? s) => ParsedSearchParameter.FoldForSearch(s);
 
     /// <summary>Tests a string search value against string-type nodes, using starts-with & case-insensitive.</summary>
     /// <param name="valueNode">The value node.</param>
@@ -82,7 +66,13 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (foldedValue.StartsWith(FoldForSearch(sp.Values[i]), StringComparison.OrdinalIgnoreCase))
+            string? v = sp.FoldedValues?[i];
+            if (v is null)
+            {
+                continue;
+            }
+
+            if (foldedValue.StartsWith(v, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -129,7 +119,13 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (foldedValue.Contains(FoldForSearch(sp.Values[i]), StringComparison.OrdinalIgnoreCase))
+            string? v = sp.FoldedValues?[i];
+            if (v is null)
+            {
+                continue;
+            }
+
+            if (foldedValue.Contains(v, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -206,7 +202,11 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = FoldForSearch(sp.Values[i]);
+            string? v = sp.FoldedValues?[i];
+            if (v is null)
+            {
+                continue;
+            }
 
             if ((!string.IsNullOrEmpty(hn.Family) && foldedFamily.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
                 foldedGiven.Any(gn => !string.IsNullOrEmpty(gn) && gn.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
@@ -242,7 +242,11 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = FoldForSearch(sp.Values[i]);
+            string? v = sp.FoldedValues?[i];
+            if (v is null)
+            {
+                continue;
+            }
 
             if ((!string.IsNullOrEmpty(hn.Family) && foldedFamily.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
                 foldedGiven.Any(gn => !string.IsNullOrEmpty(gn) && gn.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
@@ -317,7 +321,11 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = FoldForSearch(sp.Values[i]);
+            string? v = sp.FoldedValues?[i];
+            if (v is null)
+            {
+                continue;
+            }
 
             if ((nodeVal.Use is not null && foldedUse.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
                 (nodeVal.Type is not null && foldedType.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
@@ -365,7 +373,11 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = FoldForSearch(sp.Values[i]);
+            string? v = sp.FoldedValues?[i];
+            if (v is null)
+            {
+                continue;
+            }
 
             if ((nodeVal.Use is not null && foldedUse.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
                 (nodeVal.Type is not null && foldedType.Contains(v, StringComparison.OrdinalIgnoreCase)) ||

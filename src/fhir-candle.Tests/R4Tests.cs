@@ -514,6 +514,11 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "name:exact=Peter", 1)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
+    // Phase 8 (M9): a bare combining mark folds to the empty string; with FoldedValues
+    // null-sentinel, evaluators skip it and the search must NOT match every patient
+    // (which is what a literal StartsWith("") / Contains("") would do).
+    [InlineData(null, "name=\u0301", 0)]
+    [InlineData(null, "name:contains=\u0301", 0)]
     // Phase 4: accent-insensitive string search (pat1 has a second name with family=Muñoz)
     [InlineData(null, "family=munoz", 1)]
     [InlineData(null, "family=MUÑOZ", 1)]

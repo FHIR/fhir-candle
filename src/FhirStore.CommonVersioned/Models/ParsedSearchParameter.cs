@@ -189,6 +189,16 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Gets or sets the applied value flags.</summary>
     public bool[] IgnoredValueFlags { get; set; } = [];
 
+    /// <summary>
+    /// For string-typed search parameters, the case- and accent-folded form of each
+    /// value in <see cref="Values"/>, cached at parse time to avoid per-evaluation
+    /// refolding. Entries whose folded form is the empty string are stored as
+    /// <c>null</c>; string-search evaluators skip null entries to avoid the
+    /// <c>StartsWith("")</c> / <c>Contains("")</c> false-positive match. Null on
+    /// non-string parameters.
+    /// </summary>
+    public string?[]? FoldedValues { get; set; } = null;
+
     /// <summary>Gets or sets a value indicating whether this parameter has been ignored.</summary>
     public bool IgnoredParameter { get; set; } = false;
 
@@ -265,6 +275,7 @@ public class ParsedSearchParameter : ICloneable
         Name = other.Name;
         Values = other.Values.Select(v => v).ToArray();
         IgnoredValueFlags = other.IgnoredValueFlags.Select(v => v).ToArray();
+        FoldedValues = other.FoldedValues?.Select(v => v).ToArray();
         IgnoredParameter = other.IgnoredParameter;
         IgnoredReason = other.IgnoredReason;
         ChainedParameters = other.ChainedParameters?.DeepCopy();
@@ -1069,7 +1080,51 @@ public class ParsedSearchParameter : ICloneable
                 //    //    }
                 //    //}
                 //    break;
+
+            case SearchParamType.String:
+                {
+                    // Cache the case/accent-folded form of each value once at parse time.
+                    // Empty folds become null so string-search evaluators can skip them,
+                    // avoiding the StartsWith("") / Contains("") false-positive match
+                    // for inputs like a bare combining mark.
+                    FoldedValues = new string?[Values.Length];
+                    for (int i = 0; i < Values.Length; i++)
+                    {
+                        string folded = FoldForSearch(Values[i]);
+                        FoldedValues[i] = string.IsNullOrEmpty(folded) ? null : folded;
+                    }
+                }
+                break;
         }
+    }
+
+    /// <summary>
+    /// Folds a string for case- and accent-insensitive comparison: NFD-normalize,
+    /// drop combining marks, recompose. Per FHIR R4 § 3.1.1.3, default string searches
+    /// are both case- and accent-insensitive. Used to populate <see cref="FoldedValues"/>
+    /// at parse time and to fold resource-side strings inside the string-search
+    /// evaluators (where caching is not viable because the value is per-resource).
+    /// </summary>
+    /// <param name="s">The input string.</param>
+    /// <returns>The folded form, or <see cref="string.Empty"/> if null/empty.</returns>
+    internal static string FoldForSearch(string? s)
+    {
+        if (string.IsNullOrEmpty(s))
+        {
+            return s ?? string.Empty;
+        }
+
+        string normalized = s.Normalize(System.Text.NormalizationForm.FormD);
+        System.Text.StringBuilder sb = new(normalized.Length);
+        foreach (char c in normalized)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString().Normalize(System.Text.NormalizationForm.FormC);
     }
 
     /// <summary>Enumerates parse in this collection.</summary>
