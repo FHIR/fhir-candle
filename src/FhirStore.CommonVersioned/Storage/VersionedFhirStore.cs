@@ -430,7 +430,16 @@ public partial class VersionedFhirStore : IFhirStore
 
                     if (opDef is not null)
                     {
-                        _ = InstanceCreate(new FhirRequestContext(this, "POST", "OperationDefinition", opDef), out _);
+                        // Self-registration of operation definitions: this is an internal
+                        // POST during startup; we deliberately want to preserve the
+                        // OperationDefinition.id we computed (so subsequent CapabilityStatement
+                        // generation can reference it by stable id). With M2's HTTP-method
+                        // gating, POST would otherwise discard the supplied id — so pass
+                        // forceAllowExistingId: true.
+                        _ = InstanceCreate(
+                            new FhirRequestContext(this, "POST", "OperationDefinition", opDef),
+                            out _,
+                            forceAllowExistingId: true);
                     }
                 }
                 catch (Exception ex)
@@ -1535,13 +1544,14 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        // FHIR REST: POST (create) MUST always assign a server-side id, even when
-        // _config.AllowExistingId is true. The legacy AllowExistingId flag is preserved
-        // only for bundle-ingest callers that pass forceExistingId explicitly, and for
-        // non-POST createcalls (e.g., load-from-disk via update-as-create).
-        bool isPostCreate =
-            ctx.Interaction == Common.StoreInteractionCodes.TypeCreate ||
-            ctx.Interaction == Common.StoreInteractionCodes.TypeCreateConditional;
+        // FHIR REST §2.42: on POST (create), the server SHALL ignore the client-supplied
+        // Resource.id and assign a server-side id. The gate is the HTTP method, NOT the
+        // dispatcher interaction enum — callers may set Interaction = TypeCreate for a
+        // non-POST path (e.g., load-from-disk update-as-create, OperationDefinition
+        // self-registration) and need the legacy AllowExistingId behavior preserved.
+        // Bundle-ingest callers and internal load callers that explicitly want to keep
+        // a client-supplied id still pass forceExistingId: true.
+        bool isPostCreate = string.Equals(ctx.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase);
 
         bool allowExistingIdForThisCall = forceExistingId ||
             (!isPostCreate && _config.AllowExistingId);

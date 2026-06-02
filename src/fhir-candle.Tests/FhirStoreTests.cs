@@ -912,6 +912,57 @@ public class TestPostPutIdSemantics : IClassFixture<FhirStoreTests>
         putResponse.StatusCode?.IsSuccessful().ShouldBeTrue();
         putResponse.Id.ShouldBe(id);
     }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void BundleTransactionPostStillSucceedsAfterM2Flip(FhirReleases.FhirSequenceCodes version)
+    {
+        // M2 regression — verifies the bundle-transaction POST path still works after
+        // the HTTP-method gate change in DoInstanceCreate.
+        //
+        // Note on FHIR transaction semantics (§3.2.0.16.5): bundle preprocessing
+        // (buildTransactionResourceLookup + fixTransactionEntryReferencesRecurse) ALWAYS
+        // reassigns POST-entry resource ids to server-generated GUIDs, regardless of
+        // forceAllowExistingId. So even though DoProcessBundle calls PerformInteraction
+        // with forceAllowExistingId: true (preserved through M2), there's no client-id
+        // to preserve by the time PerformInteraction runs. The audit-pinning content
+        // here is: the bundle transaction still SUCCEEDS post-M2 — the HTTP-method gate
+        // does not regress this path.
+        const string clientBundleId = "phase5-bundle-original-id";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        string bundleJson = "{\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":[{" +
+            "\"fullUrl\":\"urn:uuid:00000000-0000-0000-0000-000000000001\"," +
+            "\"resource\":{\"resourceType\":\"Patient\",\"id\":\"" + clientBundleId + "\",\"gender\":\"male\"}," +
+            "\"request\":{\"method\":\"POST\",\"url\":\"Patient\"}}]}";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}",
+            Forwarded = null,
+            Authorization = null,
+            Interaction = StoreInteractionCodes.SystemBundle,
+            SourceFormat = "application/fhir+json",
+            SourceContent = bundleJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.ProcessBundle(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode?.IsSuccessful().ShouldBeTrue();
+
+        string body = response.SerializedResource ?? string.Empty;
+        body.ShouldContain("\"resourceType\":\"Bundle\"");
+        body.ShouldContain("\"type\":\"transaction-response\"");
+        // A POST entry should produce a 201 Created response (the entry's location
+        // header will reference the server-assigned id, not the client-supplied one).
+        body.ShouldContain("\"status\":\"201", Case.Insensitive);
+    }
 }
 
 
