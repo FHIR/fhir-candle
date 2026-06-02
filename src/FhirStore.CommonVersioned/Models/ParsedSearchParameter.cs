@@ -1657,7 +1657,12 @@ public class ParsedSearchParameter : ICloneable
             // YYYY-MM
             case 7:
                 end = start.AddMonths(1).AddTicks(-1);
-                approxDelta = TimeSpan.FromDays(62);
+                // ±65 days covers any consecutive two-month span (worst case 62 days,
+                // Jul–Aug or Dec–Jan) with a small safety margin for timezone offsets
+                // and inclusive-boundary edge cases. We deliberately use a flat window —
+                // AddMonths(2) would introduce leap-Feb asymmetry the `ap` window does
+                // not need.
+                approxDelta = TimeSpan.FromDays(65);
                 break;
 
             // YYYY-MM-DD

@@ -185,10 +185,17 @@ public static class EvalDateSearch
                     // FHIR R4 leaves the window semantics to the implementation; window sizes
                     // are derived from the granularity of the search string in
                     // ParsedSearchParameter.TryParseDateString.
+                    //
+                    // ValueDateApproxDeltas is invariably allocated alongside
+                    // ValueDateStarts / ValueDateEnds at parse time (see
+                    // ParsedSearchParameter.ProcessTypedValues, SearchParamType.Date),
+                    // so length mismatch should never happen — guarded with a Debug.Assert
+                    // to catch future producer-side bugs in debug builds.
                     {
-                        TimeSpan delta = ((sp.ValueDateApproxDeltas?.Length ?? 0) > i)
-                            ? sp.ValueDateApproxDeltas![i]
-                            : TimeSpan.FromDays(1);
+                        System.Diagnostics.Debug.Assert(
+                            sp.ValueDateApproxDeltas is not null && sp.ValueDateApproxDeltas.Length > i,
+                            "ValueDateApproxDeltas length mismatch in EvalDateSearch.Approximately; producer invariant violated.");
+                        TimeSpan delta = sp.ValueDateApproxDeltas![i];
 
                         DateTimeOffset expandedStart = sp.ValueDateStarts[i] - delta;
                         DateTimeOffset expandedEnd = sp.ValueDateEnds[i] + delta;

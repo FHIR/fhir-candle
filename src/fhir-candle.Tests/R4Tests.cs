@@ -710,6 +710,74 @@ public class R4TestsPatient : IClassFixture<R4Tests>
         }
     }
 
+    /// <summary>
+    /// Phase 9 (L5) — leap-Feb safety-margin pin. Inline-creates a Patient with
+    /// birthDate 2016-01-28 and queries birthdate=ap2016-04. The 65-day window
+    /// includes that birthDate (2016-04-01 minus 65 days = 2016-01-27); a 62-day
+    /// window would exclude it (2016-04-01 minus 62 days = 2016-01-30). Pins the
+    /// L5 widen-by-3-days change against an inadvertent revert.
+    /// </summary>
+    [Fact]
+    public void PatientSearchApYYYYMMWindowIncludesSafetyMargin()
+    {
+        string newId = $"l5-margin-r4-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+        string newPatientJson = "{\"resourceType\":\"Patient\",\"id\":\"" + newId + "\"," +
+            "\"name\":[{\"family\":\"L5Margin\"}],\"birthDate\":\"2016-01-28\"}";
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = newPatientJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        try
+        {
+            _fixture._store.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+                .ShouldBeTrue();
+
+            FhirRequestContext searchCtx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "GET",
+                Url = _fixture._store.Config.BaseUrl + "/Patient?birthdate=ap2016-04",
+                Forwarded = null,
+                Authorization = null,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+
+            _fixture._store.TypeSearch(searchCtx, out FhirResponseContext response).ShouldBeTrue();
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            response.SerializedResource.ShouldContain(newId, Case.Sensitive,
+                "expected birthdate=ap2016-04 to include patient born 2016-01-28 under the 65-day window");
+        }
+        finally
+        {
+            FhirRequestContext deleteCtx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "DELETE",
+                Url = _fixture._store.Config.BaseUrl + $"/Patient/{newId}",
+                Forwarded = null,
+                Authorization = null,
+                ResourceType = "Patient",
+                Id = newId,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+            _fixture._store.InstanceDelete(deleteCtx, out FhirResponseContext _);
+        }
+    }
+
 
     [Theory]
     [InlineData(null, "example", null, null, R4Tests._observationsWithSubjectExample)]
