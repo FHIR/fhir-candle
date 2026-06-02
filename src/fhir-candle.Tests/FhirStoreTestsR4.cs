@@ -1,4 +1,4 @@
-﻿// <copyright file="FhirStoreTestsR4.cs" company="Microsoft Corporation">
+// <copyright file="FhirStoreTestsR4.cs" company="Microsoft Corporation">
 //     Copyright (c) Microsoft Corporation. All rights reserved.
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
@@ -285,7 +285,8 @@ public class FhirStoreTestsR4: IDisposable
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created, response.SerializedOutcome);
@@ -387,7 +388,8 @@ public class FhirStoreTestsR4: IDisposable
         // add a search parameter for the patient resource
         success = fhirStore.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         success.ShouldBe(true);
         response.StatusCode.ShouldBe(HttpStatusCode.Created);

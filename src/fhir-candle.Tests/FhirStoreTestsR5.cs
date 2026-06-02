@@ -1,4 +1,4 @@
-﻿// <copyright file="FhirStoreTestsR5.cs" company="Microsoft Corporation">
+// <copyright file="FhirStoreTestsR5.cs" company="Microsoft Corporation">
 //     Copyright (c) Microsoft Corporation. All rights reserved.
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
@@ -78,7 +78,8 @@ public class FhirStoreTestsR5: IDisposable
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created, response.SerializedOutcome);
@@ -182,7 +183,8 @@ public class FhirStoreTestsR5: IDisposable
         // add a search parameter for the patient resource
         success = fhirStore.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         success.ShouldBe(true);
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -500,7 +502,7 @@ public class FhirStoreTestsR5: IDisposable
         results.ShouldNotBeNull();
         results!.Entries.ShouldHaveCount(1);
 
-        encounterJson = encounterJson.Replace("in-progress", "completed");
+        encounterJson = encounterJson.Replace("\"in-progress\"", "\"completed\"");
 
         var firstUpdateResponse = DoUpdate(
             "Encounter",
@@ -513,7 +515,7 @@ public class FhirStoreTestsR5: IDisposable
             out lastModified,
             out location);
 
-        firstUpdateResponse.ShouldBe(HttpStatusCode.Created, "This update request should have been treated as Create since we are creating the first version.");
+        firstUpdateResponse.ShouldBe(HttpStatusCode.OK, "This update request should have been treated as Update since the resource already exists from the earlier DoCreate.");
 
         notification = fhirStore.SerializeSubscriptionEvents(
             "encounter-complete-fhirpath",
@@ -617,7 +619,7 @@ public class FhirStoreTestsR5: IDisposable
         results.ShouldNotBeNull();
         results!.Entries.ShouldHaveCount(1);
 
-        encounterJson = encounterJson.Replace("in-progress", "completed");
+        encounterJson = encounterJson.Replace("\"in-progress\"", "\"completed\"");
 
         var firstUpdateResponse = DoUpdate(
             "Encounter",
@@ -630,7 +632,7 @@ public class FhirStoreTestsR5: IDisposable
             out lastModified,
             out location);
 
-        firstUpdateResponse.ShouldBe(HttpStatusCode.Created, "This update request should have been treated as Create since we are creating the first version.");
+        firstUpdateResponse.ShouldBe(HttpStatusCode.OK, "This update request should have been treated as Update since the resource already exists from the earlier DoCreate.");
 
         notification = fhirStore.SerializeSubscriptionEvents(
             "encounter-complete-query",
@@ -699,7 +701,8 @@ public class FhirStoreTestsR5: IDisposable
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);

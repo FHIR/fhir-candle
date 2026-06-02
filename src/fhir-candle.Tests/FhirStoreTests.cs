@@ -301,7 +301,8 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -446,7 +447,8 @@ public class TestDuplicateExplicitIdCreate : IClassFixture<FhirStoreTests>
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -466,7 +468,8 @@ public class TestDuplicateExplicitIdCreate : IClassFixture<FhirStoreTests>
 
         success = fhirStore.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         success.ShouldBeFalse();
         response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
@@ -521,7 +524,8 @@ public class TestResourceWrongLocation: IClassFixture<FhirStoreTests>
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeFalse();
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
@@ -572,7 +576,8 @@ public class TestResourceInvalidElement : IClassFixture<FhirStoreTests>
 
         bool success = fhirStore.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeFalse();
         response.StatusCode?.IsSuccessful().ShouldBeFalse();
@@ -716,5 +721,142 @@ public class TestBundleRequestParsing : IClassFixture<FhirStoreTests>
 
             ctx?.Interaction.ShouldBe(expected);
         }
+    }
+}
+
+
+/// <summary>
+/// Phase 7 — POST/PUT id semantics, cross-version. POST MUST always assign a server id;
+/// PUT must reject when URL id and body id differ.
+/// </summary>
+public class TestPostPutIdSemantics : IClassFixture<FhirStoreTests>
+{
+    /// <summary>Gets the configurations.</summary>
+    public static IEnumerable<object[]> Configurations => FhirStoreTests.TestConfigurations;
+
+    private readonly FhirStoreTests _fixture;
+
+    public TestPostPutIdSemantics(FhirStoreTests fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PostAssignsServerIdEvenWhenClientSuppliesId(FhirReleases.FhirSequenceCodes version)
+    {
+        const string clientId = "client-supplied-id-must-be-discarded";
+        string json = "{\"resourceType\":\"Patient\",\"id\":\"" + clientId + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceCreate(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.Id.ShouldNotBeNullOrEmpty();
+        response.Id.ShouldNotBe(clientId, "POST must always assign a server-side id per FHIR REST spec");
+        response.Location.ShouldNotContain($"Patient/{clientId}");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PostWithoutClientIdAssignsServerId(FhirReleases.FhirSequenceCodes version)
+    {
+        string json = "{\"resourceType\":\"Patient\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceCreate(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.Id.ShouldNotBeNullOrEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PutRejectsUrlBodyIdMismatch(FhirReleases.FhirSequenceCodes version)
+    {
+        const string urlId = "phase7-url-id";
+        const string bodyId = "phase7-different-body-id";
+        string json = "{\"resourceType\":\"Patient\",\"id\":\"" + bodyId + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{urlId}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        response.SerializedOutcome.ShouldContain(urlId);
+        response.SerializedOutcome.ShouldContain(bodyId);
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PutAcceptsUrlBodyIdMatch(FhirReleases.FhirSequenceCodes version)
+    {
+        string id = $"phase7-put-match-{version.ToString().ToLowerInvariant()}";
+        string json = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode?.IsSuccessful().ShouldBeTrue();
+        response.Id.ShouldBe(id);
     }
 }

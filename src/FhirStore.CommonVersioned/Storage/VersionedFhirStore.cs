@@ -1535,11 +1535,22 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
+        // FHIR REST: POST (create) MUST always assign a server-side id, even when
+        // _config.AllowExistingId is true. The legacy AllowExistingId flag is preserved
+        // only for bundle-ingest callers that pass forceExistingId explicitly, and for
+        // non-POST createcalls (e.g., load-from-disk via update-as-create).
+        bool isPostCreate =
+            ctx.Interaction == Common.StoreInteractionCodes.TypeCreate ||
+            ctx.Interaction == Common.StoreInteractionCodes.TypeCreateConditional;
+
+        bool allowExistingIdForThisCall = forceExistingId ||
+            (!isPostCreate && _config.AllowExistingId);
+
         // create the resource
         Resource? stored = rs.InstanceCreate(
             ctx,
             content,
-            forceExistingId || _config.AllowExistingId,
+            allowExistingIdForThisCall,
             out HttpStatusCode createStatusCode,
             out OperationOutcome createOutcome);
         Resource? sForHook = null;
@@ -2323,6 +2334,25 @@ public partial class VersionedFhirStore : IFhirStore
                     $"Resource type: {resourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
                 StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // FHIR REST: when both URL id and body id are present, they must agree.
+        // The request is syntactically valid (well-formed FHIR) but semantically
+        // inconsistent, so we return 422 Unprocessable Entity. R4 spec section
+        // 3.1.0.7.1 permits either 400 or 422 here.
+        if (!string.IsNullOrEmpty(id) &&
+            !string.IsNullOrEmpty(content.Id) &&
+            !id.Equals(content.Id, StringComparison.Ordinal))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.UnprocessableEntity,
+                    $"URL id '{id}' does not match resource id '{content.Id}'",
+                    OperationOutcome.IssueType.Invalid),
+                StatusCode = HttpStatusCode.UnprocessableEntity,
             };
             return false;
         }

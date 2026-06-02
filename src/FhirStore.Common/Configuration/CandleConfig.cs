@@ -365,7 +365,11 @@ public record class CandleConfig
     public string[] SmartOptionalTenants { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets a value indicating whether the create interactions can specify an ID.
+    /// Gets or sets a value indicating whether non-POST create paths may preserve a
+    /// client-supplied id. Applies to bundle ingest (transaction / batch — via the
+    /// internal forceExistingId override) and to load-from-disk update-as-create only;
+    /// POST /[type] is always required by the FHIR REST spec to assign a server-side
+    /// id and ignores this setting.
     /// </summary>
     [ConfigurationKeyName("Create_Existing_Id")]
     public bool AllowExistingId { get; set; } = true;

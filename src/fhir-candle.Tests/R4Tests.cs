@@ -1,4 +1,4 @@
-﻿// <copyright file="FhirStoreTestsR4Resource.cs" company="Microsoft Corporation">
+// <copyright file="FhirStoreTestsR4Resource.cs" company="Microsoft Corporation">
 //     Copyright (c) Microsoft Corporation. All rights reserved.
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
@@ -1061,7 +1061,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // test conditional that has no matches
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1108,7 +1109,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // first, store our resource
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1126,7 +1128,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // now, store it conditionally with a single match
         success = _fixture._store.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         // all contents should match original - not a new version
         success.ShouldBeTrue();
@@ -1176,7 +1179,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // first, store our resource
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1205,7 +1209,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // now store the second resource
         success = _fixture._store.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1224,7 +1229,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // now attempt to store with a conditional create that matches both
         success = _fixture._store.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         // this should fail
         success.ShouldBeFalse();
@@ -1387,7 +1393,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext createResp);
+            out FhirResponseContext createResp,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         createResp.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1445,7 +1452,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx1,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1456,7 +1464,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             createCtx2,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1507,7 +1516,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1562,7 +1572,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1703,7 +1714,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1739,7 +1751,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext createResp);
+            out FhirResponseContext createResp,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         createResp.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1760,7 +1773,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         // should return the existing resource
         success.ShouldBeTrue();
@@ -1799,7 +1813,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1810,7 +1825,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1830,7 +1846,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeFalse();
         response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
@@ -1862,7 +1879,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1884,7 +1902,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         // IfNoneExist found a match, so should return the existing resource
         success.ShouldBeTrue();
@@ -2045,7 +2064,8 @@ public class R4TestBundleConditionals : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
