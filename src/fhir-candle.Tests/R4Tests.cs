@@ -505,6 +505,13 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "name:exact=Peter", 1)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
+    // Phase 4: accent-insensitive string search (pat1 has a second name with family=Muñoz)
+    [InlineData(null, "family=munoz", 1)]
+    [InlineData(null, "family=MUÑOZ", 1)]
+    [InlineData(null, "family:contains=unoz", 1)]
+    [InlineData(null, "family:exact=Muñoz", 1)]
+    [InlineData(null, "family:exact=Munoz", 0)]
+    [InlineData(null, "family:exact=muñoz", 0)]
     [InlineData(null, "_profile:missing=true", R4Tests._patientCount - 1)]
     [InlineData(null, "_profile:missing=false", 1)]
     [InlineData(null, "multiplebirth=3", 1)]

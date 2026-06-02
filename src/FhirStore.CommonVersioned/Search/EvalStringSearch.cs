@@ -8,6 +8,8 @@ using Hl7.Fhir.ElementModel;
 using Hl7.Fhir.FhirPath;
 using Hl7.Fhir.Model;
 using Newtonsoft.Json.Linq;
+using System.Globalization;
+using System.Text;
 using static FhirCandle.Search.SearchDefinitions;
 
 namespace FhirCandle.Search;
@@ -15,6 +17,33 @@ namespace FhirCandle.Search;
 /// <summary>A class that contains functions to test string inputs against various FHIR types.</summary>
 public static class EvalStringSearch
 {
+    /// <summary>
+    /// Folds a string for case- and accent-insensitive comparison: NFD-normalize,
+    /// drop combining marks, recompose. Per FHIR R4 § 3.1.1.3, default string searches
+    /// are both case- and accent-insensitive; this helper is applied to non-exact paths only.
+    /// </summary>
+    /// <param name="s">The input string.</param>
+    /// <returns>The folded form, or the input unchanged if null/empty.</returns>
+    private static string FoldForSearch(string? s)
+    {
+        if (string.IsNullOrEmpty(s))
+        {
+            return s ?? string.Empty;
+        }
+
+        string normalized = s.Normalize(NormalizationForm.FormD);
+        StringBuilder sb = new(normalized.Length);
+        foreach (char c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
     /// <summary>Tests a string search value against string-type nodes, using starts-with & case-insensitive.</summary>
     /// <param name="valueNode">The value node.</param>
     /// <param name="sp">       The sp.</param>
@@ -44,6 +73,8 @@ public static class EvalStringSearch
             return false;
         }
 
+        string foldedValue = FoldForSearch(stringValue);
+
         for (int i = 0; i < sp.Values.Length; i++)
         {
             if (sp.IgnoredValueFlags[i])
@@ -51,7 +82,7 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (stringValue.StartsWith(sp.Values[i], StringComparison.OrdinalIgnoreCase))
+            if (foldedValue.StartsWith(FoldForSearch(sp.Values[i]), StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -89,6 +120,8 @@ public static class EvalStringSearch
             return false;
         }
 
+        string foldedValue = FoldForSearch(stringValue);
+
         for (int i = 0; i < sp.Values.Length; i++)
         {
             if (sp.IgnoredValueFlags[i])
@@ -96,7 +129,7 @@ public static class EvalStringSearch
                 continue;
             }
 
-            if (stringValue.Contains(sp.Values[i], StringComparison.OrdinalIgnoreCase))
+            if (foldedValue.Contains(FoldForSearch(sp.Values[i]), StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -162,6 +195,10 @@ public static class EvalStringSearch
             return false;
         }
 
+        string foldedFamily = FoldForSearch(hn.Family);
+        string foldedText = FoldForSearch(hn.Text);
+        string[] foldedGiven = hn.Given?.Select(FoldForSearch).ToArray() ?? [];
+
         for (int i = 0; i < sp.Values.Length; i++)
         {
             if (sp.IgnoredValueFlags[i])
@@ -169,11 +206,11 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = sp.Values[i];
+            string v = FoldForSearch(sp.Values[i]);
 
-            if ((hn.Family?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (hn.Given?.Any(gn => gn?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ?? false) ||
-                (hn.Text?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false))
+            if ((!string.IsNullOrEmpty(hn.Family) && foldedFamily.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                foldedGiven.Any(gn => !string.IsNullOrEmpty(gn) && gn.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(hn.Text) && foldedText.StartsWith(v, StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }
@@ -194,6 +231,10 @@ public static class EvalStringSearch
             return false;
         }
 
+        string foldedFamily = FoldForSearch(hn.Family);
+        string foldedText = FoldForSearch(hn.Text);
+        string[] foldedGiven = hn.Given?.Select(FoldForSearch).ToArray() ?? [];
+
         for (int i = 0; i < sp.Values.Length; i++)
         {
             if (sp.IgnoredValueFlags[i])
@@ -201,11 +242,11 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = sp.Values[i];
+            string v = FoldForSearch(sp.Values[i]);
 
-            if ((hn.Family?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (hn.Given?.Any(gn => gn?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ?? false) ||
-                (hn.Text?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false))
+            if ((!string.IsNullOrEmpty(hn.Family) && foldedFamily.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                foldedGiven.Any(gn => !string.IsNullOrEmpty(gn) && gn.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(hn.Text) && foldedText.Contains(v, StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }
@@ -259,6 +300,16 @@ public static class EvalStringSearch
             return false;
         }
 
+        string foldedUse = FoldForSearch(nodeVal.Use?.ToString());
+        string foldedType = FoldForSearch(nodeVal.Type?.ToString());
+        string foldedText = FoldForSearch(nodeVal.Text);
+        string foldedCity = FoldForSearch(nodeVal.City);
+        string foldedDistrict = FoldForSearch(nodeVal.District);
+        string foldedState = FoldForSearch(nodeVal.State);
+        string foldedPostalCode = FoldForSearch(nodeVal.PostalCode);
+        string foldedCountry = FoldForSearch(nodeVal.Country);
+        string[] foldedLine = nodeVal.Line?.Select(FoldForSearch).ToArray() ?? [];
+
         for (int i = 0; i < sp.Values.Length; i++)
         {
             if (sp.IgnoredValueFlags[i])
@@ -266,17 +317,17 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = sp.Values[i];
+            string v = FoldForSearch(sp.Values[i]);
 
-            if ((nodeVal.Use?.ToString().StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Type?.ToString().StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Text?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Line?.Any(v => v?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ?? false) ||
-                (nodeVal.City?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.District?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.State?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.PostalCode?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Country?.StartsWith(v, StringComparison.OrdinalIgnoreCase) ?? false))
+            if ((nodeVal.Use is not null && foldedUse.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (nodeVal.Type is not null && foldedType.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.Text) && foldedText.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                foldedLine.Any(ln => !string.IsNullOrEmpty(ln) && ln.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.City) && foldedCity.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.District) && foldedDistrict.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.State) && foldedState.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.PostalCode) && foldedPostalCode.StartsWith(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.Country) && foldedCountry.StartsWith(v, StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }
@@ -297,6 +348,16 @@ public static class EvalStringSearch
             return false;
         }
 
+        string foldedUse = FoldForSearch(nodeVal.Use?.ToString());
+        string foldedType = FoldForSearch(nodeVal.Type?.ToString());
+        string foldedText = FoldForSearch(nodeVal.Text);
+        string foldedCity = FoldForSearch(nodeVal.City);
+        string foldedDistrict = FoldForSearch(nodeVal.District);
+        string foldedState = FoldForSearch(nodeVal.State);
+        string foldedPostalCode = FoldForSearch(nodeVal.PostalCode);
+        string foldedCountry = FoldForSearch(nodeVal.Country);
+        string[] foldedLine = nodeVal.Line?.Select(FoldForSearch).ToArray() ?? [];
+
         for (int i = 0; i < sp.Values.Length; i++)
         {
             if (sp.IgnoredValueFlags[i])
@@ -304,17 +365,17 @@ public static class EvalStringSearch
                 continue;
             }
 
-            string v = sp.Values[i];
+            string v = FoldForSearch(sp.Values[i]);
 
-            if ((nodeVal.Use?.ToString().Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Type?.ToString().Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Text?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Line?.Any(v => v?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ?? false) ||
-                (nodeVal.City?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.District?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.State?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.PostalCode?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (nodeVal.Country?.Contains(v, StringComparison.OrdinalIgnoreCase) ?? false))
+            if ((nodeVal.Use is not null && foldedUse.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (nodeVal.Type is not null && foldedType.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.Text) && foldedText.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                foldedLine.Any(ln => !string.IsNullOrEmpty(ln) && ln.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.City) && foldedCity.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.District) && foldedDistrict.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.State) && foldedState.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.PostalCode) && foldedPostalCode.Contains(v, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(nodeVal.Country) && foldedCountry.Contains(v, StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }
