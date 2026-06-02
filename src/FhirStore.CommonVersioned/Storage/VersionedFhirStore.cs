@@ -2357,6 +2357,28 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        // FHIR REST §3.1.0.7: Resource.id SHALL be present in the body on PUT and
+        // SHALL equal the URL id. Under --strict we enforce this with 422; the
+        // lenient default (preserving historical behavior) stamps the URL id onto
+        // an empty body id and falls through.
+        if (!string.IsNullOrEmpty(id) && string.IsNullOrEmpty(content.Id))
+        {
+            if (_config.Strict)
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.UnprocessableEntity,
+                        $"Resource.id is required on PUT and must equal the URL id '{id}'.",
+                        OperationOutcome.IssueType.Required),
+                    StatusCode = HttpStatusCode.UnprocessableEntity,
+                };
+                return false;
+            }
+
+            content.Id = id;
+        }
+
         HttpStatusCode sc;
 
         IFhirInteractionHook[] hooks = GetHooks(

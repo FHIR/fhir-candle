@@ -859,6 +859,228 @@ public class TestPostPutIdSemantics : IClassFixture<FhirStoreTests>
         response.StatusCode?.IsSuccessful().ShouldBeTrue();
         response.Id.ShouldBe(id);
     }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PutEmptyBodyIdLenientDefaultStampsUrlId(FhirReleases.FhirSequenceCodes version)
+    {
+        // Step 1: POST with forceAllowExistingId to create at a known id.
+        string id = $"phase2-put-empty-body-lenient-{version.ToString().ToLowerInvariant()}";
+        string createJson = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = createJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool createSuccess = fhirStore.InstanceCreate(
+            createCtx,
+            out FhirResponseContext createResponse,
+            forceAllowExistingId: true);
+        createSuccess.ShouldBeTrue();
+        createResponse.Id.ShouldBe(id);
+
+        // Step 2: PUT with body lacking id — lenient default should stamp the URL id.
+        string putJson = "{\"resourceType\":\"Patient\",\"language\":\"fr\"}";
+
+        FhirRequestContext putCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = putJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool putSuccess = fhirStore.InstanceUpdate(putCtx, out FhirResponseContext putResponse);
+
+        putSuccess.ShouldBeTrue();
+        putResponse.StatusCode?.IsSuccessful().ShouldBeTrue();
+        putResponse.Id.ShouldBe(id);
+    }
+}
+
+
+/// <summary>
+/// Phase 2 — H4 strict-mode variant of TestPostPutIdSemantics. Constructs version-specific
+/// stores with TenantConfiguration.Strict == true and asserts PUT with empty body Resource.id
+/// is rejected with 422 + OperationOutcome per FHIR R4 §3.1.0.7.
+/// </summary>
+public class TestPostPutIdSemanticsStrict
+{
+    public static IEnumerable<object[]> Configurations => FhirStoreTests.TestConfigurations;
+
+    private readonly Dictionary<FhirReleases.FhirSequenceCodes, IFhirStore> _stores = new();
+
+    public TestPostPutIdSemanticsStrict()
+    {
+        TenantConfiguration configR4 = new()
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
+            ControllerName = "r4-strict",
+            BaseUrl = "http://localhost/fhir/r4-strict",
+            AllowExistingId = true,
+            AllowCreateAsUpdate = true,
+            Strict = true,
+        };
+        IFhirStore candleR4 = new candleR4::FhirCandle.Storage.VersionedFhirStore();
+        candleR4.Init(configR4);
+        _stores.Add(FhirReleases.FhirSequenceCodes.R4, candleR4);
+
+        TenantConfiguration configR4B = new()
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4B,
+            ControllerName = "r4b-strict",
+            BaseUrl = "http://localhost/fhir/r4b-strict",
+            AllowExistingId = true,
+            AllowCreateAsUpdate = true,
+            Strict = true,
+        };
+        IFhirStore candleR4B = new candleR4B::FhirCandle.Storage.VersionedFhirStore();
+        candleR4B.Init(configR4B);
+        _stores.Add(FhirReleases.FhirSequenceCodes.R4B, candleR4B);
+
+        TenantConfiguration configR5 = new()
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R5,
+            ControllerName = "r5-strict",
+            BaseUrl = "http://localhost/fhir/r5-strict",
+            AllowExistingId = true,
+            AllowCreateAsUpdate = true,
+            Strict = true,
+        };
+        IFhirStore candleR5 = new candleR5::FhirCandle.Storage.VersionedFhirStore();
+        candleR5.Init(configR5);
+        _stores.Add(FhirReleases.FhirSequenceCodes.R5, candleR5);
+    }
+
+    private IFhirStore GetStore(FhirReleases.FhirSequenceCodes version) => _stores[version];
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PutEmptyBodyIdStrictRejectsWith422(FhirReleases.FhirSequenceCodes version)
+    {
+        string id = $"phase2-put-empty-body-strict-{version.ToString().ToLowerInvariant()}";
+        string createJson = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = GetStore(version);
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = createJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool createSuccess = fhirStore.InstanceCreate(
+            createCtx,
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
+        createSuccess.ShouldBeTrue();
+
+        string putJson = "{\"resourceType\":\"Patient\",\"language\":\"fr\"}";
+
+        FhirRequestContext putCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = putJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool putSuccess = fhirStore.InstanceUpdate(putCtx, out FhirResponseContext putResponse);
+
+        putSuccess.ShouldBeFalse();
+        putResponse.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        putResponse.SerializedOutcome.ShouldNotBeNullOrEmpty();
+        putResponse.SerializedOutcome.ShouldContain(id);
+        putResponse.SerializedOutcome.ShouldContain("OperationOutcome");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PutAcceptsUrlBodyIdMatchInStrict(FhirReleases.FhirSequenceCodes version)
+    {
+        string id = $"phase2-put-strict-match-{version.ToString().ToLowerInvariant()}";
+        string json = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = GetStore(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode?.IsSuccessful().ShouldBeTrue();
+        response.Id.ShouldBe(id);
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void PutRejectsUrlBodyIdMismatchInStrict(FhirReleases.FhirSequenceCodes version)
+    {
+        const string urlId = "phase2-strict-url-id";
+        const string bodyId = "phase2-strict-different-body-id";
+        string json = "{\"resourceType\":\"Patient\",\"id\":\"" + bodyId + "\",\"language\":\"en\"}";
+
+        IFhirStore fhirStore = GetStore(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{urlId}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        success.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        response.SerializedOutcome.ShouldContain(urlId);
+        response.SerializedOutcome.ShouldContain(bodyId);
+    }
 }
 
 
