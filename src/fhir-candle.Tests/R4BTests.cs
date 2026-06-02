@@ -541,6 +541,8 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     // Phase 5: :not modifier matches resources where the element is absent (R4B has no no-gender patients)
     [InlineData(null, "gender:not=male", R4BTests._patientCount - R4BTests._patientsMale)]
     [InlineData(null, "gender:not=female", R4BTests._patientCount - R4BTests._patientsFemale)]
+    // Phase 6: repeated parameter AND semantics (regression)
+    [InlineData(null, "birthdate=ge1980&birthdate=le1990", 2)]
     [InlineData(null, "name-use=official", R4BTests._patientCount)]
     [InlineData(null, "name-use=invalid-name-use", 0)]
     [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
