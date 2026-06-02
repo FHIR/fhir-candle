@@ -1561,7 +1561,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
-        if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
+        if (!DateTime.TryParse(dateString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime dt))
         {
             Console.WriteLine($"Failed to parse date: {dateString}");
             IgnoredReason ??= $"Invalid date format: {dateString}";
@@ -1570,7 +1570,10 @@ public class ParsedSearchParameter : ICloneable
             return false;
         }
 
-        start = new DateTimeOffset(dt, TimeSpan.Zero);
+        // RoundtripKind preserves any explicit offset as DateTimeKind.Local; normalize to UTC.
+        start = dt.Kind == DateTimeKind.Local
+            ? new DateTimeOffset(dt).ToUniversalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
 
         switch (dateString.Length)
         {
@@ -1668,7 +1671,7 @@ public class ParsedSearchParameter : ICloneable
         }
 
         // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
-        if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
+        if (!DateTime.TryParse(dateString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime dt))
         {
             Console.WriteLine($"Failed to parse date: {dateString}");
             start = DateTimeOffset.MinValue;
@@ -1676,7 +1679,10 @@ public class ParsedSearchParameter : ICloneable
             return false;
         }
 
-        start = new DateTimeOffset(dt, TimeSpan.Zero);
+        // RoundtripKind preserves any explicit offset as DateTimeKind.Local; normalize to UTC.
+        start = dt.Kind == DateTimeKind.Local
+            ? new DateTimeOffset(dt).ToUniversalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
 
         switch (dateString.Length)
         {

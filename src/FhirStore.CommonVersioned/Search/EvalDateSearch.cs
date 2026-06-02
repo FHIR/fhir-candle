@@ -124,8 +124,8 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.NotEqual:
-
-                    if ((valueStart != sp.ValueDateStarts[i]) || (valueEnd != sp.ValueDateEnds[i]))
+                    // ne: target interval is NOT wholly inside the search interval
+                    if (!((valueStart >= sp.ValueDateStarts[i]) && (valueEnd <= sp.ValueDateEnds[i])))
                     {
                         return true;
                     }
@@ -133,6 +133,8 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.GreaterThan:
+                    // gt: target extends past the end of the search range
+                    // https://www.hl7.org/fhir/R4/search.html#prefix
                     if (valueEnd > sp.ValueDateEnds[i])
                     {
                         return true;
@@ -140,21 +142,24 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.LessThan:
-                    if (valueEnd < sp.ValueDateEnds[i])
+                    // lt: target starts before the start of the search range
+                    if (valueStart < sp.ValueDateStarts[i])
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.GreaterThanOrEqual:
-                    if (valueEnd >= sp.ValueDateEnds[i])
+                    // ge: target intersects [reqStart, +inf)
+                    if (valueEnd >= sp.ValueDateStarts[i])
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.LessThanOrEqual:
-                    if (valueEnd <= sp.ValueDateEnds[i])
+                    // le: target intersects (-inf, reqEnd]
+                    if (valueStart <= sp.ValueDateEnds[i])
                     {
                         return true;
                     }
