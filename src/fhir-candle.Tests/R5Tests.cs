@@ -359,6 +359,10 @@ public class R5TestsObservation : IClassFixture<R5Tests>
     [InlineData(null, "date=ge2016", 3)]
     [InlineData(null, "date=lt2016", 3)]
     [InlineData(null, "date=ge2017", 1)]
+    // Phase 3: precision-aware ap window against effectiveDateTime
+    [InlineData(null, "date=ap2016", 3)]
+    [InlineData(null, "date=ap2012-09-17", 3)]
+    [InlineData(null, "date=ap2030", 0)]
     [InlineData("PatientExampleFull", "subject=Patient/example", R5Tests._observationsWithSubjectExample)]
     [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
     [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
@@ -626,6 +630,12 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "birthdate=le1982-08-02", 4)]
     [InlineData(null, "birthdate=lt1982-01-23", 2)]
     [InlineData(null, "birthdate=gt1982-08-02", 0)]
+    // Phase 3: precision-aware ap window (R5 birthdates: 1974-12-25 x2, 1982-01-23, 1982-08-02)
+    [InlineData(null, "birthdate=ap1982", 2)]
+    [InlineData(null, "birthdate=ap1983", 2)]
+    [InlineData(null, "birthdate=ap1990", 0)]
+    [InlineData(null, "birthdate=ap1982-01", 1)]
+    [InlineData(null, "birthdate=ap1982-01-23", 1)]
     [InlineData(null, "gender=InvalidValue", 0)]
     [InlineData(null, "gender=male", R5Tests._patientsMale)]
     [InlineData(null, "gender=female", R5Tests._patientsFemale)]

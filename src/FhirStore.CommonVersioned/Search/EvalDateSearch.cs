@@ -180,11 +180,23 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.Approximately:
-                    // TODO: this is not correct date approximation since it does not account for precision, but works well enough for now
-                    if ((valueStart.Subtract(sp.ValueDateStarts[i]) < TimeSpan.FromDays(1)) ||
-                        (valueEnd.Subtract(sp.ValueDateEnds[i]) < TimeSpan.FromDays(1)))
+                    // precision-aware fixed window around the search value;
+                    // match if the target interval overlaps the expanded search interval.
+                    // FHIR R4 leaves the window semantics to the implementation; window sizes
+                    // are derived from the granularity of the search string in
+                    // ParsedSearchParameter.TryParseDateString.
                     {
-                        return true;
+                        TimeSpan delta = ((sp.ValueDateApproxDeltas?.Length ?? 0) > i)
+                            ? sp.ValueDateApproxDeltas![i]
+                            : TimeSpan.FromDays(1);
+
+                        DateTimeOffset expandedStart = sp.ValueDateStarts[i] - delta;
+                        DateTimeOffset expandedEnd = sp.ValueDateEnds[i] + delta;
+
+                        if ((valueStart <= expandedEnd) && (valueEnd >= expandedStart))
+                        {
+                            return true;
+                        }
                     }
                     break;
             }

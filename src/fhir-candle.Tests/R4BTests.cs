@@ -252,6 +252,10 @@ public class R4BTestsObservation : IClassFixture<R4BTests>
     [InlineData(null, "date=ge2016", 3)]
     [InlineData(null, "date=lt2016", 3)]
     [InlineData(null, "date=ge2017", 1)]
+    // Phase 3: precision-aware ap window against effectiveDateTime
+    [InlineData(null, "date=ap2016", 3)]
+    [InlineData(null, "date=ap2012-09-17", 3)]
+    [InlineData(null, "date=ap2030", 0)]
     [InlineData("PatientExampleFull", "subject=Patient/example", R4Tests._observationsWithSubjectExample)]
     [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
     [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
@@ -517,6 +521,12 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     [InlineData(null, "birthdate=le1982-08-02", 3)]
     [InlineData(null, "birthdate=lt1982-01-23", 1)]
     [InlineData(null, "birthdate=gt1982-08-02", 0)]
+    // Phase 3: precision-aware ap window (R4B birthdates: 1974-12-25, 1982-01-23, 1982-08-02)
+    [InlineData(null, "birthdate=ap1982", 2)]
+    [InlineData(null, "birthdate=ap1983", 2)]
+    [InlineData(null, "birthdate=ap1990", 0)]
+    [InlineData(null, "birthdate=ap1982-01", 1)]
+    [InlineData(null, "birthdate=ap1982-01-23", 1)]
     [InlineData(null, "gender=InvalidValue", 0)]
     [InlineData(null, "gender=male", R4BTests._patientsMale)]
     [InlineData(null, "gender=female", R4BTests._patientsFemale)]

@@ -210,6 +210,15 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Gets or sets the date ends.</summary>
     public DateTimeOffset[]? ValueDateEnds { get; set; } = null;
 
+    /// <summary>
+    /// Gets or sets per-value approximation deltas used by the <c>ap</c> prefix.
+    /// The window size scales with the granularity of the search string
+    /// (year → ±1 year, year+month → ±2 months, full date → ±1 month,
+    /// date+time → ±1 day). Populated alongside <see cref="ValueDateStarts"/>
+    /// and <see cref="ValueDateEnds"/> in <c>ProcessTypedValues</c>.
+    /// </summary>
+    public TimeSpan[]? ValueDateApproxDeltas { get; set; } = null;
+
     /// <summary>Gets or sets the values for integer types.</summary>
     public long[]? ValueInts { get; set; } = null;
 
@@ -264,6 +273,7 @@ public class ParsedSearchParameter : ICloneable
         CompositeComponents = other.CompositeComponents?.Select(c => new ParsedSearchParameter(c)).ToArray();
         ValueDateStarts = other.ValueDateStarts?.Select(v => v).ToArray();
         ValueDateEnds = other.ValueDateEnds?.Select(v => v).ToArray();
+        ValueDateApproxDeltas = other.ValueDateApproxDeltas?.Select(v => v).ToArray();
         ValueInts = other.ValueInts?.Select(v => v).ToArray();
         ValueDecimals = other.ValueDecimals?.Select(v => v).ToArray();
         ValueFhirCodes = other.ValueFhirCodes?.Select(v => v).ToArray();
@@ -866,13 +876,15 @@ public class ParsedSearchParameter : ICloneable
                 {
                     ValueDateStarts = new DateTimeOffset[Values.Length];
                     ValueDateEnds = new DateTimeOffset[Values.Length];
+                    ValueDateApproxDeltas = new TimeSpan[Values.Length];
 
                     for (int i = 0; i < Values.Length; i++)
                     {
-                        if (TryParseDateString(Values[i], out DateTimeOffset start, out DateTimeOffset end))
+                        if (TryParseDateString(Values[i], out DateTimeOffset start, out DateTimeOffset end, out TimeSpan approxDelta))
                         {
                             ValueDateStarts[i] = start;
                             ValueDateEnds[i] = end;
+                            ValueDateApproxDeltas[i] = approxDelta;
                         }
                         else
                         {
@@ -1530,12 +1542,15 @@ public class ParsedSearchParameter : ICloneable
     }
 
     /// <summary>Attempts to parse a date string.</summary>
-    /// <param name="dateString">The date string.</param>
-    /// <param name="start">     [out] The start.</param>
-    /// <param name="end">       [out] The end.</param>
+    /// <param name="dateString">  The date string.</param>
+    /// <param name="start">       [out] The start.</param>
+    /// <param name="end">         [out] The end.</param>
+    /// <param name="approxDelta"> [out] Window delta used by the <c>ap</c> prefix; scales with the granularity of <paramref name="dateString"/>.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end)
+    public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end, out TimeSpan approxDelta)
     {
+        approxDelta = TimeSpan.Zero;
+
         if (string.IsNullOrEmpty(dateString))
         {
             start = DateTimeOffset.MinValue;
@@ -1557,6 +1572,7 @@ public class ParsedSearchParameter : ICloneable
 
             start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
             end = start.AddYears(1).AddTicks(-1);
+            approxDelta = TimeSpan.FromDays(365);
             return true;
         }
 
@@ -1580,27 +1596,32 @@ public class ParsedSearchParameter : ICloneable
             // YYYY
             case 4:
                 end = start.AddYears(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(365);
                 break;
 
             // YYYY-MM
             case 7:
                 end = start.AddMonths(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(62);
                 break;
 
             // YYYY-MM-DD
             case 10:
                 end = start.AddDays(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(31);
                 break;
 
             // Note: this is not defined as valid, but wanted to support it
             // YYYY-MM-DDThh
             case 13:
                 end = start.AddHours(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(1);
                 break;
 
             // YYYY-MM-DDThh:mm
             case 16:
                 end = start.AddMinutes(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(1);
                 break;
 
             // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
@@ -1628,6 +1649,7 @@ public class ParsedSearchParameter : ICloneable
             // YYYY-MM-DDThh:mm:ss.ffff+zz:zz
             case 30:
                 end = start.AddSeconds(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(1);
                 break;
 
             default:
