@@ -120,4 +120,12 @@ public class TenantConfiguration
     /// Gets or sets a value indicating whether to allow create as update.
     /// </summary>
     public bool AllowCreateAsUpdate { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether spec-strict server behavior is enabled for
+    /// this tenant. When false (default), the tenant accepts lenient inputs (e.g., PUT
+    /// with empty body Resource.id is stamped with the URL id). When true, the tenant
+    /// enforces spec-strict behaviors per FHIR R4 §3.1.0.7.
+    /// </summary>
+    public bool Strict { get; set; } = false;
 }

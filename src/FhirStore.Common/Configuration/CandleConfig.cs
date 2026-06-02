@@ -187,6 +187,12 @@ public record class CliOptions
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    public Option<bool?> Strict { get; } = new("--strict")
+    {
+        Description = "Enable spec-strict server behavior (e.g., reject PUT with empty body Resource.id per FHIR R4 §3.1.0.7). Default: false (lenient).",
+        Arity = ArgumentArity.ZeroOrOne,
+    };
+
     public Option<int?> MaxSubscriptionExpirationMinutes { get; } = new("--max-subscription-minutes")
     {
         Description = "Maximum number of minutes a subscription can be active.",
@@ -380,6 +386,16 @@ public record class CandleConfig
     [ConfigurationKeyName("Create_As_Update")]
     public bool AllowCreateAsUpdate { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether spec-strict server behavior is enabled.
+    /// When false (default), the server accepts certain lenient inputs (e.g., PUT with
+    /// empty body Resource.id is stamped with the URL id). When true, the server
+    /// enforces spec-strict behaviors per FHIR R4 §3.1.0.7 (e.g., PUT with empty body
+    /// Resource.id is rejected with 422 + OperationOutcome).
+    /// </summary>
+    [ConfigurationKeyName("Strict")]
+    public bool Strict { get; set; } = false;
+
     /// <summary>Gets or sets the maximum number of minutes a subscription can be open.</summary>
     [ConfigurationKeyName("Max_Subscription_Minutes")]
     public int MaxSubscriptionExpirationMinutes { get; set; } = 0;
@@ -504,6 +520,7 @@ public record class CandleConfig
         SupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged ?? false;
         AllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId ?? true;
         AllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate ?? true;
+        Strict = pr.GetValue(opt.Strict) ?? envConfig?.Strict ?? false;
         MaxSubscriptionExpirationMinutes = pr.GetValue(opt.MaxSubscriptionExpirationMinutes) ?? envConfig?.MaxSubscriptionExpirationMinutes ?? 0;
 
         ZulipEmail = pr.GetValue(opt.ZulipEmail) ?? envConfig?.ZulipEmail;
@@ -892,6 +909,7 @@ public class CliRootCommand : RootCommand
         Add(_cliOptions.SupportNotChanged);
         Add(_cliOptions.AllowExistingId);
         Add(_cliOptions.AllowCreateAsUpdate);
+        Add(_cliOptions.Strict);
 
         Add(_cliOptions.MaxSubscriptionExpirationMinutes);
         Add(_cliOptions.ZulipEmail);

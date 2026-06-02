@@ -579,6 +579,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                Strict = config.Strict,
             });
         }
 
@@ -596,6 +597,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                Strict = config.Strict,
             });
         }
 
@@ -613,6 +615,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                Strict = config.Strict,
             });
         }
 
