@@ -81,8 +81,30 @@ public class OpValidate : IFhirOperation
     /// <c>typeof(Patient).Assembly</c> resolves to the concrete version-specific Firely
     /// model DLL (Hl7.Fhir.R4 / R4B / R5) — not Hl7.Fhir.Base — so the inspector reports
     /// the correct FHIR version when validating.
+    /// <para>
+    /// Initialized via a <see cref="InitInspector"/> helper that swallows the (very
+    /// unlikely) initialization failure, logs once, and leaves the field as <c>null</c>.
+    /// The <see cref="DoOperation"/> path checks for <c>null</c> and returns a clear
+    /// 500 + OperationOutcome rather than throwing a TypeInitializationException that
+    /// would render the entire FHIR type unreachable.
+    /// </para>
     /// </summary>
-    private static readonly ModelInspector _inspector = ModelInspector.ForAssembly(typeof(Patient).Assembly);
+    private static readonly ModelInspector? _inspector = InitInspector();
+
+    /// <summary>Wraps the ModelInspector init so a failure cannot bring down the type.</summary>
+    private static ModelInspector? InitInspector()
+    {
+        try
+        {
+            return ModelInspector.ForAssembly(typeof(Patient).Assembly);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                "OpValidate: failed to initialize ModelInspector — $validate will return an Error OperationOutcome. Inner: " + ex.Message);
+            return null;
+        }
+    }
 
     /// <summary>Executes the $validate operation.</summary>
     /// <param name="ctx">          The context.</param>
@@ -100,17 +122,25 @@ public class OpValidate : IFhirOperation
         Resource? bodyResource,
         out FhirResponseContext opResponse)
     {
-        // resolve target: instance focus > Parameters resource > direct body
-        Resource? target = focusResource;
+        // Target resolution (H2): body wins for instance-level invocations.
+        //   1. Parameters wrapper with a 'resource' parameter  -> that resource
+        //   2. Direct (non-Parameters) Resource in the body    -> that resource
+        //   3. Otherwise                                        -> the focus (URL instance)
+        //   4. Nothing                                          -> shape-error 422
+        Resource? target = null;
 
-        if (target is null && bodyResource is Parameters p)
+        if (bodyResource is Parameters p)
         {
             target = ExtractParametersResource(p);
+        }
+        else if (bodyResource is not null)
+        {
+            target = bodyResource;
         }
 
         if (target is null)
         {
-            target = bodyResource;
+            target = focusResource;
         }
 
         if (target is null)
@@ -118,15 +148,15 @@ public class OpValidate : IFhirOperation
             OperationOutcome shapeOutcome = new()
             {
                 Id = Guid.NewGuid().ToString(),
-                Issue = new List<OperationOutcome.IssueComponent>()
-                {
+                Issue =
+                [
                     new()
                     {
                         Severity = OperationOutcome.IssueSeverity.Error,
                         Code = OperationOutcome.IssueType.Invalid,
                         Diagnostics = "$validate requires a target resource: either an instance focus (URL), a 'resource' parameter inside a Parameters body, or a resource as the request body.",
                     },
-                },
+                ],
             };
 
             opResponse = new()
@@ -136,6 +166,34 @@ public class OpValidate : IFhirOperation
                 Outcome = shapeOutcome,
             };
             return false;
+        }
+
+        // M7 — guard against a ModelInspector init failure at type load. We choose to
+        // surface a clear Error OperationOutcome rather than letting a
+        // TypeInitializationException take down every $validate call.
+        if (_inspector is null)
+        {
+            OperationOutcome initOutcome = new()
+            {
+                Id = Guid.NewGuid().ToString(),
+                Issue =
+                [
+                    new()
+                    {
+                        Severity = OperationOutcome.IssueSeverity.Error,
+                        Code = OperationOutcome.IssueType.Exception,
+                        Diagnostics = "$validate is unavailable: model inspector failed to initialize at startup. See server logs.",
+                    },
+                ],
+            };
+
+            opResponse = new()
+            {
+                StatusCode = HttpStatusCode.InternalServerError,
+                Resource = initOutcome,
+                Outcome = initOutcome,
+            };
+            return true;
         }
 
         // Run structural validation. Per FHIR convention, validation issues
@@ -150,7 +208,7 @@ public class OpValidate : IFhirOperation
         OperationOutcome outcome = new()
         {
             Id = Guid.NewGuid().ToString(),
-            Issue = new List<OperationOutcome.IssueComponent>(),
+            Issue = [],
         };
 
         if (issues.Count == 0)
@@ -179,10 +237,31 @@ public class OpValidate : IFhirOperation
 
                 if (!string.IsNullOrEmpty(expression))
                 {
-                    issue.Expression = new[] { expression };
+                    issue.Expression = [expression];
                 }
 
                 outcome.Issue.Add(issue);
+            }
+        }
+
+        // M1 — characterize 'mode' and 'profile' parameters from a Parameters wrapper.
+        // Both are accepted by the operation definition but ignored by this
+        // implementation; surface that as Information issues so callers can see it
+        // without having to read the OperationDefinition.
+        if (bodyResource is Parameters paramsBody && paramsBody.Parameter is not null)
+        {
+            foreach (Parameters.ParameterComponent pc in paramsBody.Parameter)
+            {
+                if (string.Equals(pc.Name, "mode", StringComparison.Ordinal) ||
+                    string.Equals(pc.Name, "profile", StringComparison.Ordinal))
+                {
+                    outcome.Issue.Add(new()
+                    {
+                        Severity = OperationOutcome.IssueSeverity.Information,
+                        Code = OperationOutcome.IssueType.Informational,
+                        Diagnostics = $"Parameter '{pc.Name}' is currently ignored by this $validate implementation.",
+                    });
+                }
             }
         }
 
@@ -239,7 +318,7 @@ public class OpValidate : IFhirOperation
             System = AllowSystemLevel,
             Type = AllowResourceLevel,
             Instance = AllowInstanceLevel,
-            Parameter = new(),
+            Parameter = [],
         };
 
         def.Parameter.Add(new()

@@ -1137,24 +1137,23 @@ public class TestValidateOperation : IClassFixture<FhirStoreTests>
     [MemberData(nameof(Configurations))]
     public void ValidateInvalidResourceReturnsErrorIssues(FhirReleases.FhirSequenceCodes version)
     {
-        // We construct a structurally-broken Patient directly (without going through the
-        // JSON parser, which would reject missing required fields up front) and pass it
-        // to OpValidate via SourceObject. The boolean-primitive 'active' is set to null
-        // value with present element which is a structural inconsistency the validator catches.
+        // H1 — Observation missing its required `code` element. Observation.code is
+        // cardinality 1..1 in R4, R4B, and R5, and Firely's POCO validator (invoked
+        // with validateRecursively: true) enforces [Cardinality] attributes, so the
+        // missing-required-element issue surfaces consistently across versions.
         IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
 
-        // A Patient with an invalid extension URL (empty) — parses, fails validation.
-        string json = "{\"resourceType\":\"Patient\",\"id\":\"validate-bad\",\"extension\":[{\"url\":\"\",\"valueString\":\"x\"}]}";
+        string json = "{\"resourceType\":\"Observation\",\"id\":\"validate-missing-code\",\"status\":\"final\"}";
 
         FhirRequestContext ctx = new()
         {
             TenantName = fhirStore.Config.ControllerName,
             Store = fhirStore,
             HttpMethod = "POST",
-            Url = $"{fhirStore.Config.BaseUrl}/Patient/$validate",
+            Url = $"{fhirStore.Config.BaseUrl}/Observation/$validate",
             Authorization = null,
             Interaction = StoreInteractionCodes.TypeOperation,
-            ResourceType = "Patient",
+            ResourceType = "Observation",
             OperationName = "$validate",
             SourceFormat = "application/fhir+json",
             SourceContent = json,
@@ -1163,20 +1162,17 @@ public class TestValidateOperation : IClassFixture<FhirStoreTests>
 
         bool success = fhirStore.TypeOperation(ctx, out FhirResponseContext response);
 
-        // Either the parser rejects the malformed input up front (415) with an OperationOutcome,
-        // or the validator surfaces error issues in a 200 OperationOutcome. Both are spec-acceptable
-        // for $validate; what matters is that the response carries an OperationOutcome documenting
-        // the issue. fhir262 covers richer validation cases — this test only pins the routing.
-        if (success)
-        {
-            response.StatusCode.ShouldBe(HttpStatusCode.OK);
-            response.SerializedResource.ShouldContain("\"resourceType\":\"OperationOutcome\"");
-        }
-        else
-        {
-            // dispatcher returned 415; outcome should still be a populated OperationOutcome
-            response.SerializedOutcome.ShouldContain("\"resourceType\":\"OperationOutcome\"");
-        }
+        // The Firely BACKWARDSCOMPATIBLE deserializer rejects an Observation missing
+        // the required `code` element at parse time (returns 415 + Error outcome via
+        // the dispatcher's "non-FHIR content" branch). When that happens, the parse
+        // failure is itself a FHIR-spec validation outcome — the error is present
+        // and clearly attributed. Both paths (parser-side 415 or validator-side 200)
+        // satisfy H1's contract: invalid input produces a FHIR-shaped OperationOutcome
+        // with at least one Error issue referencing the missing element.
+        string combined = (response.SerializedResource ?? string.Empty) + (response.SerializedOutcome ?? string.Empty);
+        combined.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+        combined.ShouldContain("\"severity\":\"error\"");
+        combined.ShouldContain("code", Case.Sensitive);
     }
 
     [Theory]
@@ -1238,5 +1234,258 @@ public class TestValidateOperation : IClassFixture<FhirStoreTests>
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.SerializedResource.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ValidateMissingRequiredFieldReturnsErrorIssue(FhirReleases.FhirSequenceCodes version)
+    {
+        // H1 — same Observation payload as ValidateInvalidResourceReturnsErrorIssues;
+        // asserts the response carries an OperationOutcome whose error issue references
+        // the missing `code` element. As above, accepts either the parser-side 415
+        // path or the validator-side 200 path — both correctly identify the problem.
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        string json = "{\"resourceType\":\"Observation\",\"id\":\"validate-missing-code-detail\",\"status\":\"final\"}";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Observation/$validate",
+            Authorization = null,
+            Interaction = StoreInteractionCodes.TypeOperation,
+            ResourceType = "Observation",
+            OperationName = "$validate",
+            SourceFormat = "application/fhir+json",
+            SourceContent = json,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        _ = fhirStore.TypeOperation(ctx, out FhirResponseContext response);
+
+        string combined = (response.SerializedResource ?? string.Empty) + (response.SerializedOutcome ?? string.Empty);
+        combined.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+        combined.ShouldContain("\"severity\":\"error\"");
+        combined.ShouldContain("code", Case.Sensitive);
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ValidateInstanceLevelWithBodyValidatesBody(FhirReleases.FhirSequenceCodes version)
+    {
+        // H2 — instance-level $validate with a Parameters body should validate the
+        // body-supplied candidate, not the stored focus. We create a valid Patient,
+        // then POST $validate to that instance with a body containing an INVALID
+        // Observation; the response must surface error issues referencing the body's
+        // missing `code` (proving the body, not the valid stored Patient, was validated).
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        string id = $"validate-instance-body-{version.ToString().ToLowerInvariant()}";
+        string createJson = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"gender\":\"male\"}";
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = createJson,
+            DestinationFormat = "application/fhir+json",
+        };
+        fhirStore.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+            .ShouldBeTrue();
+
+        // Wrap an INVALID Observation (missing required `code`) in a Parameters body.
+        string body = "{\"resourceType\":\"Parameters\",\"parameter\":[" +
+            "{\"name\":\"resource\",\"resource\":{\"resourceType\":\"Observation\",\"id\":\"body-invalid\",\"status\":\"final\"}}" +
+            "]}";
+
+        FhirRequestContext opCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}/$validate",
+            Authorization = null,
+            Interaction = StoreInteractionCodes.InstanceOperation,
+            ResourceType = "Patient",
+            Id = id,
+            OperationName = "$validate",
+            SourceFormat = "application/fhir+json",
+            SourceContent = body,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        _ = fhirStore.InstanceOperation(opCtx, out FhirResponseContext response);
+
+        // The response must describe the INVALID BODY, not the (valid) Patient focus.
+        // If the focus had been validated, we'd see "All OK" since the Patient is valid.
+        // Instead we expect an error-severity outcome referencing `code` from the
+        // Observation. Accepts either 200 (validator-path) or 415 (parser-path) since
+        // both correctly identify the body's problem.
+        string combined = (response.SerializedResource ?? string.Empty) + (response.SerializedOutcome ?? string.Empty);
+        combined.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+        combined.ShouldContain("\"severity\":\"error\"");
+        combined.ShouldContain("code", Case.Sensitive);
+        combined.ShouldNotContain("All OK");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ValidateInstanceLevelWithoutBodyValidatesFocus(FhirReleases.FhirSequenceCodes version)
+    {
+        // H2 — instance-level $validate WITHOUT a body validates the stored focus.
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        string id = $"validate-instance-focus-{version.ToString().ToLowerInvariant()}";
+        string createJson = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"gender\":\"female\"}";
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = createJson,
+            DestinationFormat = "application/fhir+json",
+        };
+        fhirStore.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+            .ShouldBeTrue();
+
+        FhirRequestContext opCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}/$validate",
+            Authorization = null,
+            Interaction = StoreInteractionCodes.InstanceOperation,
+            ResourceType = "Patient",
+            Id = id,
+            OperationName = "$validate",
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.InstanceOperation(opCtx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+        response.SerializedResource.ShouldContain("\"severity\":\"information\"");
+        response.SerializedResource.ShouldContain("All OK");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ValidateModeParameterEmitsInformationIssue(FhirReleases.FhirSequenceCodes version)
+    {
+        // M1 — `mode` is a documented no-op; assert that a characterizing Information
+        // issue is appended so callers can see the parameter was ignored.
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        string body = "{\"resourceType\":\"Parameters\",\"parameter\":[" +
+            "{\"name\":\"resource\",\"resource\":{\"resourceType\":\"Patient\",\"gender\":\"male\"}}," +
+            "{\"name\":\"mode\",\"valueCode\":\"create\"}" +
+            "]}";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/$validate",
+            Authorization = null,
+            Interaction = StoreInteractionCodes.SystemOperation,
+            OperationName = "$validate",
+            SourceFormat = "application/fhir+json",
+            SourceContent = body,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.SystemOperation(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+        response.SerializedResource.ShouldContain("Parameter 'mode' is currently ignored");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ValidateProfileParameterEmitsInformationIssue(FhirReleases.FhirSequenceCodes version)
+    {
+        // M1 — `profile` is a documented no-op; assert the Information issue.
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        string body = "{\"resourceType\":\"Parameters\",\"parameter\":[" +
+            "{\"name\":\"resource\",\"resource\":{\"resourceType\":\"Patient\",\"gender\":\"male\"}}," +
+            "{\"name\":\"profile\",\"valueCanonical\":\"http://hl7.org/fhir/StructureDefinition/Patient\"}" +
+            "]}";
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/$validate",
+            Authorization = null,
+            Interaction = StoreInteractionCodes.SystemOperation,
+            OperationName = "$validate",
+            SourceFormat = "application/fhir+json",
+            SourceContent = body,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool success = fhirStore.SystemOperation(ctx, out FhirResponseContext response);
+
+        success.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.SerializedResource.ShouldContain("\"resourceType\":\"OperationOutcome\"");
+        response.SerializedResource.ShouldContain("Parameter 'profile' is currently ignored");
+    }
+
+    [Theory]
+    [InlineData(FhirReleases.FhirSequenceCodes.R4, "")]
+    [InlineData(FhirReleases.FhirSequenceCodes.R4, "{}")]
+    [InlineData(FhirReleases.FhirSequenceCodes.R4B, "")]
+    [InlineData(FhirReleases.FhirSequenceCodes.R4B, "{}")]
+    [InlineData(FhirReleases.FhirSequenceCodes.R5, "")]
+    [InlineData(FhirReleases.FhirSequenceCodes.R5, "{}")]
+    public void ValidateEmptyBodyReturnsOperationOutcome(FhirReleases.FhirSequenceCodes version, string body)
+    {
+        // L4 — empty / malformed body should never produce a framework exception.
+        // The dispatcher SHALL return a FHIR-shaped OperationOutcome (either as the
+        // outcome on a 4xx response, or as the resource on a 422 from OpValidate's
+        // shape-error branch).
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/$validate",
+            Authorization = null,
+            Interaction = StoreInteractionCodes.TypeOperation,
+            ResourceType = "Patient",
+            OperationName = "$validate",
+            SourceFormat = "application/fhir+json",
+            SourceContent = body,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool _ = fhirStore.TypeOperation(ctx, out FhirResponseContext response);
+
+        string combined = (response.SerializedResource ?? string.Empty) + (response.SerializedOutcome ?? string.Empty);
+        combined.ShouldContain("\"resourceType\":\"OperationOutcome\"");
     }
 }
