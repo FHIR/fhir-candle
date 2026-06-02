@@ -349,12 +349,7 @@ public class FhirController : ControllerBase
             return;
         }
 
-        // GET /<TenantName>/Parameters/$<op> mirrors the POST variant: route through
-        // system-level dispatch when the URL resource is the wire-type 'Parameters'.
-        bool isParametersWireType =
-            resourceName.Equals("Parameters", StringComparison.Ordinal);
-
-        if (!isParametersWireType && !store.SupportsResource(resourceName))
+        if (!store.SupportsResource(resourceName))
         {
             await LogAndReturnError(Response, 404, $"GetTypeOperation <<< tenant {storeName} does not support resource {resourceName}!");
             return;
@@ -373,10 +368,8 @@ public class FhirController : ControllerBase
             Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
-            Interaction = isParametersWireType
-                ? Common.StoreInteractionCodes.SystemOperation
-                : Common.StoreInteractionCodes.TypeOperation,
-            ResourceType = isParametersWireType ? string.Empty : resourceName,
+            Interaction = Common.StoreInteractionCodes.TypeOperation,
+            ResourceType = resourceName,
             OperationName = "$" + opName,
         };
 
@@ -386,9 +379,7 @@ public class FhirController : ControllerBase
             return;
         }
 
-        bool success = isParametersWireType
-            ? store.SystemOperation(ctx, out FhirResponseContext opResponse)
-            : store.TypeOperation(ctx, out opResponse);
+        bool success = store.TypeOperation(ctx, out FhirResponseContext opResponse);
 
         await AddFhirResponse(Response, prefer, success, opResponse);
     }
@@ -1043,13 +1034,7 @@ public class FhirController : ControllerBase
             return;
         }
 
-        // POST /<TenantName>/Parameters/$<op> is a wire-type-as-system-op shape:
-        // 'Parameters' is not a stored resource type, so skip the SupportsResource check
-        // and route through system-level dispatch instead of type-level.
-        bool isParametersWireType =
-            resourceName.Equals("Parameters", StringComparison.Ordinal);
-
-        if (!isParametersWireType && !store.SupportsResource(resourceName))
+        if (!store.SupportsResource(resourceName))
         {
             await LogAndReturnError(Response, 404, $"PostTypeOperation <<< tenant {storeName} does not support resource {resourceName}!");
             return;
@@ -1075,10 +1060,8 @@ public class FhirController : ControllerBase
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
-                Interaction = isParametersWireType
-                    ? Common.StoreInteractionCodes.SystemOperation
-                    : Common.StoreInteractionCodes.TypeOperation,
-                ResourceType = isParametersWireType ? string.Empty : resourceName,
+                Interaction = Common.StoreInteractionCodes.TypeOperation,
+                ResourceType = resourceName,
                 OperationName = "$" + opName,
                 SourceFormat = Request.ContentType ?? string.Empty,
                 SourceContent = content,
@@ -1091,9 +1074,7 @@ public class FhirController : ControllerBase
             }
 
             // operation
-            bool success = isParametersWireType
-                ? store.SystemOperation(ctx, out FhirResponseContext opResponse)
-                : store.TypeOperation(ctx, out opResponse);
+            bool success = store.TypeOperation(ctx, out FhirResponseContext opResponse);
 
             await AddFhirResponse(Response, prefer, success, opResponse);
         }
