@@ -915,6 +915,77 @@ public class TestPostPutIdSemantics : IClassFixture<FhirStoreTests>
 
     [Theory]
     [MemberData(nameof(Configurations))]
+    public void PutReplaceExistingWithMatchingIdsSucceeds(FhirReleases.FhirSequenceCodes version)
+    {
+        // M5 — pin the PUT-replace happy path: PUT to an existing instance with matching
+        // body id should succeed and produce the mutated resource. Existing rows only
+        // exercise PUT-as-create; this fills the gap.
+        string id = $"phase7-put-replace-{version.ToString().ToLowerInvariant()}";
+        string createJson = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"gender\":\"male\"}";
+
+        IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "POST",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = createJson,
+            DestinationFormat = "application/fhir+json",
+        };
+        fhirStore.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+            .ShouldBeTrue();
+
+        // Mutate: add a telecom entry, keep id matched.
+        string replaceJson = "{\"resourceType\":\"Patient\",\"id\":\"" + id + "\",\"gender\":\"male\"," +
+            "\"telecom\":[{\"system\":\"phone\",\"value\":\"+1-555-0100\",\"use\":\"work\"}]}";
+
+        FhirRequestContext replaceCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "PUT",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = replaceJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool putSuccess = fhirStore.InstanceUpdate(replaceCtx, out FhirResponseContext putResponse);
+
+        putSuccess.ShouldBeTrue();
+        putResponse.StatusCode?.IsSuccessful().ShouldBeTrue();
+        putResponse.Id.ShouldBe(id);
+        putResponse.SerializedResource.ShouldContain("\"value\":\"+1-555-0100\"");
+
+        // Read back to confirm replacement landed.
+        FhirRequestContext readCtx = new()
+        {
+            TenantName = fhirStore.Config.ControllerName,
+            Store = fhirStore,
+            HttpMethod = "GET",
+            Url = $"{fhirStore.Config.BaseUrl}/Patient/{id}",
+            Forwarded = null,
+            Authorization = null,
+            ResourceType = "Patient",
+            Id = id,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        fhirStore.InstanceRead(readCtx, out FhirResponseContext readResponse).ShouldBeTrue();
+        readResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        readResponse.SerializedResource.ShouldContain("\"value\":\"+1-555-0100\"");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
     public void BundleTransactionPostStillSucceedsAfterM2Flip(FhirReleases.FhirSequenceCodes version)
     {
         // M2 regression — verifies the bundle-transaction POST path still works after
