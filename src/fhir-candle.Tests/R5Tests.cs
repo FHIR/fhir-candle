@@ -610,6 +610,8 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "birthdate=1982-01-23", 1)]
     [InlineData(null, "birthdate=1982-01", 1)]
     [InlineData(null, "birthdate=1982", 2)]
+    [InlineData(null, "birthdate:missing=true", 2)]
+    [InlineData(null, "birthdate:missing=false", R5Tests._patientCount - 2)]
     [InlineData(null, "gender=InvalidValue", 0)]
     [InlineData(null, "gender=male", R5Tests._patientsMale)]
     [InlineData(null, "gender=female", R5Tests._patientsFemale)]

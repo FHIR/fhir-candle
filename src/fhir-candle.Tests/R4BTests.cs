@@ -501,6 +501,8 @@ public class R4BTestsPatient : IClassFixture<R4BTests>
     [InlineData(null, "birthdate=1982-01-23", 1)]
     [InlineData(null, "birthdate=1982-01", 1)]
     [InlineData(null, "birthdate=1982", 2)]
+    [InlineData(null, "birthdate:missing=true", 2)]
+    [InlineData(null, "birthdate:missing=false", R4BTests._patientCount - 2)]
     [InlineData(null, "gender=InvalidValue", 0)]
     [InlineData(null, "gender=male", R4BTests._patientsMale)]
     [InlineData(null, "gender=female", R4BTests._patientsFemale)]

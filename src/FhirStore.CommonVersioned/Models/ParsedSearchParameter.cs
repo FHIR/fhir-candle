@@ -851,6 +851,14 @@ public class ParsedSearchParameter : ICloneable
             return;
         }
 
+        // ':missing' values are booleans ("true"/"false"), not typed values;
+        // SearchTester.TestNode routes :missing through SearchTestMissing before
+        // any type-specific dispatch, so skip type-specific parsing here.
+        if (Modifier == SearchModifierCodes.Missing)
+        {
+            return;
+        }
+
         // parse value types that require additional conversion
         switch (spd!.Type)
         {
@@ -1539,7 +1547,15 @@ public class ParsedSearchParameter : ICloneable
         // need to check for just year because DateTime refuses to parse that
         if (dateString.Length == 4)
         {
-            start = new DateTimeOffset(int.Parse(dateString), 1, 1, 0, 0, 0, TimeSpan.Zero);
+            if (!int.TryParse(dateString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int year))
+            {
+                IgnoredReason ??= $"Invalid date format: {dateString}";
+                start = DateTimeOffset.MinValue;
+                end = DateTimeOffset.MaxValue;
+                return false;
+            }
+
+            start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
             end = start.AddYears(1).AddTicks(-1);
             return true;
         }
@@ -1639,7 +1655,14 @@ public class ParsedSearchParameter : ICloneable
         // need to check for just year because DateTime refuses to parse that
         if (dateString.Length == 4)
         {
-            start = new DateTimeOffset(int.Parse(dateString), 1, 1, 0, 0, 0, TimeSpan.Zero);
+            if (!int.TryParse(dateString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int year))
+            {
+                start = DateTimeOffset.MinValue;
+                end = DateTimeOffset.MaxValue;
+                return false;
+            }
+
+            start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
             end = start.AddYears(1).AddTicks(-1);
             return true;
         }
