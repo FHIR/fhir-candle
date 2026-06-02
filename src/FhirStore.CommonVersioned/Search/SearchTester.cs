@@ -177,6 +177,12 @@ public class SearchTester
                     continue;
                 }
 
+                // per FHIR R4 spec, :not matches resources where the element is absent.
+                if (sp.Modifier == SearchModifierCodes.Not)
+                {
+                    continue;
+                }
+
                 return false;
             }
 

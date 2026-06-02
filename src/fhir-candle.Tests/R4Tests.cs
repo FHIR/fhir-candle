@@ -543,6 +543,9 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "gender=male", R4Tests._patientsMale)]
     [InlineData(null, "gender=female", R4Tests._patientsFemale)]
     [InlineData(null, "gender=male,female", (R4Tests._patientsMale + R4Tests._patientsFemale))]
+    // Phase 5: :not modifier matches resources where the element is absent
+    [InlineData(null, "gender:not=male", R4Tests._patientCount - R4Tests._patientsMale)]
+    [InlineData(null, "gender:not=female", R4Tests._patientCount - R4Tests._patientsFemale)]
     [InlineData(null, "name-use=official", R4Tests._patientCount - 1)]
     [InlineData(null, "name-use=invalid-name-use", 0)]
     [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
