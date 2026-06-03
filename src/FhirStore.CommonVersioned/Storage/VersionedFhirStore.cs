@@ -16,6 +16,7 @@ using Hl7.Fhir.Rest;
 using Hl7.Fhir.Support;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
+using Microsoft.Extensions.Primitives;
 using System.Net;
 using System.Collections;
 using System.Collections.Concurrent;
@@ -26,6 +27,7 @@ using FhirCandle.Interactions;
 using FhirCandle.Compartments;
 using FhirCandle.Extensions;
 using Hl7.Fhir.Utility;
+using SearchParameterHandling = FhirCandle.Client.CandleClientSettings.SearchParameterHandling;
 
 namespace FhirCandle.Storage;
 
@@ -4740,6 +4742,133 @@ rs,
         return ivrs.TypeSearch(parameters, true)!.ToArray();
     }
 
+    /// <summary>
+    /// Resolves the effective <see cref="SearchParameterHandling"/> for a request.
+    /// An explicit <c>Prefer: handling=…</c> header wins (the last directive is used
+    /// if the header is multi-valued); otherwise the tenant default applies —
+    /// <see cref="SearchParameterHandling.Strict"/> when <c>--strict</c>, lenient otherwise.
+    /// </summary>
+    /// <param name="ctx">The incoming request context.</param>
+    /// <returns>Effective handling mode for this request.</returns>
+    private SearchParameterHandling EffectiveSearchHandling(FhirRequestContext ctx)
+    {
+        if (ctx.RequestHeaders.TryGetValue("Prefer", out StringValues prefer))
+        {
+            // Walk from the last header value to the first; within each value walk
+            // directives from last to first. Spec wording is that the last
+            // appearance wins.
+            for (int v = prefer.Count - 1; v >= 0; v--)
+            {
+                string? value = prefer[v];
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                string[] directives = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                for (int d = directives.Length - 1; d >= 0; d--)
+                {
+                    string directive = directives[d];
+                    if (!directive.StartsWith("handling=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string handlingValue = directive["handling=".Length..].Trim();
+                    if (handlingValue.Equals("strict", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return SearchParameterHandling.Strict;
+                    }
+
+                    if (handlingValue.Equals("lenient", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return SearchParameterHandling.Lenient;
+                    }
+                }
+            }
+        }
+
+        return _config.Strict ? SearchParameterHandling.Strict : SearchParameterHandling.Lenient;
+    }
+
+    /// <summary>
+    /// Aggregates strict search issues from unknown parameters, fully-ignored
+    /// parameters, and per-value malformations, and produces a 400 response when
+    /// any are present and the effective handling is strict.
+    /// </summary>
+    /// <param name="handling">          The effective handling mode for the request.</param>
+    /// <param name="unknownParameters"> Query-string keys not recognized for the resource type.</param>
+    /// <param name="parameters">        The parsed (and partially-validated) parameters.</param>
+    /// <param name="response">          [out] When the method returns true, the 400 response.</param>
+    /// <returns>True if the caller should short-circuit with the strict response; false otherwise.</returns>
+    private bool TryBuildStrictSearchOutcome(
+        SearchParameterHandling handling,
+        List<string> unknownParameters,
+        ParsedSearchParameter[] parameters,
+        out FhirResponseContext response)
+    {
+        if (handling != SearchParameterHandling.Strict)
+        {
+            response = new();
+            return false;
+        }
+
+        List<(StrictRuleCode Rule, string Message, OperationOutcome.IssueType IssueType)> issues = [];
+
+        foreach (string key in unknownParameters)
+        {
+            issues.Add((
+                StrictRuleCode.SearchUnknownParameter,
+                $"Unknown search parameter '{key}' for this resource type.",
+                OperationOutcome.IssueType.NotSupported));
+        }
+
+        foreach (ParsedSearchParameter parameter in parameters)
+        {
+            if (parameter.IgnoredParameter)
+            {
+                issues.Add((
+                    StrictRuleCode.SearchMalformedParameter,
+                    $"Search parameter '{parameter.Name}' was rejected as malformed (modifier, chain, or value parse failure).",
+                    OperationOutcome.IssueType.Invalid));
+                continue;
+            }
+
+            for (int i = 0; i < parameter.IgnoredValueFlags.Length; i++)
+            {
+                if (!parameter.IgnoredValueFlags[i])
+                {
+                    continue;
+                }
+
+                string offending = (parameter.Values is not null && i < parameter.Values.Length)
+                    ? parameter.Values[i] ?? string.Empty
+                    : string.Empty;
+
+                issues.Add((
+                    StrictRuleCode.SearchMalformedParameter,
+                    $"Search parameter '{parameter.Name}' value '{offending}' was rejected as malformed.",
+                    OperationOutcome.IssueType.Invalid));
+            }
+        }
+
+        if (issues.Count == 0)
+        {
+            response = new();
+            return false;
+        }
+
+        response = new()
+        {
+            Outcome = SerializationUtils.BuildOutcomeForStrictRules(
+                HttpStatusCode.BadRequest,
+                issues,
+                _config.FhirVersion),
+            StatusCode = HttpStatusCode.BadRequest,
+        };
+        return true;
+    }
+
     /// <summary>Executes the type search operation.</summary>
     /// <param name="ctx">The request and related context.</param>
     /// <param name="response">[out] The response status, resource, outcome, and context.</param>
@@ -4806,7 +4935,21 @@ rs,
             searchQueryParams,
             this,
             rs,
-            ctx.ResourceType);
+            ctx.ResourceType,
+            out List<string> unknownSearchKeys);
+
+        // Strict search handling: reject unknown / malformed parameters with 400
+        // when the effective Prefer: handling=strict is in effect (either the
+        // tenant is strict, or the client explicitly sent the header).
+        if (TryBuildStrictSearchOutcome(
+                EffectiveSearchHandling(ctx),
+                unknownSearchKeys,
+                parameters,
+                out FhirResponseContext strictResponse))
+        {
+            response = strictResponse;
+            return false;
+        }
 
         // execute search
         List<Resource> results = rs.TypeSearch(parameters).ToList();
@@ -5139,6 +5282,8 @@ rs,
         List<Resource> results = [];
         List<ParsedSearchParameter> appliedParameters = [];
 
+        SearchParameterHandling effectiveHandling = EffectiveSearchHandling(ctx);
+
         // iterate across the compartment resources
         foreach ((string resourceType, ParsedCompartment.IncludedResource ir) in compartment.IncludedResources)
         {
@@ -5154,7 +5299,21 @@ rs,
                 searchQueryParams,
                 this,
                 rs,
-                resourceType);
+                resourceType,
+                out List<string> unknownSearchKeys);
+
+            // Strict search handling — same contract as DoTypeSearch. The
+            // compartment-filter parameters built below are internal (synthesized
+            // from the compartment definition) and stay on the legacy overload.
+            if (TryBuildStrictSearchOutcome(
+                    effectiveHandling,
+                    unknownSearchKeys,
+                    parameters,
+                    out FhirResponseContext strictResponse))
+            {
+                response = strictResponse;
+                return false;
+            }
 
             List<ParsedSearchParameter> compartmentFilters = [];
 
@@ -5711,6 +5870,8 @@ rs,
 
         List<(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
 
+        SearchParameterHandling effectiveHandling = EffectiveSearchHandling(ctx);
+
         foreach (string resourceType in resourceTypes)
         {
             // parse search parameters
@@ -5718,7 +5879,20 @@ rs,
                 searchQueryParams,
                 this,
                 _store[resourceType],
-                resourceType);
+                resourceType,
+                out List<string> unknownSearchKeys);
+
+            // Strict search handling per resource type — _type=A,B,C must
+            // produce parameters that all parse against every requested type.
+            if (TryBuildStrictSearchOutcome(
+                    effectiveHandling,
+                    unknownSearchKeys,
+                    parameters,
+                    out FhirResponseContext strictResponse))
+            {
+                response = strictResponse;
+                return false;
+            }
 
             // execute search
             IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters);

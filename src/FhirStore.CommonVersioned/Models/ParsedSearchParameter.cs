@@ -1127,20 +1127,54 @@ public class ParsedSearchParameter : ICloneable
         return sb.ToString().Normalize(System.Text.NormalizationForm.FormC);
     }
 
-    /// <summary>Enumerates parse in this collection.</summary>
+    /// <summary>Parses a search query string into a typed parameter array.</summary>
+    /// <remarks>
+    /// Thin shim over the unknown-key-capturing overload; preserves backward
+    /// compatibility for the many internal call sites (subscription triggers,
+    /// OperationDefinition self-registration, auth filtering, bundle reference
+    /// resolution, compartment filter expansion) that should silently ignore
+    /// unknown parameters even when the tenant is in strict mode.
+    /// </remarks>
     /// <param name="queryString">  The query string.</param>
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="resourceType"> Type of the resource.</param>
-    /// <returns>
-    /// An enumerator that allows foreach to be used to process parse in this collection.
-    /// </returns>
     public static ParsedSearchParameter[] Parse(
         string queryString,
         VersionedFhirStore store,
         IVersionedResourceStore resourceStore,
         string resourceType)
     {
+        return Parse(queryString, store, resourceStore, resourceType, out _);
+    }
+
+    /// <summary>
+    /// Parses a search query string into a typed parameter array, additionally
+    /// capturing the names of any query-string keys that the parser did not
+    /// recognize. Used by strict-mode search handling
+    /// (<c>Prefer: handling=strict</c>) to surface unknown parameters with a 400
+    /// + <c>OperationOutcome</c> response instead of silently dropping them.
+    /// </summary>
+    /// <param name="queryString">       The query string.</param>
+    /// <param name="store">             The FHIR store.</param>
+    /// <param name="resourceStore">     The resource store.</param>
+    /// <param name="resourceType">      Type of the resource.</param>
+    /// <param name="unknownParameters">
+    /// [out] Names of query-string keys that the parser dropped because they did
+    /// not match any known search parameter for <paramref name="resourceType"/>.
+    /// Excludes search result parameters (<c>_count</c>, <c>_sort</c>, etc.),
+    /// which are handled by <see cref="ParsedResultParameters"/>. Never null;
+    /// empty when every key parsed.
+    /// </param>
+    public static ParsedSearchParameter[] Parse(
+        string queryString,
+        VersionedFhirStore store,
+        IVersionedResourceStore resourceStore,
+        string resourceType,
+        out List<string> unknownParameters)
+    {
+        unknownParameters = [];
+
         if (string.IsNullOrWhiteSpace(queryString))
         {
             return [];
@@ -1165,7 +1199,7 @@ public class ParsedSearchParameter : ICloneable
                     continue;
                 }
 
-                Console.WriteLine($"Search Parameter {key} is not a known search parameter.");
+                unknownParameters.Add(key);
                 continue;
             }
 
