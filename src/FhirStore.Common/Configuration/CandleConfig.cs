@@ -396,6 +396,31 @@ public record class CandleConfig
     [ConfigurationKeyName("Strict")]
     public bool Strict { get; set; } = false;
 
+    /// <summary>
+    /// Raw nullable view of <see cref="AllowExistingId"/> capturing the CLI / env value
+    /// before the `?? default` coalesce in the constructor. Used exclusively by the
+    /// startup conflict-warning logic in <c>Program.BuildTenantConfigurations</c> to
+    /// distinguish an explicit user value from an unsupplied flag when composing with
+    /// <c>--strict</c>. Not consumed by any runtime behavior.
+    /// </summary>
+    public bool? RawAllowExistingId { get; private set; }
+
+    /// <summary>
+    /// Raw nullable view of <see cref="AllowCreateAsUpdate"/> capturing the CLI / env
+    /// value before the `?? default` coalesce in the constructor. Used exclusively by
+    /// the startup conflict-warning logic in <c>Program.BuildTenantConfigurations</c>
+    /// to distinguish an explicit user value from an unsupplied flag when composing
+    /// with <c>--strict</c>. Not consumed by any runtime behavior.
+    /// </summary>
+    public bool? RawAllowCreateAsUpdate { get; private set; }
+
+    /// <summary>
+    /// Raw nullable view of <see cref="SupportNotChanged"/> capturing the CLI / env
+    /// value before the `?? default` coalesce in the constructor. Reserved for future
+    /// strict-mode conflict warnings. Not consumed by any runtime behavior today.
+    /// </summary>
+    public bool? RawSupportNotChanged { get; private set; }
+
     /// <summary>Gets or sets the maximum number of minutes a subscription can be open.</summary>
     [ConfigurationKeyName("Max_Subscription_Minutes")]
     public int MaxSubscriptionExpirationMinutes { get; set; } = 0;
@@ -517,9 +542,13 @@ public record class CandleConfig
         TenantsR4B = pr.GetValue(opt.TenantsR4B) ?? envConfig?.TenantsR4B ?? [];
         TenantsR5 = pr.GetValue(opt.TenantsR5) ?? envConfig?.TenantsR5 ?? [];
         TenantsR6 = pr.GetValue(opt.TenantsR6) ?? envConfig?.TenantsR6 ?? [];
-        SupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged ?? false;
-        AllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId ?? true;
-        AllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate ?? true;
+        RawSupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged;
+        RawAllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId;
+        RawAllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate;
+
+        SupportNotChanged = RawSupportNotChanged ?? false;
+        AllowExistingId = RawAllowExistingId ?? true;
+        AllowCreateAsUpdate = RawAllowCreateAsUpdate ?? true;
         Strict = pr.GetValue(opt.Strict) ?? envConfig?.Strict ?? false;
         MaxSubscriptionExpirationMinutes = pr.GetValue(opt.MaxSubscriptionExpirationMinutes) ?? envConfig?.MaxSubscriptionExpirationMinutes ?? 0;
 
