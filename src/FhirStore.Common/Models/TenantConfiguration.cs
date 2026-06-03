@@ -128,4 +128,27 @@ public class TenantConfiguration
     /// enforces spec-strict behaviors per FHIR R4 §3.1.0.7.
     /// </summary>
     public bool Strict { get; set; } = false;
+
+    /// <summary>
+    /// Composes spec-strict policy into the related per-feature flags. When
+    /// <see cref="Strict"/> is <c>true</c>, this forces <see cref="AllowExistingId"/>
+    /// and <see cref="AllowCreateAsUpdate"/> to <c>false</c> so the downstream code
+    /// paths that already gate on those flags take their strict branch.
+    /// </summary>
+    /// <remarks>
+    /// Called by <c>VersionedFhirStore.Init</c> so every store-creation path
+    /// (CLI-launched, programmatic, test) gets the same authoritative composition.
+    /// Also called by <c>Program.BuildTenantConfigurations</c> for warning-and-display
+    /// purposes. Idempotent — safe to call repeatedly.
+    /// </remarks>
+    public void ResolveStrict()
+    {
+        if (!Strict)
+        {
+            return;
+        }
+
+        AllowExistingId = false;
+        AllowCreateAsUpdate = false;
+    }
 }

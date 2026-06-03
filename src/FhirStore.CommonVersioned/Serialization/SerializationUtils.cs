@@ -9,6 +9,8 @@ using System.Net;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Serialization;
+using FhirCandle.Strict;
+using FhirCandle.Utils;
 using Hl7.Fhir.Language.Debugging;
 using Hl7.Fhir.Model;
 using Hl7.Fhir.Rest;
@@ -128,6 +130,82 @@ public static class SerializationUtils
                         : message,
                 },
             },
+        };
+    }
+
+    /// <summary>
+    /// Builds an <see cref="OperationOutcome"/> for a single spec-strict rule violation.
+    /// Appends the canonical FHIR spec URL (resolved from
+    /// <see cref="StrictRule.GetSpecUrl(StrictRuleCode, FhirReleases.FhirSequenceCodes)"/>)
+    /// to the diagnostics message so test-rig operators can justify the rejection
+    /// without an out-of-band lookup.
+    /// </summary>
+    /// <param name="sc">       The HTTP status code to associate with the outcome.</param>
+    /// <param name="message">  The diagnostic message; the spec URL is appended.</param>
+    /// <param name="rule">     The strict rule that produced this outcome.</param>
+    /// <param name="version">  The target FHIR version (selects per-version URL).</param>
+    /// <param name="issueType">(Optional) <see cref="OperationOutcome.IssueType"/>;
+    ///                         defaults via <see cref="BuildOutcomeForRequest"/>.</param>
+    /// <returns>An <see cref="OperationOutcome"/> with one issue.</returns>
+    public static OperationOutcome BuildOutcomeForStrictRule(
+        HttpStatusCode sc,
+        string message,
+        StrictRuleCode rule,
+        FhirReleases.FhirSequenceCodes version,
+        OperationOutcome.IssueType? issueType = null)
+    {
+        string url = StrictRule.GetSpecUrl(rule, version);
+        string diagnostics = string.IsNullOrEmpty(url)
+            ? message
+            : $"{message} (see {url})";
+        return BuildOutcomeForRequest(sc, diagnostics, issueType);
+    }
+
+    /// <summary>
+    /// Builds an <see cref="OperationOutcome"/> that aggregates multiple spec-strict
+    /// rule violations into one response. Used by search-handling strict mode where a
+    /// single request may surface several unknown / malformed parameters and the
+    /// caller wants to fix them all in one round-trip.
+    /// </summary>
+    /// <param name="sc">     The HTTP status code to associate with the outcome.</param>
+    /// <param name="issues"> The rule violations; one issue is emitted per tuple.</param>
+    /// <param name="version">The target FHIR version (selects per-version URL).</param>
+    /// <returns>An <see cref="OperationOutcome"/> with one issue per input tuple, or a
+    /// single placeholder issue if <paramref name="issues"/> is empty.</returns>
+    public static OperationOutcome BuildOutcomeForStrictRules(
+        HttpStatusCode sc,
+        IEnumerable<(StrictRuleCode Rule, string Message, OperationOutcome.IssueType IssueType)> issues,
+        FhirReleases.FhirSequenceCodes version)
+    {
+        List<OperationOutcome.IssueComponent> components = [];
+        OperationOutcome.IssueSeverity severity = sc.IsSuccessful()
+            ? OperationOutcome.IssueSeverity.Information
+            : OperationOutcome.IssueSeverity.Error;
+
+        foreach ((StrictRuleCode rule, string message, OperationOutcome.IssueType issueType) in issues)
+        {
+            string url = StrictRule.GetSpecUrl(rule, version);
+            string diagnostics = string.IsNullOrEmpty(url)
+                ? message
+                : $"{message} (see {url})";
+
+            components.Add(new OperationOutcome.IssueComponent
+            {
+                Severity = severity,
+                Code = issueType,
+                Diagnostics = diagnostics,
+            });
+        }
+
+        if (components.Count == 0)
+        {
+            return BuildOutcomeForRequest(sc);
+        }
+
+        return new OperationOutcome
+        {
+            Id = Guid.NewGuid().ToString(),
+            Issue = components,
         };
     }
 

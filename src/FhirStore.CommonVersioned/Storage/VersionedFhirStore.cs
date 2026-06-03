@@ -208,6 +208,11 @@ public partial class VersionedFhirStore : IFhirStore
             throw new ArgumentNullException(nameof(config.BaseUrl));
         }
 
+        // Compose --strict policy into the per-feature flags BEFORE assignment so
+        // every store-creation path (CLI-launched, programmatic, test) gets the
+        // same authoritative composition. Idempotent.
+        config.ResolveStrict();
+
         _config = config;
         //_baseUri = new Uri(config.ControllerName);
 
