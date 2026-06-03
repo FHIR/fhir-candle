@@ -6,6 +6,7 @@
 using FhirCandle.Search;
 using FhirCandle.Models;
 using FhirCandle.Operations;
+using FhirCandle.Strict;
 using FhirCandle.Subscriptions;
 using FhirCandle.Utils;
 using Hl7.Fhir.ElementModel;
@@ -18,6 +19,7 @@ using Hl7.FhirPath.Expressions;
 using System.Net;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
@@ -56,6 +58,13 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>The compiler.</summary>
     private static FhirPathCompiler _compiler = null!;
+
+    /// <summary>
+    /// FHIR id datatype regex per the spec (R4/R4B/R5 datatypes.html#id):
+    /// <c>[A-Za-z0-9\-\.]{1,64}</c>. Used by strict-mode pre-checks on POST/PUT
+    /// to reject ill-formed resource ids with <see cref="StrictRuleCode.ResourceIdRegex"/>.
+    /// </summary>
+    private static readonly Regex _fhirIdRegex = new("^[A-Za-z0-9\\-\\.]{1,64}$", RegexOptions.Compiled);
 
     /// <summary>The store.</summary>
     private Dictionary<string, IVersionedResourceStore> _store = [];
@@ -1558,6 +1567,29 @@ public partial class VersionedFhirStore : IFhirStore
         // a client-supplied id still pass forceExistingId: true.
         bool isPostCreate = string.Equals(ctx.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase);
 
+        // Strict POST pre-check: client-supplied Resource.id is rejected with 400 per
+        // FHIR REST §3.1.0.6 ("the server SHALL assign the id"). Internal load callers
+        // (transaction processing, package self-registration) bypass via forceExistingId.
+        // Composing solely via AllowExistingId=false would silently re-ID instead of
+        // returning the spec-correct status code.
+        if (_config.Strict &&
+            isPostCreate &&
+            !forceExistingId &&
+            !string.IsNullOrEmpty(content.Id))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                    HttpStatusCode.BadRequest,
+                    "POST/create must not include Resource.id; the server assigns ids on create.",
+                    StrictRuleCode.PostClientSuppliedId,
+                    _config.FhirVersion,
+                    OperationOutcome.IssueType.Invalid),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
         bool allowExistingIdForThisCall = forceExistingId ||
             (!isPostCreate && _config.AllowExistingId);
 
@@ -2356,16 +2388,19 @@ public partial class VersionedFhirStore : IFhirStore
         // FHIR REST: when both URL id and body id are present, they must agree.
         // The request is syntactically valid (well-formed FHIR) but semantically
         // inconsistent, so we return 422 Unprocessable Entity. R4 spec section
-        // 3.1.0.7.1 permits either 400 or 422 here.
+        // 3.1.0.7.1 permits either 400 or 422 here. This rule is always-on
+        // (strict-independent) because the spec leaves the server no other choice.
         if (!string.IsNullOrEmpty(id) &&
             !string.IsNullOrEmpty(content.Id) &&
             !id.Equals(content.Id, StringComparison.Ordinal))
         {
             response = new()
             {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                Outcome = SerializationUtils.BuildOutcomeForStrictRule(
                     HttpStatusCode.UnprocessableEntity,
                     $"URL id '{id}' does not match resource id '{content.Id}'",
+                    StrictRuleCode.PutBodyIdMismatch,
+                    _config.FhirVersion,
                     OperationOutcome.IssueType.Invalid),
                 StatusCode = HttpStatusCode.UnprocessableEntity,
             };
@@ -2382,9 +2417,11 @@ public partial class VersionedFhirStore : IFhirStore
             {
                 response = new()
                 {
-                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
                         HttpStatusCode.UnprocessableEntity,
                         $"Resource.id is required on PUT and must equal the URL id '{id}'.",
+                        StrictRuleCode.PutEmptyBodyId,
+                        _config.FhirVersion,
                         OperationOutcome.IssueType.Required),
                     StatusCode = HttpStatusCode.UnprocessableEntity,
                 };
@@ -2392,6 +2429,74 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             content.Id = id;
+        }
+
+        // Strict-only id semantics. Skipped during load (load callers may have
+        // pre-existing non-conforming ids that we don't want to re-validate) and
+        // during conditional updates (no URL id segment is present; the conditional
+        // path manufactures a guid when no match is found).
+        if (_config.Strict && _loadState == LoadStateCodes.None)
+        {
+            // Reject ill-formed URL id under strict (only meaningful for instance
+            // PUT — conditional PUT has no URL id segment).
+            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+                !string.IsNullOrEmpty(id) &&
+                !_fhirIdRegex.IsMatch(id))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.BadRequest,
+                        $"URL id '{id}' does not match the FHIR id datatype regex [A-Za-z0-9\\-\\.]{{1,64}}.",
+                        StrictRuleCode.ResourceIdRegex,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.Invalid),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
+
+            // Defensive: body id must also conform. Reachable when URL id is empty
+            // (which would already be caught above for non-conditional PUTs) or
+            // when the body id passes the URL/body mismatch check (i.e., they
+            // agree but both are non-conforming).
+            if (!string.IsNullOrEmpty(content.Id) &&
+                !_fhirIdRegex.IsMatch(content.Id))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.BadRequest,
+                        $"Resource.id '{content.Id}' does not match the FHIR id datatype regex [A-Za-z0-9\\-\\.]{{1,64}}.",
+                        StrictRuleCode.ResourceIdRegex,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.Invalid),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
+
+            // PUT-on-missing under strict returns 404 (not the lenient 400 the
+            // underlying AllowCreateAsUpdate=false path would produce). Only
+            // applied to instance PUT — the conditional-update path resolves the
+            // id from search results below and handles its own no-match case via
+            // 412.
+            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+                !string.IsNullOrEmpty(id) &&
+                !((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)rs).ContainsKey(id))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.NotFound,
+                        $"Resource {resourceType}/{id} does not exist; PUT cannot create resources under strict mode.",
+                        StrictRuleCode.PutCreateAsUpdateDisallowed,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.NotFound),
+                    StatusCode = HttpStatusCode.NotFound,
+                };
+                return false;
+            }
         }
 
         HttpStatusCode sc;
