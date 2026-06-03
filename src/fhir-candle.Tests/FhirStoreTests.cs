@@ -1442,6 +1442,66 @@ public class TestStrictModeIdSemantics
         // The stored lastUpdated must NOT be the client-supplied 1990 value.
         response.SerializedResource.ShouldNotContain("1990-01-01T00:00:00");
     }
+
+    // ---- Phase 4: CapabilityStatement assertions under strict ----
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void CapabilityStatementUrlMatchesTenantBaseUrlStrict(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "GET",
+            Url = $"{store.Config.BaseUrl}/metadata",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool ok = store.GetMetadata(ctx, out FhirResponseContext? response);
+
+        ok.ShouldBeTrue();
+        response.ShouldNotBeNull();
+        response!.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // CapabilityStatement.url should reflect the tenant's base URL.
+        response.SerializedResource.ShouldContain(
+            $"\"url\":\"{store.Config.BaseUrl}/CapabilityStatement/metadata\"");
+    }
+
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void CapabilityStatementFhirVersionMatchesTenantStrict(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "GET",
+            Url = $"{store.Config.BaseUrl}/metadata",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool ok = store.GetMetadata(ctx, out FhirResponseContext? response);
+
+        ok.ShouldBeTrue();
+        response.ShouldNotBeNull();
+
+        string expectedFhirVersion = version switch
+        {
+            FhirReleases.FhirSequenceCodes.R4 => "4.0.1",
+            FhirReleases.FhirSequenceCodes.R4B => "4.3.0",
+            FhirReleases.FhirSequenceCodes.R5 => "5.0.0",
+            _ => throw new ArgumentOutOfRangeException(nameof(version)),
+        };
+        response!.SerializedResource.ShouldContain($"\"fhirVersion\":\"{expectedFhirVersion}\"");
+    }
 }
 
 
