@@ -189,7 +189,10 @@ public record class CliOptions
 
     public Option<bool?> Strict { get; } = new("--strict")
     {
-        Description = "Enable spec-strict server behavior (e.g., reject PUT with empty body Resource.id per FHIR R4 §3.1.0.7). Default: false (lenient).",
+        Description = "Enable spec-strict server behavior across id semantics and search parameter handling. " +
+                      "Forces --create-existing-id and --create-as-update to off (overrides explicit values; " +
+                      "startup logs a warning per override). Rejected requests carry the relevant FHIR spec " +
+                      "URL in OperationOutcome.diagnostics. Default: false (lenient).",
         Arity = ArgumentArity.ZeroOrOne,
     };
 
