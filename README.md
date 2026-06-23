@@ -44,6 +44,20 @@ For more information, please see the [Security Readme](SECURITY.MD).
 
 # Documentation
 
+Full documentation lives in the [`docs/`](docs/) tree:
+
+- **Users** — running, configuring, and calling the server: [docs/user/](docs/user/)
+  - [Getting started](docs/user/getting-started.md)
+  - [FHIR tenants](docs/user/tenants.md)
+  - [Loading initial data](docs/user/loading-data.md)
+  - [Strict mode (`--strict`)](docs/user/strict-mode.md)
+  - [Subscriptions reference implementation](docs/user/subscriptions-ri.md)
+  - [Using OpenTelemetry](docs/user/opentelemetry.md)
+  - [`$validate` operation](docs/user/operations/validate.md)
+- **Contributors** — architecture and internals: [docs/technical/](docs/technical/)
+
+The sections below are a quick-start; deeper detail lives in `docs/`.
+
 ## Get Started with .Net
 
 [Install .NET 8 or newer](https://get.dot.net) and run this command:
@@ -55,6 +69,7 @@ dotnet tool install --global fhir-candle
 Note that this software is still under heavy development.
 
 Start a FHIR server and open the browser by running:
+
 ```
 fhir-candle -o
 ```
@@ -68,119 +83,28 @@ docker pull ghcr.io/fhir/fhir-candle:latest
 docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest
 ```
 
-This will run the docker image with the default configuration, mapping port 5826 from the container to port 8080 in the host.
-Once running, you can access http://localhost:8080/ in the browser to access the fhir-candle's UI or access the default endpoints:
+This runs the Docker image with the default configuration, mapping port 5826 from the container to port 8080 on the host. Once running, access http://localhost:8080/ for the UI, or the default endpoints:
 * http://localhost:8080/fhir/r4/ for FHIR R4
 * http://localhost:8080/fhir/r4b/ for FHIR R4B
 * http://localhost:8080/fhir/r5/ for FHIR R5
 
-Note that additional arguments can be passed directly via the `docker run` command. For example, to run the server with only an R4 endpoint named 'test':
-```
-docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest --r4 test
-```
+## Get Started by cloning this repository
 
-
-## Get Started via cloning this repository
-
-To run the default server from the command line:
 ```
 dotnet run --project src/fhir-candle/fhir-candle.csproj
 ```
 
-To pass arguments when using `dotnet run`, add an extra `--`.  For example, to see help:
-```
-dotnet run --project src/fhir-candle/fhir-candle.csproj -- --help
-```
+For arguments, build, and release-output details on all platforms, see
+[Getting started](docs/user/getting-started.md).
 
-To build a release version of the project:
-```
-dotnet build src/fhir-candle/fhir-candle.csproj -c Release
-```
+## More configuration and features
 
-
-The output of the release build can be run (from the root directory of the repo)
-* on all platforms:
-```
-dotnet ./src/fhir-candle/bin/Release/net8.0/fhir-candle.dll
-```
-* if you built on Windows:
-```
-.\src\fhir-candle\bin\Release\net8.0\fhir-candle.exe
-```
-* if you built on Linux or MacOs:
-```
-./src/fhir-candle/bin/Release/net8.0/fhir-candle
-```
-
-### FHIR Tenants
-
-By default, this software loads three FHIR 'tenants':
-* a FHIR R4 endpoint at `/r4`,
-* a FHIR R4B endpoint at `/r4b`, and
-* a FHIR R5 endpoint at `/r5`.
-
-The tenants can be controlled by command line arguments - note that manually specifying any tenants
-overrides the default configuration and will *only* load the ones specified.  To load only an R4
-endpoint at 'fhir', the arguments would include `--r4 fhir`.  You can specify multiple tenants for
-the same version, for example `--r5 fhir --r5 also-fhir` will create two endpoints.
-
-### Loading Initial Data
-
-The server will load initial data specified by the `--fhir-source` argument.  If the path specified
-is a relative path, the software will look for the directory starting at the current running path.
-
-If the system is loading multiple tenants, it will check the path for additional directories based
-on the tenant names.  For example, a path like `fhirData` passed into the default server will look for
-`fhirData/r4`, `fhirData/r4b`, and `fhirData/r5`.  If tenant directories are not found, all tenants will try to
-load resources from the specified path.
-
-### Subscriptions Reference Implementation
-
-This project also contains the reference stack for FHIR Subscriptions.  To use the default landing page
-of the subscriptions RI, the following command can be used:
-```
-fhir-candle --reference-implementation subscriptions --load-package hl7.fhir.uv.subscriptions-backport#1.1.0 --load-examples false --protect-source true -m 1000
-```
-
-### Strict Mode (`--strict`)
-
-The `--strict` flag puts the server in its strictest spec-conformant REST posture so it can be used as
-the system-under-test for FHIR conformance test rigs (Touchstone, Inferno, IG-specific test plans, custom
-CI suites) without lenient behaviors masking client mistakes. It is **monolithic**, **opt-in**, and **per-tenant**:
-a single boolean flips on every enforced behavior listed below, and rejected requests carry the relevant
-FHIR spec URL inline in `OperationOutcome.diagnostics`.
-
-When `--strict` is combined with a conflicting explicit per-feature flag (e.g.
-`--strict --create-as-update true`), strict wins and a one-line startup warning names the override.
-
-| Behavior | Status code | Lenient default | Spec |
-|---|---|---|---|
-| `PUT` body missing `Resource.id` | 422 | Stamps URL id onto empty body | `http.html#update` |
-| `PUT` body id ≠ URL id (always on) | 422 | Same — always rejected | `http.html#update` |
-| `POST` with client-supplied `Resource.id` | 400 | Silently re-assigns id (with `--create-existing-id`) | `http.html#create` |
-| `PUT` on a missing resource id | 404 | Creates as update (with `--create-as-update`) | `http.html#upsert` |
-| `Resource.id` not matching `[A-Za-z0-9\-\.]{1,64}` | 400 (or 422 at parse) | Best-effort accept | `datatypes.html#id` |
-| Unknown / malformed search parameter | 400 | Silently dropped | `search.html#errors` |
-| `CapabilityStatement.url` matches tenant base URL | n/a | Same — already correct | n/a |
-| `CapabilityStatement.fhirVersion` matches tenant version | n/a | Same — already correct | n/a |
-
-Search handling honors the standard `Prefer: handling=strict` / `Prefer: handling=lenient` header. An
-explicit header wins over the tenant default, so a strict tenant can still accept a lenient request,
-and a lenient tenant can still serve a strict request, by client choice.
-
-Strict mode is **not** advertised in `CapabilityStatement` — clients running conformance tests should
-not have to read out-of-band metadata to know the server is spec-correct.
-
-## Using OpenTelemetry
-
-OpenTelemetry instrumentation can be enabled via either the `--otel-otlp-endpoint` argument or the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
-For example, to send traces to a Jaeger instance running on `localhost:4317`: `fhir-candle -o --otel-otlp-endpoint http://localhost:4317`.
-
-For local testing, you can run a Jaeger instance in Docker with the following command:
-
-```
-docker run --rm --name jaeger -p 4317:4317 -p 4318:4318 -p 5778:5778 -p 16686:16686 -p 14250:14250 jaegertracing/all-in-one:latest
-```
+- [FHIR tenants](docs/user/tenants.md) — choose FHIR versions/endpoints with `--r4` / `--r4b` / `--r5`.
+- [Loading initial data](docs/user/loading-data.md) — seed resources with `--fhir-source`.
+- [Strict mode (`--strict`)](docs/user/strict-mode.md) — strict spec-conformant REST posture for conformance testing.
+- [Subscriptions reference implementation](docs/user/subscriptions-ri.md) — run the FHIR Subscriptions RI stack.
+- [Using OpenTelemetry](docs/user/opentelemetry.md) — export traces via `--otel-otlp-endpoint`.
+- [`$validate` operation](docs/user/operations/validate.md) — structural resource validation.
 
 # To-Do
 Note: items are unsorted within their priorities
