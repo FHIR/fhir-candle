@@ -21,5 +21,18 @@ instead.
 
 ### Operations
 
-- [`$validate`](operations/validate.md) — structural validation operation: what
-  it covers, what it does not, request shapes, and response semantics.
+See the [operations index](operations/README.md) for all documented operations.
+
+- [`$validate`](operations/validate.md) — structural resource validation.
+- [`$convert`](operations/convert.md) — parse and re-serialize a resource.
+- [`$test-if-fhir`](operations/test-if-fhir.md) — is a payload parseable FHIR?
+- [`$feature-query`](operations/feature-query.md) — query supported capability
+  features.
+- [`$reset-store`](operations/reset-store.md) — delete all non-protected
+  resources.
+- [`$status`](operations/status.md) — current status of `Subscription`
+  resources.
+- [`$events`](operations/events.md) — fetch prior `Subscription` notification
+  events.
+- [`$subscription-hook`](operations/subscription-hook.md) — receive a
+  notification `Bundle`.

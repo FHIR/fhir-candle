@@ -211,3 +211,4 @@ Response — `200 OK` (note the "ignored" notes alongside "All OK"):
   — internals and the follow-up path to profile/terminology validation.
 - [Strict mode (`--strict`)](../strict-mode.md) — strict REST behaviors for
   conformance testing.
+- [Operations index](README.md) — all documented operations.
