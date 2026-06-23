@@ -172,11 +172,11 @@ public class StrictModeStartupTests
     {
         foreach (StrictRuleCode rule in Enum.GetValues<StrictRuleCode>())
         {
-            StrictRule.SpecUrls.ShouldContainKey(rule);
+            StrictRule.SpecUrls.ContainsKey(rule).ShouldBeTrue();
             IReadOnlyDictionary<FhirReleases.FhirSequenceCodes, string> perVersion = StrictRule.SpecUrls[rule];
-            perVersion.ShouldContainKey(FhirReleases.FhirSequenceCodes.R4);
-            perVersion.ShouldContainKey(FhirReleases.FhirSequenceCodes.R4B);
-            perVersion.ShouldContainKey(FhirReleases.FhirSequenceCodes.R5);
+            perVersion.ContainsKey(FhirReleases.FhirSequenceCodes.R4).ShouldBeTrue();
+            perVersion.ContainsKey(FhirReleases.FhirSequenceCodes.R4B).ShouldBeTrue();
+            perVersion.ContainsKey(FhirReleases.FhirSequenceCodes.R5).ShouldBeTrue();
         }
     }
 }
