@@ -6,6 +6,7 @@
 using FhirCandle.Search;
 using FhirCandle.Models;
 using FhirCandle.Operations;
+using FhirCandle.Strict;
 using FhirCandle.Subscriptions;
 using FhirCandle.Utils;
 using Hl7.Fhir.ElementModel;
@@ -15,15 +16,18 @@ using Hl7.Fhir.Rest;
 using Hl7.Fhir.Support;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
+using Microsoft.Extensions.Primitives;
 using System.Net;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
 using FhirCandle.Interactions;
 using FhirCandle.Compartments;
 using FhirCandle.Extensions;
 using Hl7.Fhir.Utility;
+using SearchParameterHandling = FhirCandle.Client.CandleClientSettings.SearchParameterHandling;
 
 namespace FhirCandle.Storage;
 
@@ -56,6 +60,13 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>The compiler.</summary>
     private static FhirPathCompiler _compiler = null!;
+
+    /// <summary>
+    /// FHIR id datatype regex per the spec (R4/R4B/R5 datatypes.html#id):
+    /// <c>[A-Za-z0-9\-\.]{1,64}</c>. Used by strict-mode pre-checks on POST/PUT
+    /// to reject ill-formed resource ids with <see cref="StrictRuleCode.ResourceIdRegex"/>.
+    /// </summary>
+    private static readonly Regex _fhirIdRegex = new("^[A-Za-z0-9\\-\\.]{1,64}$", RegexOptions.Compiled);
 
     /// <summary>The store.</summary>
     private Dictionary<string, IVersionedResourceStore> _store = [];
@@ -207,6 +218,11 @@ public partial class VersionedFhirStore : IFhirStore
         {
             throw new ArgumentNullException(nameof(config.BaseUrl));
         }
+
+        // Compose --strict policy into the per-feature flags BEFORE assignment so
+        // every store-creation path (CLI-launched, programmatic, test) gets the
+        // same authoritative composition. Idempotent.
+        config.ResolveStrict();
 
         _config = config;
         //_baseUri = new Uri(config.ControllerName);
@@ -430,7 +446,16 @@ public partial class VersionedFhirStore : IFhirStore
 
                     if (opDef is not null)
                     {
-                        _ = InstanceCreate(new FhirRequestContext(this, "POST", "OperationDefinition", opDef), out _);
+                        // Self-registration of operation definitions: this is an internal
+                        // POST during startup; we deliberately want to preserve the
+                        // OperationDefinition.id we computed (so subsequent CapabilityStatement
+                        // generation can reference it by stable id). With M2's HTTP-method
+                        // gating, POST would otherwise discard the supplied id — so pass
+                        // forceAllowExistingId: true.
+                        _ = InstanceCreate(
+                            new FhirRequestContext(this, "POST", "OperationDefinition", opDef),
+                            out _,
+                            forceAllowExistingId: true);
                     }
                 }
                 catch (Exception ex)
@@ -1535,11 +1560,46 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
+        // FHIR REST §2.42: on POST (create), the server SHALL ignore the client-supplied
+        // Resource.id and assign a server-side id. The gate is the HTTP method, NOT the
+        // dispatcher interaction enum — callers may set Interaction = TypeCreate for a
+        // non-POST path (e.g., load-from-disk update-as-create, OperationDefinition
+        // self-registration) and need the legacy AllowExistingId behavior preserved.
+        // Bundle-ingest callers and internal load callers that explicitly want to keep
+        // a client-supplied id still pass forceExistingId: true.
+        bool isPostCreate = string.Equals(ctx.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase);
+
+        // Strict POST pre-check: client-supplied Resource.id is rejected with 400 per
+        // FHIR REST §3.1.0.6 ("the server SHALL assign the id"). Internal load callers
+        // (transaction processing, package self-registration) bypass via forceExistingId.
+        // Composing solely via AllowExistingId=false would silently re-ID instead of
+        // returning the spec-correct status code.
+        if (_config.Strict &&
+            isPostCreate &&
+            !forceExistingId &&
+            !string.IsNullOrEmpty(content.Id))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                    HttpStatusCode.BadRequest,
+                    "POST/create must not include Resource.id; the server assigns ids on create.",
+                    StrictRuleCode.PostClientSuppliedId,
+                    _config.FhirVersion,
+                    OperationOutcome.IssueType.Invalid),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
+        bool allowExistingIdForThisCall = forceExistingId ||
+            (!isPostCreate && _config.AllowExistingId);
+
         // create the resource
         Resource? stored = rs.InstanceCreate(
             ctx,
             content,
-            forceExistingId || _config.AllowExistingId,
+            allowExistingIdForThisCall,
             out HttpStatusCode createStatusCode,
             out OperationOutcome createOutcome);
         Resource? sForHook = null;
@@ -2325,6 +2385,120 @@ public partial class VersionedFhirStore : IFhirStore
                 StatusCode = HttpStatusCode.NotFound,
             };
             return false;
+        }
+
+        // FHIR REST: when both URL id and body id are present, they must agree.
+        // The request is syntactically valid (well-formed FHIR) but semantically
+        // inconsistent, so we return 422 Unprocessable Entity. R4 spec section
+        // 3.1.0.7.1 permits either 400 or 422 here. This rule is always-on
+        // (strict-independent) because the spec leaves the server no other choice.
+        if (!string.IsNullOrEmpty(id) &&
+            !string.IsNullOrEmpty(content.Id) &&
+            !id.Equals(content.Id, StringComparison.Ordinal))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                    HttpStatusCode.UnprocessableEntity,
+                    $"URL id '{id}' does not match resource id '{content.Id}'",
+                    StrictRuleCode.PutBodyIdMismatch,
+                    _config.FhirVersion,
+                    OperationOutcome.IssueType.Invalid),
+                StatusCode = HttpStatusCode.UnprocessableEntity,
+            };
+            return false;
+        }
+
+        // FHIR REST §3.1.0.7: Resource.id SHALL be present in the body on PUT and
+        // SHALL equal the URL id. Under --strict we enforce this with 422; the
+        // lenient default (preserving historical behavior) stamps the URL id onto
+        // an empty body id and falls through.
+        if (!string.IsNullOrEmpty(id) && string.IsNullOrEmpty(content.Id))
+        {
+            if (_config.Strict)
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.UnprocessableEntity,
+                        $"Resource.id is required on PUT and must equal the URL id '{id}'.",
+                        StrictRuleCode.PutEmptyBodyId,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.Required),
+                    StatusCode = HttpStatusCode.UnprocessableEntity,
+                };
+                return false;
+            }
+
+            content.Id = id;
+        }
+
+        // Strict-only id semantics. Skipped during load (load callers may have
+        // pre-existing non-conforming ids that we don't want to re-validate) and
+        // during conditional updates (no URL id segment is present; the conditional
+        // path manufactures a guid when no match is found).
+        if (_config.Strict && _loadState == LoadStateCodes.None)
+        {
+            // Reject ill-formed URL id under strict (only meaningful for instance
+            // PUT — conditional PUT has no URL id segment).
+            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+                !string.IsNullOrEmpty(id) &&
+                !_fhirIdRegex.IsMatch(id))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.BadRequest,
+                        $"URL id '{id}' does not match the FHIR id datatype regex [A-Za-z0-9\\-\\.]{{1,64}}.",
+                        StrictRuleCode.ResourceIdRegex,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.Invalid),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
+
+            // Defensive: body id must also conform. Reachable when URL id is empty
+            // (which would already be caught above for non-conditional PUTs) or
+            // when the body id passes the URL/body mismatch check (i.e., they
+            // agree but both are non-conforming).
+            if (!string.IsNullOrEmpty(content.Id) &&
+                !_fhirIdRegex.IsMatch(content.Id))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.BadRequest,
+                        $"Resource.id '{content.Id}' does not match the FHIR id datatype regex [A-Za-z0-9\\-\\.]{{1,64}}.",
+                        StrictRuleCode.ResourceIdRegex,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.Invalid),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
+
+            // PUT-on-missing under strict returns 404 (not the lenient 400 the
+            // underlying AllowCreateAsUpdate=false path would produce). Only
+            // applied to instance PUT — the conditional-update path resolves the
+            // id from search results below and handles its own no-match case via
+            // 412.
+            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+                !string.IsNullOrEmpty(id) &&
+                !((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)rs).ContainsKey(id))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForStrictRule(
+                        HttpStatusCode.NotFound,
+                        $"Resource {resourceType}/{id} does not exist; PUT cannot create resources under strict mode.",
+                        StrictRuleCode.PutCreateAsUpdateDisallowed,
+                        _config.FhirVersion,
+                        OperationOutcome.IssueType.NotFound),
+                    StatusCode = HttpStatusCode.NotFound,
+                };
+                return false;
+            }
         }
 
         HttpStatusCode sc;
@@ -4568,6 +4742,133 @@ rs,
         return ivrs.TypeSearch(parameters, true)!.ToArray();
     }
 
+    /// <summary>
+    /// Resolves the effective <see cref="SearchParameterHandling"/> for a request.
+    /// An explicit <c>Prefer: handling=…</c> header wins (the last directive is used
+    /// if the header is multi-valued); otherwise the tenant default applies —
+    /// <see cref="SearchParameterHandling.Strict"/> when <c>--strict</c>, lenient otherwise.
+    /// </summary>
+    /// <param name="ctx">The incoming request context.</param>
+    /// <returns>Effective handling mode for this request.</returns>
+    private SearchParameterHandling EffectiveSearchHandling(FhirRequestContext ctx)
+    {
+        if (ctx.RequestHeaders.TryGetValue("Prefer", out StringValues prefer))
+        {
+            // Walk from the last header value to the first; within each value walk
+            // directives from last to first. Spec wording is that the last
+            // appearance wins.
+            for (int v = prefer.Count - 1; v >= 0; v--)
+            {
+                string? value = prefer[v];
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                string[] directives = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                for (int d = directives.Length - 1; d >= 0; d--)
+                {
+                    string directive = directives[d];
+                    if (!directive.StartsWith("handling=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string handlingValue = directive["handling=".Length..].Trim();
+                    if (handlingValue.Equals("strict", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return SearchParameterHandling.Strict;
+                    }
+
+                    if (handlingValue.Equals("lenient", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return SearchParameterHandling.Lenient;
+                    }
+                }
+            }
+        }
+
+        return _config.Strict ? SearchParameterHandling.Strict : SearchParameterHandling.Lenient;
+    }
+
+    /// <summary>
+    /// Aggregates strict search issues from unknown parameters, fully-ignored
+    /// parameters, and per-value malformations, and produces a 400 response when
+    /// any are present and the effective handling is strict.
+    /// </summary>
+    /// <param name="handling">          The effective handling mode for the request.</param>
+    /// <param name="unknownParameters"> Query-string keys not recognized for the resource type.</param>
+    /// <param name="parameters">        The parsed (and partially-validated) parameters.</param>
+    /// <param name="response">          [out] When the method returns true, the 400 response.</param>
+    /// <returns>True if the caller should short-circuit with the strict response; false otherwise.</returns>
+    private bool TryBuildStrictSearchOutcome(
+        SearchParameterHandling handling,
+        List<string> unknownParameters,
+        ParsedSearchParameter[] parameters,
+        out FhirResponseContext response)
+    {
+        if (handling != SearchParameterHandling.Strict)
+        {
+            response = new();
+            return false;
+        }
+
+        List<(StrictRuleCode Rule, string Message, OperationOutcome.IssueType IssueType)> issues = [];
+
+        foreach (string key in unknownParameters)
+        {
+            issues.Add((
+                StrictRuleCode.SearchUnknownParameter,
+                $"Unknown search parameter '{key}' for this resource type.",
+                OperationOutcome.IssueType.NotSupported));
+        }
+
+        foreach (ParsedSearchParameter parameter in parameters)
+        {
+            if (parameter.IgnoredParameter)
+            {
+                issues.Add((
+                    StrictRuleCode.SearchMalformedParameter,
+                    $"Search parameter '{parameter.Name}' was rejected as malformed (modifier, chain, or value parse failure).",
+                    OperationOutcome.IssueType.Invalid));
+                continue;
+            }
+
+            for (int i = 0; i < parameter.IgnoredValueFlags.Length; i++)
+            {
+                if (!parameter.IgnoredValueFlags[i])
+                {
+                    continue;
+                }
+
+                string offending = (parameter.Values is not null && i < parameter.Values.Length)
+                    ? parameter.Values[i] ?? string.Empty
+                    : string.Empty;
+
+                issues.Add((
+                    StrictRuleCode.SearchMalformedParameter,
+                    $"Search parameter '{parameter.Name}' value '{offending}' was rejected as malformed.",
+                    OperationOutcome.IssueType.Invalid));
+            }
+        }
+
+        if (issues.Count == 0)
+        {
+            response = new();
+            return false;
+        }
+
+        response = new()
+        {
+            Outcome = SerializationUtils.BuildOutcomeForStrictRules(
+                HttpStatusCode.BadRequest,
+                issues,
+                _config.FhirVersion),
+            StatusCode = HttpStatusCode.BadRequest,
+        };
+        return true;
+    }
+
     /// <summary>Executes the type search operation.</summary>
     /// <param name="ctx">The request and related context.</param>
     /// <param name="response">[out] The response status, resource, outcome, and context.</param>
@@ -4634,7 +4935,21 @@ rs,
             searchQueryParams,
             this,
             rs,
-            ctx.ResourceType);
+            ctx.ResourceType,
+            out List<string> unknownSearchKeys);
+
+        // Strict search handling: reject unknown / malformed parameters with 400
+        // when the effective Prefer: handling=strict is in effect (either the
+        // tenant is strict, or the client explicitly sent the header).
+        if (TryBuildStrictSearchOutcome(
+                EffectiveSearchHandling(ctx),
+                unknownSearchKeys,
+                parameters,
+                out FhirResponseContext strictResponse))
+        {
+            response = strictResponse;
+            return false;
+        }
 
         // execute search
         List<Resource> results = rs.TypeSearch(parameters).ToList();
@@ -4967,6 +5282,8 @@ rs,
         List<Resource> results = [];
         List<ParsedSearchParameter> appliedParameters = [];
 
+        SearchParameterHandling effectiveHandling = EffectiveSearchHandling(ctx);
+
         // iterate across the compartment resources
         foreach ((string resourceType, ParsedCompartment.IncludedResource ir) in compartment.IncludedResources)
         {
@@ -4982,7 +5299,21 @@ rs,
                 searchQueryParams,
                 this,
                 rs,
-                resourceType);
+                resourceType,
+                out List<string> unknownSearchKeys);
+
+            // Strict search handling — same contract as DoTypeSearch. The
+            // compartment-filter parameters built below are internal (synthesized
+            // from the compartment definition) and stay on the legacy overload.
+            if (TryBuildStrictSearchOutcome(
+                    effectiveHandling,
+                    unknownSearchKeys,
+                    parameters,
+                    out FhirResponseContext strictResponse))
+            {
+                response = strictResponse;
+                return false;
+            }
 
             List<ParsedSearchParameter> compartmentFilters = [];
 
@@ -5539,6 +5870,8 @@ rs,
 
         List<(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
 
+        SearchParameterHandling effectiveHandling = EffectiveSearchHandling(ctx);
+
         foreach (string resourceType in resourceTypes)
         {
             // parse search parameters
@@ -5546,7 +5879,20 @@ rs,
                 searchQueryParams,
                 this,
                 _store[resourceType],
-                resourceType);
+                resourceType,
+                out List<string> unknownSearchKeys);
+
+            // Strict search handling per resource type — _type=A,B,C must
+            // produce parameters that all parse against every requested type.
+            if (TryBuildStrictSearchOutcome(
+                    effectiveHandling,
+                    unknownSearchKeys,
+                    parameters,
+                    out FhirResponseContext strictResponse))
+            {
+                response = strictResponse;
+                return false;
+            }
 
             // execute search
             IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters);

@@ -187,6 +187,15 @@ public record class CliOptions
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    public Option<bool?> Strict { get; } = new("--strict")
+    {
+        Description = "Enable spec-strict server behavior across id semantics and search parameter handling. " +
+                      "Forces --create-existing-id and --create-as-update to off (overrides explicit values; " +
+                      "startup logs a warning per override). Rejected requests carry the relevant FHIR spec " +
+                      "URL in OperationOutcome.diagnostics. Default: false (lenient).",
+        Arity = ArgumentArity.ZeroOrOne,
+    };
+
     public Option<int?> MaxSubscriptionExpirationMinutes { get; } = new("--max-subscription-minutes")
     {
         Description = "Maximum number of minutes a subscription can be active.",
@@ -365,7 +374,11 @@ public record class CandleConfig
     public string[] SmartOptionalTenants { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets a value indicating whether the create interactions can specify an ID.
+    /// Gets or sets a value indicating whether non-POST create paths may preserve a
+    /// client-supplied id. Applies to bundle ingest (transaction / batch — via the
+    /// internal forceExistingId override) and to load-from-disk update-as-create only;
+    /// POST /[type] is always required by the FHIR REST spec to assign a server-side
+    /// id and ignores this setting.
     /// </summary>
     [ConfigurationKeyName("Create_Existing_Id")]
     public bool AllowExistingId { get; set; } = true;
@@ -375,6 +388,41 @@ public record class CandleConfig
     /// </summary>
     [ConfigurationKeyName("Create_As_Update")]
     public bool AllowCreateAsUpdate { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether spec-strict server behavior is enabled.
+    /// When false (default), the server accepts certain lenient inputs (e.g., PUT with
+    /// empty body Resource.id is stamped with the URL id). When true, the server
+    /// enforces spec-strict behaviors per FHIR R4 §3.1.0.7 (e.g., PUT with empty body
+    /// Resource.id is rejected with 422 + OperationOutcome).
+    /// </summary>
+    [ConfigurationKeyName("Strict")]
+    public bool Strict { get; set; } = false;
+
+    /// <summary>
+    /// Raw nullable view of <see cref="AllowExistingId"/> capturing the CLI / env value
+    /// before the `?? default` coalesce in the constructor. Used exclusively by the
+    /// startup conflict-warning logic in <c>Program.BuildTenantConfigurations</c> to
+    /// distinguish an explicit user value from an unsupplied flag when composing with
+    /// <c>--strict</c>. Not consumed by any runtime behavior.
+    /// </summary>
+    public bool? RawAllowExistingId { get; private set; }
+
+    /// <summary>
+    /// Raw nullable view of <see cref="AllowCreateAsUpdate"/> capturing the CLI / env
+    /// value before the `?? default` coalesce in the constructor. Used exclusively by
+    /// the startup conflict-warning logic in <c>Program.BuildTenantConfigurations</c>
+    /// to distinguish an explicit user value from an unsupplied flag when composing
+    /// with <c>--strict</c>. Not consumed by any runtime behavior.
+    /// </summary>
+    public bool? RawAllowCreateAsUpdate { get; private set; }
+
+    /// <summary>
+    /// Raw nullable view of <see cref="SupportNotChanged"/> capturing the CLI / env
+    /// value before the `?? default` coalesce in the constructor. Reserved for future
+    /// strict-mode conflict warnings. Not consumed by any runtime behavior today.
+    /// </summary>
+    public bool? RawSupportNotChanged { get; private set; }
 
     /// <summary>Gets or sets the maximum number of minutes a subscription can be open.</summary>
     [ConfigurationKeyName("Max_Subscription_Minutes")]
@@ -497,9 +545,14 @@ public record class CandleConfig
         TenantsR4B = pr.GetValue(opt.TenantsR4B) ?? envConfig?.TenantsR4B ?? [];
         TenantsR5 = pr.GetValue(opt.TenantsR5) ?? envConfig?.TenantsR5 ?? [];
         TenantsR6 = pr.GetValue(opt.TenantsR6) ?? envConfig?.TenantsR6 ?? [];
-        SupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged ?? false;
-        AllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId ?? true;
-        AllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate ?? true;
+        RawSupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged;
+        RawAllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId;
+        RawAllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate;
+
+        SupportNotChanged = RawSupportNotChanged ?? false;
+        AllowExistingId = RawAllowExistingId ?? true;
+        AllowCreateAsUpdate = RawAllowCreateAsUpdate ?? true;
+        Strict = pr.GetValue(opt.Strict) ?? envConfig?.Strict ?? false;
         MaxSubscriptionExpirationMinutes = pr.GetValue(opt.MaxSubscriptionExpirationMinutes) ?? envConfig?.MaxSubscriptionExpirationMinutes ?? 0;
 
         ZulipEmail = pr.GetValue(opt.ZulipEmail) ?? envConfig?.ZulipEmail;
@@ -888,6 +941,7 @@ public class CliRootCommand : RootCommand
         Add(_cliOptions.SupportNotChanged);
         Add(_cliOptions.AllowExistingId);
         Add(_cliOptions.AllowCreateAsUpdate);
+        Add(_cliOptions.Strict);
 
         Add(_cliOptions.MaxSubscriptionExpirationMinutes);
         Add(_cliOptions.ZulipEmail);

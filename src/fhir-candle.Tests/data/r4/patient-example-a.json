@@ -28,6 +28,13 @@
       "given": [
         "Duck"
       ]
+    },
+    {
+      "use": "usual",
+      "family": "Muñoz",
+      "given": [
+        "Test"
+      ]
     }
   ],
   "gender": "male",

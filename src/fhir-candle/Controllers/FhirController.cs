@@ -369,6 +369,7 @@ public class FhirController : ControllerBase
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.TypeOperation,
+            ResourceType = resourceName,
             OperationName = "$" + opName,
         };
 
@@ -378,9 +379,7 @@ public class FhirController : ControllerBase
             return;
         }
 
-        bool success = store.TypeOperation(
-            ctx,
-            out FhirResponseContext opResponse);
+        bool success = store.TypeOperation(ctx, out FhirResponseContext opResponse);
 
         await AddFhirResponse(Response, prefer, success, opResponse);
     }
@@ -1075,9 +1074,7 @@ public class FhirController : ControllerBase
             }
 
             // operation
-            bool success = store.TypeOperation(
-                ctx,
-                out FhirResponseContext opResponse);
+            bool success = store.TypeOperation(ctx, out FhirResponseContext opResponse);
 
             await AddFhirResponse(Response, prefer, success, opResponse);
         }

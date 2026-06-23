@@ -124,8 +124,8 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.NotEqual:
-
-                    if ((valueStart != sp.ValueDateStarts[i]) || (valueEnd != sp.ValueDateEnds[i]))
+                    // ne: target interval is NOT wholly inside the search interval
+                    if (!((valueStart >= sp.ValueDateStarts[i]) && (valueEnd <= sp.ValueDateEnds[i])))
                     {
                         return true;
                     }
@@ -133,6 +133,8 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.GreaterThan:
+                    // gt: target extends past the end of the search range
+                    // https://www.hl7.org/fhir/R4/search.html#prefix
                     if (valueEnd > sp.ValueDateEnds[i])
                     {
                         return true;
@@ -140,21 +142,24 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.LessThan:
-                    if (valueEnd < sp.ValueDateEnds[i])
+                    // lt: target starts before the start of the search range
+                    if (valueStart < sp.ValueDateStarts[i])
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.GreaterThanOrEqual:
-                    if (valueEnd >= sp.ValueDateEnds[i])
+                    // ge: target intersects [reqStart, +inf)
+                    if (valueEnd >= sp.ValueDateStarts[i])
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.LessThanOrEqual:
-                    if (valueEnd <= sp.ValueDateEnds[i])
+                    // le: target intersects (-inf, reqEnd]
+                    if (valueStart <= sp.ValueDateEnds[i])
                     {
                         return true;
                     }
@@ -175,11 +180,30 @@ public static class EvalDateSearch
                     break;
 
                 case SearchPrefixCodes.Approximately:
-                    // TODO: this is not correct date approximation since it does not account for precision, but works well enough for now
-                    if ((valueStart.Subtract(sp.ValueDateStarts[i]) < TimeSpan.FromDays(1)) ||
-                        (valueEnd.Subtract(sp.ValueDateEnds[i]) < TimeSpan.FromDays(1)))
+                    // precision-aware fixed window around the search value;
+                    // match if the target interval overlaps the expanded search interval.
+                    // FHIR R4 leaves the window semantics to the implementation; window sizes
+                    // are derived from the granularity of the search string in
+                    // ParsedSearchParameter.TryParseDateString.
+                    //
+                    // ValueDateApproxDeltas is invariably allocated alongside
+                    // ValueDateStarts / ValueDateEnds at parse time (see
+                    // ParsedSearchParameter.ProcessTypedValues, SearchParamType.Date),
+                    // so length mismatch should never happen — guarded with a Debug.Assert
+                    // to catch future producer-side bugs in debug builds.
                     {
-                        return true;
+                        System.Diagnostics.Debug.Assert(
+                            sp.ValueDateApproxDeltas is not null && sp.ValueDateApproxDeltas.Length > i,
+                            "ValueDateApproxDeltas length mismatch in EvalDateSearch.Approximately; producer invariant violated.");
+                        TimeSpan delta = sp.ValueDateApproxDeltas![i];
+
+                        DateTimeOffset expandedStart = sp.ValueDateStarts[i] - delta;
+                        DateTimeOffset expandedEnd = sp.ValueDateEnds[i] + delta;
+
+                        if ((valueStart <= expandedEnd) && (valueEnd >= expandedStart))
+                        {
+                            return true;
+                        }
                     }
                     break;
             }

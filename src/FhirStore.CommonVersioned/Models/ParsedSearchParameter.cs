@@ -189,6 +189,16 @@ public class ParsedSearchParameter : ICloneable
     /// <summary>Gets or sets the applied value flags.</summary>
     public bool[] IgnoredValueFlags { get; set; } = [];
 
+    /// <summary>
+    /// For string-typed search parameters, the case- and accent-folded form of each
+    /// value in <see cref="Values"/>, cached at parse time to avoid per-evaluation
+    /// refolding. Entries whose folded form is the empty string are stored as
+    /// <c>null</c>; string-search evaluators skip null entries to avoid the
+    /// <c>StartsWith("")</c> / <c>Contains("")</c> false-positive match. Null on
+    /// non-string parameters.
+    /// </summary>
+    public string?[]? FoldedValues { get; set; } = null;
+
     /// <summary>Gets or sets a value indicating whether this parameter has been ignored.</summary>
     public bool IgnoredParameter { get; set; } = false;
 
@@ -209,6 +219,15 @@ public class ParsedSearchParameter : ICloneable
 
     /// <summary>Gets or sets the date ends.</summary>
     public DateTimeOffset[]? ValueDateEnds { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets per-value approximation deltas used by the <c>ap</c> prefix.
+    /// The window size scales with the granularity of the search string
+    /// (year → ±1 year, year+month → ±2 months, full date → ±1 month,
+    /// date+time → ±1 day). Populated alongside <see cref="ValueDateStarts"/>
+    /// and <see cref="ValueDateEnds"/> in <c>ProcessTypedValues</c>.
+    /// </summary>
+    public TimeSpan[]? ValueDateApproxDeltas { get; set; } = null;
 
     /// <summary>Gets or sets the values for integer types.</summary>
     public long[]? ValueInts { get; set; } = null;
@@ -256,6 +275,7 @@ public class ParsedSearchParameter : ICloneable
         Name = other.Name;
         Values = other.Values.Select(v => v).ToArray();
         IgnoredValueFlags = other.IgnoredValueFlags.Select(v => v).ToArray();
+        FoldedValues = other.FoldedValues?.Select(v => v).ToArray();
         IgnoredParameter = other.IgnoredParameter;
         IgnoredReason = other.IgnoredReason;
         ChainedParameters = other.ChainedParameters?.DeepCopy();
@@ -264,6 +284,7 @@ public class ParsedSearchParameter : ICloneable
         CompositeComponents = other.CompositeComponents?.Select(c => new ParsedSearchParameter(c)).ToArray();
         ValueDateStarts = other.ValueDateStarts?.Select(v => v).ToArray();
         ValueDateEnds = other.ValueDateEnds?.Select(v => v).ToArray();
+        ValueDateApproxDeltas = other.ValueDateApproxDeltas?.Select(v => v).ToArray();
         ValueInts = other.ValueInts?.Select(v => v).ToArray();
         ValueDecimals = other.ValueDecimals?.Select(v => v).ToArray();
         ValueFhirCodes = other.ValueFhirCodes?.Select(v => v).ToArray();
@@ -851,6 +872,14 @@ public class ParsedSearchParameter : ICloneable
             return;
         }
 
+        // ':missing' values are booleans ("true"/"false"), not typed values;
+        // SearchTester.TestNode routes :missing through SearchTestMissing before
+        // any type-specific dispatch, so skip type-specific parsing here.
+        if (Modifier == SearchModifierCodes.Missing)
+        {
+            return;
+        }
+
         // parse value types that require additional conversion
         switch (spd!.Type)
         {
@@ -858,13 +887,15 @@ public class ParsedSearchParameter : ICloneable
                 {
                     ValueDateStarts = new DateTimeOffset[Values.Length];
                     ValueDateEnds = new DateTimeOffset[Values.Length];
+                    ValueDateApproxDeltas = new TimeSpan[Values.Length];
 
                     for (int i = 0; i < Values.Length; i++)
                     {
-                        if (TryParseDateString(Values[i], out DateTimeOffset start, out DateTimeOffset end))
+                        if (TryParseDateString(Values[i], out DateTimeOffset start, out DateTimeOffset end, out TimeSpan approxDelta))
                         {
                             ValueDateStarts[i] = start;
                             ValueDateEnds[i] = end;
+                            ValueDateApproxDeltas[i] = approxDelta;
                         }
                         else
                         {
@@ -1049,23 +1080,101 @@ public class ParsedSearchParameter : ICloneable
                 //    //    }
                 //    //}
                 //    break;
+
+            case SearchParamType.String:
+                {
+                    // Cache the case/accent-folded form of each value once at parse time.
+                    // Empty folds become null so string-search evaluators can skip them,
+                    // avoiding the StartsWith("") / Contains("") false-positive match
+                    // for inputs like a bare combining mark.
+                    FoldedValues = new string?[Values.Length];
+                    for (int i = 0; i < Values.Length; i++)
+                    {
+                        string folded = FoldForSearch(Values[i]);
+                        FoldedValues[i] = string.IsNullOrEmpty(folded) ? null : folded;
+                    }
+                }
+                break;
         }
     }
 
-    /// <summary>Enumerates parse in this collection.</summary>
+    /// <summary>
+    /// Folds a string for case- and accent-insensitive comparison: NFD-normalize,
+    /// drop combining marks, recompose. Per FHIR R4 § 3.1.1.3, default string searches
+    /// are both case- and accent-insensitive. Used to populate <see cref="FoldedValues"/>
+    /// at parse time and to fold resource-side strings inside the string-search
+    /// evaluators (where caching is not viable because the value is per-resource).
+    /// </summary>
+    /// <param name="s">The input string.</param>
+    /// <returns>The folded form, or <see cref="string.Empty"/> if null/empty.</returns>
+    internal static string FoldForSearch(string? s)
+    {
+        if (string.IsNullOrEmpty(s))
+        {
+            return s ?? string.Empty;
+        }
+
+        string normalized = s.Normalize(System.Text.NormalizationForm.FormD);
+        System.Text.StringBuilder sb = new(normalized.Length);
+        foreach (char c in normalized)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString().Normalize(System.Text.NormalizationForm.FormC);
+    }
+
+    /// <summary>Parses a search query string into a typed parameter array.</summary>
+    /// <remarks>
+    /// Thin shim over the unknown-key-capturing overload; preserves backward
+    /// compatibility for the many internal call sites (subscription triggers,
+    /// OperationDefinition self-registration, auth filtering, bundle reference
+    /// resolution, compartment filter expansion) that should silently ignore
+    /// unknown parameters even when the tenant is in strict mode.
+    /// </remarks>
     /// <param name="queryString">  The query string.</param>
     /// <param name="store">        The FHIR store.</param>
     /// <param name="resourceStore">The resource store.</param>
     /// <param name="resourceType"> Type of the resource.</param>
-    /// <returns>
-    /// An enumerator that allows foreach to be used to process parse in this collection.
-    /// </returns>
     public static ParsedSearchParameter[] Parse(
         string queryString,
         VersionedFhirStore store,
         IVersionedResourceStore resourceStore,
         string resourceType)
     {
+        return Parse(queryString, store, resourceStore, resourceType, out _);
+    }
+
+    /// <summary>
+    /// Parses a search query string into a typed parameter array, additionally
+    /// capturing the names of any query-string keys that the parser did not
+    /// recognize. Used by strict-mode search handling
+    /// (<c>Prefer: handling=strict</c>) to surface unknown parameters with a 400
+    /// + <c>OperationOutcome</c> response instead of silently dropping them.
+    /// </summary>
+    /// <param name="queryString">       The query string.</param>
+    /// <param name="store">             The FHIR store.</param>
+    /// <param name="resourceStore">     The resource store.</param>
+    /// <param name="resourceType">      Type of the resource.</param>
+    /// <param name="unknownParameters">
+    /// [out] Names of query-string keys that the parser dropped because they did
+    /// not match any known search parameter for <paramref name="resourceType"/>.
+    /// Excludes search result parameters (<c>_count</c>, <c>_sort</c>, etc.),
+    /// which are handled by <see cref="ParsedResultParameters"/>. Never null;
+    /// empty when every key parsed.
+    /// </param>
+    public static ParsedSearchParameter[] Parse(
+        string queryString,
+        VersionedFhirStore store,
+        IVersionedResourceStore resourceStore,
+        string resourceType,
+        out List<string> unknownParameters)
+    {
+        unknownParameters = [];
+
         if (string.IsNullOrWhiteSpace(queryString))
         {
             return [];
@@ -1090,7 +1199,7 @@ public class ParsedSearchParameter : ICloneable
                     continue;
                 }
 
-                Console.WriteLine($"Search Parameter {key} is not a known search parameter.");
+                unknownParameters.Add(key);
                 continue;
             }
 
@@ -1522,12 +1631,15 @@ public class ParsedSearchParameter : ICloneable
     }
 
     /// <summary>Attempts to parse a date string.</summary>
-    /// <param name="dateString">The date string.</param>
-    /// <param name="start">     [out] The start.</param>
-    /// <param name="end">       [out] The end.</param>
+    /// <param name="dateString">  The date string.</param>
+    /// <param name="start">       [out] The start.</param>
+    /// <param name="end">         [out] The end.</param>
+    /// <param name="approxDelta"> [out] Window delta used by the <c>ap</c> prefix; scales with the granularity of <paramref name="dateString"/>.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end)
+    public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end, out TimeSpan approxDelta)
     {
+        approxDelta = TimeSpan.Zero;
+
         if (string.IsNullOrEmpty(dateString))
         {
             start = DateTimeOffset.MinValue;
@@ -1539,13 +1651,22 @@ public class ParsedSearchParameter : ICloneable
         // need to check for just year because DateTime refuses to parse that
         if (dateString.Length == 4)
         {
-            start = new DateTimeOffset(int.Parse(dateString), 1, 1, 0, 0, 0, TimeSpan.Zero);
+            if (!int.TryParse(dateString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int year))
+            {
+                IgnoredReason ??= $"Invalid date format: {dateString}";
+                start = DateTimeOffset.MinValue;
+                end = DateTimeOffset.MaxValue;
+                return false;
+            }
+
+            start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
             end = start.AddYears(1).AddTicks(-1);
+            approxDelta = TimeSpan.FromDays(365);
             return true;
         }
 
         // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
-        if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
+        if (!DateTime.TryParse(dateString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime dt))
         {
             Console.WriteLine($"Failed to parse date: {dateString}");
             IgnoredReason ??= $"Invalid date format: {dateString}";
@@ -1554,34 +1675,47 @@ public class ParsedSearchParameter : ICloneable
             return false;
         }
 
-        start = new DateTimeOffset(dt, TimeSpan.Zero);
+        // RoundtripKind preserves any explicit offset as DateTimeKind.Local; normalize to UTC.
+        start = dt.Kind == DateTimeKind.Local
+            ? new DateTimeOffset(dt).ToUniversalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
 
         switch (dateString.Length)
         {
             // YYYY
             case 4:
                 end = start.AddYears(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(365);
                 break;
 
             // YYYY-MM
             case 7:
                 end = start.AddMonths(1).AddTicks(-1);
+                // ±65 days covers any consecutive two-month span (worst case 62 days,
+                // Jul–Aug or Dec–Jan) with a small safety margin for timezone offsets
+                // and inclusive-boundary edge cases. We deliberately use a flat window —
+                // AddMonths(2) would introduce leap-Feb asymmetry the `ap` window does
+                // not need.
+                approxDelta = TimeSpan.FromDays(65);
                 break;
 
             // YYYY-MM-DD
             case 10:
                 end = start.AddDays(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(31);
                 break;
 
             // Note: this is not defined as valid, but wanted to support it
             // YYYY-MM-DDThh
             case 13:
                 end = start.AddHours(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(1);
                 break;
 
             // YYYY-MM-DDThh:mm
             case 16:
                 end = start.AddMinutes(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(1);
                 break;
 
             // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
@@ -1609,6 +1743,7 @@ public class ParsedSearchParameter : ICloneable
             // YYYY-MM-DDThh:mm:ss.ffff+zz:zz
             case 30:
                 end = start.AddSeconds(1).AddTicks(-1);
+                approxDelta = TimeSpan.FromDays(1);
                 break;
 
             default:
@@ -1639,13 +1774,20 @@ public class ParsedSearchParameter : ICloneable
         // need to check for just year because DateTime refuses to parse that
         if (dateString.Length == 4)
         {
-            start = new DateTimeOffset(int.Parse(dateString), 1, 1, 0, 0, 0, TimeSpan.Zero);
+            if (!int.TryParse(dateString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int year))
+            {
+                start = DateTimeOffset.MinValue;
+                end = DateTimeOffset.MaxValue;
+                return false;
+            }
+
+            start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
             end = start.AddYears(1).AddTicks(-1);
             return true;
         }
 
         // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
-        if (!DateTime.TryParse(dateString, null, DateTimeStyles.RoundtripKind, out DateTime dt))
+        if (!DateTime.TryParse(dateString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime dt))
         {
             Console.WriteLine($"Failed to parse date: {dateString}");
             start = DateTimeOffset.MinValue;
@@ -1653,7 +1795,10 @@ public class ParsedSearchParameter : ICloneable
             return false;
         }
 
-        start = new DateTimeOffset(dt, TimeSpan.Zero);
+        // RoundtripKind preserves any explicit offset as DateTimeKind.Local; normalize to UTC.
+        start = dt.Kind == DateTimeKind.Local
+            ? new DateTimeOffset(dt).ToUniversalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
 
         switch (dateString.Length)
         {

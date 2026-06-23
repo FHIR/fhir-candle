@@ -355,6 +355,20 @@ public class R5TestsObservation : IClassFixture<R5Tests>
     [InlineData(null, "subject._id=example", R5Tests._observationsWithSubjectExample)]
     [InlineData(null, "subject:Patient._id=example", R5Tests._observationsWithSubjectExample)]
     [InlineData(null, "subject._id=example&_include=Observation:patient", R5Tests._observationsWithSubjectExample, R5Tests._observationsWithSubjectExample + 1)]
+    // Phase 2: date prefix boundary tests against effectiveDateTime (2012-09-17 x3, 2016-03-28, 2016-05-18T22:33:22Z, 2017-05-03T15:54:26-04:00)
+    [InlineData(null, "date=ge2016", 3)]
+    [InlineData(null, "date=lt2016", 3)]
+    [InlineData(null, "date=ge2017", 1)]
+    // Phase 3: precision-aware ap window against effectiveDateTime
+    [InlineData(null, "date=ap2016", 3)]
+    [InlineData(null, "date=ap2012-09-17", 3)]
+    [InlineData(null, "date=ap2030", 0)]
+    // Phase 6 (M4): offset-aware date normalization.
+    [InlineData(null, "date=ge2017-05-03T19:54:26Z", 1)]
+    [InlineData(null, "date=lt2017-05-03T19:54:26Z", 5)]
+    // Phase 6 (M6): instant-boundary gt/ge semantics at 2016-05-18T22:33:22Z.
+    [InlineData(null, "date=gt2016-05-18T22:33:22Z", 1)]
+    [InlineData(null, "date=ge2016-05-18T22:33:22Z", 2)]
     [InlineData("PatientExampleFull", "subject=Patient/example", R5Tests._observationsWithSubjectExample)]
     [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
     [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
@@ -602,6 +616,13 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "name:exact=Peter", 2)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
+    // Phase 4: accent-insensitive string search (pat1 has a second name with family=Muñoz)
+    [InlineData(null, "family=munoz", 1)]
+    [InlineData(null, "family=MUÑOZ", 1)]
+    [InlineData(null, "family:contains=unoz", 1)]
+    [InlineData(null, "family:exact=Muñoz", 1)]
+    [InlineData(null, "family:exact=Munoz", 0)]
+    [InlineData(null, "family:exact=muñoz", 0)]
     [InlineData(null, "_profile:missing=true", R5Tests._patientCount)]
     [InlineData(null, "_profile:missing=false", 0)]
     [InlineData(null, "multiplebirth=3", 1)]
@@ -610,10 +631,33 @@ public class R5TestsPatient : IClassFixture<R5Tests>
     [InlineData(null, "birthdate=1982-01-23", 1)]
     [InlineData(null, "birthdate=1982-01", 1)]
     [InlineData(null, "birthdate=1982", 2)]
+    [InlineData(null, "birthdate:missing=true", 2)]
+    [InlineData(null, "birthdate:missing=false", R5Tests._patientCount - 2)]
+    // Phase 2: date prefix boundary inclusivity (R5 birthdates: 1974-12-25 x2, 1982-01-23, 1982-08-02)
+    [InlineData(null, "birthdate=ge1982", 2)]
+    [InlineData(null, "birthdate=gt1982", 0)]
+    [InlineData(null, "birthdate=lt1982", 2)]
+    [InlineData(null, "birthdate=le1982", 4)]
+    [InlineData(null, "birthdate=ne1982", 2)]
+    [InlineData(null, "birthdate=ge1982-01-23", 2)]
+    [InlineData(null, "birthdate=le1982-08-02", 4)]
+    [InlineData(null, "birthdate=lt1982-01-23", 2)]
+    [InlineData(null, "birthdate=gt1982-08-02", 0)]
+    // Phase 3: precision-aware ap window (R5 birthdates: 1974-12-25 x2, 1982-01-23, 1982-08-02)
+    [InlineData(null, "birthdate=ap1982", 2)]
+    [InlineData(null, "birthdate=ap1983", 2)]
+    [InlineData(null, "birthdate=ap1990", 0)]
+    [InlineData(null, "birthdate=ap1982-01", 1)]
+    [InlineData(null, "birthdate=ap1982-01-23", 1)]
     [InlineData(null, "gender=InvalidValue", 0)]
     [InlineData(null, "gender=male", R5Tests._patientsMale)]
     [InlineData(null, "gender=female", R5Tests._patientsFemale)]
     [InlineData(null, "gender=male,female", (R5Tests._patientsMale + R5Tests._patientsFemale))]
+    // Phase 5: :not modifier matches resources where the element is absent (R5 has no no-gender patients)
+    [InlineData(null, "gender:not=male", R5Tests._patientCount - R5Tests._patientsMale)]
+    [InlineData(null, "gender:not=female", R5Tests._patientCount - R5Tests._patientsFemale)]
+    // Phase 6: repeated parameter AND semantics (regression)
+    [InlineData(null, "birthdate=ge1980&birthdate=le1990", 2)]
     [InlineData(null, "name-use=official", R5Tests._patientCount)]
     [InlineData(null, "name-use=invalid-name-use", 0)]
     [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 2)]
@@ -757,6 +801,83 @@ public class R5TestsPatient : IClassFixture<R5Tests>
         {
             selfLink.ShouldContain(searchPart);
         }
+    }
+
+    /// <summary>
+    /// Phase 6 (M3) — falsifiable :not-on-absent regression. Inline-creates a Patient
+    /// with no gender element, asserts that gender:not=male returns the original count
+    /// plus one, then deletes the patient.
+    /// </summary>
+    [Fact]
+    public void PatientSearchNotModifierMatchesAbsentElement()
+    {
+        string newId = $"no-gender-r5-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+        string newPatientJson = "{\"resourceType\":\"Patient\",\"id\":\"" + newId + "\",\"name\":[{\"family\":\"NoGenderTest\"}]}";
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = newPatientJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        try
+        {
+            _fixture._store.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+                .ShouldBeTrue();
+
+            int expected = (R5Tests._patientCount - R5Tests._patientsMale) + 1;
+            AssertGenderNotMatches("gender:not=male", expected, newId);
+
+            int expectedFemale = (R5Tests._patientCount - R5Tests._patientsFemale) + 1;
+            AssertGenderNotMatches("gender:not=female", expectedFemale, newId);
+        }
+        finally
+        {
+            FhirRequestContext deleteCtx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "DELETE",
+                Url = _fixture._store.Config.BaseUrl + $"/Patient/{newId}",
+                Forwarded = null,
+                Authorization = null,
+                ResourceType = "Patient",
+                Id = newId,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+            _fixture._store.InstanceDelete(deleteCtx, out FhirResponseContext _);
+        }
+    }
+
+    private void AssertGenderNotMatches(string search, int expectedCount, string expectedId)
+    {
+        FhirRequestContext searchCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "GET",
+            Url = _fixture._store.Config.BaseUrl + "/Patient?" + search,
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        _fixture._store.TypeSearch(searchCtx, out FhirResponseContext response).ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource!);
+        results.ShouldNotBeNull();
+        results!.Total.ShouldBe(expectedCount, $"expected {search} to match {expectedCount} patients (including the inline-created no-gender patient)");
+        response.SerializedResource.ShouldContain(expectedId, Case.Sensitive, $"expected {search} response to include the inline-created no-gender patient '{expectedId}'");
     }
 
 

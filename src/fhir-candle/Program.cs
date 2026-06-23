@@ -11,6 +11,7 @@ using fhir.candle.McpTools;
 using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
+using FhirCandle.Strict;
 using FhirCandle.Utils;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using Microsoft.AspNetCore.DataProtection;
@@ -548,6 +549,61 @@ public static partial class Program
         Process.Start(psi);
     }
 
+    /// <summary>
+    /// Builds a minimal <see cref="WebApplication"/> for in-process integration testing of
+    /// <c>FhirController</c>. Wires only the services the controller depends on
+    /// (FhirStoreManager + SmartAuthManager + FhirPackageService + DataProtection + MVC),
+    /// skipping the production UI / Blazor / FluentUI / OpenTelemetry / MCP registrations.
+    /// The caller is responsible for any additional setup (e.g. <c>UseTestServer()</c>) on
+    /// the supplied <see cref="WebApplicationBuilder"/> before this method runs.
+    /// </summary>
+    /// <param name="builder">The pre-configured web application builder.</param>
+    /// <param name="config">The fhir-candle configuration.</param>
+    /// <param name="tenants">The tenant configurations keyed by controller name.</param>
+    /// <returns>The fully built and initialized <see cref="WebApplication"/>, not yet started.</returns>
+    public static WebApplication BuildAppForTesting(
+        WebApplicationBuilder builder,
+        CandleConfig config,
+        Dictionary<string, TenantConfiguration> tenants)
+    {
+        builder.Services.AddDataProtection().SetApplicationName("fhir-candle-tests");
+        builder.Services.AddCors();
+
+        builder.Services.AddSingleton(config);
+        builder.Services.AddSingleton(tenants);
+
+        builder.Services.AddSingleton<IFhirPackageService, FhirPackageService>();
+        builder.Services.AddSingleton<IFhirStoreManager, FhirStoreManager>();
+        builder.Services.AddSingleton<ISmartAuthManager, SmartAuthManager>();
+
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddControllers()
+            .AddApplicationPart(typeof(fhir.candle.Controllers.FhirController).Assembly);
+        builder.Services.AddHttpClient();
+
+        WebApplication app = builder.Build();
+
+        app.UseCors(b => b
+            .AllowAnyOrigin()
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .WithExposedHeaders(new[] { "Content-Location", "Location", "Etag", "Last-Modified" }));
+
+        app.UseRouting();
+        app.MapControllers();
+        app.UseDeveloperExceptionPage();
+
+        IFhirPackageService ps = app.Services.GetRequiredService<IFhirPackageService>();
+        IFhirStoreManager sm = app.Services.GetRequiredService<IFhirStoreManager>();
+        ISmartAuthManager am = app.Services.GetRequiredService<ISmartAuthManager>();
+
+        ps.Init();
+        sm.Init();
+        am.Init();
+
+        return app;
+    }
+
     /// <summary>Builds an enumeration of tenant configurations for this application.</summary>
     /// <param name="config">The configuration.</param>
     /// <returns>
@@ -561,6 +617,16 @@ public static partial class Program
 
         bool allRequired = smartRequired.Contains("*");
         bool allOptional = smartOptional.Contains("*");
+
+        // Emit per-override strict conflict warnings before building tenants, so they
+        // surface even if tenant construction throws.
+        foreach (StrictConflictWarning warning in ComputeStrictWarnings(config))
+        {
+            Console.Error.WriteLine(
+                $"fhir-candle <<< WARN: --strict overrides --{warning.Flag} {warning.RawValue}; " +
+                $"spec-enforced value is {warning.StrictEnforced}. " +
+                $"See {StrictRule.GetSpecUrl(warning.Rule, FhirReleases.FhirSequenceCodes.R4)}.");
+        }
 
         Dictionary<string, TenantConfiguration> tenants = new();
 
@@ -579,6 +645,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                Strict = config.Strict,
             });
         }
 
@@ -596,6 +663,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                Strict = config.Strict,
             });
         }
 
@@ -613,6 +681,7 @@ public static partial class Program
                 SmartAllowed = allOptional || smartOptional.Contains(tenant),
                 AllowExistingId = config.AllowExistingId,
                 AllowCreateAsUpdate = config.AllowCreateAsUpdate,
+                Strict = config.Strict,
             });
         }
 
@@ -647,7 +716,68 @@ public static partial class Program
             }
         }
 
+        // Resolve --strict composition on each tenant config before it leaves this
+        // builder so the visible tenant config matches what VersionedFhirStore.Init
+        // will see. Idempotent — Init will call ResolveStrict() again defensively.
+        foreach (TenantConfiguration tenant in tenants.Values)
+        {
+            tenant.ResolveStrict();
+
+            if (tenant.Strict)
+            {
+                Console.WriteLine($"fhir-candle <<< Strict mode active for tenant '{tenant.ControllerName}'.");
+            }
+        }
+
         return tenants;
+    }
+
+    /// <summary>A single strict-mode override warning surfaced at startup.</summary>
+    /// <param name="Flag">         The CLI flag name (without the leading <c>--</c>).</param>
+    /// <param name="RawValue">     The user-supplied value (or <c>null</c> if defaulted).</param>
+    /// <param name="StrictEnforced">The value that <c>--strict</c> forces.</param>
+    /// <param name="Rule">         The strict rule that justifies the override.</param>
+    internal readonly record struct StrictConflictWarning(
+        string Flag,
+        bool? RawValue,
+        bool StrictEnforced,
+        StrictRuleCode Rule);
+
+    /// <summary>
+    /// Computes per-feature override warnings to emit when <c>--strict</c> is paired
+    /// with an explicit conflicting flag value. Returns an empty list if strict is off
+    /// or no conflicts exist. Pure / no side-effects so it can be unit-tested.
+    /// </summary>
+    /// <param name="config">The CLI configuration.</param>
+    /// <returns>One <see cref="StrictConflictWarning"/> per conflicting flag.</returns>
+    internal static List<StrictConflictWarning> ComputeStrictWarnings(CandleConfig config)
+    {
+        List<StrictConflictWarning> warnings = [];
+
+        if (!config.Strict)
+        {
+            return warnings;
+        }
+
+        if (config.RawAllowExistingId == true)
+        {
+            warnings.Add(new StrictConflictWarning(
+                "create-existing-id",
+                config.RawAllowExistingId,
+                false,
+                StrictRuleCode.PostClientSuppliedId));
+        }
+
+        if (config.RawAllowCreateAsUpdate == true)
+        {
+            warnings.Add(new StrictConflictWarning(
+                "create-as-update",
+                config.RawAllowCreateAsUpdate,
+                false,
+                StrictRuleCode.PutCreateAsUpdateDisallowed));
+        }
+
+        return warnings;
     }
 
     /// <summary>Searches for the FHIR specification directory.</summary>

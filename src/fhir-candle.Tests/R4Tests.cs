@@ -1,4 +1,4 @@
-﻿// <copyright file="FhirStoreTestsR4Resource.cs" company="Microsoft Corporation">
+// <copyright file="FhirStoreTestsR4Resource.cs" company="Microsoft Corporation">
 //     Copyright (c) Microsoft Corporation. All rights reserved.
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
@@ -252,6 +252,23 @@ public class R4TestsObservation : IClassFixture<R4Tests>
     [InlineData(null, "subject._id=example", R4Tests._observationsWithSubjectExample)]
     [InlineData(null, "subject:Patient._id=example", R4Tests._observationsWithSubjectExample)]
     [InlineData(null, "subject._id=example&_include=Observation:patient", R4Tests._observationsWithSubjectExample, R4Tests._observationsWithSubjectExample + 1)]
+    // Phase 2: date prefix boundary tests against effectiveDateTime (2012-09-17 x3, 2016-03-28, 2016-05-18T22:33:22Z, 2017-05-03T15:54:26-04:00)
+    [InlineData(null, "date=ge2016", 3)]
+    [InlineData(null, "date=lt2016", 3)]
+    [InlineData(null, "date=ge2017", 1)]
+    // Phase 3: precision-aware ap window against effectiveDateTime
+    [InlineData(null, "date=ap2016", 3)]
+    [InlineData(null, "date=ap2012-09-17", 3)]
+    [InlineData(null, "date=ap2030", 0)]
+    // Phase 6 (M4): offset-aware date normalization. effectiveDateTime
+    // 2017-05-03T15:54:26-04:00 equals UTC 2017-05-03T19:54:26Z; reverting
+    // the ToUniversalTime() normalization would shift these counts.
+    [InlineData(null, "date=ge2017-05-03T19:54:26Z", 1)]
+    [InlineData(null, "date=lt2017-05-03T19:54:26Z", 5)]
+    // Phase 6 (M6): instant-boundary gt/ge semantics at an observation's instant
+    // (2016-05-18T22:33:22Z). gt excludes the boundary observation, ge includes it.
+    [InlineData(null, "date=gt2016-05-18T22:33:22Z", 1)]
+    [InlineData(null, "date=ge2016-05-18T22:33:22Z", 2)]
     [InlineData("PatientExampleFull", "subject=Patient/example", R4Tests._observationsWithSubjectExample)]
     [InlineData("PatientDoesNotExistFull", "subject=Patient/example", 0)]
     [InlineData("PatientExamplePatientOnly", "subject=Patient/example", 0)]
@@ -497,6 +514,18 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "name:exact=Peter", 1)]
     [InlineData(null, "name:exact=peter", 0)]
     [InlineData(null, "name:exact=Peterish", 0)]
+    // Phase 8 (M9): a bare combining mark folds to the empty string; with FoldedValues
+    // null-sentinel, evaluators skip it and the search must NOT match every patient
+    // (which is what a literal StartsWith("") / Contains("") would do).
+    [InlineData(null, "name=\u0301", 0)]
+    [InlineData(null, "name:contains=\u0301", 0)]
+    // Phase 4: accent-insensitive string search (pat1 has a second name with family=Muñoz)
+    [InlineData(null, "family=munoz", 1)]
+    [InlineData(null, "family=MUÑOZ", 1)]
+    [InlineData(null, "family:contains=unoz", 1)]
+    [InlineData(null, "family:exact=Muñoz", 1)]
+    [InlineData(null, "family:exact=Munoz", 0)]
+    [InlineData(null, "family:exact=muñoz", 0)]
     [InlineData(null, "_profile:missing=true", R4Tests._patientCount - 1)]
     [InlineData(null, "_profile:missing=false", 1)]
     [InlineData(null, "multiplebirth=3", 1)]
@@ -505,10 +534,34 @@ public class R4TestsPatient : IClassFixture<R4Tests>
     [InlineData(null, "birthdate=1982-01-23", 1)]
     [InlineData(null, "birthdate=1982-01", 1)]
     [InlineData(null, "birthdate=1982", 2)]
+    [InlineData(null, "birthdate:missing=true", 2)]
+    [InlineData(null, "birthdate:missing=false", R4Tests._patientCount - 2)]
+    // Phase 2: date prefix boundary inclusivity (R4 birthdates: 1974-12-25, 1982-01-23, 1982-08-02, 1987-02-20)
+    [InlineData(null, "birthdate=ge1982", 3)]
+    [InlineData(null, "birthdate=gt1982", 1)]
+    [InlineData(null, "birthdate=lt1982", 1)]
+    [InlineData(null, "birthdate=le1982", 3)]
+    [InlineData(null, "birthdate=ne1982", 2)]
+    [InlineData(null, "birthdate=ge1982-01-23", 3)]
+    [InlineData(null, "birthdate=le1982-08-02", 3)]
+    [InlineData(null, "birthdate=lt1982-01-23", 1)]
+    [InlineData(null, "birthdate=gt1982-08-02", 1)]
+    // Phase 3: precision-aware ap window
+    [InlineData(null, "birthdate=ap1982", 2)]
+    [InlineData(null, "birthdate=ap1987", 1)]
+    [InlineData(null, "birthdate=ap1983", 2)]
+    [InlineData(null, "birthdate=ap1990", 0)]
+    [InlineData(null, "birthdate=ap1982-01", 1)]
+    [InlineData(null, "birthdate=ap1982-01-23", 1)]
     [InlineData(null, "gender=InvalidValue", 0)]
     [InlineData(null, "gender=male", R4Tests._patientsMale)]
     [InlineData(null, "gender=female", R4Tests._patientsFemale)]
     [InlineData(null, "gender=male,female", (R4Tests._patientsMale + R4Tests._patientsFemale))]
+    // Phase 5: :not modifier matches resources where the element is absent
+    [InlineData(null, "gender:not=male", R4Tests._patientCount - R4Tests._patientsMale)]
+    [InlineData(null, "gender:not=female", R4Tests._patientCount - R4Tests._patientsFemale)]
+    // Phase 6: repeated parameter AND semantics (regression)
+    [InlineData(null, "birthdate=ge1980&birthdate=le1990", 3)]
     [InlineData(null, "name-use=official", R4Tests._patientCount - 1)]
     [InlineData(null, "name-use=invalid-name-use", 0)]
     [InlineData(null, "identifier=urn:oid:1.2.36.146.595.217.0.1|12345", 1)]
@@ -654,6 +707,74 @@ public class R4TestsPatient : IClassFixture<R4Tests>
         foreach (string searchPart in search.Split('&'))
         {
             selfLink.ShouldContain(searchPart);
+        }
+    }
+
+    /// <summary>
+    /// Phase 9 (L5) — leap-Feb safety-margin pin. Inline-creates a Patient with
+    /// birthDate 2016-01-28 and queries birthdate=ap2016-04. The 65-day window
+    /// includes that birthDate (2016-04-01 minus 65 days = 2016-01-27); a 62-day
+    /// window would exclude it (2016-04-01 minus 62 days = 2016-01-30). Pins the
+    /// L5 widen-by-3-days change against an inadvertent revert.
+    /// </summary>
+    [Fact]
+    public void PatientSearchApYYYYMMWindowIncludesSafetyMargin()
+    {
+        string newId = $"l5-margin-r4-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+        string newPatientJson = "{\"resourceType\":\"Patient\",\"id\":\"" + newId + "\"," +
+            "\"name\":[{\"family\":\"L5Margin\"}],\"birthDate\":\"2016-01-28\"}";
+
+        FhirRequestContext createCtx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "POST",
+            Url = _fixture._store.Config.BaseUrl + "/Patient",
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = newPatientJson,
+            DestinationFormat = "application/fhir+json",
+        };
+
+        try
+        {
+            _fixture._store.InstanceCreate(createCtx, out FhirResponseContext _, forceAllowExistingId: true)
+                .ShouldBeTrue();
+
+            FhirRequestContext searchCtx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "GET",
+                Url = _fixture._store.Config.BaseUrl + "/Patient?birthdate=ap2016-04",
+                Forwarded = null,
+                Authorization = null,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+
+            _fixture._store.TypeSearch(searchCtx, out FhirResponseContext response).ShouldBeTrue();
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            response.SerializedResource.ShouldContain(newId, Case.Sensitive,
+                "expected birthdate=ap2016-04 to include patient born 2016-01-28 under the 65-day window");
+        }
+        finally
+        {
+            FhirRequestContext deleteCtx = new()
+            {
+                TenantName = _fixture._store.Config.ControllerName,
+                Store = _fixture._store,
+                HttpMethod = "DELETE",
+                Url = _fixture._store.Config.BaseUrl + $"/Patient/{newId}",
+                Forwarded = null,
+                Authorization = null,
+                ResourceType = "Patient",
+                Id = newId,
+                SourceFormat = "application/fhir+json",
+                DestinationFormat = "application/fhir+json",
+            };
+            _fixture._store.InstanceDelete(deleteCtx, out FhirResponseContext _);
         }
     }
 
@@ -1022,7 +1143,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // test conditional that has no matches
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1069,7 +1191,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // first, store our resource
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1087,7 +1210,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // now, store it conditionally with a single match
         success = _fixture._store.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         // all contents should match original - not a new version
         success.ShouldBeTrue();
@@ -1137,7 +1261,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // first, store our resource
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1166,7 +1291,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // now store the second resource
         success = _fixture._store.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1185,7 +1311,8 @@ public class R4TestConditionals : IClassFixture<R4Tests>
         // now attempt to store with a conditional create that matches both
         success = _fixture._store.InstanceCreate(
             ctx,
-            out response);
+            out response,
+            forceAllowExistingId: true);
 
         // this should fail
         success.ShouldBeFalse();
@@ -1348,7 +1475,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext createResp);
+            out FhirResponseContext createResp,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         createResp.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1406,7 +1534,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx1,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1417,7 +1546,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             createCtx2,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1468,7 +1598,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1523,7 +1654,8 @@ public class R4TestConditionalUpdates : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1664,7 +1796,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1700,7 +1833,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext createResp);
+            out FhirResponseContext createResp,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
         createResp.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -1721,7 +1855,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         // should return the existing resource
         success.ShouldBeTrue();
@@ -1760,7 +1895,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1771,7 +1907,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1791,7 +1928,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         success.ShouldBeFalse();
         response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
@@ -1823,7 +1961,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
@@ -1845,7 +1984,8 @@ public class R4TestConditionalCreateViaUrlQuery : IClassFixture<R4Tests>
 
         success = _fixture._store.InstanceCreate(
             ctx,
-            out FhirResponseContext response);
+            out FhirResponseContext response,
+            forceAllowExistingId: true);
 
         // IfNoneExist found a match, so should return the existing resource
         success.ShouldBeTrue();
@@ -2006,7 +2146,8 @@ public class R4TestBundleConditionals : IClassFixture<R4Tests>
 
         bool success = _fixture._store.InstanceCreate(
             createCtx,
-            out FhirResponseContext _);
+            out FhirResponseContext _,
+            forceAllowExistingId: true);
 
         success.ShouldBeTrue();
 
