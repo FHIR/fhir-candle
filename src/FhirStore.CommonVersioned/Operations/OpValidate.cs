@@ -96,7 +96,7 @@ public class OpValidate : IFhirOperation
     {
         try
         {
-            return ModelInspector.ForAssembly(typeof(Patient).Assembly);
+            return ModelInfo.ModelInspector;
         }
         catch (Exception ex)
         {
