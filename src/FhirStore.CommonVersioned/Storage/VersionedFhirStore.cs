@@ -4950,6 +4950,13 @@ rs,
             response = strictResponse;
             return false;
         }
+        
+        // parse search result parameters
+        ParsedResultParameters resultParameters = new ParsedResultParameters(
+            searchQueryParams,
+            this,
+            rs,
+            ctx.ResourceType);
 
         // execute search
         List<Resource> results = rs.TypeSearch(parameters).ToList();
@@ -4959,34 +4966,18 @@ rs,
             results = filterSearchResultsForAuth(ctx, results);
         }
 
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(
-            searchQueryParams,
-            this,
-            rs,
-            ctx.ResourceType);
-
-        string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
-        string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
-        string selfResultParams = resultParameters.GetAppliedQueryString();
-
-        if (!string.IsNullOrEmpty(selfSearchParams))
-        {
-            selfLink = selfLink + "?" + selfSearchParams;
-        }
-
-        if (!string.IsNullOrEmpty(selfResultParams))
-        {
-            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
-        }
+        
+        List<Bundle.LinkComponent> links = GetHateoasLinks(results.Count(),resultParameters,ctx,parameters);
 
         // create our bundle for results
         Bundle bundle = new Bundle
         {
             Type = Bundle.BundleType.Searchset,
             Total = results.Count(),
-            Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
+            Link = links
         };
+
+
 
         if (resultParameters.SummaryFlag != "count")
         {
@@ -4997,15 +4988,21 @@ rs,
 
             HashSet<string> addedIds = new();
             int resultCount = 0;
+            int index = 0;
 
             foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
             {
+                index++;
                 if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
                     (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
                 {
                     break;
                 }
 
+                if (resultParameters.Offset >= 0 && index < resultParameters.Offset.Value) {
+                    continue;
+                }
+                
                 resultCount++;
 
                 string relativeUrl = $"{resource.TypeName}/{resource.Id}";
@@ -5073,6 +5070,59 @@ rs,
             StatusCode = HttpStatusCode.OK,
         };
         return true;
+    }
+
+    private List<Bundle.LinkComponent> GetHateoasLinks(int totalCount, ParsedResultParameters resultParameters, FhirRequestContext ctx, ParsedSearchParameter[] parameters)
+    {
+
+        string GetLinkUrl(long count, long offset, string searchParams)
+        {
+
+            string theLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
+            if (!string.IsNullOrWhiteSpace(searchParams))
+            {
+                theLink = theLink + "?" + searchParams;
+            }
+            theLink = theLink + (theLink.Contains('?') ? '&' : '?') + $"_offset={offset}&_count={count}";
+
+            return theLink;
+        }
+
+        string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
+        string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
+        string selfResultParams = resultParameters.GetAppliedQueryString();
+
+        if (!string.IsNullOrEmpty(selfSearchParams))
+        {
+            selfLink = selfLink + "?" + selfSearchParams;
+        }
+
+        if (!string.IsNullOrEmpty(selfResultParams))
+        {
+            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
+        }
+
+        List<Bundle.LinkComponent> links = new();
+        links.Add(new Bundle.LinkComponent() { Relation = "self", Url = selfLink });
+        if (totalCount == 0 || resultParameters.PageMatchCount==null || resultParameters.PageMatchCount == 0)
+        {
+            return links;
+        }        
+        var requestPageCount = Math.Min(resultParameters.PageMatchCount.Value, _config.MaxPageCount);
+
+        if (totalCount > requestPageCount)
+        {
+            string nextLink = GetLinkUrl(requestPageCount, requestPageCount + 1, selfSearchParams);
+            links.Add(new Bundle.LinkComponent() { Relation = "next", Url = nextLink });
+        }
+        if (resultParameters.Offset > 0)
+        {
+            var prevOffset = Math.Max(0, (resultParameters.Offset - requestPageCount - 1) ?? 0);
+            string prevLink = GetLinkUrl(requestPageCount, prevOffset, selfSearchParams);
+            links.Add(new Bundle.LinkComponent() { Relation = "previous", Url = prevLink });
+        }
+
+        return links;
     }
 
     /// <summary>Compartment search.</summary>
@@ -5924,7 +5974,7 @@ rs,
         Bundle bundle = new()
         {
             Type = Bundle.BundleType.Searchset,
-            Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, }, ],
+            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
         };
 
         HashSet<string> addedIds = new();
@@ -6507,7 +6557,7 @@ rs,
                 {
                     Name = featureName,
                     Context = string.IsNullOrEmpty(context) ? null : context,
-                    Value = inputValue is not null ? [ inputValue ] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [],
+                    Value = inputValue is not null ? [inputValue] : !string.IsNullOrEmpty(inputRawValue) ? [new FhirString(inputRawValue)] : [],
                     Matches = null,
                     ProcessingStatus = "unknown",
                 };
@@ -6859,12 +6909,12 @@ rs,
                 SearchInclude = resourceStore.GetSearchIncludes(),
                 SearchRevInclude = resourceStore.GetSearchRevIncludes(),
                 SearchParam = resourceStore.GetSearchParamDefinitions().Select(sp => new CapabilityStatement.SearchParamComponent()
-                    {
-                        Name = sp.Name,
-                        Definition = sp.Url,
-                        Type = sp.Type,
-                        Documentation = string.IsNullOrEmpty(sp.Description) ? null : sp.Description,
-                    }).ToList(),
+                {
+                    Name = sp.Name,
+                    Definition = sp.Url,
+                    Type = sp.Type,
+                    Documentation = string.IsNullOrEmpty(sp.Description) ? null : sp.Description,
+                }).ToList(),
                 Operation = _operations.Values
                     .Where(o =>
                         (o.AllowInstanceLevel || o.AllowResourceLevel) &&
