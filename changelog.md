@@ -1,5 +1,8 @@
 * Work in Progress
-  * Fix issue #41: Incorrect link to subscriptions backport IG.
+  * Fixed: type-level delete now requires search criteria.
+  * Fixed: conditional update is gated on interaction (control-only requests are rejected).
+  * Fixed: a control-only query on POST create is treated as a normal create.
+  * Fixed: parse-lock on control-only writes (see issue #62).
 
 * v2026.623.2024 — PR #60
   * Added `--strict` mode (opt-in, default off):
