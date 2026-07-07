@@ -2097,6 +2097,9 @@ public class TestConditionalControlParameters
     private static string PatientJson(string gender = "female") =>
         $"{{\"resourceType\":\"Patient\",\"gender\":\"{gender}\"}}";
 
+    private static string PatientJsonWithId(string id, string gender = "female") =>
+        $"{{\"resourceType\":\"Patient\",\"id\":\"{id}\",\"gender\":\"{gender}\"}}";
+
     /// <summary>
     /// Seeds a plain (non-conditional) Patient and returns its server-assigned id. The seed POST
     /// carries no query, so it resolves to a normal create regardless of the fix under test.
@@ -2120,6 +2123,26 @@ public class TestConditionalControlParameters
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
         response.Id.ShouldNotBeNullOrEmpty();
         return response.Id;
+    }
+
+    /// <summary>Seeds a Patient at a caller-chosen id via a plain (no-query) instance PUT.</summary>
+    private static void SeedPatientWithId(IFhirStore store, string id, string gender = "female")
+    {
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "PUT",
+            Url = $"{store.Config.BaseUrl}/Patient/{id}",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = PatientJsonWithId(id, gender),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool ok = store.InstanceUpdate(ctx, out FhirResponseContext response);
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
     }
 
     /// <summary>
@@ -2269,6 +2292,68 @@ public class TestConditionalControlParameters
         ok.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
         SearchTotal(store).ShouldBe(3);
+    }
+
+    // ---- Phase 2: conditional-update control-parameter handling + strict re-gate ----
+
+    /// <summary>A control-only instance PUT is a normal update (advances the version), not a search.</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void InstanceUpdateWithControlParamsIsNormalUpdate(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatientWithId(store, "pat-1");
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "PUT", "Patient/pat-1", StoreInteractionCodes.InstanceUpdate,
+            "?_format=json", PatientJsonWithId("pat-1", "male"));
+
+        bool ok = store.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Location.ShouldContain("Patient/pat-1");
+        response.ETag.ShouldBe("W/\"2\"");
+        SearchTotal(store).ShouldBe(1);
+    }
+
+    /// <summary>A REST conditional update carrying only control params is rejected 400 (no writes).</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ConditionalUpdateControlParamsReturns400(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatient(store);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "PUT", "Patient", StoreInteractionCodes.InstanceUpdateConditional,
+            "?_pretty=true&_format=json", PatientJson("male"));
+
+        bool ok = store.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        SearchTotal(store).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// Under strict, a PUT to a missing instance with control-only params still returns 404 — the
+    /// control param no longer suppresses the strict PUT-on-missing check (interaction-gated).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void StrictInstanceUpdateMissingIdWithControlParamsReturns404(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStrictStore(version);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "PUT", "Patient/does-not-exist", StoreInteractionCodes.InstanceUpdate,
+            "?_format=json", PatientJsonWithId("does-not-exist", "male"));
+
+        bool ok = store.InstanceUpdate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 }
 

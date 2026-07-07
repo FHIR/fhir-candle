@@ -2451,7 +2451,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             // Reject ill-formed URL id under strict (only meaningful for instance
             // PUT — conditional PUT has no URL id segment).
-            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+            if ((ctx.Interaction != Common.StoreInteractionCodes.InstanceUpdateConditional) &&
                 !string.IsNullOrEmpty(id) &&
                 !_fhirIdRegex.IsMatch(id))
             {
@@ -2493,7 +2493,7 @@ public partial class VersionedFhirStore : IFhirStore
             // applied to instance PUT — the conditional-update path resolves the
             // id from search results below and handles its own no-match case via
             // 412.
-            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+            if ((ctx.Interaction != Common.StoreInteractionCodes.InstanceUpdateConditional) &&
                 !string.IsNullOrEmpty(id) &&
                 !((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)rs).ContainsKey(id))
             {
@@ -2515,7 +2515,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         IFhirInteractionHook[] hooks = GetHooks(
             ctx.ResourceType,
-            string.IsNullOrEmpty(ctx.UrlQuery) ? Common.StoreInteractionCodes.InstanceUpdate : Common.StoreInteractionCodes.InstanceUpdateConditional);
+            ctx.Interaction == Common.StoreInteractionCodes.InstanceUpdateConditional ? Common.StoreInteractionCodes.InstanceUpdateConditional : Common.StoreInteractionCodes.InstanceUpdate);
         foreach (IFhirInteractionHook hook in hooks)
         {
             if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
@@ -2547,8 +2547,25 @@ public partial class VersionedFhirStore : IFhirStore
         OperationOutcome outcome;
 
         // check for conditional update
-        if (!string.IsNullOrEmpty(ctx.UrlQuery))
+        if (ctx.Interaction == Common.StoreInteractionCodes.InstanceUpdateConditional)
         {
+            // A conditional update MUST carry at least one real search parameter. The REST
+            // controller hard-sets InstanceUpdateConditional for ANY non-empty query (including a
+            // control-only one such as ?_format=json), so a control-only conditional update is
+            // rejected here rather than running an unfiltered "match everything" search.
+            if (!FhirCandle.Search.Common.QueryContainsSearchParameters(ctx.UrlQuery))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.BadRequest,
+                        "Conditional update requires search criteria",
+                        OperationOutcome.IssueType.Required),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
+
             bool success = DoTypeSearch(
                 ctx,
                 out FhirResponseContext searchResp);
