@@ -705,6 +705,14 @@ public class TestBundleRequestParsing : IClassFixture<FhirStoreTests>
     [InlineData("DELETE", "Patient/id/Patient", null)]
     [InlineData("DELETE", "request/with/too/many/path/segments", null)]
 
+    // Issue #62 parse-locks: a write query carrying only control parameters must NOT resolve as a
+    // conditional operation (POST/PUT stay non-conditional; a criteria-less conditional PUT with
+    // no id is unparseable).
+    [InlineData("POST", "Patient?_format=json", StoreInteractionCodes.TypeCreate)]
+    [InlineData("POST", "Patient?_format=json&_pretty=true", StoreInteractionCodes.TypeCreate)]
+    [InlineData("PUT", "Patient/id?_format=json", StoreInteractionCodes.InstanceUpdate)]
+    [InlineData("PUT", "Patient?_format=json", null)]
+
     public void DetermineInteraction(string verb, string url, StoreInteractionCodes? expected)
     {
         foreach (IFhirStore store in _fixture._stores.Values)
