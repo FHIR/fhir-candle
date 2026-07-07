@@ -4460,6 +4460,23 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        // A type-level (conditional) delete MUST carry real search criteria. Control/result
+        // parameters (_format, _pretty, _count, ...) are not criteria; without at least one real
+        // search parameter the type search would match every resource of the type, so reject the
+        // request rather than deleting everything (covers both empty and control-only queries).
+        if (!FhirCandle.Search.Common.QueryContainsSearchParameters(ctx.UrlQuery))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    $"Type-level delete of {ctx.ResourceType} requires search criteria",
+                    OperationOutcome.IssueType.Required),
+                StatusCode = HttpStatusCode.BadRequest,
+            };
+            return false;
+        }
+
         bool success = DoTypeSearch(ctx, out FhirResponseContext searchResp);
 
         // check for failed search

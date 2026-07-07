@@ -2355,5 +2355,65 @@ public class TestConditionalControlParameters
         ok.ShouldBeFalse();
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
+
+    // ---- Phase 3: criteria-less / control-only type-delete guard ----
+
+    /// <summary>A type-level delete carrying only control params is rejected 400 (deletes nothing).</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void TypeDeleteWithControlParamsReturns400(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatient(store);
+        SeedPatient(store);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "DELETE", "Patient", StoreInteractionCodes.TypeDeleteConditional,
+            "?_format=json&_pretty=true", null);
+
+        bool ok = store.TypeDelete(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        SearchTotal(store).ShouldBe(2);
+    }
+
+    /// <summary>A type-level delete with no query criteria is rejected 400 (deletes nothing).</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void TypeDeleteNoCriteriaReturns400(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatient(store);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "DELETE", "Patient", StoreInteractionCodes.TypeDeleteConditional,
+            string.Empty, null);
+
+        bool ok = store.TypeDelete(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        SearchTotal(store).ShouldBe(1);
+    }
+
+    /// <summary>A genuine conditional delete with real criteria still deletes the match.</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void TypeDeleteWithRealCriteriaStillWorks(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        string id = SeedPatient(store);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "DELETE", "Patient", StoreInteractionCodes.TypeDeleteConditional,
+            $"?_id={id}", null);
+
+        bool ok = store.TypeDelete(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        SearchTotal(store).ShouldBe(0);
+    }
 }
 
