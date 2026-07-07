@@ -3,6 +3,7 @@
   * Fixed: conditional update is gated on interaction (control-only requests are rejected).
   * Fixed: a control-only query on POST create is treated as a normal create.
   * Fixed: parse-lock on control-only writes (see issue #62).
+  * Updated NuGet Dependencies
 
 * v2026.623.2024 — PR #60
   * Added `--strict` mode (opt-in, default off):
