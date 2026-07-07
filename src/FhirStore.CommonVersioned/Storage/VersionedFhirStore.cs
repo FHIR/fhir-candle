@@ -1451,9 +1451,23 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        // A conditional create is triggered only by a resolved TypeCreateConditional interaction
+        // or a non-empty If-None-Exist header (a REST create signals "conditional" via
+        // If-None-Exist only) AND an effective conditional query that carries at least one real
+        // search parameter. Control/result parameters (_format, _pretty, ...) are not search
+        // criteria, so a control-param-only query is a normal create — not a conditional one.
+        string conditionalQuery = !string.IsNullOrEmpty(ctx.IfNoneExist)
+            ? ctx.IfNoneExist
+            : ctx.UrlQuery;
+
+        bool isConditionalCreate =
+            ((ctx.Interaction == Common.StoreInteractionCodes.TypeCreateConditional) ||
+             !string.IsNullOrEmpty(ctx.IfNoneExist)) &&
+            FhirCandle.Search.Common.QueryContainsSearchParameters(conditionalQuery);
+
         IFhirInteractionHook[] hooks = GetHooks(
             resourceType,
-            string.IsNullOrEmpty(ctx.IfNoneExist) ? Common.StoreInteractionCodes.TypeCreate : Common.StoreInteractionCodes.TypeCreateConditional);
+            isConditionalCreate ? Common.StoreInteractionCodes.TypeCreateConditional : Common.StoreInteractionCodes.TypeCreate);
         foreach (IFhirInteractionHook hook in hooks)
         {
             if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
@@ -1482,12 +1496,8 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        // check for conditional create
-        string conditionalQuery = !string.IsNullOrEmpty(ctx.IfNoneExist)
-            ? ctx.IfNoneExist
-            : ctx.UrlQuery;
-
-        if (!string.IsNullOrEmpty(conditionalQuery))
+        // check for conditional create (isConditionalCreate/conditionalQuery computed above)
+        if (isConditionalCreate)
         {
             bool success = DoTypeSearch(
                 ctx with { UrlQuery = conditionalQuery },

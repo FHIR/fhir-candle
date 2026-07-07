@@ -2033,3 +2033,242 @@ public class TestValidateOperation : IClassFixture<FhirStoreTests>
         combined.ShouldContain("\"resourceType\":\"OperationOutcome\"");
     }
 }
+
+
+/// <summary>
+/// Regression tests for issue #62 — control-only query parameters (_format, _pretty, _summary,
+/// _elements) on a write request (POST / PUT / DELETE [type]) must NOT be treated as
+/// conditional-operation criteria. A control-param-only create or instance update is a plain
+/// write; a control-param-only (or criteria-less) conditional update / type-delete is rejected.
+/// Parameterized across R4/R4B/R5, with fresh stores per test.
+/// </summary>
+public class TestConditionalControlParameters
+{
+    public static IEnumerable<object[]> Configurations => FhirStoreTests.TestConfigurations;
+
+    private readonly Dictionary<FhirReleases.FhirSequenceCodes, IFhirStore> _stores = new();
+    private readonly Dictionary<FhirReleases.FhirSequenceCodes, IFhirStore> _strictStores = new();
+
+    private IFhirStore GetStore(FhirReleases.FhirSequenceCodes version)
+    {
+        if (!_stores.TryGetValue(version, out IFhirStore? store))
+        {
+            store = MakeStore(version, $"{version.ToString().ToLowerInvariant()}-cond-ctrl", strict: false);
+            _stores[version] = store;
+        }
+
+        return store;
+    }
+
+    private IFhirStore GetStrictStore(FhirReleases.FhirSequenceCodes version)
+    {
+        if (!_strictStores.TryGetValue(version, out IFhirStore? store))
+        {
+            store = MakeStore(version, $"{version.ToString().ToLowerInvariant()}-cond-ctrl-strict", strict: true);
+            _strictStores[version] = store;
+        }
+
+        return store;
+    }
+
+    private static IFhirStore MakeStore(FhirReleases.FhirSequenceCodes version, string tenant, bool strict)
+    {
+        TenantConfiguration cfg = new()
+        {
+            FhirVersion = version,
+            ControllerName = tenant,
+            BaseUrl = $"http://localhost/fhir/{tenant}",
+            AllowExistingId = !strict,
+            AllowCreateAsUpdate = true,
+            Strict = strict,
+        };
+
+        IFhirStore store = version switch
+        {
+            FhirReleases.FhirSequenceCodes.R4 => new candleR4::FhirCandle.Storage.VersionedFhirStore(),
+            FhirReleases.FhirSequenceCodes.R4B => new candleR4B::FhirCandle.Storage.VersionedFhirStore(),
+            FhirReleases.FhirSequenceCodes.R5 => new candleR5::FhirCandle.Storage.VersionedFhirStore(),
+            _ => throw new ArgumentOutOfRangeException(nameof(version)),
+        };
+        store.Init(cfg);
+        return store;
+    }
+
+    private static string PatientJson(string gender = "female") =>
+        $"{{\"resourceType\":\"Patient\",\"gender\":\"{gender}\"}}";
+
+    /// <summary>
+    /// Seeds a plain (non-conditional) Patient and returns its server-assigned id. The seed POST
+    /// carries no query, so it resolves to a normal create regardless of the fix under test.
+    /// </summary>
+    private static string SeedPatient(IFhirStore store, string gender = "female")
+    {
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "POST",
+            Url = $"{store.Config.BaseUrl}/Patient",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = PatientJson(gender),
+            DestinationFormat = "application/fhir+json",
+        };
+
+        bool ok = store.InstanceCreate(ctx, out FhirResponseContext response);
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.Id.ShouldNotBeNullOrEmpty();
+        return response.Id;
+    }
+
+    /// <summary>
+    /// Builds a write-request context. <paramref name="path"/> (e.g. "Patient" or
+    /// "Patient/pat-1") seeds ResourceType/Id via URL parsing; <paramref name="interaction"/> and
+    /// <paramref name="urlQuery"/> are then set explicitly to reproduce exactly what the REST
+    /// controllers hand the store (which hard-code the interaction and pass the raw query string).
+    /// </summary>
+    private static FhirRequestContext WriteCtx(
+        IFhirStore store,
+        string httpMethod,
+        string path,
+        StoreInteractionCodes interaction,
+        string urlQuery,
+        string? body)
+    {
+        return new FhirRequestContext
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = httpMethod,
+            Url = $"{store.Config.BaseUrl}/{path}",
+            Authorization = null,
+            SourceFormat = body is null ? string.Empty : "application/fhir+json",
+            SourceContent = body ?? string.Empty,
+            DestinationFormat = "application/fhir+json",
+            Interaction = interaction,
+            UrlQuery = urlQuery,
+        };
+    }
+
+    private static int SearchTotal(IFhirStore store, string resourceType = "Patient")
+    {
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "GET",
+            Url = $"{store.Config.BaseUrl}/{resourceType}",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        store.TypeSearch(ctx, out FhirResponseContext response).ShouldBeTrue();
+        MinimalBundle? results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+        results.ShouldNotBeNull();
+        return results!.Total;
+    }
+
+    // ---- Phase 1: conditional-create control-parameter handling ----
+
+    /// <summary>Core repro (issue #62): a control-only POST with 2+ existing must still create.</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void CreateWithControlParamsCreatesNewResource(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatient(store);
+        SeedPatient(store);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "POST", "Patient", StoreInteractionCodes.TypeCreate,
+            "?_format=json&_pretty=true", PatientJson("male"));
+
+        bool ok = store.InstanceCreate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        response.Id.ShouldNotBeNullOrEmpty();
+        response.Location.ShouldContain($"Patient/{response.Id}");
+        SearchTotal(store).ShouldBe(3);
+    }
+
+    /// <summary>A control-only POST with exactly one existing resource still creates (not 200).</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void CreateWithControlParamsSingleExisting(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatient(store);
+
+        FhirRequestContext ctx = WriteCtx(
+            store, "POST", "Patient", StoreInteractionCodes.TypeCreate,
+            "?_format=json", PatientJson("male"));
+
+        bool ok = store.InstanceCreate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        SearchTotal(store).ShouldBe(2);
+    }
+
+    /// <summary>A genuine conditional create (If-None-Exist) with multiple matches still 412s.</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ConditionalCreateMultipleMatchesStill412(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        string id1 = SeedPatient(store);
+        string id2 = SeedPatient(store);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "POST",
+            Url = $"{store.Config.BaseUrl}/Patient",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = PatientJson("male"),
+            DestinationFormat = "application/fhir+json",
+            IfNoneExist = $"_id={id1},{id2}",
+        };
+
+        bool ok = store.InstanceCreate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeFalse();
+        response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+        SearchTotal(store).ShouldBe(2);
+    }
+
+    /// <summary>A pathological control-only If-None-Exist is treated as a normal create, not a search.</summary>
+    [Theory]
+    [MemberData(nameof(Configurations))]
+    public void ConditionalCreateViaIfNoneExistControlOnlyCreates(FhirReleases.FhirSequenceCodes version)
+    {
+        IFhirStore store = GetStore(version);
+        SeedPatient(store);
+        SeedPatient(store);
+
+        FhirRequestContext ctx = new()
+        {
+            TenantName = store.Config.ControllerName,
+            Store = store,
+            HttpMethod = "POST",
+            Url = $"{store.Config.BaseUrl}/Patient",
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            SourceContent = PatientJson("male"),
+            DestinationFormat = "application/fhir+json",
+            IfNoneExist = "_format=json",
+        };
+
+        bool ok = store.InstanceCreate(ctx, out FhirResponseContext response);
+
+        ok.ShouldBeTrue();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        SearchTotal(store).ShouldBe(3);
+    }
+}
+

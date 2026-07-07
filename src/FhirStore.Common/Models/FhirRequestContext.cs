@@ -443,26 +443,7 @@ public record class FhirRequestContext
         _urlPath = requestUrlPath.TrimEnd('/');
         _urlQuery = requestUrlQuery;
 
-        bool hasQueryParameters = false;
-        if (!string.IsNullOrEmpty(requestUrlQuery))
-        {
-            // need to parse into KVPs
-
-            System.Collections.Specialized.NameValueCollection queryParams = System.Web.HttpUtility.ParseQueryString(requestUrlQuery);
-
-            foreach (string? key in queryParams.AllKeys ?? Array.Empty<string>())
-            {
-                if (string.IsNullOrEmpty(key) ||
-                    Search.Common.HttpParameters.Contains(key) ||
-                    Search.Common.SearchResultParameters.Contains(key))
-                {
-                    continue;
-                }
-
-                hasQueryParameters = true;
-                break;
-            }
-        }
+        bool hasQueryParameters = Search.Common.QueryContainsSearchParameters(requestUrlQuery);
 
         string[] pathComponents = requestUrlPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
