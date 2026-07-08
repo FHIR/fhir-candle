@@ -68,4 +68,39 @@ public static class Common
         /// <summary>Request a precision of the total number of results for a request.</summary>
         "_total"
     });
+
+    /// <summary>
+    /// Determines whether a URL query string contains at least one real search parameter — that
+    /// is, a parameter that is neither an HTTP control parameter (<c>_format</c>, <c>_pretty</c>,
+    /// <c>_summary</c>, <c>_elements</c>) nor a search-result parameter (<c>_count</c>,
+    /// <c>_include</c>, <c>_sort</c>, ...). A leading '?' is tolerated. Used by the write paths to
+    /// decide whether a request is genuinely conditional (create / update / type-delete) rather
+    /// than a plain write that merely carries serialization-control parameters.
+    /// </summary>
+    /// <param name="urlQuery">The URL query string (with or without a leading '?').</param>
+    /// <returns>True if at least one real search parameter is present; otherwise, false.</returns>
+    public static bool QueryContainsSearchParameters(string? urlQuery)
+    {
+        if (string.IsNullOrEmpty(urlQuery))
+        {
+            return false;
+        }
+
+        System.Collections.Specialized.NameValueCollection queryParams =
+            System.Web.HttpUtility.ParseQueryString(urlQuery);
+
+        foreach (string? key in queryParams.AllKeys ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrEmpty(key) ||
+                HttpParameters.Contains(key) ||
+                SearchResultParameters.Contains(key))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
 }

@@ -1451,9 +1451,23 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        // A conditional create is triggered only by a resolved TypeCreateConditional interaction
+        // or a non-empty If-None-Exist header (a REST create signals "conditional" via
+        // If-None-Exist only) AND an effective conditional query that carries at least one real
+        // search parameter. Control/result parameters (_format, _pretty, ...) are not search
+        // criteria, so a control-param-only query is a normal create — not a conditional one.
+        string conditionalQuery = !string.IsNullOrEmpty(ctx.IfNoneExist)
+            ? ctx.IfNoneExist
+            : ctx.UrlQuery;
+
+        bool isConditionalCreate =
+            ((ctx.Interaction == Common.StoreInteractionCodes.TypeCreateConditional) ||
+             !string.IsNullOrEmpty(ctx.IfNoneExist)) &&
+            FhirCandle.Search.Common.QueryContainsSearchParameters(conditionalQuery);
+
         IFhirInteractionHook[] hooks = GetHooks(
             resourceType,
-            string.IsNullOrEmpty(ctx.IfNoneExist) ? Common.StoreInteractionCodes.TypeCreate : Common.StoreInteractionCodes.TypeCreateConditional);
+            isConditionalCreate ? Common.StoreInteractionCodes.TypeCreateConditional : Common.StoreInteractionCodes.TypeCreate);
         foreach (IFhirInteractionHook hook in hooks)
         {
             if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
@@ -1482,12 +1496,8 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        // check for conditional create
-        string conditionalQuery = !string.IsNullOrEmpty(ctx.IfNoneExist)
-            ? ctx.IfNoneExist
-            : ctx.UrlQuery;
-
-        if (!string.IsNullOrEmpty(conditionalQuery))
+        // check for conditional create (isConditionalCreate/conditionalQuery computed above)
+        if (isConditionalCreate)
         {
             bool success = DoTypeSearch(
                 ctx with { UrlQuery = conditionalQuery },
@@ -2441,7 +2451,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             // Reject ill-formed URL id under strict (only meaningful for instance
             // PUT — conditional PUT has no URL id segment).
-            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+            if ((ctx.Interaction != Common.StoreInteractionCodes.InstanceUpdateConditional) &&
                 !string.IsNullOrEmpty(id) &&
                 !_fhirIdRegex.IsMatch(id))
             {
@@ -2483,7 +2493,7 @@ public partial class VersionedFhirStore : IFhirStore
             // applied to instance PUT — the conditional-update path resolves the
             // id from search results below and handles its own no-match case via
             // 412.
-            if (string.IsNullOrEmpty(ctx.UrlQuery) &&
+            if ((ctx.Interaction != Common.StoreInteractionCodes.InstanceUpdateConditional) &&
                 !string.IsNullOrEmpty(id) &&
                 !((IReadOnlyDictionary<string, Hl7.Fhir.Model.Resource>)rs).ContainsKey(id))
             {
@@ -2505,7 +2515,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         IFhirInteractionHook[] hooks = GetHooks(
             ctx.ResourceType,
-            string.IsNullOrEmpty(ctx.UrlQuery) ? Common.StoreInteractionCodes.InstanceUpdate : Common.StoreInteractionCodes.InstanceUpdateConditional);
+            ctx.Interaction == Common.StoreInteractionCodes.InstanceUpdateConditional ? Common.StoreInteractionCodes.InstanceUpdateConditional : Common.StoreInteractionCodes.InstanceUpdate);
         foreach (IFhirInteractionHook hook in hooks)
         {
             if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Pre))
@@ -2537,8 +2547,25 @@ public partial class VersionedFhirStore : IFhirStore
         OperationOutcome outcome;
 
         // check for conditional update
-        if (!string.IsNullOrEmpty(ctx.UrlQuery))
+        if (ctx.Interaction == Common.StoreInteractionCodes.InstanceUpdateConditional)
         {
+            // A conditional update MUST carry at least one real search parameter. The REST
+            // controller hard-sets InstanceUpdateConditional for ANY non-empty query (including a
+            // control-only one such as ?_format=json), so a control-only conditional update is
+            // rejected here rather than running an unfiltered "match everything" search.
+            if (!FhirCandle.Search.Common.QueryContainsSearchParameters(ctx.UrlQuery))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(
+                        HttpStatusCode.BadRequest,
+                        "Conditional update requires search criteria",
+                        OperationOutcome.IssueType.Required),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
+
             bool success = DoTypeSearch(
                 ctx,
                 out FhirResponseContext searchResp);
@@ -4429,6 +4456,23 @@ public partial class VersionedFhirStore : IFhirStore
                     $"Resource type: {ctx.ResourceType} is not supported",
                     OperationOutcome.IssueType.NotSupported),
                 StatusCode = HttpStatusCode.NotFound,
+            };
+            return false;
+        }
+
+        // A type-level (conditional) delete MUST carry real search criteria. Control/result
+        // parameters (_format, _pretty, _count, ...) are not criteria; without at least one real
+        // search parameter the type search would match every resource of the type, so reject the
+        // request rather than deleting everything (covers both empty and control-only queries).
+        if (!FhirCandle.Search.Common.QueryContainsSearchParameters(ctx.UrlQuery))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.BadRequest,
+                    $"Type-level delete of {ctx.ResourceType} requires search criteria",
+                    OperationOutcome.IssueType.Required),
+                StatusCode = HttpStatusCode.BadRequest,
             };
             return false;
         }

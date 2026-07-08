@@ -1,5 +1,34 @@
 * Work in Progress
-  * Fix issue #41: Incorrect link to subscriptions backport IG.
+  * Fixed: type-level delete now requires search criteria.
+  * Fixed: conditional update is gated on interaction (control-only requests are rejected).
+  * Fixed: a control-only query on POST create is treated as a normal create.
+  * Fixed: parse-lock on control-only writes (see issue #62).
+  * Updated NuGet Dependencies
+
+* v2026.623.2024 — PR #60
+  * Added `--strict` mode (opt-in, default off):
+    * per-tenant rule registry with rule composition and startup warnings;
+    * `Prefer: handling=strict` search enforcement (`400` on unknown/malformed parameters);
+    * POST/PUT resource-id semantics (client-id, regex validation, on-missing behavior) and PUT empty-body-id enforcement;
+    * `CapabilityStatement` `url`/`fhirVersion` pinned under strict.
+  * Added the `$validate` operation (target precedence, `mode`/`profile` handling, initialization guard).
+  * Fixed — search: token `:not` now matches resources missing the element; default string search is accent-insensitive; spec-correct FHIR date-prefix interval semantics with a precision-aware `ap` window; `:missing=true` no longer crashes on date parameters.
+  * Fixed — storage: POST always assigns a server id and PUT enforces URL/body id match; POST id-assignment now keys on the HTTP method.
+  * Changed: documentation overhaul — new `docs/` tree (user, technical/architecture, operations, `$validate`, strict) with the README trimmed to a quick-start; search string-fold values are now cached (performance).
+  * Dependencies: routine dependency updates.
+
+* v2026.528.2036 — PR #58
+  * Fixed: repeated query parameters are preserved, restoring correct AND semantics.
+  * Fixed: create-failure outcomes and details are surfaced from storage.
+  * Fixed: the subscription hook propagates bundle-create failure, and operation dispatchers honor `opResponse.StatusCode`.
+  * Fixed issue #40: broken link to the subscriptions backport IG.
+  * Dependencies: routine dependency updates.
+
+* v2026.527.1737 — PR #52 (@zidad)
+  * Fixed: omit empty `location`/`etag` from `Bundle.entry.response`.
+
+* v2026.526.2054 — PR #50 (@berkant-k)
+  * Fixed: `ResourceStore` now distinguishes and reports create (`201 Created`) vs update (`200 OK`) outcomes correctly.
 
 * v2026.415.1643
   * Fix issue #46: Regression caused by CLI directory handling (docker images failing to find FHIR directory)

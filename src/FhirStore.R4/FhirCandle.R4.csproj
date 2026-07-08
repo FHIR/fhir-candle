@@ -7,7 +7,7 @@
 	  <None Remove="Client\**" />
 	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Include="Hl7.Fhir.R4" Version="6.2.0" />
+		<PackageReference Include="Hl7.Fhir.R4" Version="6.2.1" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
