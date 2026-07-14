@@ -92,6 +92,13 @@ public class TenantConfiguration
     public int MaxResourceCount { get; set; } = 0;
 
     /// <summary>
+    /// Gets or sets the default page size.
+    /// </summary>
+    public int DefaultPageCount { get; set; } = 10;
+
+    public int MaxPageCount { get; set; } = 1000;
+
+    /// <summary>
     /// Gets or sets the maximum allowed subscription expiration minutes.
     /// </summary>
     public int MaxSubscriptionExpirationMinutes { get; set; } = 30;

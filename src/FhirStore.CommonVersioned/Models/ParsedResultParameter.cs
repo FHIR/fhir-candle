@@ -28,6 +28,7 @@ public class ParsedResultParameters
         "_sort",
         "_summary",
         "_total",
+        "_offset"
     ];
 
     /// <summary>Gets or sets the inclusion FHIRpath extractions, keyed by resource.</summary>
@@ -68,6 +69,8 @@ public class ParsedResultParameters
     /// Gets or sets the maximum number of results to return.
     /// </summary>
     public long? MaxResults { get; private set; } = null;
+
+    public int? Offset { get; private set; } = null;
 
     /// <summary>
     /// Gets or sets the summary flag
@@ -146,6 +149,17 @@ public class ParsedResultParameters
                             (count >= 0))
                         {
                             PageMatchCount = count;
+                            applied.Add(key + "=" + value);
+                            _rawParameters.Add((key, value));
+                        }
+                    }
+                    break;
+                case "_offset":
+                    {
+                        if (int.TryParse(value, out int offset) &&
+                            (offset >= 0))
+                        {
+                            Offset = offset;
                             applied.Add(key + "=" + value);
                             _rawParameters.Add((key, value));
                         }
