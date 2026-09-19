@@ -148,13 +148,13 @@
       <ReferencePath Condition="'%(FileName)'=='FhirCandle.R5'">
         <Aliases>candleR5</Aliases>
       </ReferencePath>
-      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R4.Core'">
+      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R4'">
         <Aliases>coreR4</Aliases>
       </ReferencePath>
-      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R4B.Core'">
+      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R4B'">
         <Aliases>coreR4B</Aliases>
       </ReferencePath>
-      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R5.Core'">
+      <ReferencePath Condition="'%(FileName)'=='Hl7.Fhir.R5'">
         <Aliases>coreR5</Aliases>
       </ReferencePath>
     </ItemGroup>
