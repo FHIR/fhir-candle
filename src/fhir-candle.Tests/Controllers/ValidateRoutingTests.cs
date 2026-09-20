@@ -18,6 +18,7 @@ namespace fhir.candle.Tests.Controllers;
 ///     proving the wire-type body unwrap is handled by the operation, not by a
 ///     controller-side branch.
 /// </summary>
+[Collection(CompatibilityHostCollection.Name)]
 public class ValidateRoutingTests : IClassFixture<CandleWebApplicationFactory>
 {
     private readonly CandleWebApplicationFactory _factory;
