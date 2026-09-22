@@ -1974,9 +1974,13 @@ public partial class VersionedFhirStore : IFhirStore
     {
         bool success = DoInstanceRead(ctx, out response);
 
+        string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
+            ? System.Web.HttpUtility.ParseQueryString(ctx.UrlQuery)["_summary"] ?? string.Empty
+            : ctx.SerializeSummaryFlag;
+
         string sr = response.Resource is null
             ? string.Empty
-            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty, summaryFlag);
 
         string so = response.Outcome is null
             ? string.Empty
@@ -4763,7 +4767,15 @@ rs,
             ctx,
             out response);
 
-        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        // Direct requests and form searches may carry _summary only in the search parameters.
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+        string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
+            ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
+            : ctx.SerializeSummaryFlag;
+
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty, summaryFlag);
         string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with
@@ -5131,9 +5143,16 @@ rs,
             ctx,
             out response);
 
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+        string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
+            ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
+            : ctx.SerializeSummaryFlag;
+
         string sr = response.Resource is null
             ? string.Empty
-            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty, summaryFlag);
 
         string so = response.Outcome is null
             ? string.Empty
@@ -5535,9 +5554,16 @@ rs,
             ctx,
             out response);
 
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+        string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
+            ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
+            : ctx.SerializeSummaryFlag;
+
         string sr = response.Resource is null
             ? string.Empty
-            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+            : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty, summaryFlag);
 
         string so = response.Outcome is null
             ? string.Empty
@@ -5836,7 +5862,14 @@ rs,
             ctx,
             out response);
 
-        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty);
+        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
+            ? ctx.UrlQuery
+            : ctx.SourceContent;
+        string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
+            ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
+            : ctx.SerializeSummaryFlag;
+
+        string sr = response.Resource is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Resource, ctx.DestinationFormat, ctx.SerializePretty, summaryFlag);
         string so = response.Outcome is null ? string.Empty : SerializationUtils.SerializeFhir((Resource)response.Outcome, ctx.DestinationFormat, ctx.SerializePretty);
 
         response = response with

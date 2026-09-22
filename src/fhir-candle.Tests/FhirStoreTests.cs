@@ -284,6 +284,11 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
         string json1 = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + _id + "\",\"language\":\"en\"}";
         string json2 = "{\"resourceType\":\"" + _resourceType + "\",\"id\":\"" + _id + "\",\"language\":\"en-US\"}";
 
+        using JsonDocument submitted = JsonDocument.Parse(json1);
+        using JsonDocument submittedUpdate = JsonDocument.Parse(json2);
+        submitted.RootElement.GetProperty("language").GetString().ShouldBe("en");
+        submittedUpdate.RootElement.GetProperty("language").GetString().ShouldBe("en-US");
+
         IFhirStore fhirStore = _fixture.GetStoreForVersion(version);
 
         FhirRequestContext ctx = new()
@@ -314,6 +319,9 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
         response.LastModified.ShouldNotBeNullOrEmpty();
         response.Location.ShouldEndWith(_resourceType + "/" + _id);
 
+        using JsonDocument created = JsonDocument.Parse(response.SerializedResource);
+        created.RootElement.GetProperty("language").GetString().ShouldBe("en");
+
         ctx = new()
         {
             TenantName = fhirStore.Config.ControllerName,
@@ -338,6 +346,9 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
         response.SerializedOutcome.ShouldNotBeNullOrEmpty();
         response.ETag.ShouldBe("W/\"1\"");
         response.Location.ShouldEndWith(_resourceType + "/" + _id);
+
+        using JsonDocument read = JsonDocument.Parse(response.SerializedResource);
+        read.RootElement.GetProperty("language").GetString().ShouldBe("en");
 
         ctx = new()
         {
@@ -366,6 +377,9 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
         response.LastModified.ShouldNotBeNullOrEmpty();
         response.Location.ShouldEndWith(_resourceType + "/" + _id);
 
+        using JsonDocument updated = JsonDocument.Parse(response.SerializedResource);
+        updated.RootElement.GetProperty("language").GetString().ShouldBe("en-US");
+
         ctx = new()
         {
             TenantName = fhirStore.Config.ControllerName,
@@ -385,6 +399,9 @@ public class TestPatientCRUD : IClassFixture<FhirStoreTests>
         success.ShouldBeTrue();
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Location.ShouldBeNullOrEmpty();
+
+        using JsonDocument deleted = JsonDocument.Parse(response.SerializedResource);
+        deleted.RootElement.GetProperty("language").GetString().ShouldBe("en-US");
 
         ctx = new()
         {

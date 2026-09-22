@@ -2571,11 +2571,14 @@ public class R4TestsSummary : IClassFixture<R4Tests>
     private readonly record struct SearchResultInfo(
         string SummaryFlag,
         bool Success,
+        HttpStatusCode? Status,
         int? Total,
         int MatchCount,
         int EntryCount,
-        int ResponseLength,
-        string SelfLink);
+        string SelfLink,
+        JsonElement[] Resources);
+
+    private sealed record SummaryResourceExpectation(JsonElement Input, GeneratedResourceBinding Binding);
 
     private static string[] _summaryFlags = ["false", "true", "text", "data", "count"];
 
@@ -2629,17 +2632,22 @@ public class R4TestsSummary : IClassFixture<R4Tests>
     [InlineData("/Patient/example/Observation?patient=example", R4Tests._observationsWithSubjectExample)]
     public void Search(string search, int matchCount)
     {
-        Dictionary<string, SearchResultInfo> summaryResults = _summaryFlags.Select(sf => doSearch(sf)).ToDictionary(s => s.SummaryFlag);
+        SearchResultInfo initial = DoSummarySearch("?_type=Patient,Observation", string.Empty);
+        AssertSummarySearchCounts(initial, R4Tests._patientCount + R4Tests._observationCount);
+        Dictionary<string, SummaryResourceExpectation> expectedResources = BindSummaryInputs(initial.Resources);
+        string generatedPatient = Assert.Single(expectedResources, pair => !pair.Value.Input.TryGetProperty("id", out _)).Key;
+        string[] expectedIdentities = ExpectedSummaryIdentities(search, generatedPatient);
+        Assert.Equal(matchCount, expectedIdentities.Length);
 
-        // first, make sure everything worked
+        Dictionary<string, SearchResultInfo> summaryResults = _summaryFlags
+            .Select(summaryFlag => DoSummarySearch(search, summaryFlag)).ToDictionary(result => result.SummaryFlag);
+
+        // Membership is unordered, but each input resource's arrays, values, and metadata are not.
         foreach ((string summaryFlag, SearchResultInfo sri) in summaryResults)
         {
             sri.Success.ShouldBeTrue($"Search with _summary={summaryFlag} failed");
-            sri.ResponseLength.ShouldBeGreaterThan(0, $"Search with _summary={summaryFlag} returned no data");
+            AssertSummarySearchResult(sri, matchCount, expectedIdentities, expectedResources);
         }
-
-        // false should have the longest response
-        summaryResults["false"].ResponseLength.ShouldBe(summaryResults.Values.Max(sri => sri.ResponseLength));
 
         // count should have no entries
         summaryResults["count"].EntryCount.ShouldBe(0);
@@ -2656,51 +2664,437 @@ public class R4TestsSummary : IClassFixture<R4Tests>
             sri.SelfLink.Contains($"_summary={summaryFlag}").ShouldBeTrue($"Search with _summary={summaryFlag} returned incorrect self link");
         }
 
-        return;
-
-        SearchResultInfo doSearch(string summaryFlag)
+        // Neither repeated summaries nor their marker codings may change a subsequent ordinary search/read.
+        AssertSummarySearchResult(DoSummarySearch(search, string.Empty), matchCount, expectedIdentities, expectedResources);
+        foreach (string identity in expectedIdentities)
         {
-            FhirRequestContext ctx = new()
+            SummaryResourceExpectation expected = expectedResources[identity];
+            FhirRequestContext context = new()
             {
                 TenantName = _fixture._store.Config.ControllerName,
                 Store = _fixture._store,
                 HttpMethod = "GET",
-                Url = _fixture._store.Config.BaseUrl + search + "&_summary=" + summaryFlag,
-                Forwarded = null,
+                Url = expected.Binding.Location,
                 Authorization = null,
-                SourceFormat = "application/fhir+json",
                 DestinationFormat = "application/fhir+json",
             };
+            _fixture._store.InstanceRead(context, out FhirResponseContext response).ShouldBeTrue();
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            response.MimeType.ShouldBe("application/fhir+json");
+            response.ResourceType.ShouldBe(expected.Binding.ResourceType);
+            response.Id.ShouldBe(expected.Binding.Id);
+            using JsonDocument read = JsonDocument.Parse(response.SerializedResource);
+            AssertSummaryProjection(expected.Input, read.RootElement, "false", expected.Binding);
+            WireContractAssertions.ResourceHeaders(expected.Binding, response.ETag, response.Location, response.LastModified);
+            AssertSummaryOutcome(response.SerializedOutcome);
+        }
+    }
 
-            FhirResponseContext response;
-            bool success = ctx.Interaction switch
+    private SearchResultInfo DoSummarySearch(string search, string summaryFlag)
+    {
+        FhirRequestContext ctx = new()
+        {
+            TenantName = _fixture._store.Config.ControllerName,
+            Store = _fixture._store,
+            HttpMethod = "GET",
+            Url = _fixture._store.Config.BaseUrl + search +
+                (string.IsNullOrEmpty(summaryFlag) ? string.Empty : "&_summary=" + summaryFlag),
+            Forwarded = null,
+            Authorization = null,
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+        };
+
+        FhirResponseContext response;
+        bool success = ctx.Interaction switch
+        {
+            StoreInteractionCodes.CompartmentSearch => _fixture._store.CompartmentSearch(ctx, out response),
+            StoreInteractionCodes.CompartmentTypeSearch => _fixture._store.CompartmentTypeSearch(ctx, out response),
+            StoreInteractionCodes.TypeSearch => _fixture._store.TypeSearch(ctx, out response),
+            StoreInteractionCodes.SystemSearch => _fixture._store.SystemSearch(ctx, out response),
+            _ => _fixture._store.TypeSearch(ctx, out response)
+        };
+
+        success.ShouldBeTrue($"Search with _summary={summaryFlag} failed");
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.MimeType.ShouldBe("application/fhir+json");
+        response.SerializedResource.ShouldNotBeNullOrEmpty();
+        AssertSummaryOutcome(response.SerializedOutcome);
+
+        using JsonDocument document = JsonDocument.Parse(response.SerializedResource);
+        JsonElement root = document.RootElement;
+        Assert.Equal("Bundle", root.GetProperty("resourceType").GetString());
+        Assert.Equal("searchset", root.GetProperty("type").GetString());
+        bool hasEntries = root.TryGetProperty("entry", out JsonElement entryArray);
+        AssertSummaryJsonMembers(root, hasEntries
+            ? ["resourceType", "type", "total", "link", "entry"]
+            : ["resourceType", "type", "total", "link"]);
+        if (summaryFlag == "count")
+        {
+            Assert.False(hasEntries, "_summary=count must not serialize entries or resource bodies.");
+        }
+
+        JsonElement link = Assert.Single(root.GetProperty("link").EnumerateArray());
+        AssertSummaryJsonMembers(link, ["relation", "url"]);
+        Assert.Equal("self", link.GetProperty("relation").GetString());
+        JsonElement[] entries = hasEntries ? entryArray.EnumerateArray().ToArray() : [];
+        foreach (JsonElement entry in entries)
+        {
+            AssertSummaryJsonMembers(entry, ["fullUrl", "resource", "search"]);
+            AssertSummaryJsonMembers(entry.GetProperty("search"), ["mode"]);
+            string identity = SummaryIdentity(entry.GetProperty("resource"));
+            Assert.Equal(_fixture._config.BaseUrl + "/" + identity, entry.GetProperty("fullUrl").GetString());
+        }
+
+        JsonElement[] resources = entries.Select(entry => entry.GetProperty("resource").Clone()).ToArray();
+        Assert.Equal(resources.Length, resources.Select(SummaryIdentity).Distinct(StringComparer.Ordinal).Count());
+        return new(summaryFlag, success, response.StatusCode, root.GetProperty("total").GetInt32(),
+            entries.Count(entry => entry.GetProperty("search").GetProperty("mode").GetString() == "match"),
+            entries.Length, link.GetProperty("url").GetString()!, resources);
+    }
+
+    private static void AssertSummarySearchCounts(SearchResultInfo result, int total)
+    {
+        result.Success.ShouldBeTrue();
+        result.Status.ShouldBe(HttpStatusCode.OK);
+        result.Total.ShouldBe(total);
+        int entries = result.SummaryFlag == "count" ? 0 : total;
+        result.EntryCount.ShouldBe(entries);
+        result.MatchCount.ShouldBe(entries);
+        Assert.Equal(entries, result.Resources.Length);
+        if (string.IsNullOrEmpty(result.SummaryFlag))
+        {
+            Assert.DoesNotContain("_summary=", result.SelfLink, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("_summary=" + result.SummaryFlag, result.SelfLink, StringComparison.Ordinal);
+        }
+    }
+
+    private static void AssertSummarySearchResult(
+        SearchResultInfo result,
+        int total,
+        string[] identities,
+        IReadOnlyDictionary<string, SummaryResourceExpectation> expectations)
+    {
+        AssertSummarySearchCounts(result, total);
+        if (result.SummaryFlag == "count")
+        {
+            Assert.Empty(result.Resources);
+            return;
+        }
+
+        Assert.Equal(identities.Order(StringComparer.Ordinal), result.Resources.Select(SummaryIdentity).Order(StringComparer.Ordinal));
+        foreach (JsonElement resource in result.Resources)
+        {
+            SummaryResourceExpectation expected = expectations[SummaryIdentity(resource)];
+            AssertSummaryProjection(expected.Input, resource,
+                string.IsNullOrEmpty(result.SummaryFlag) ? "false" : result.SummaryFlag, expected.Binding);
+        }
+    }
+
+    private static string[] ExpectedSummaryIdentities(string search, string generatedPatient)
+    {
+        // Reviewed data/r4 inputs, not identities learned from the query being tested.
+        string[] officialPatients = ["Patient/example", "Patient/pat1", "Patient/pat2", "Patient/pat3", "Patient/pat4"];
+        string[] observations =
+        [
+            "Observation/1minute-apgar-score", "Observation/656", "Observation/blood-pressure",
+            "Observation/blood-pressure-cancel", "Observation/blood-pressure-dar", "Observation/example",
+        ];
+        return search switch
+        {
+            "/Patient?_id:not=example" => ["Patient/pat1", "Patient/pat2", "Patient/pat3", "Patient/pat4", generatedPatient],
+            "/Patient?_profile:missing=false" or "/Patient?active:missing=true" => [generatedPatient],
+            "/Patient?_profile:missing=true" or "/Patient?name-use=official" or "/Patient?active=true" => officialPatients,
+            "/Patient?multiplebirth=3" or "/Patient?multiplebirth=le3" or "/Patient?gender=female" => ["Patient/pat4"],
+            "/Patient?birthdate=1982-01-23" or "/Patient?birthdate=1982-01" => ["Patient/pat3"],
+            "/Patient?birthdate=1982" => ["Patient/pat3", "Patient/pat4"],
+            "/Patient?gender=male" => ["Patient/example", "Patient/pat1", "Patient/pat3"],
+            "/Patient?gender=male,female" => ["Patient/example", "Patient/pat1", "Patient/pat3", "Patient/pat4"],
+            "?_type=Patient" => [.. officialPatients, generatedPatient],
+            "?_type=Patient,Observation" => [.. officialPatients, generatedPatient, .. observations],
+            "/Patient/example/Observation?patient=example" =>
+                ["Observation/example", "Observation/blood-pressure", "Observation/blood-pressure-cancel", "Observation/blood-pressure-dar"],
+            "/Patient?_id=example" or
+            "/Patient?name=peter" or
+            "/Patient?name=peter,not-present" or
+            "/Patient?name=not-present,peter" or
+            "/Patient?name:contains=eter" or
+            "/Patient?name:exact=Peter" or
+            "/Patient?identifier=urn:oid:1.2.36.146.595.217.0.1|12345" or
+            "/Patient?identifier=|12345" or
+            "/Patient?identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|12345" or
+            "/Patient?telecom=phone|(03) 5555 6473" or
+            "/Patient?telecom=|(03) 5555 6473" or
+            "/Patient?telecom=phone|" or
+            "/Patient?_id=example&name=peter" or
+            "/Patient?_has:Observation:patient:_id=blood-pressure" or
+            "/Patient?_has:Observation:subject:_id=blood-pressure" => ["Patient/example"],
+            "/Patient?_id=AnIdThatDoesNotExist" or
+            "/Patient?name=not-present,another-not-present" or
+            "/Patient?name:contains=zzrot" or
+            "/Patient?name:exact=peter" or
+            "/Patient?name:exact=Peterish" or
+            "/Patient?multiplebirth=lt3" or
+            "/Patient?gender=InvalidValue" or
+            "/Patient?name-use=invalid-name-use" or
+            "/Patient?identifier=urn:oid:1.2.36.146.595.217.0.1|ValueThatDoesNotExist" or
+            "/Patient?identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|EXT|12345" or
+            "/Patient?identifier:of-type=http://terminology.hl7.org/CodeSystem/v2-0203|MR|ABC" or
+            "/Patient?active=false" or
+            "/Patient?active=garbage" or
+            "/Patient?_id=example&name=not-present" or
+            "/Patient?_id=example&_profile:missing=false" => [],
+            _ => throw new ArgumentException("No independently authored summary membership for " + search, nameof(search)),
+        };
+    }
+
+    private Dictionary<string, SummaryResourceExpectation> BindSummaryInputs(JsonElement[] resources)
+    {
+        string directory = _fixture._config.LoadDirectory?.FullName
+            ?? throw new InvalidOperationException("The R4 summary fixture requires its checked-in data/r4 inputs.");
+        Dictionary<string, SummaryResourceExpectation> expectations = new(StringComparer.Ordinal);
+        foreach (JsonElement input in SummaryInputs(directory))
+        {
+            string resourceType = input.GetProperty("resourceType").GetString()!;
+            JsonElement actual;
+            if (input.TryGetProperty("id", out JsonElement inputId))
             {
-                StoreInteractionCodes.CompartmentSearch => _fixture._store.CompartmentSearch(ctx, out response),
-                StoreInteractionCodes.CompartmentTypeSearch => _fixture._store.CompartmentTypeSearch(ctx, out response),
-                StoreInteractionCodes.TypeSearch => _fixture._store.TypeSearch(ctx, out response),
-                StoreInteractionCodes.SystemSearch => _fixture._store.SystemSearch(ctx, out response),
-                _ => _fixture._store.TypeSearch(ctx, out response)
-            };
-
-            MinimalBundle? results = null;
-
-            if (success)
+                string identity = resourceType + "/" + inputId.GetString();
+                actual = Assert.Single(resources, resource => SummaryIdentity(resource) == identity);
+            }
+            else
             {
-                results = JsonSerializer.Deserialize<MinimalBundle>(response.SerializedResource);
+                // The transaction's sole id-less Patient is bound by its authored identifier, not by search order.
+                Assert.Equal("Patient", resourceType);
+                JsonElement identifier = Assert.Single(input.GetProperty("identifier").EnumerateArray());
+                string system = identifier.GetProperty("system").GetString()!;
+                string value = identifier.GetProperty("value").GetString()!;
+                actual = Assert.Single(resources, resource =>
+                    resource.GetProperty("resourceType").GetString() == "Patient" &&
+                    resource.GetProperty("identifier").EnumerateArray().Any(candidate =>
+                        candidate.GetProperty("system").GetString() == system &&
+                        candidate.GetProperty("value").GetString() == value));
             }
 
-            return new()
-            {
-                SummaryFlag = summaryFlag,
-                Success = success,
-                Total = results?.Total,
-                MatchCount = results?.Entries?.Count(e => e.Search?.Mode == "match") ?? 0,
-                EntryCount = results?.Entries?.Count() ?? 0,
-                ResponseLength = response.SerializedResource?.Length ?? 0,
-                SelfLink = results?.Links?.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty,
-            };
+            string id = actual.GetProperty("id").GetString()!;
+            Assert.Matches(@"\A[A-Za-z0-9\-.]{1,64}\z", id);
+            JsonElement meta = actual.GetProperty("meta");
+            string version = meta.GetProperty("versionId").GetString()!;
+            Assert.Equal("1", version);
+            string lastUpdated = meta.GetProperty("lastUpdated").GetString()!;
+            Assert.Matches(@"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z", lastUpdated);
+            Assert.True(DateTimeOffset.TryParse(lastUpdated, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out DateTimeOffset instant));
+            Assert.True(instant <= DateTimeOffset.UtcNow.AddSeconds(1));
+            string baseUrl = _fixture._config.BaseUrl;
+            GeneratedResourceBinding binding = new(resourceType, id, version, lastUpdated, instant, baseUrl, $"{baseUrl}/{resourceType}/{id}");
 
+            // Only generated identity/version/time are captured. All content still comes from the raw input.
+            AssertSummaryProjection(input, actual, "false", binding);
+            Assert.True(expectations.TryAdd(SummaryIdentity(actual), new(input, binding)));
         }
+
+        Assert.Equal(resources.Length, expectations.Count);
+        Assert.Equal(expectations.Keys.Order(StringComparer.Ordinal), resources.Select(SummaryIdentity).Order(StringComparer.Ordinal));
+        return expectations;
+    }
+
+    private static IEnumerable<JsonElement> SummaryInputs(string directory)
+    {
+        string[] files =
+        [
+            "patient-example.json", "patient-example-a.json", "patient-example-b.json",
+            "patient-example-c.json", "patient-example-d.json",
+            "Observation-1minute-apgar-score.json", "Observation-656.json", "Observation-blood-pressure.json",
+            "Observation-blood-pressure-cancel.json", "Observation-blood-pressure-dar.json", "Observation-example.json",
+        ];
+        foreach (string fileName in files)
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, fileName)));
+            yield return document.RootElement.Clone();
+        }
+
+        using JsonDocument transaction = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "Bundle-transaction-cdex-load-payer.json")));
+        JsonElement patient = transaction.RootElement.GetProperty("entry")[0].GetProperty("resource");
+        Assert.Equal("Patient", patient.GetProperty("resourceType").GetString());
+        Assert.False(patient.TryGetProperty("id", out _));
+        yield return patient.Clone();
+    }
+
+    private static void AssertSummaryProjection(
+        JsonElement input,
+        JsonElement actual,
+        string summaryFlag,
+        GeneratedResourceBinding? binding)
+    {
+        string resourceType = input.GetProperty("resourceType").GetString()!;
+        Assert.Contains(resourceType, new[] { "Patient", "Observation" });
+        Assert.Equal(resourceType, actual.GetProperty("resourceType").GetString());
+        Assert.Equal(binding?.Id ?? input.GetProperty("id").GetString(), actual.GetProperty("id").GetString());
+        if (binding is not null)
+        {
+            Assert.Equal(binding.Version, actual.GetProperty("meta").GetProperty("versionId").GetString());
+            Assert.Equal(binding.LastUpdated, actual.GetProperty("meta").GetProperty("lastUpdated").GetString());
+        }
+
+        string[] selected = summaryFlag switch
+        {
+            "false" => input.EnumerateObject().Select(property => property.Name).ToArray(),
+            "data" => input.EnumerateObject().Where(property => property.Name != "text").Select(property => property.Name).ToArray(),
+            "text" => resourceType == "Patient"
+                ? ["resourceType", "id", "meta", "text"]
+                : ["resourceType", "id", "meta", "text", "status", "code"],
+            "true" => SummaryMembers(resourceType),
+            _ => throw new ArgumentOutOfRangeException(nameof(summaryFlag)),
+        };
+        string[] present = input.EnumerateObject().Where(property => selected.Contains(property.Name, StringComparer.Ordinal))
+            .Select(property => property.Name).ToArray();
+        string[] generatedMembers = binding is not null || summaryFlag != "false" ? ["id", "meta"] : ["id"];
+        AssertSummaryJsonMembers(actual, present.Concat(generatedMembers).Distinct(StringComparer.Ordinal));
+
+        if (summaryFlag == "false")
+        {
+            JsonProperty[] originalMeta = input.TryGetProperty("meta", out JsonElement inputMeta)
+                ? inputMeta.EnumerateObject().ToArray()
+                : [];
+            JsonElement actualMeta = actual.GetProperty("meta");
+            AssertSummaryJsonMembers(actualMeta,
+                originalMeta.Select(property => property.Name).Concat(["versionId", "lastUpdated"]).Distinct(StringComparer.Ordinal));
+            foreach (JsonProperty property in originalMeta)
+            {
+                WireContractAssertions.Content(property.Value.GetRawText(), actualMeta.GetProperty(property.Name).GetRawText(), CompatibilityFormat.Json);
+            }
+        }
+        else
+        {
+            // Included contained resources receive the same exact pair, but not stored-resource version/time.
+            Sdk6ContractTests.AssertSummaryExchangeMetadata(input.GetRawText(), actual.GetRawText(), CompatibilityFormat.Json,
+                storedResource: binding is not null);
+        }
+
+        foreach (string name in present.Where(name => name is not ("id" or "meta")))
+        {
+            JsonElement expectedValue = input.GetProperty(name);
+            JsonElement actualValue = actual.GetProperty(name);
+            if (summaryFlag == "data" && name == "contained")
+            {
+                Assert.Equal(expectedValue.GetArrayLength(), actualValue.GetArrayLength());
+                for (int index = 0; index < expectedValue.GetArrayLength(); index++)
+                {
+                    AssertSummaryProjection(expectedValue[index], actualValue[index], "data", null);
+                }
+            }
+            else if (summaryFlag == "true")
+            {
+                AssertSummaryValue(expectedValue, actualValue, SummaryChildShape(resourceType, name, expectedValue));
+            }
+            else
+            {
+                WireContractAssertions.Content(expectedValue.GetRawText(), actualValue.GetRawText(), CompatibilityFormat.Json);
+            }
+        }
+    }
+
+    private static void AssertSummaryValue(JsonElement input, JsonElement actual, string shape)
+    {
+        Assert.Equal(input.ValueKind, actual.ValueKind);
+        if (input.ValueKind == JsonValueKind.Array)
+        {
+            Assert.Equal(input.GetArrayLength(), actual.GetArrayLength());
+            for (int index = 0; index < input.GetArrayLength(); index++)
+            {
+                AssertSummaryValue(input[index], actual[index], shape);
+            }
+            return;
+        }
+        if (input.ValueKind != JsonValueKind.Object)
+        {
+            WireContractAssertions.Content(input.GetRawText(), actual.GetRawText(), CompatibilityFormat.Json);
+            return;
+        }
+
+        string[] allowed = SummaryMembers(shape);
+        JsonProperty[] properties = input.EnumerateObject().Where(property => allowed.Contains(property.Name, StringComparer.Ordinal)).ToArray();
+        AssertSummaryJsonMembers(actual, properties.Select(property => property.Name));
+        foreach (JsonProperty property in properties)
+        {
+            AssertSummaryValue(property.Value, actual.GetProperty(property.Name), SummaryChildShape(shape, property.Name, property.Value));
+        }
+    }
+
+    private static string[] SummaryMembers(string shape) => shape switch
+    {
+        // FHIR R4 element definitions' isSummary flags, restricted to the shapes in the reviewed inputs.
+        // No serializer/model inspector supplies this list. Element.id/extension and primitive extensions are not summary fields.
+        "Patient" =>
+        [
+            "resourceType", "id", "meta", "implicitRules", "identifier", "active", "name", "telecom", "gender",
+            "birthDate", "deceasedBoolean", "deceasedDateTime", "address", "managingOrganization", "link",
+        ],
+        "Observation" =>
+        [
+            "resourceType", "id", "meta", "implicitRules", "identifier", "basedOn", "partOf", "status", "code",
+            "subject", "focus", "encounter", "effectiveDateTime", "issued", "performer", "valueQuantity",
+            "hasMember", "derivedFrom", "component",
+        ],
+        "Observation.component" => ["modifierExtension", "code", "valueQuantity", "valueCodeableConcept"],
+        "Patient.link" => ["modifierExtension", "other", "type"],
+        "Identifier" => ["use", "type", "system", "value", "period", "assigner"],
+        "HumanName" => ["use", "text", "family", "given", "prefix", "suffix", "period"],
+        "ContactPoint" => ["system", "value", "use", "rank", "period"],
+        "Address" => ["use", "type", "text", "line", "city", "district", "state", "postalCode", "country", "period"],
+        "Reference" => ["reference", "type", "identifier", "display"],
+        "Coding" => ["system", "version", "code", "display", "userSelected"],
+        "CodeableConcept" => ["coding", "text"],
+        "Quantity" => ["value", "comparator", "unit", "system", "code"],
+        "Period" => ["start", "end"],
+        _ => throw new ArgumentException("No independently authored summary projection for " + shape, nameof(shape)),
+    };
+
+    private static string SummaryChildShape(string shape, string name, JsonElement value)
+    {
+        if (value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
+        {
+            return "primitive";
+        }
+        return (shape, name) switch
+        {
+            ("Patient", "identifier") or ("Observation", "identifier") or ("Reference", "identifier") => "Identifier",
+            ("Patient", "name") => "HumanName",
+            ("Patient", "telecom") => "ContactPoint",
+            ("Patient", "address") => "Address",
+            ("Patient", "link") => "Patient.link",
+            ("Patient", "managingOrganization") or ("Patient.link", "other") or ("Identifier", "assigner") or
+            ("Observation", "basedOn") or ("Observation", "partOf") or ("Observation", "subject") or
+            ("Observation", "focus") or ("Observation", "encounter") or ("Observation", "performer") or
+            ("Observation", "hasMember") or ("Observation", "derivedFrom") => "Reference",
+            ("Observation", "code") or ("Observation.component", "code") or
+            ("Observation.component", "valueCodeableConcept") or ("Identifier", "type") => "CodeableConcept",
+            ("Observation", "valueQuantity") or ("Observation.component", "valueQuantity") => "Quantity",
+            ("Observation", "component") => "Observation.component",
+            ("CodeableConcept", "coding") => "Coding",
+            ("Identifier", "period") or ("HumanName", "period") or ("ContactPoint", "period") or ("Address", "period") => "Period",
+            ("HumanName", "given") or ("HumanName", "prefix") or ("HumanName", "suffix") or ("Address", "line") => "primitive",
+            _ => throw new ArgumentException($"No independently authored summary child shape for {shape}.{name}.", nameof(name)),
+        };
+    }
+
+    private void AssertSummaryOutcome(string body) =>
+        WireContractAssertions.Body(new OutcomeBodyExpectation("summary-outcome", [new("information", "success")]),
+            body, CompatibilityFormat.Json, _fixture._config.BaseUrl, new CompatibilityBindings());
+
+    private static string SummaryIdentity(JsonElement resource) =>
+        resource.GetProperty("resourceType").GetString() + "/" + resource.GetProperty("id").GetString();
+
+    private static void AssertSummaryJsonMembers(JsonElement actual, IEnumerable<string> expected)
+    {
+        Assert.Equal(JsonValueKind.Object, actual.ValueKind);
+        string[] names = actual.EnumerateObject().Select(property => property.Name).ToArray();
+        Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(expected.Order(StringComparer.Ordinal), names.Order(StringComparer.Ordinal));
     }
 }
 

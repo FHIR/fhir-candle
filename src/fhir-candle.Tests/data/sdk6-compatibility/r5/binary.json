@@ -1,0 +1,11 @@
+{
+  "resourceType": "Binary",
+  "meta": {
+    "tag": [
+      { "system": "https://example.test/corpus", "code": "synthetic-r5" }
+    ]
+  },
+  "contentType": "application/octet-stream",
+  "securityContext": { "reference": "Patient/wire-patient" },
+  "data": "AAECA/7/QUJDCg=="
+}

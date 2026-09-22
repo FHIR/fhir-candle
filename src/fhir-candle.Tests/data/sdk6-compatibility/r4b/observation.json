@@ -1,0 +1,29 @@
+{
+  "resourceType": "Observation",
+  "meta": {
+    "tag": [
+      { "system": "https://example.test/corpus", "code": "synthetic-r4b" }
+    ]
+  },
+  "identifier": [
+    { "system": "https://example.test/identifier", "value": "quantity-r4b" }
+  ],
+  "status": "final",
+  "code": { "text": "Synthetic precision observation" },
+  "subject": { "reference": "Patient/wire-patient" },
+  "effectiveDateTime": "2024-06-03T10:11:12.3400-05:00",
+  "valueQuantity": {
+    "value": 1234567890.123400,
+    "unit": "mg/dL",
+    "system": "http://unitsofmeasure.org",
+    "code": "mg/dL"
+  },
+  "derivedFrom": [
+    { "reference": "Observation/prior-a" },
+    { "reference": "Observation/prior-b" }
+  ],
+  "component": [
+    { "code": { "text": "First synthetic component" }, "valueString": "first" },
+    { "code": { "text": "Second synthetic component" }, "valueBoolean": true }
+  ]
+}
