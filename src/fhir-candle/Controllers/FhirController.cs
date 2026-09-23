@@ -612,6 +612,27 @@ public class FhirController : ControllerBase
     }
 
 
+    /// <summary>Reads search form occurrences and appends the URL query after the body.</summary>
+    /// <returns>The encoded search parameters.</returns>
+    private async Task<string> getSearchContent()
+    {
+        if (Request.HasFormContentType)
+        {
+            return QueryString.Create(Request.Form).Add(Request.QueryString).ToString();
+        }
+
+        using StreamReader reader = new StreamReader(Request.Body);
+        string content = await reader.ReadToEndAsync();
+        string queryString = Request.QueryString.ToString();
+
+        if (!string.IsNullOrEmpty(queryString))
+        {
+            return string.IsNullOrEmpty(content) ? queryString : content + "&" + queryString[1..];
+        }
+
+        return content;
+    }
+
     /// <summary>
     /// (An Action that handles HTTP POST requests) posts a resource type search.
     /// </summary>
@@ -646,31 +667,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -749,31 +747,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -861,31 +836,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -1110,31 +1062,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {

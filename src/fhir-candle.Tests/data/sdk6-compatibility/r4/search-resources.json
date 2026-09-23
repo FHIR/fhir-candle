@@ -1,0 +1,165 @@
+{
+    "fhirVersion": "4.0.1",
+    "resources": [
+        {
+            "resourceType": "Organization", "id": "shared", "name": "Oak Clinic"
+        },
+        {
+            "resourceType": "Organization", "id": "other", "name": "Cedar Clinic"
+        },
+        {
+            "resourceType": "Patient", "id": "beta", "language": "en",
+            "identifier": [{ "system": "https://example.test/search/r4/identifiers", "value": "B" }],
+            "active": false, "name": [{ "family": "Baker", "given": ["Bea"] }],
+            "gender": "male", "birthDate": "1990-04-05", "multipleBirthInteger": 4,
+            "managingOrganization": { "reference": "Organization/other" }
+        },
+        {
+            "resourceType": "Patient", "id": "gamma", "language": "en",
+            "identifier": [{ "system": "https://example.test/search/r4/identifiers", "value": "G" }],
+            "active": true, "name": [{ "family": "Muñoz", "given": ["Zoe"] }],
+            "gender": "female", "birthDate": "1980-02-03"
+        },
+        {
+            "resourceType": "Patient", "id": "alpha", "language": "en",
+            "identifier": [{ "system": "https://example.test/search/r4/identifiers", "value": "A" }],
+            "active": true, "name": [{ "family": "Muñoz", "given": ["Ada"] }],
+            "gender": "female", "birthDate": "1980-02-03",
+            "address": [{ "city": "Québec" }], "multipleBirthInteger": 2,
+            "managingOrganization": { "reference": "Organization/shared" }
+        },
+        {
+            "resourceType": "Patient", "id": "missing", "language": "en"
+        },
+        {
+            "resourceType": "Observation", "id": "late",
+            "meta": {
+                "source": "https://example.test/search/r4/source/b",
+                "profile": ["https://example.test/search/r4/profile/lab"]
+            },
+            "status": "final",
+            "code": { "coding": [{ "system": "https://example.test/search/r4/codes", "code": "weight" }] },
+            "subject": { "reference": "{{tenant-base}}/Patient/beta" },
+            "effectiveDateTime": "2022-06-07T08:09:10Z",
+            "valueQuantity": { "value": 30, "unit": "g", "system": "http://unitsofmeasure.org", "code": "g" }
+        },
+        {
+            "resourceType": "Observation", "id": "twin", "status": "preliminary",
+            "code": { "coding": [{ "system": "https://example.test/search/r4/codes", "code": "pulse" }] },
+            "subject": { "reference": "Patient/alpha" },
+            "effectiveDateTime": "2020-01-02T03:04:05Z",
+            "valueQuantity": { "value": 20, "unit": "mg", "system": "http://unitsofmeasure.org", "code": "mg" }
+        },
+        {
+            "resourceType": "Observation", "id": "early",
+            "meta": {
+                "source": "https://example.test/search/r4/source/a",
+                "profile": ["https://example.test/search/r4/profile/vitals"]
+            },
+            "status": "amended",
+            "code": { "coding": [{ "system": "https://example.test/search/r4/codes", "code": "weight" }] },
+            "subject": { "reference": "Patient/alpha" },
+            "effectiveDateTime": "2020-01-02T03:04:05Z",
+            "valueQuantity": { "value": 10, "unit": "mg", "system": "http://unitsofmeasure.org", "code": "mg" }
+        },
+        {
+            "resourceType": "Observation", "id": "missing", "status": "final",
+            "code": { "text": "No coded measurement or subject" }
+        },
+        {
+            "resourceType": "Encounter", "id": "visit", "status": "finished",
+            "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+            "subject": {
+                "reference": "Patient/alpha",
+                "identifier": { "system": "https://example.test/search/r4/identifiers", "value": "A" }
+            },
+            "period": { "start": "2021-06-01T09:00:00Z", "end": "2021-06-01T10:00:00Z" }
+        },
+        {
+            "resourceType": "Encounter", "id": "other-visit", "status": "planned",
+            "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "IMP" },
+            "subject": { "reference": "Patient/beta" }
+        },
+        {
+            "resourceType": "SearchParameter", "id": "multiplebirth",
+            "url": "https://example.test/search/r4/SearchParameter/multiplebirth",
+            "name": "CompatibilityMultipleBirth", "status": "active",
+            "description": "Search the authored integer multiple birth value",
+            "code": "multiplebirth", "base": ["Patient"], "type": "number",
+            "expression": "(Patient.multipleBirth as integer)"
+        },
+        {
+            "resourceType": "ValueSet", "id": "local-membership",
+            "url": "https://example.test/search/r4/ValueSet/local-membership",
+            "name": "CompatibilityLocalMembership", "status": "active",
+            "compose": {
+                "include": [{
+                    "system": "https://example.test/search/r4/codes",
+                    "concept": [{ "code": "weight" }]
+                }]
+            }
+        }
+    ],
+    "siblingOverrides": [
+        {
+            "resourceType": "Organization", "id": "shared", "name": "Elm Clinic"
+        },
+        {
+            "resourceType": "Patient", "id": "alpha", "language": "de",
+            "identifier": [{ "system": "https://example.test/search/r4/identifiers", "value": "A" }],
+            "active": true, "name": [{ "family": "Elm", "given": ["Ada"] }],
+            "gender": "female", "birthDate": "1980-02-03",
+            "address": [{ "city": "Québec" }], "multipleBirthInteger": 2,
+            "managingOrganization": { "reference": "Organization/shared" }
+        },
+        {
+            "resourceType": "Patient", "id": "beta", "language": "de",
+            "identifier": [{ "system": "https://example.test/search/r4/identifiers", "value": "B" }],
+            "active": false, "name": [{ "family": "Muñoz", "given": ["Bea"] }],
+            "gender": "male", "birthDate": "1990-04-05", "multipleBirthInteger": 4,
+            "managingOrganization": { "reference": "Organization/other" }
+        },
+        {
+            "resourceType": "Observation", "id": "late",
+            "meta": {
+                "source": "https://example.test/search/r4/source/b",
+                "profile": ["https://example.test/search/r4/profile/lab"]
+            },
+            "status": "final",
+            "code": { "coding": [{ "system": "https://example.test/search/r4/codes", "code": "weight" }] },
+            "subject": { "reference": "{{tenant-base}}/Patient/alpha" },
+            "effectiveDateTime": "2022-06-07T08:09:10Z",
+            "valueQuantity": { "value": 30, "unit": "g", "system": "http://unitsofmeasure.org", "code": "g" }
+        },
+        {
+            "resourceType": "Observation", "id": "twin", "status": "preliminary",
+            "code": { "coding": [{ "system": "https://example.test/search/r4/codes", "code": "pulse" }] },
+            "subject": { "reference": "Patient/beta" },
+            "effectiveDateTime": "2020-01-02T03:04:05Z",
+            "valueQuantity": { "value": 20, "unit": "mg", "system": "http://unitsofmeasure.org", "code": "mg" }
+        },
+        {
+            "resourceType": "Observation", "id": "early",
+            "meta": {
+                "source": "https://example.test/search/r4/source/a",
+                "profile": ["https://example.test/search/r4/profile/vitals"]
+            },
+            "status": "amended",
+            "code": { "coding": [{ "system": "https://example.test/search/r4/codes", "code": "weight" }] },
+            "subject": { "reference": "Patient/beta" },
+            "effectiveDateTime": "2020-01-02T03:04:05Z",
+            "valueQuantity": { "value": 10, "unit": "mg", "system": "http://unitsofmeasure.org", "code": "mg" }
+        },
+        {
+            "resourceType": "ValueSet", "id": "local-membership",
+            "url": "https://example.test/search/r4/ValueSet/local-membership",
+            "name": "CompatibilityLocalMembership", "status": "active",
+            "compose": {
+                "include": [{
+                    "system": "https://example.test/search/r4/codes",
+                    "concept": [{ "code": "pulse" }]
+                }]
+            }
+        }
+    ]
+}

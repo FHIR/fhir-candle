@@ -6202,7 +6202,7 @@ rs,
         foreach (Resource inclusion in reverseInclusions)
         {
             // add the matched result to the bundle
-            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{resource.TypeName}/{resource.Id}", Bundle.SearchEntryMode.Include);
+            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{inclusion.TypeName}/{inclusion.Id}", Bundle.SearchEntryMode.Include);
         }
     }
 
@@ -6386,7 +6386,7 @@ rs,
         foreach (Resource inclusion in inclusions)
         {
             // add the matched result to the bundle
-            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{resource.TypeName}/{resource.Id}", Bundle.SearchEntryMode.Include);
+            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{inclusion.TypeName}/{inclusion.Id}", Bundle.SearchEntryMode.Include);
         }
     }
 

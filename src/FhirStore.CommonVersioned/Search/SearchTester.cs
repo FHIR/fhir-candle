@@ -69,7 +69,9 @@ public class SearchTester
             {
                 reverseChainCache ??= [];
 
-                string rcKey = sp.ReverseChainedParameterLink.ResourceType + "." + sp.ReverseChainedParameterLink.Name;
+                // The complete requested reverse chain retains the nested filter's names, order, and values.
+                string rcKey = sp.ReverseChainedParameterLink.ResourceType + "." +
+                    sp.ReverseChainedParameterLink.Name + "?" + sp.GetAppliedQueryString();
 
                 if (!reverseChainCache.TryGetValue(rcKey, out Resource[]? reverseChainMatches))
                 {
@@ -90,16 +92,13 @@ public class SearchTester
                 //    $" resource {sp.ReverseChainedParameterLink.ResourceType}.{sp.ReverseChainedParameterLink.ParamType}={rootNode.InstanceType!}/{id} and" +
                 //    $" {sp.ReverseChainedParameterFilter.ResourceType}.{sp.ReverseChainedParameterFilter.Name}={sp.ReverseChainedParameterFilter.Values.FirstOrDefault()}");
 
-                foreach (Resource reverseChainResource in reverseChainMatches)
+                if (!reverseChainMatches.Any(reverseChainResource =>
+                    TestForMatch(reverseChainResource.ToPocoNode(), [qualifiedLink])))
                 {
-                    // test to see if this matches
-                    if (!TestForMatch(reverseChainResource.ToPocoNode(), [qualifiedLink]))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
-                // matched all reverse chain resources
+                // Each reverse chain needs a related match; subsequent parameters still apply independently.
                 continue;
             }
 
@@ -168,15 +167,19 @@ public class SearchTester
                     break;
             }
 
-            if (!extracted.Any())
+            if (sp.Modifier == SearchModifierCodes.Missing)
             {
-                // check if we are looking for missing values - successful match
-                if ((sp.Modifier == SearchModifierCodes.Missing) &&
-                    sp.Values.Any(v => v.StartsWith("t", StringComparison.OrdinalIgnoreCase)))
+                // Presence is decided across all values, not by a single valueless member.
+                if (!SearchTestMissing(extracted.FirstOrDefault(HasSearchValue), sp))
                 {
-                    continue;
+                    return false;
                 }
 
+                continue;
+            }
+
+            if (!extracted.Any())
+            {
                 // per FHIR R4 spec, :not matches resources where the element is absent.
                 if (sp.Modifier == SearchModifierCodes.Not)
                 {
@@ -314,7 +317,7 @@ public class SearchTester
                 return EvalReferenceSearch.TestReferenceAgainstPrimitive(resultNode, sp);
 
             case "reference-reference":
-                return EvalReferenceSearch.TestReference(resultNode, sp);
+                return EvalReferenceSearch.TestReference(resultNode, sp, FhirStore.Config.BaseUrl);
 
             case "reference-oid":
                 return EvalReferenceSearch.TestReferenceAgainstOid(resultNode, sp);
@@ -340,7 +343,7 @@ public class SearchTester
 
             // note: the literals used are 'actual' resource types (e.g., patient)
             case "reference-resourcetype-reference":
-                return EvalReferenceSearch.TestReference(resultNode, sp, sp.ModifierLiteral!);
+                return EvalReferenceSearch.TestReference(resultNode, sp, FhirStore.Config.BaseUrl, sp.ModifierLiteral!);
 
             // note: the literals used are 'actual' resource types (e.g., patient)
             case "reference-resourcetype-oid":
@@ -701,19 +704,28 @@ public class SearchTester
         }
     }
 
+    private static bool HasSearchValue(PocoNode? valueNode)
+    {
+        if (valueNode?.Poco is null)
+        {
+            return false;
+        }
+
+        // Primitive extensions do not supply a scalar; populated complex elements have child values.
+        return valueNode.Poco is PrimitiveType
+            ? valueNode.GetValue() is not null
+            : valueNode.Children().Any(child => child.Any());
+    }
+
     /// <summary>Searches for the first test missing.</summary>
     /// <param name="valueNode">The value node.</param>
     /// <param name="sp">       The sp.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
     public static bool SearchTestMissing(PocoNode? valueNode, ParsedSearchParameter sp)
     {
-        if (valueNode?.Poco is null)
-        {
-            return true;
-        }
-
         bool positive = sp.Values.Any(v => v.StartsWith("t", StringComparison.OrdinalIgnoreCase));
         bool negative = sp.Values.Any(v => v.StartsWith("f", StringComparison.OrdinalIgnoreCase));
+        bool present = HasSearchValue(valueNode);
 
         // testing both missing and not missing is always true
         if (positive && negative)
@@ -722,13 +734,13 @@ public class SearchTester
         }
 
         // test for missing and a null value
-        if (positive && (valueNode.Poco is null))
+        if (positive && !present)
         {
             return true;
         }
 
         // test for not missing and not a null value
-        if (negative && (valueNode?.GetValue() is not null))
+        if (negative && present)
         {
             return true;
         }

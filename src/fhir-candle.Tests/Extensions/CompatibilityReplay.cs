@@ -251,7 +251,13 @@ internal sealed class CompatibilityReplay : IDisposable, IAsyncDisposable
             SerializePretty = request.Pretty,
             SerializeSummaryFlag = request.Summary,
         };
-        bool success = _stores[request.Tenant].PerformInteraction(context, out FhirResponseContext direct, serializeReturn: true);
+        FhirResponseContext direct;
+        bool success = context.Interaction switch
+        {
+            Common.StoreInteractionCodes.CompartmentSearch => _stores[request.Tenant].CompartmentSearch(context, out direct),
+            Common.StoreInteractionCodes.CompartmentTypeSearch => _stores[request.Tenant].CompartmentTypeSearch(context, out direct),
+            _ => _stores[request.Tenant].PerformInteraction(context, out direct, serializeReturn: true),
+        };
         return new CompatibilityResponse(Transport, direct.StatusCode ?? throw new InvalidOperationException("Missing direct status."), direct.MimeType)
         {
             Direct = new CompatibilityDirectResponse(

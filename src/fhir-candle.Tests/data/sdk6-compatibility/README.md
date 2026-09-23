@@ -139,7 +139,7 @@ this source inspection.
 
 ### Raw fixture content
 
-Each of `r4/`, `r4b/`, and `r5/` contains the following five raw files:
+Each of `r4/`, `r4b/`, and `r5/` contains the following five raw exchange fixtures:
 
 | Files | Reviewed content and exact preservation checks |
 |---|---|
@@ -230,6 +230,364 @@ as newly created per query. Only unspecified search membership order is a set;
 all resource arrays, narrative text, decimal tokens, choice names and references
 remain exact. Full reads/searches after summaries reject stored mutation or
 tag accumulation. No native output is recorded as an expected snapshot.
+
+## Search inventory (phase 4)
+
+`Sdk6ContractTests.Search.cs` and the three `search-resources.json` files were
+authored against the existing search tests and contracts **before running the
+new cases against the runtime**. Neither membership nor order is recorded from
+an SDK result. The JSON files are corpus containers, not FHIR Bundles: each has
+the literal FHIR version, 14 raw resources, and seven complete sibling-resource
+overrides. `SearchGraphXml` contains separately authored XML counterparts in
+the Search partial; it does not convert the JSON with Firely or a generic
+JSON-to-XML adapter. Both formats are used for seeds, definition writes, reads,
+and search responses.
+
+| Case ID / test | Versions / formats / boundaries | Input and expectation source | Deliberate local variability |
+|---|---|---|---|
+| `SearchFamiliesReturnExpectedIds` | 96 rows: eight families × R4/R4B/R5 × JSON/XML × HTTP/direct; every query uses GET and form POST | `R4TestsPatient`/`R4BTestsPatient`/`R5TestsPatient` string, gender, boolean, identifier, multiplebirth, birthdate, and reference cases; the three Observation suites' code/value-quantity/composite/date/profile cases; `R5TestsEncounter` reference-identifier/chaining cases; existing `_source` URI declaration in `ParsedSearchParameter._allResourceParameters` and native URI evaluator. | 67 literal probes cover positive/negative/absent values. Expected identities are literal C# arrays. `:missing=true/false` is exercised for applicable ordinary families; the supported composite's missing-component resource must not match, without inventing a composite `:missing` modifier. No unit conversion, quantity precision TODO, or new decimal-conformance policy is asserted. |
+| `ReferenceChainsAndIncludesStayTenantLocal` | 72 rows: six groups × the 12-row version/format/boundary matrix; GET and form POST | The Patient suites' `_has:Observation:patient/subject:_id` and `_revinclude` cases, Observation subject chains/`_include`, Encounter subject chains, documented named tenants, and `StoreTerminologyService.VsContains`/`EvalTokenSearch.TestTokenInCodeableConcept`'s existing local `:in` contract. | Each replay hosts oak and elm of the same version. Identical resource IDs have different Patient names, Organization names, and Observation targets; the same ValueSet canonical contains `weight` in oak and `pulse` in elm. Run oak → elm → oak, using the same expressions. Assert forward/typed/multihop/reverse chains, absent targets, include/revinclude identities and modes, deduplication, and full resource content. Unknown ValueSet and absent coding return no matches; no external terminology service is used. |
+| `SortReturnsExplicitIdentityOrder` | 168 rows: seven key/tie groups × two directions × the 12-row matrix; GET and form POST | The three Patient/Observation sort suites; the explicitly settled `FhirSortComparer.Compare` missing-value branches, not the legacy contradictory comments. | Birthdate, Observation date/status, and `_lastUpdated`; exact nonempty membership is checked before exact match order. Equal date keys use an explicit opposite-direction `_id` secondary key. Status ties use a date secondary key, including missing dates. `_lastUpdated` order is authored from four sequential ordinary updates, with separately bound versions/timestamps and a strict monotonic-time precondition, never by sorting actual search output. |
+| `DynamicSearchParameterAndCompartmentStateIsFresh` | 24 rows: SearchParameter and CompartmentDefinition lifecycle groups × the 12-row matrix; sibling tenant in each replay; GET and form POST searches | `FhirStoreTestsR4`/`R4B` create/capability tests and `FhirStoreTestsR5.SearchParameterCreate/CapabilityCount`; `AuthCompartmentTests.TestCompartmentTypeSearch`, the Patient compartment rows, and existing definition create/update/delete dispatch. | PUT-as-create, PUT with bound If-Match, DELETE, and ordinary reads only. Warm `compat-family` against family, change its expression to given, verify old/new membership and changed capability documentation, delete and require absence/strict rejection, then recreate to reject stale compiled state. Capability count deltas follow the existing tests; the added declaration's name/canonical/type/documentation are authored exact values, not generated expectations. A custom Patient compartment first includes only Observation, then only Encounter; deletion removes that registration (no invented fallback to a built-in definition). Sibling default compartments and definitions remain unaffected. |
+| `StrictAndPreferHandlingPreserveOutcomes` | 24 rows: default/strict tenants × the 12-row matrix; GET and form POST | Every unknown/multiple-unknown/malformed/partially-malformed and override case in `StrictSearchHandlingTests`; `docs/user/strict-mode.md`; the documented last-directive-wins rule in `EffectiveSearchHandling`. | Create two idless Patients via POST, so strict setup does not bypass ID/upsert policy. Bind their generated identities once. Exercise tenant default, explicit lenient/strict, and both orders of two handling directives. Strict errors require exact issue count/order, severity, code, offending parameter/value and version-specific `search.html#errors` URL; no direct resource or resource headers. Lenient responses must still contain exactly the Alpha Patient, not merely return 200. A final full search reuses both original content/metadata bindings. |
+| `SearchTheoryDataIsNonEmptyAndLabeled` | Pure BCL inventory, no host/store | Authored family/group/version/format/transport lists and raw corpus. | Pins all 384 replay rows and checks unique labels, literal fixture FHIR versions, 14 unique identities, and seven declared sibling overrides. No Firely expected-side parsing/model inspection. |
+
+### Authored search graph and identities
+
+The base graph's insertion order is deliberately not a correct sort order:
+Patients are `beta`, `gamma`, `alpha`, `missing`; Observations are `late`, `twin`,
+`early`, `missing`. This avoids an accidentally stable, no-op sorter passing.
+
+- Patient `alpha`: Muñoz/Ada, female, active, birthDate `1980-02-03`,
+  multipleBirthInteger `2`, identifier `A`, Québec address, Organization/shared.
+  `beta`: Baker/Bea, male, inactive, `1990-04-05`, integer `4`, identifier `B`,
+  Organization/other. `gamma`: Muñoz/Zoe, female, active, `1980-02-03`, identifier
+  `G`, no multiple birth or organization. `missing` has only id/language.
+- Observation `early`: amended, `weight`, `10 mg`, Patient/alpha, timestamp
+  `2020-01-02T03:04:05Z`, source `/source/a` and profile `/profile/vitals`.
+  `twin`: preliminary, `pulse`, `20 mg`, the same Patient and timestamp, no
+  source/profile. `late`: final, `weight`, `30 g`, an **absolute configured
+  tenant URL** to Patient/beta, `2022-06-07T08:09:10Z`, source `/source/b` and
+  profile `/profile/lab`. `missing`: final with a text-only mandatory code,
+  and no subject/effective/value/source/profile.
+- Organization/shared is Oak Clinic; Organization/other is Cedar Clinic.
+  Encounter/visit refers to Patient/alpha and carries identifier `A`, AMB class,
+  and a one-hour June 2021 period; Encounter/other-visit refers to Patient/beta,
+  carries IMP class, and has no period. The multiplebirth SearchParameter is
+  derived from the existing version-specific raw fixtures. The local ValueSet
+  includes only the synthetic `weight` code.
+- Sibling overrides make Organization/shared Elm Clinic; Patient/alpha's
+  family Elm and Patient/beta's family Muñoz, both with `language=de`.
+  Observation early/twin instead refer to Patient/beta, while late uses that
+  sibling's absolute Patient/alpha URL. Its same-canonical ValueSet includes
+  only `pulse`. Complete entry content and generated bindings are checked
+  against the appropriate sibling input, not just overlapping IDs.
+
+All canonical systems/URLs include the declared `r4`, `r4b`, or `r5` suffix.
+The only JSON template slot is `{{tenant-base}}`, replaced with the configured
+tenant base without stripping prefixes. R4/R4B Encounter uses `finished`,
+a single Coding `class`, and `period`; R5 uses `completed`, an array of
+CodeableConcept `class` values, and `actualPeriod`. R5 SearchParameters include
+`processingMode=normal`. These are explicit specification-version differences,
+not relaxed comparisons. `_source` actually exercises URI extraction;
+`_profile` separately exercises the existing canonical-reference parameter.
+
+The reviewed sort identity orders are:
+
+| Key group | Ascending match order | Descending match order |
+|---|---|---|
+| Patient birthdate, unique present keys plus missing | missing, alpha, beta | beta, alpha, missing |
+| Patient birthdate with opposite-direction `_id` secondary | missing, gamma, alpha, beta | beta, alpha, gamma, missing |
+| Observation date, unique present keys plus missing | missing, early, late | late, early, missing |
+| Observation date with opposite-direction `_id` secondary | missing, twin, early, late | late, early, twin, missing |
+| Observation status, unique keys | early, late, twin | twin, late, early |
+| Observation status, date secondary, `_id` tertiary | early, missing, late, twin | twin, late, missing, early |
+| Observation `_lastUpdated` after twin → late → missing → early updates | twin, late, missing, early | early, missing, late, twin |
+
+Missing sort values are first ascending and last descending. Status is
+mandatory on these version-correct Observations and `meta.lastUpdated` is
+generated for every persisted resource, so missing values are exercised on
+birthdate/date, including a secondary date key, rather than by seeding invalid
+resources or editing store internals. Time values are captured only as permitted
+generated bindings, with 25 ms between controlled updates; the expected ID order
+above remains literal.
+
+### Search assertion boundaries and execution status
+
+Every successful search checks the searchset type, exact total, exact entry and
+match/include counts, no duplicate/unexpected/absent identities, permitted
+`search.mode` values, a tenant-specific applied self URL, and a fullUrl equal to
+the **entry resource's** tenant/type/id. Each complete same-format entry resource
+must equal its authored input plus previously bound generated metadata. Empty
+results require no entries. Unsorted membership is a set; sorted match order is
+additionally an exact sequence, and no resource array is normalized.
+
+Direct outcomes remain separate from serialized Bundles and have the expected
+successful issue semantics; HTTP assertions inspect the actual selected body.
+Strict failure outcomes are checked on the actual boundary with no fabricated
+HTTP fields. Fully ignored parameters disappear from a lenient self link.
+The partially valid date-list case preserves the existing
+`ParsedSearchParameter.GetAppliedQueryString` request-literal echo while
+requiring only the valid date to affect membership; that is not an assertion
+that a malformed value matched.
+
+This is an **authored coverage inventory, not a phase-4 pass claim**. Initial
+verification uses the exact phase-4 application build and combined test filter
+from the plan/`AGENTS.md`, against unchanged production search code first.
+Failures must be reported with evidence before any repair or retry. The
+phase-3 execution evidence and every earlier corpus inventory above remain
+unchanged; these new cases do not establish later phases or other OS/framework
+cells.
+
+### Phase-4 attempt-2 partial recovery evidence (2026-09-22)
+
+The original attempt remains **1,443 executed / 1,353 passed / 90 failed**,
+including all 1,058 earlier selected cases passing. The reviewed first-failure
+classification is P1 repeated forms **12**, P2 complex presence **30**, P3
+inclusion fullUrls **24**, and P4 local references **18**: 84 pre-existing
+defect cases, not established SDK6-origin regressions. U1 accounts for the
+other six cases: successful compartment searches were incorrectly requested
+through the unsupported generic dispatcher. These are six cases with two
+diagnoses, not twelve failures.
+
+Attempt 2 retains all 384 original replay rows and their inventory fact.
+The three original JSON graphs are byte-identical to recovery intake;
+the original family/reference/sort probes, both definition lifecycles,
+and the separately authored XML graph are unchanged. Additional controls
+use independent hand-authored JSON/XML literals in the Search partial.
+The authored additions are:
+
+| Test | Additional rows | Contract guarded |
+|---|---:|---|
+| `ReverseChainUsesExistentialMatchesAndDistinctFilters` | 144 | Twelve independently labeled predicates across the 12-row matrix: zero/one/multiple candidates, one/multiple targets, distinct names and repeated same keys in both orders, different related resources satisfying separate filters, nested forward-filter identity, and oak/elm/oak revisits. All references in this graph are relative so M1 reproduction does not require P4. |
+| `PostSearchPreservesRepeatedParametersAndEncoding` | 192 | Four routes × four groups × the matrix: single/comma/repeated values, encoded values/modifiers/keys, body-before-query repetitions, and empty forms/values. The original string/date probes remain. System searches explicitly declare `_type=Observation`. |
+| `MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions` | 84 | Seven presence groups: HumanName, Quantity, Reference, extension-only birthDate, false, zero, and multivalued given names with one extension-only and one populated primitive. |
+| `IncludedFullUrlsIdentifyReturnedResources` | 36 | Include/revinclude at the configured root on both boundaries, plus independent HTTP forwarded-root rows, retaining exact content, total, mode, deduplication and identity assertions. |
+| `LocalReferenceEquivalenceRejectsForeignBases` | 168 | Fourteen groups covering both local spellings, exact foreign references with local-negative controls, authority/tenant/prefix boundaries, URN/OID/type/canonical preservation, reverse chains, reverse includes, and both compartment routes. |
+| `CompartmentReplayUsesExistingMethods` | 12 | The complete original successful compartment definition/type/sibling/create/update/delete lifecycle through the supported boundary. |
+| `GenericCompartmentDispatchRemainsUnsupported` | 6 | Direct generic GET/form dispatch for both compartment routes remains unsuccessful/501, with its actual empty serialized fields kept distinct from its outcome object. |
+| `SearchRecoveryTheoryDataIsNonEmptyAndLabeled` | 1 fact | Pins the additional 642 replay rows and their labels without replacing the original inventory fact. |
+
+Search helper failures now identify version, format, transport, tenant, probe,
+actual method/path/form body, and expected/actual identities before total
+assertions. Assertion and wire-parser failures are rethrown with context,
+not swallowed. Search probes still use `SendAsync`; they are **not** counted
+as recorded `StepAsync` responses. Original content, outcome, ordering, URL,
+membership and status assertions remain.
+
+The only completed adapter edit selects the existing `CompartmentSearch` or
+`CompartmentTypeSearch` from the parsed interaction **before** invoking it.
+All other direct calls still use `PerformInteraction(..., serializeReturn:
+true)`; no fallback after 501 or production generic dispatch was added.
+This edit has not executed in a test run yet. P1-P4 production code and the
+M1 branch/cache remain **unmodified** at this hand-back.
+
+The new POST controls deliberately keep boundary distinctions: direct form
+controls provide complete `SourceContent`, because merging a separate URL
+query is controller behavior. New system controls preserve the current
+one-literal-per-parameter-name self-link projection while requiring every
+occurrence to affect membership. Neither decision changes an original
+expectation or authorizes a search-parser/self-link repair.
+
+#### Actual diagnostic executions
+
+The command authority is `AGENTS.md`. Only these two diagnostic test commands
+ran; neither is an acceptance gate:
+
+```powershell
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReverseChainUsesExistentialMatchesAndDistinctFilters"
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.PostSearchPreservesRepeatedParametersAndEncoding|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.IncludedFullUrlsIdentifyReturnedResources|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.LocalReferenceEquivalenceRejectsForeignBases|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.CompartmentReplayUsesExistingMethods|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.GenericCompartmentDispatchRemainsUnsupported"
+```
+
+1. **M1 regression-first:** exit **1**, **144 executed / 48 passed / 96
+   failed**, no skips, **0 compiler warnings / 0 compiler errors**. Production
+   and the replay adapter were unchanged. The 84 M1 first failures were
+   `zero`, `multiple-targets`, `distinct-names`, `same-key`,
+   `same-key-reversed`, `nested-filters`, and `nested-filters-reversed`,
+   twelve each. Examples: no candidates incorrectly returned all three
+   Patients; final-status candidates for two Patients incorrectly returned
+   none; incompatible repeated `_id` or nested-family filters returned the
+   Patient selected by the first filter. The other twelve first failures
+   were the known P1 form-flattening mechanism in the six HTTP
+   `independent-related` and six HTTP reversed-order rows. These are new
+   guard executions, not a recount of the original 90.
+2. **Additional guards before production repair:** exit **1**, **no tests
+   executed**, **0 warnings / 2 compiler errors**. The compiler stopped at
+   `Sdk6ContractTests.Search.cs:415` with CS8506 (no best type for the switch
+   expression) and CS8131 (deconstruction requires a typed right-hand-side).
+   The new presence-control deconstruction contains untyped collection
+   expressions in its switch arms. This is an introduced test-authoring
+   compile blocker, not a newly diagnosed product defect. The 498 selected
+   guard rows remain unexecuted. The mandated compile-failure stop was
+   honored: no corrective edit or diagnostic retry followed.
+
+Raw evidence is under ignored `scratch/0919-01/`:
+
+- `dev-do-phase4-attempt2-m1-before-20260922-183933.log` records the first
+  command/exit but the noninteractive transcript omitted native output.
+- `dev-do-phase4-attempt2-m1-before-raw-20260922-184018.log` preserves that
+  command's complete tool-retained output via `Get-Content | Out-Host` inside
+  a new `Start-Transcript -NoClobber` session. This is an explicitly labeled
+  output recovery, **not a rerun**; the recovery command exited 0.
+- `dev-do-phase4-attempt2-guards-before-20260922-185023.log` directly captures
+  the second command through `Out-Host`, its compile errors and exit 1.
+
+The final exact application build and complete phase-4 test gate were **not
+run** because diagnostic compilation blocked this attempt. The original
+masked probes, repair controls, and later platform/framework gates are not
+claimed to pass. This section records partial work and a hand-back, not
+phase completion or a refreshed attempt budget.
+
+### Phase-4 attempt-3 verification evidence (2026-09-22)
+
+This continues the **original final attempt 3**. The attempt-1 failure,
+attempt-2 M1 reproduction, and attempt-2 compile failure above remain history.
+The first edit supplied explicitly typed arrays to the new presence-control
+switch; its literals, selected rows, and assertions did not change. The
+unchanged-production additional-guard diagnostic then compiled and executed
+**498 cases: 210 passed, 288 failed, none skipped**, with **zero compiler
+warnings/errors**. The already recorded M1 baseline was not rerun.
+
+The additional-guard first failures independently reproduced only the
+approved mechanisms: 96 HTTP form/encoding/query-merge failures (P1), 60
+presence failures (P2), 36 inclusion-fullUrl failures (P3), 84 local-reference
+failures (P4), and 12 dedicated-compartment lifecycle failures at the known
+P4 sibling probe. All six generic-dispatch 501 controls passed. In particular,
+the corrected direct adapter reached the supported lifecycle rather than
+falling back after a 501.
+
+#### Bounded implementation
+
+- **P1:** All four existing POST handlers use one private helper.
+  `QueryString.Create(Request.Form).Add(Request.QueryString)` encodes each
+  parsed key/value occurrence and appends the URL query after the body once.
+  Repeated AND, comma OR, encoded delimiters/Unicode/keys, and empty
+  values/forms retain their meaning. The non-form stream fallback remains;
+  authorization, negotiation, request headers, summary, and response handling
+  are not replaced. System self links retain the previously documented
+  one-literal-per-name projection; all occurrences still constrain membership.
+- **P2:** `SearchTester` decides `:missing` across the extracted values.
+  A primitive must have a scalar value (including real false/zero), while a
+  populated complex node has children. One extension-only primitive cannot
+  make a multivalued parameter missing when another member is populated.
+  This is confined to presence testing, not a general value-extraction rewrite.
+- **P3:** Both inclusion loops build fullUrls from the included resource's
+  type/id and the supplied `rootUrl`. Forwarded roots, content, membership,
+  search modes, totals, and deduplication remain independently asserted.
+- **P4:** `TestReference` receives the explicit current store's
+  `Config.BaseUrl`. The comparison equates `Type/id` with exactly
+  `<that-base>/Type/id` in both directions. Foreign authority, sibling tenant,
+  base-prefix lookalike, and descendant-path controls remain nonlocal; exact
+  foreign absolute matches, typed references, URN/OID, and canonical controls
+  remain valid. No suffix-based `Resolve` proof or resolver/versioning redesign
+  was introduced. The existing reference-search, reverse-chain, reverse-include,
+  and compartment callers obtain this context through their store's tester.
+- **M1:** The existing reverse branch requires **any** related match, so an
+  empty candidate set is false. Each repeated `_has` still applies separately
+  with AND. Its cache key includes the complete requested reverse-chain
+  literal, including the nested filter's names/order/values. Cache lifetime
+  and store ownership remain unchanged; no `ParsedSearchParameter` or
+  `ResourceStore` plumbing change was needed.
+- **U1:** The attempt-2 adapter edit is retained and now executed: select
+  `CompartmentSearch` / `CompartmentTypeSearch` before dispatch; use ordinary
+  `PerformInteraction(..., serializeReturn: true)` for other requests.
+  Successful serialized resource/outcome assertions remain separate from
+  the explicit unsupported generic-dispatch controls. Production generic
+  compartment dispatch was not added.
+
+These are the approved repairs to existing behavior, **not evidence that
+SDK 6 caused P1-P4 or M1**. No comparer, factory, scenario model, Exchange
+partial, legacy test, compiler ownership, sorting, Unicode evaluator,
+terminology, unit-conversion, or unsupported-capability repair was made.
+
+#### Observed regression-before/after matrix
+
+The after column is observed both in the complete Search-partial diagnostic
+and in the unchanged cumulative acceptance filter, not inferred from source.
+
+| Added guard | Before production repair (passed / failed) | After (passed / failed) |
+|---|---:|---:|
+| Reverse-chain existential/filter identity | 48 / 96, attempt 2: 84 M1 and 12 P1 first failures | 144 / 0 |
+| Four POST routes, encoding, merging, empty controls | 96 / 96 | 192 / 0 |
+| Complex/primitive/multivalued presence | 24 / 60 | 84 / 0 |
+| Included identity and configured/forwarded roots | 0 / 36 | 36 / 0 |
+| Local/foreign reference boundaries and consumers | 84 / 84 | 168 / 0 |
+| Dedicated compartment lifecycle | 0 / 12, stopped at P4 | 12 / 0 |
+| Generic compartment dispatch remains 501 | 6 / 0 | 6 / 0 |
+| Additional inventory fact | Not selected by the before diagnostics | 1 / 0 |
+
+All originally masked probes now execute successfully: quantity/reference
+POSTs and later profile/identifier checks; HTTP string address/presence and
+date/Period checks; included content, sibling and oak-revisit checks;
+absent/no-target reverse chains; and complete compartment create/update/delete,
+type, sibling, and final ordinary-search isolation checks on both boundaries.
+The 168 original sort rows, strict/Prefer cases, SearchParameter lifecycle,
+terminology cases, and selected legacy accent/exact cases remain in the gates.
+Search probes still use `SendAsync`; they are not relabeled as recorded
+`StepAsync` responses.
+
+The Search diagnostic executed **1,028 / 1,028 passing cases**. The exact final
+cumulative gate executed **2,086 / 2,086 passing cases**, with **no skips and
+zero compiler warnings/errors**. Its result-header multiset retains all
+**1,443 original cases**, including the original 90 failures, with identical
+multiplicity: **1,058 earlier cases + 384 original search rows + one original
+inventory fact**. The difference is exactly **642 additional rows + one
+additional inventory fact**, not a reduced or substituted original selection.
+For each FHIR version, the added theory matrix has 53 Direct/JSON, 53
+Direct/XML, 54 HTTP/JSON, and 54 HTTP/XML rows; the forwarded-root and
+generic-dispatch boundary differences explain those counts.
+
+The three original JSON graphs retain their intake SHA256 values:
+
+| Graph | SHA256 |
+|---|---|
+| R4 | `4FD0662932314FDAE4B52CA136E3D0CB80EFE4CC73A92A233338252C2D28F59D` |
+| R4B | `F5ACE1DCD6FFE244A1C3E1E4B9CF4AE80166261BF7A624BDA057C5E9D5B4AC2F` |
+| R5 | `C8F6DF8FB99439A22FF6554E6B742E42F29F9AEEEB7959D0076BBFC00DBA7BA5` |
+
+No original absolute reference, Unicode value, XML graph literal, probe,
+expected identity, or assertion was changed. No additional cases beyond the
+attempt-2 inventory were introduced in attempt 3.
+
+#### Actual commands and retained raw evidence
+
+`AGENTS.md` is the command authority. These are the four actual build/test
+executions, in order; the first and third are supplementary diagnostics:
+
+```powershell
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.PostSearchPreservesRepeatedParametersAndEncoding|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.IncludedFullUrlsIdentifyReturnedResources|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.LocalReferenceEquivalenceRejectsForeignBases|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.CompartmentReplayUsesExistingMethods|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.GenericCompartmentDispatchRemainsUnsupported"
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReferenceChainsAndIncludesStayTenantLocal|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SortReturnsExplicitIdentityOrder|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.DynamicSearchParameterAndCompartmentStateIsFresh|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.StrictAndPreferHandlingPreserveOutcomes|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReverseChainUsesExistentialMatchesAndDistinctFilters|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.PostSearchPreservesRepeatedParametersAndEncoding|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.IncludedFullUrlsIdentifyReturnedResources|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.LocalReferenceEquivalenceRejectsForeignBases|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.CompartmentReplayUsesExistingMethods|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.GenericCompartmentDispatchRemainsUnsupported|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled"
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests|FullyQualifiedName~fhir.candle.Tests.R4TestsPatient|FullyQualifiedName~fhir.candle.Tests.R4TestsObservation|FullyQualifiedName~fhir.candle.Tests.R4BTestsPatient|FullyQualifiedName~fhir.candle.Tests.R4BTestsObservation|FullyQualifiedName~fhir.candle.Tests.R5TestsPatient|FullyQualifiedName~fhir.candle.Tests.R5TestsObservation|FullyQualifiedName~fhir.candle.Tests.R5TestsEncounter|FullyQualifiedName~fhir.candle.Tests.StrictSearchHandlingTests|FullyQualifiedName~fhir.candle.Tests.AuthCompartmentTests|FullyQualifiedName~fhir.candle.Tests.FhirStoreTestsR4|FullyQualifiedName~fhir.candle.Tests.FhirStoreTestsR5"
+```
+
+All logs below are under ignored `scratch/0919-01/`, captured with
+`Start-Transcript -NoClobber` and native output piped through `Out-Host`;
+the native exit was captured immediately, printed, and returned after
+`Stop-Transcript`.
+
+| Raw log | Exit | Actual result |
+|---|---:|---|
+| `dev-do-phase4-attempt3-guards-before-20260922-185811.log` | 1 | 498 executed, 210 passed, 288 approved-mechanism failures; no skips; 0 warnings/errors |
+| `dev-do-phase4-attempt3-build-20260922-190815.log` | 0 | Exact application build; 0 warnings/errors |
+| `dev-do-phase4-attempt3-search-after-20260922-190951.log` | 0 | 1,028 executed/passed; no skips; 0 warnings/errors |
+| `dev-do-phase4-attempt3-final-test-20260922-191457.log` | 0 | Exact cumulative filter; 2,086 executed/passed; no skips; 0 warnings/errors |
+| `dev-do-phase4-attempt3-result-audit-20260922-192104.log` | 1 | Read-only result/hash inspection; graph hashes and retention counts agreed, but an extra display-name-uniqueness assumption failed |
+| `dev-do-phase4-attempt3-multiplicity-audit-20260922-192326.log` | 0 | Corrected read-only multiset inspection: all 1,443 original multiplicities retained; exactly 643 additions |
+
+The audit failure is retained, not hidden or counted as a test failure:
+xUnit truncates two legacy R4 `identifier:of-type` case display names to the
+same text. Their original and final multiplicities are both **two**.
+The corrected inspection compares those multiplicities instead of requiring
+unique rendered names; all added case display identities are distinct.
+It made no product/test edit and reran no test command.
+
+Only this README evidence section was added after the successful final test.
+The implementation and test sources are unchanged since the exact build and
+gate; the integrating runner must repeat the exact gate after this documentation
+update before staging. This records Windows/net10.0 R4/R4B/R5 execution, not
+later phases, other target frameworks, browser checks, or other OS cells.
+No phase status, staging, or commit is claimed here.
 
 ## Comparison and binding policy
 
