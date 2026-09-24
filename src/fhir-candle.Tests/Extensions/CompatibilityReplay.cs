@@ -10,11 +10,13 @@ extern alias candleR5;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using fhir.candle.Services;
 using fhir.candle.Tests.Controllers;
 using fhir.candle.Tests.Models;
 using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 
 namespace fhir.candle.Tests.Extensions;
@@ -78,6 +80,28 @@ internal sealed class CompatibilityReplay : IDisposable, IAsyncDisposable
     internal CompatibilityBindings Bindings { get; } = new();
     internal IReadOnlyList<KeyValuePair<string, CompatibilityResponse>> Responses => _responses;
     internal string? OwnedDirectory => _factory?.OwnedDirectory;
+
+    /// <summary>Returns this replay's actual tenant store for package loading and event observation.</summary>
+    internal IFhirStore GetOwnedStore(string tenantName)
+    {
+        ThrowIfDisposed();
+        if (!_tenants.TryGetValue(tenantName, out CompatibilityTenant? tenant))
+        {
+            throw new ArgumentException("The tenant must belong to this replay.", nameof(tenantName));
+        }
+
+        IFhirStore store = _factory is null
+            ? _stores[tenantName]
+            : _factory.Services.GetRequiredService<IFhirStoreManager>()[tenantName];
+        if (store.Config.ControllerName != tenant.Name ||
+            store.Config.FhirVersion != tenant.Version ||
+            store.Config.BaseUrl != tenant.BaseUrl)
+        {
+            throw new InvalidOperationException("The owned store does not match the declared tenant.");
+        }
+
+        return store;
+    }
 
     /// <summary>Runs pre-seed emptiness checks, raw seeds, then the declared ordered requests.</summary>
     internal async Task RunAsync()

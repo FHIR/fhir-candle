@@ -589,6 +589,166 @@ update before staging. This records Windows/net10.0 R4/R4B/R5 execution, not
 later phases, other target frameworks, browser checks, or other OS cells.
 No phase status, staging, or commit is claimed here.
 
+## Operations and subscriptions inventory (phase 5)
+
+These inputs are synthetic local-only resources, not SDK-generated snapshots
+or copies of real patient data. XML expectations are independently authored
+in the two domain partials; no expected-side Firely parser or converter is
+used. The original foundation, Exchange, Search, and legacy subscription
+tests are unchanged.
+
+| Test / matrix | Authored rows and boundaries | Independent provenance and contract |
+|---|---|---|
+| `ValidatePreservesTargetAndIssueContract` | 468: 13 targets × system/type/instance × R4/R4B/R5 × JSON/XML × HTTP/direct | `TestValidateOperation` H1/H2/M1/L4 and `docs/user/operations/validate.md`. Bare/wrapped valid targets, missing Observation.code, invalid boolean, invalid FHIR XHTML, ignored mode/profile, no body, no-target Parameters, malformed syntax. Valid/invalid parseable targets are 200; no target is 422; malformed syntax is pre-operation 415. Valid stored Patient focus is unchanged when an invalid Observation body takes precedence. |
+| `OperationStoreAccessorPreservesOwnership` | 12: all three versions/formats/boundaries, two same-version tenants each | Existing replay/factory ownership. Actual store sees the boundary's Patient write; sibling does not. Unknown/case-mismatched tenants and disposed access throw. No process-static manager, replacement store, or HTTP bypass. |
+| `OperationDiscoveryIsVersionAndPackageCorrect` | 24: absent/PAS package × full 12-row matrix | `IFhirOperation` declarations, `GetDefinition`, `CheckLoadedOperations`, and `docs/technical/operations-and-hooks.md`. Exact eight common operation identities/canonicals, generated IDs, implementation versions/levels/state/resource restrictions, Op class naming and GET/POST declarations. R4-only `$submit`/`$inquire` additionally require PAS and use the supplied literal definitions below, not generated IDs; R4B/R5 cannot acquire them by loading its package ID. Definitions, dispatch, and capability advertisements are separately checked on the same store, with metadata read before loading and again afterward. |
+| `OperationRoutesPreserveSupportedBoundaries` | 204: 17 independently labeled route/method probes × full matrix | Existing operation level/resource restrictions and the documented POST-only `$validate` contract. Supported system `$convert`, GET/POST Subscription `$status`; wrong levels/resources, missing instances, invalid hook input, unknown operation, PATCH operation boundary, and GET `$validate` rejection. All twelve original GET rows now require the approved 405/error/not-supported diagnostic, no direct resource, and exactly HTTP `Allow: POST`, followed by an unchanged focus read. HTTP's unsupported PATCH is still 405/empty with GET/POST Allow; the unsupported generic direct dispatch remains 501 without invented serialized fields. |
+| `InteractionHookRequiresPackageAndEligibleTask` | 72: six independent controls × full matrix | The actual R4 `CDexTaskProcess`/`IFhirInteractionHook`, not `$subscription-hook`. Package absent, eligible PUT, eligible POST, wrong status, wrong intent, missing query; R4B/R5 never acquire the R4 hook. Completed Task must contain one result Bundle with the exact synthetic Patient and a matching output reference. Both declared and actual loaded hook identities are checked. |
+| `ParametersBodiesUseProperOperationRoutes` in `ValidateRoutingTests` | 24 HTTP rows: three versions × two formats × four routes | Existing executable `/Parameters/$validate` 404 and documented system/type/instance body unwrapping. Eighteen proper-route rows require 200/information/informational/All OK; six Parameters-URL rows retain 404. The original two tests remain; only their stale class summary is corrected. |
+| `SubscriptionConversionAndFiltersPreserveEvents` | 312: 26 independent probes × full matrix | `R4TestSubscriptions`, `R4BTestSubscriptions`, `R5TestSubscriptions`, and `FhirStoreTestsR5`. Query, FHIRPath `%previous`/`%current`, and interaction-only topics; positive/negative patient filters; positive/negative create/update/delete and already-terminal update. Actual topic/subscription create/read content and parsed filter/channel/status shapes are asserted. Each scenario proves both directions of same-version tenant isolation. |
+| `SubscriptionNotificationContentPreservesReferences` | 108: handshake/heartbeat/event × empty/id-only/full-resource × full matrix | Existing `SerializeSubscriptionEvents`, converters, legacy handshake tests, and the store event contract. Fresh handshake/heartbeat have zero events; event scenarios capture two real events. BCL oracle binds event numbers/timestamps, exact tenant subscription/focus/additional-context references, status UUID/fullUrl relationships, and complete resource content. GET/POST `$status`, negative status filter, and GET/POST `$events` selecting only event 2 are checked. Independently authored inbound notification goes through `$subscription-hook` and must populate only the receiver's actual received state and Bundle store. |
+| `SubscriptionNotificationOracleRejectsChangedReferences` | 36 pure BCL controls: six cases × three versions × two formats | Hand-authored inbound status literals: six positives and thirty negatives reject changed subscription tenant, focus tenant, additional context, event number, or total. No store, SDK parser, or captured expected output. |
+| `OperationTheoryDataIsNonEmptyAndLabeled`, `SubscriptionTheoryDataIsNonEmptyAndVersionCorrect` | Two inventory facts | Explicit nonzero row counts/unique labels; version-specific topic and Encounter shapes, local-only endpoints. |
+
+Original phase-5 authored additions total **1,262 tests**: 1,200 replay theory rows (600
+HTTP/600 direct), 36 pure BCL oracle rows, two inventory facts, and 24
+controller routing rows. These are authored counts, **not a final gate
+pass count**. A failure within a scenario can still mask its later checks;
+runner output and the implementation hand-back must identify those paths.
+
+### Bounded O1/O2 recovery additions
+
+O1 is a **pre-existing POST-only contract defect**, not an SDK6-origin
+regression. The initial new tests assumed 405; the recovery's exact
+405/error/not-supported outcome and HTTP `Allow: POST` are now explicitly
+approved. The exact diagnostic is
+`$validate only supports POST; GET is not allowed.` This is validate-only
+enforcement, not generic enforcement of operation declarations.
+
+O2 is a **new fixture/oracle assumption error**, not a production PAS defect.
+The PAS implementations deliberately return null from `GetDefinition`.
+The corrected R4 package supplies independently authored definitions through
+normal `LoadPackage`; built-in generated-definition expectations stay
+separate. Neither PAS implementation is changed.
+
+| Added test | Authored rows and boundaries | Independent contract |
+|---|---|---|
+| `ValidateRejectsGetAtEveryOperationLevel` | 90: 36 bodyless rows across all versions/formats/boundaries/levels, plus 18 direct raw-body, 18 direct malformed-body, and 18 direct non-FHIR-object rows | Exact 405, one error/not-supported issue with the approved diagnostic, false direct success, empty serialized resource and identity/header fields, and HTTP Allow exactly POST. The object rows use complete `FhirRequestContext` values (including Authorization) with `SourceObject = new object()` through each existing system/type/instance wrapper and additionally assert null Resource. Rejection precedes both parsing branches; focus content/version/time survive. |
+| `ValidateMethodRejectionPreservesEarlierGuards` | 156: 120 common rows (ten probes × full matrix), plus 36 HTTP-only tenant/auth rows | Missing instance GET with/without a body and POST with a body; unsupported Parameters/unknown type at type and instance levels; unknown operations at all three levels. Unsupported-type HTTP errors remain 404/plain text; generic direct dispatch is still 501 without serialized output, while explicit operation wrappers retain their 404/error/not-supported resource guard even with a non-FHIR object. Unknown operation and missing-instance diagnostics remain exact. Real existing factory/SMART configuration checks missing tenants and authorization at all three levels; no auth service replacement or invented direct tenant routing. None adds Allow. |
+| `ValidateGetPreferencesPreserveState` | 72 HTTP rows: all versions/formats/levels × default/representation/OperationOutcome/minimal | Normal negotiated JSON/XML outcome selection, or the existing minimal empty body, always with exactly Allow POST and no resource headers. A subsequent ordinary read reuses the complete content and original ID/version/timestamp/header bindings. |
+| `OtherOperationVerbBehaviorIsUnchanged` | 44: 12 system hook GET, 24 Subscription status GET/POST, eight R4 PAS type GET rows | No operation discovery assertions precede these dispatch probes. Bodyless `$subscription-hook` remains 422/error/exception with exact `Posted content is not a valid Subscription notification bundle`, no received notification and no stored Bundle. `$status` GET/POST remain supported. Independently loaded R4 PAS `Claim/$submit` and `Claim/$inquire` GET each retain 422/fatal/structure with exact `PAS Claim Submit requires a PASRequestBundle as input.` / `PAS Claim Inquiry requires a PASClaimInquiryBundle as input.`, and no HTTP Allow. |
+| `PasDefinitionsComeFromPackageContent` | Eight R4 rows: manifest-only/definition-containing × HTTP/direct × JSON/XML | Both package shapes enable executable PAS dispatch (bodyless POST remains 422/fatal/structure). Only definition-containing packages supply the two literal resources; manifest-only reads retain the existing 404/error/exception missing-resource response. Independently authored complete JSON/XML expectations and normal generated-meta bindings verify supplied content and later reads. No cache invalidation or store recreation. |
+
+Recovery adds **370 theory rows: 212 HTTP and 158 direct**, including 36
+HTTP rows using the existing factory directly for tenant/authorization
+boundaries. `OperationTheoryDataIsNonEmptyAndLabeled` checks these additions
+as well as every original count and the twelve retained GET rows. All
+original fixtures, the 468 validation rows, 24 discovery rows, 204 route
+rows, subscription cases, and original result-header multiplicities remain.
+Thus all **2,788 original selected case occurrences** (1,526 retained
+regressions plus 1,262 original phase-5 additions) remain under the unchanged
+cumulative filter. The authored recovered inventory is **3,158 selected
+cases**, not an executed/discovered/pass count; phase-5 additions now total
+1,632.
+
+### Raw fixture and version provenance
+
+- Each `validation-resources.json` contains six raw targets/wrappers; the
+  synthetic common subset is deliberately identical across R4/R4B/R5.
+  Wrapping/ignored-parameter variants are authored in the Operations partial.
+- Each `subscription-resources.json` contains eight raw resources: two
+  Patients, planned/terminal Encounters, three topic criterion families, and
+  an active local Subscription. R4 uses Basic/cross-version topic extensions;
+  R4B uses native SubscriptionTopic with backport Subscription primitive
+  extensions; R5 uses native topic/filter/channel/content fields.
+  R4/R4B Encounter.status remains **finished** and class is a Coding;
+  R5 remains **completed** and class is a CodeableConcept array. These are
+  distinct literals, not a runtime coercion to one model.
+- `r4/cdex-task-resources.json` contains the synthetic Patient and four Task
+  shapes. The data-query is `Patient?_id=cdex-patient`; it cannot contact a
+  remote server. The expanded package manifest is explicitly synthetic,
+  empty, and not official IG content. Tests copy it to their own temporary
+  directory and call `IFhirStore.LoadPackage` with
+  `hl7.fhir.us.davinci-cdex#0.0.0-sdk6-test`. PAS uses the same manifest
+  template with its own package name/version declaration, not CDex resources.
+  For R4, `ExpandedOperationPackage` writes two raw JSON OperationDefinitions
+  into that temporary package **before** normal `LoadPackage`:
+  - `sdk6-pas-claim-submit`, canonical
+    `http://hl7.org/fhir/us/davinci-pas/OperationDefinition/Claim-submit`,
+    name `$submit`, code `submit`, affectsState true;
+  - `sdk6-pas-claim-inquiry`, canonical
+    `http://hl7.org/fhir/us/davinci-pas/OperationDefinition/Claim-inquiry`,
+    name `$inquire`, code `inquire`, affectsState false.
+  Both have kind operation, status draft, resource Claim, system false,
+  type true, and instance false. These minimal synthetic definitions omit a
+  business `version` element; the fixture directive's `0.0.0-sdk6-test` is
+  distinct from the implementation's `OperationVersion` of `1.2.0`.
+  IDs are literals derived from neither version. Expected JSON and XML are
+  separately authored in the Operations partial, not parsed with Firely,
+  copied from responses, or official IG contents. Only ordinary generated
+  `meta.versionId`/`meta.lastUpdated` are bound. R4B/R5 PAS packages remain
+  manifest-only negative version controls; the new R4 manifest-only case
+  separately distinguishes executable gating from supplied definitions.
+  No archive helper or registry is involved.
+- New notification endpoints are loopback URLs. The existing isolated factory
+  does not host NotificationManager, and event handlers are unsubscribed before
+  replay disposal. This phase verifies generation/serialization and inbound
+  operation state, **not actual outbound delivery** or phase-6 teardown.
+- Validation issue mappings were authored against the structural contract and
+  read-only inspection of SDK 6.2.1 `CodedValidationException` definitions:
+  PVAL105/102 → error/required; PVAL123/124 and PVAL115 → error/value.
+  No parser/validator was run to manufacture expected values. Vendor prose
+  is only nonempty; Candle messages and target/element relationships remain
+  explicit. Inspector initialization failure mapping is preserved but not
+  fault-injected or claimed executed.
+
+### Attempt 1 diagnostic evidence (before the exact acceptance gate)
+
+The documented focused command, filtering only
+`Sdk6ContractTests.ValidatePreservesTargetAndIssueContract`, compiled with
+zero warnings/errors and ran **468 tests: 132 passed, 336 failed**, none
+skipped. Raw transcript:
+`scratch/0919-01/dev-do-phase5-attempt1-validation-regression-20260922-194732.log`.
+Of the failures, 216 were ordinary parser rejections at 415 of missing required
+fields, invalid primitives, or empty Parameters; 120 were new test-helper
+duplicate binding/emptiness-check IDs. The latter were corrected in the owned
+Operations partial, not in completed assertion/replay behavior.
+
+The bounded runtime change selects the **existing lenient parser only for
+`$validate`** in `DoSystemOperation`, `DoTypeOperation`, and
+`DoInstanceOperation`. It leaves ordinary parsing, other operations, route
+support, the inspector guard, and completed exchange/search/compartment
+contracts unchanged. The exact phase-5 build/test commands are still required
+on the final implementation tree; this regression run is not their substitute
+and does not establish that the repaired or newly authored paths pass.
+
+### Recorded attempt-1 gate and recovery verification state
+
+The runner's retained attempt-1 evidence, **not rerun by this implementation
+slice**, is: the exact application build passed with zero warnings/errors;
+the unchanged cumulative test command executed **2,788 cases: 2,772 passed,
+16 failed, zero skipped**, with no compiler/analyzer warnings/errors.
+All 1,526 retained regressions and all 468 validation cases passed. The
+sixteen failures were the twelve O1 GET rows and four R4 O2 discovery rows.
+Full retained test output:
+`scratch\0919-01\dev-do-phase5-attempt1-tests-20260922-200917.log`.
+These failures remain historical evidence, not retroactive passes.
+
+**Recovery verification has not yet run.** No build or test command was run
+for this bounded implementation slice. All 24 original discovery rows retain
+the initial metadata read, the same replay/store, definition reads, canonical
+and implementation-version checks, both PAS route probes, negative
+package/version cases, and later capability assertions. The formerly masked
+per-definition checks, **eight positive PAS dispatch probes**, and post-load
+capability checks in the four R4 rows have **not been observed executing after
+this correction**. Neither have the 370 new controls. Potential capability
+freshness is a source-predicted concern, not an additional executed failure;
+no production discovery/cache repair or test cache workaround is included.
+The runner must run both exact unchanged acceptance commands on this tree
+and record newly reached probes and any remaining failures. This inventory
+does not claim recovered acceptance, later migration gates, or other
+framework/OS/browser results.
+
 ## Comparison and binding policy
 
 - JSON object property order and insignificant FHIR XML formatting may differ.
@@ -654,3 +814,124 @@ Use the commands documented in `AGENTS.md` and the phase plan. The foundation
 gate runs the focused comparer/contract/controller filter twice, unchanged, to
 detect disposal and state dependence. These tests do not certify browser
 workflows, package/network integrations, or unexecuted framework/OS matrix cells.
+
+## Phase-5 attempt-2 gate and bounded O3 recovery
+
+This appendix records the runner's **2026-09-22 attempt-2 evidence**, not a
+rerun by this implementation slice. Earlier diagnostic, failed-gate, and
+pre-gate descriptions above remain their original chronology.
+
+- The exact application build exited 0 with zero warnings/errors.
+- The unchanged cumulative test command exited 1: **3,158 executed / 3,154
+  passed / four failed / zero skipped**, with zero compiler/analyzer
+  warnings/errors. Result-header multiset reconciliation retained all
+  **2,788 original occurrences plus 370 passing recovery controls**,
+  including duplicated truncated display names.
+- All original O1 GET rejection rows and the O1 recovery controls passed.
+  O2's supplied-definition inventory/content, generated metadata bindings,
+  per-definition reads, implementation/version gates, and all **eight
+  positive PAS POST dispatch probes** executed successfully.
+- The four R4 PAS discovery rows (HTTP/direct x JSON/XML) reached the
+  post-load capability checks. System/Patient/Subscription advertisements
+  passed; Claim's exact name assertion expected
+  `[$inquire, $submit, $validate]` but received `[$validate]`.
+  The subsequent Claim canonical assertions were **not yet executed**.
+
+O3 is the explicitly approved **pre-existing capability-cache freshness
+defect**, not an SDK6 incompatibility or a remaining PAS fixture error.
+`LoadPackage` reruns `CheckLoadedOperations`, but successful executable
+registration did not invalidate the cached CapabilityStatement. PAS's
+optional definitions deliberately return null, so definition-resource
+writes cannot serve as the registration signal. The plan records source
+provenance before this migration: discovery/load in `c7511424` (2023-08-28),
+`TryAdd` in `01885bd9` (2025-02-05), and the cached return in `18588bbe`
+(2024-09-03).
+
+The bounded repair sets the existing `_capabilitiesAreStale` flag to true
+immediately inside successful `_operations.TryAdd`, before the existing
+`try` / optional `GetDefinition`. It also covers an already registered
+executable whose definition processing throws, without changing the catch
+or logging. Startup still generates capabilities after discovery; normal
+package rediscovery and the lazy cached/deep-copy/forwarded-root paths are
+unchanged. A duplicate or ineligible registration neither invalidates a
+warmed cache nor clears pending staleness. There is no eager regeneration,
+unconditional package-load invalidation, cache replacement, or method-policy
+change.
+
+### Authored O3 controls (2026-09-24; not executed by this slice)
+
+| Added test / matrix | Authored rows and boundaries | Independent contract |
+|---|---|---|
+| `PackageOperationRegistrationRefreshesCachedMetadata` / `OperationCapabilityRefreshCases` | **12**: one manifest-only kind x R4/R4B/R5 x HTTP/direct x JSON/XML; four per version, six per transport, six per format | Settled O3 successful-registration contract, literal `OperationContracts`, existing BCL assertions, and normal replay-owned package loading. Each row owns two differently named same-version tenants. |
+
+Each row primes ordinary metadata for the target and its package-absent
+sibling, then checks their independent built-in names/canonicals and
+tenant/FHIR identities. It loads the same manifest-only PAS package twice
+consecutively into the target's existing store **before any post-load
+metadata read**. No supplied definitions or resource-write side effects
+can mask registration-driven invalidation, and the immediate duplicate
+cannot clear R4's pending refresh. Only R4 then advertises exactly Claim
+`$inquire`, `$submit`, and `$validate`, with the literal canonicals;
+system/Patient/Subscription sets remain exact. R4B/R5 retain built-ins and
+unchanged content, and the sibling retains its independent identity,
+built-ins, and complete content.
+
+The next target read obtains the warmed persisted cache; it is deliberately
+not required to equal the first genuinely regenerated response, which may
+not yet carry persisted metadata. A repeated ordinary read and another
+load of the same manifest-only package must each preserve the full warmed
+content under `WireContractAssertions.Content`, including `date`,
+`meta.versionId`, and `meta.lastUpdated` when present. None is excluded as
+volatile. No exact version increment or timestamp is required for the
+genuine rebuild. The captured warmed content is only a relational
+no-mutation check, never the operation-name/canonical oracle. Every metadata
+response retains independent exact advertisement multiplicity/canonical
+and tenant/version checks; the sibling is checked again after the no-op
+reload. Both tenants' definition searches must contain only the independent
+built-ins, omit PAS canonicals, and return the existing 404 outcome for the
+literal supplied PAS definition IDs. The fixture's `0.0.0-sdk6-test` version
+and the implementation's `1.2.0` version remain distinct.
+
+All requests use ordinary metadata without Forwarded or cache-forcing
+flags. No private generator, stale-field access, cache reset, replacement
+store, production API, static state, registry, or network fixture is added.
+The original **24** `OperationDiscoveryIsVersionAndPackageCorrect` rows
+and `AssertOperationAdvertisements` are untouched, including the original
+metadata-before-load -> single normal package-load -> metadata-after-load
+sequence, supplied-definition reads, eight positive dispatch probes, and
+all canonical assertions. The extra loads exist only in the new test.
+The inventory fact adds the exact twelve-row count and labeled/nonempty
+matrix checks without changing any previous count or matrix.
+
+The unchanged-filter total is **projected 3,170 = 3,158 retained + 12
+authored additions**, not an executed/discovered/pass count. No build,
+test, or install was run for this O3 implementation slice, and inspection
+does not establish compilation or passing gates. The parent must run both
+exact phase-5 commands, reconcile all retained result-header
+multiplicities, and record whether the four formerly failing discovery
+rows now reach their Claim canonical assertions. Final verification and
+any remaining failures belong in that subsequent record; no phase-6/7,
+browser, other-framework, or other-platform result is claimed here.
+
+### Recorded O3 required-gate result (2026-09-24)
+
+The runner subsequently executed both exact phase-5 commands on Windows
+with Release/net10.0. The application build passed with zero warnings and
+errors. The unchanged cumulative test gate passed **3,170/3,170**, with
+zero failures, skips, or compiler/analyzer warnings/errors.
+
+Result-header multiset reconciliation against attempt 2 retained all
+**3,158** previous occurrences, including the indistinguishably truncated
+legacy displays, and added exactly the **12** capability-refresh rows.
+All 24 original discovery rows now pass, including the four R4 PAS rows
+whose Claim-name failure previously masked canonical assertions. All
+twelve new rows pass: four per FHIR version, six per transport, and six
+per format. The original single-load regression and the new pending-stale,
+warmed-cache/no-op, manifest-only, and sibling controls all execute.
+
+This records the first successful required gate, before this evidence
+append. The execution record separately requires the same two commands
+again on the final documentation tree before staging and commit; no new
+runtime or test change accompanies this record. It does not establish
+phase-6/7 integration, browser behavior, other frameworks, other platforms,
+or completion of the migration.

@@ -440,6 +440,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             if (_operations.TryAdd(fhirOp.OperationName, fhirOp))
             {
+                _capabilitiesAreStale = true;
                 try
                 {
                     Hl7.Fhir.Model.OperationDefinition? opDef = fhirOp.GetDefinition(_config.FhirVersion);
@@ -3615,6 +3616,20 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            ctx.HttpMethod.Equals("GET", StringComparison.Ordinal))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.MethodNotAllowed,
+                    "$validate only supports POST; GET is not allowed.",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.MethodNotAllowed,
+            };
+            return false;
+        }
+
         Resource? r = null;
 
         if (ctx.SourceObject is not null)
@@ -3638,7 +3653,10 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
+            // Structural validation must inspect invalid-but-parseable targets itself.
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(
+                ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage,
+                lenient: ctx.OperationName.Equals("$validate", StringComparison.Ordinal));
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -3847,6 +3865,20 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            ctx.HttpMethod.Equals("GET", StringComparison.Ordinal))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.MethodNotAllowed,
+                    "$validate only supports POST; GET is not allowed.",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.MethodNotAllowed,
+            };
+            return false;
+        }
+
         Resource? r = null;
 
         if (ctx.SourceObject is not null)
@@ -3870,7 +3902,10 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
+            // Structural validation must inspect invalid-but-parseable targets itself.
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(
+                ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage,
+                lenient: ctx.OperationName.Equals("$validate", StringComparison.Ordinal));
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))
@@ -4076,6 +4111,20 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            ctx.HttpMethod.Equals("GET", StringComparison.Ordinal))
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.MethodNotAllowed,
+                    "$validate only supports POST; GET is not allowed.",
+                    OperationOutcome.IssueType.NotSupported),
+                StatusCode = HttpStatusCode.MethodNotAllowed,
+            };
+            return false;
+        }
+
         Resource? r = null;
 
         if (ctx.SourceObject is not null)
@@ -4099,7 +4148,10 @@ public partial class VersionedFhirStore : IFhirStore
         }
         else if (!string.IsNullOrEmpty(ctx.SourceContent))
         {
-            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage);
+            // Structural validation must inspect invalid-but-parseable targets itself.
+            HttpStatusCode deserializeSc = SerializationUtils.TryDeserializeFhir(
+                ctx.SourceContent, ctx.SourceFormat, out r, out string exMessage,
+                lenient: ctx.OperationName.Equals("$validate", StringComparison.Ordinal));
 
             if ((!deserializeSc.IsSuccessful()) &&
                 (!op.AcceptsNonFhir))

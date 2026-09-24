@@ -1,0 +1,45 @@
+{
+  "valid": {
+    "resourceType": "Patient",
+    "id": "validation-candidate",
+    "active": true,
+    "gender": "female",
+    "birthDate": "1980-02-03"
+  },
+  "missing-required": {
+    "resourceType": "Observation",
+    "id": "missing-code",
+    "status": "final"
+  },
+  "primitive": {
+    "resourceType": "Patient",
+    "id": "invalid-primitive",
+    "active": "not-a-boolean"
+  },
+  "narrative": {
+    "resourceType": "Patient",
+    "id": "invalid-narrative",
+    "text": {
+      "status": "generated",
+      "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><not-fhir-xhtml>Invalid narrative element</not-fhir-xhtml></div>"
+    }
+  },
+  "valid-wrapped": {
+    "resourceType": "Parameters",
+    "parameter": [
+      {
+        "name": "resource",
+        "resource": {
+          "resourceType": "Patient",
+          "id": "validation-candidate",
+          "active": true,
+          "gender": "female",
+          "birthDate": "1980-02-03"
+        }
+      }
+    ]
+  },
+  "no-target": {
+    "resourceType": "Parameters"
+  }
+}

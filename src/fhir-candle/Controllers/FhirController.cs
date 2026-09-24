@@ -381,6 +381,12 @@ public class FhirController : ControllerBase
 
         bool success = store.TypeOperation(ctx, out FhirResponseContext opResponse);
 
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            opResponse.StatusCode == HttpStatusCode.MethodNotAllowed)
+        {
+            Response.Headers[HeaderNames.Allow] = "POST";
+        }
+
         await AddFhirResponse(Response, prefer, success, opResponse);
     }
 
@@ -521,6 +527,12 @@ public class FhirController : ControllerBase
         bool success = store.InstanceOperation(
             ctx,
             out FhirResponseContext opResponse);
+
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            opResponse.StatusCode == HttpStatusCode.MethodNotAllowed)
+        {
+            Response.Headers[HeaderNames.Allow] = "POST";
+        }
 
         await AddFhirResponse(Response, prefer, success, opResponse);
     }
@@ -1233,6 +1245,12 @@ public class FhirController : ControllerBase
             bool success= store.SystemOperation(
                 ctx,
                 out FhirResponseContext opResponse);
+
+            if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+                opResponse.StatusCode == HttpStatusCode.MethodNotAllowed)
+            {
+                Response.Headers[HeaderNames.Allow] = "POST";
+            }
 
             await AddFhirResponse(Response, prefer, success, opResponse);
         }
