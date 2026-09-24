@@ -1,0 +1,18 @@
+{
+  "name": "example.test.sdk6.r5",
+  "version": "1.0.0",
+  "type": "Conformance",
+  "title": "Synthetic SDK 6 R5 local package",
+  "description": "Locally authored consumer-contract inputs; not a published implementation guide.",
+  "fhirVersions": [ "5.0.0" ],
+  "dependencies": {},
+  "license": "MIT",
+  "author": {
+    "name": "Synthetic Package Author",
+    "email": "author@example.test",
+    "url": "https://example.test/sdk6"
+  },
+  "canonical": "https://example.test/sdk6/r5",
+  "directories": { "lib": "package" },
+  "date": "20240102120000"
+}

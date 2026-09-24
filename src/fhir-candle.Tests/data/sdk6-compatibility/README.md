@@ -935,3 +935,264 @@ again on the final documentation tree before staging and commit; no new
 runtime or test change accompanies this record. It does not establish
 phase-6/7 integration, browser behavior, other frameworks, other platforms,
 or completion of the migration.
+
+## Phase-6 offline integration inventory (authored 2026-09-24)
+
+This append belongs to **original phase 6, attempt 1**, within the ongoing
+`dev-do-search-recovery` stage work attempt 3. It does not replace any
+earlier execution record. The cases below are **authored, not executed
+gate results**. The implementation worker has not run a build, test,
+restore, install, application host, or public-network probe. The parent
+owns the exact phase-6 build/test commands, failed-gate accounting, the
+required repeat after the first passing test gate, and subsequent results.
+
+### Labeled case and method inventory
+
+All three new classes join `CompatibilityHostCollection.Name`. Each has
+an inventory fact asserting nonempty, unique labels and the explicit
+version matrix; these are not claims about test discovery or pass counts.
+There are **76 authored top-level cases** (8 package, 31 client, 37
+notification), subject to the parent's actual discovery and execution.
+
+| Case | Authored versions / formats / methods | Content and negative assertions |
+|---|---|---|
+| `PackageIntegrationInventoryIsNonempty` | R4/R4B/R5; named archive/loading inventory | Three unique labeled version inputs. |
+| `LocalPackageAcquisitionCacheAndLoadingPreserveResources` | Three version rows; real registry GET; Patient JSON and independently authored Observation XML inputs; both JSON/XML store reads | Captured acquisition request; exact archive resource contents and manifest/author/FHIR version; same-instance empty second result; stopped registry plus a fresh no-registry cache consumer; a **third** package service first consumed by normal `FhirStoreManager.Init`; exact loaded directive/IDs; two wrong-version tenant negatives; separate empty-cache/no-registry and invalid-gzip controls. |
+| `CiPackageClientPreservesListingDownloadAndManifestContract` | Three version rows; `DownloadListingAsync`, `GetReferences`, `GetTagBasedReference`, `GetPackage`, `IsPackageOutdated`, `InstallOrUpdate`, `UpdateCiListingCache` | Authored listing fields; resolved versus tagged identities; cold tag installation; warm no-download result; newer QA replacement removing the old resource; raw replacement file/manifest; inherited author fields for object and string author forms; unresolved package and pre-I/O denied URI controls; exact seven-request sequence. |
+| `InitialDataUsesTenantDirectories` | Six simultaneous custom tenants: oak/elm for each R4/R4B/R5; JSON Patient and separately authored XML Observation | Normal manager loading, exactly one clinical resource of each type per tenant, all ten sibling IDs absent from each tenant, exact tenant supplements, no package directives, and full independent JSON/XML reads including the tenant-specific Observation subject. |
+| `ClientIntegrationInventoryIsNonempty` | 24 settings rows, six error/cancellation rows, 13 named public method/overload probes | Nonempty unique labels, all versions and formats, fixed method count; no invented search API. |
+| `CandleClientPreservesRequestAndResponseContract` | R4/R4B/R5 x JSON/XML x four explicit handling/version/format-setting modes | Each row calls `CreateAsync`, `ConditionalCreateAsync`, `ReadAsync(string)`, `ReadAsync(Uri)`, `UpdateAsync`, `ConditionalUpdateAsync`, `DeleteAsync(string)`, `DeleteAsync(Uri)`, `DeleteAsync(Resource)`, `PatchAsync(Uri, Parameters)`, `PatchAsync<T>(id, Parameters, versionId)`, `ConditionalPatchAsync<T>`, and `TypeHistoryAsync`; adds ordinary Create with minimal and OperationOutcome return preferences. |
+| `CandleClientPropagatesFailureAndCancellation` | Six version/format rows; all 13 method/overload probes | Actual 404/409/412 outcomes with exact id/severity/code/details/diagnostic/expression; a separately held, captured request canceled for every method; receiver observes cancellation before release; same client succeeds on a subsequent read. |
+| `NotificationIntegrationInventoryIsNonempty` | 18 delivery and 18 shutdown rows | Exact nonempty version/format/content-level and lifecycle-mode matrix. |
+| `RestHookNotificationDeliversVersionCorrectWireBody` | R4/R4B/R5 x JSON/XML x empty/id-only/full-resource; real POST | Actual matching store event after a filter-miss control; correct status resource and Bundle type, media type, tenant header, subscription/topic/event/focus/additional-context identities; exact content-level absence/presence; complete focus/Patient resources with bound metadata; same-version sibling and no-inbound-notification controls. |
+| `NotificationManagerStopsDeliveryBeforeFixtureTeardown` | R4/R4B/R5 x JSON/XML x drain/cancel/dispose; two real held POSTs | Sends from two different tenants remain in flight across queue callbacks. Concurrent stops cannot complete while either graceful send is held. Releasing only one cannot finish stop. Canceled stop throws, followed by a separate join of the same drain. Concurrent Dispose cancels and joins sends. Repeated stop/dispose and actual events after stop and after receiver disposal produce no further serialized sends or requests. No sleep establishes success. |
+
+Client request assertions inspect method, exact tenant path/raw target,
+decoded query key/value multiplicity, Host, Accept, content type, the
+format parameter, return preference, If-None-Exist, If-Match,
+If-None-Match, If-Modified-Since, and the entire raw Patient/Parameters
+body. Canned replies are separately authored, not SDK snapshots. Reply
+assertions require the version-specific Patient type, exact server ID,
+version/date/tag, changed language/active/name/identifiers, month-only
+birth date and its primitive extension, integer choice, binary bytes,
+practitioner reference/display, XHTML mixed-content whitespace, and
+absence of caller-only gender/organization fields. History asserts both
+the populated PUT entry and the resource-less DELETE entry, their order,
+request/response details, and the tenant-specific self/fullUrl values.
+OperationOutcome return content is checked through `CreateAsync<Resource>`
+using a correctly aliased Patient as input; no dynamic or reflected
+replacement client is involved.
+
+### Synthetic inputs and local-only transport
+
+The three new `package-manifest.json` files declare
+`example.test.sdk6.r4`, `example.test.sdk6.r4b`, and
+`example.test.sdk6.r5`, each pinned to stable-shaped **1.0.0** with
+explicit **4.0.1 / 4.3.0 / 5.0.0** `fhirVersions` and empty dependencies.
+They are local synthetic packages, not published HL7 packages or claims
+about official registry availability. Author addresses and canonicals
+under `example.test` are inert data, never network destinations.
+
+`LocalPackageFixture` builds USTAR/gzip bytes with
+`System.Formats.Tar.TarWriter` and `GZipStream`, containing
+`package/package.json`, a JSON Patient, and an XML Observation. The
+companion cache generates its own index. No archive is checked in, no
+Firely serializer authors the expected side, and no user cache is used.
+The resource originals are the existing per-version `patient.json/xml`
+and `observation.json/xml`. BCL edits supply only explicit IDs and, for
+initial-data cases, tenant-specific subject references.
+
+Every service configuration names an existing, owned, empty source
+directory and a unique owned temporary cache, clears
+`ReferenceImplementation`, disables official registries, and leaves NPM,
+CI, and requested package arrays empty except for the particular local
+package under test. `Init` with this configured cache sets the current
+`IsReady`; the tests do not invent a hosted-start prerequisite.
+Acquisition, fresh warm-cache lookup, and manager loading use distinct
+service instances. In particular, the manager's service is never
+pre-consumed by an earlier `InstallPackages`, whose `_processedMonikers`
+would otherwise skip the requested content. Initial-data tests create
+custom tenant folders only, not generic `r4`/`r4b`/`r5` directories.
+This is the custom-directory fallback documented in
+`docs/user/loading-data.md` and implemented by
+`FhirStoreManager.loadContents`, not a test-specific loader.
+Owned stores are explicitly released just as in the existing isolated
+host fixture; no other service's production lifetime is changed.
+
+`LocalHttpFixture` uses the existing ASP.NET Core stack, with Kestrel
+listening only at **127.0.0.1:0** and its actual address read from
+`IServerAddressesFeature` after start. It has finite expected method/path
+occurrences, captures raw bytes/headers without FHIR parsing, records
+unexpected requests or response failures, bounds startup/request/wait/
+shutdown operations to 30 seconds, and awaits listener teardown.
+The minimal host also owns and deletes a unique empty temporary content
+root, so appsettings files in an ambient working directory are not inputs.
+Slow-response and cancellation cases use completion signals, not sleeps
+or an assumption that TestServer owns a TCP port. Client wrappers create
+their own actual Firely clients against this listener.
+
+The CI fixture uses `FhirCiClient`'s existing injected `HttpClient`.
+Its finite handler permits only the enumerated HTTPS build host/path
+sequence, checks method and original absolute URI **before outbound I/O**,
+then rewrites to the numeric loopback listener. Its underlying handler
+disables proxies and redirects. The authored sequence is:
+
+1. GET `/ig/qas.json` (original synthetic QA).
+2. GET `/branches/` (authored empty core listing).
+3. GET `/ig/example/sdk6/branches/main/package.tgz` (`GetPackage`).
+4. GET the same archive (`InstallOrUpdate` cold install).
+5. GET `/ig/qas.json` (newer synthetic QA).
+6. GET `/branches/` (same empty core listing).
+7. GET the archive (replacement install).
+
+The warm install and unresolved-package checks add no download.
+QA versions resolve literally to `1.0.0-cibuild+20240101-000000Z` and
+`1.1.0-cibuild+20240105-000000Z`; installation remains under `current`,
+with the explicit `current$main` tag also checked. Manifest dates retain
+the existing compact **local-time** parsing policy. The authored manifest
+dates are later than their corresponding QA date in every time zone;
+the replacement QA is later than the original manifest. Date comparison,
+branch selection, tag policy, and BCL helper behavior are not repaired or
+redefined by these tests. Object author fields in the initial manifest
+and `"name <email> (url)"` in the replacement both traverse the local
+adapter and its inherited `Firely.Fhir.Packages.AuthorInfo`.
+
+Notification seeds reuse the completed `subscription-resources.json`
+fixtures read-only: Basic topic/backport Subscription for R4, native
+SubscriptionTopic/backport Subscription for R4B, and native R5 resources.
+Only local endpoints, content format/level, test headers, and a zero
+heartbeat period are adjusted for finite transport cases. Independent
+XML Patient/Encounter and JSON/XML status expectations live in the new
+notification test, not in made-public completed private helpers. R4
+status is Parameters in a history Bundle; R4B is SubscriptionStatus in a
+history Bundle; R5 is SubscriptionStatus in a subscription-notification
+Bundle. Generated UUIDs/timestamps are checked and bound locally, and the
+wire event timestamp must equal the actual generated store event.
+SMTP/Zulip configuration stays empty; no external destination is tested.
+
+### API provenance and the precisely accepted production exception
+
+Conventions and command authority were read from `AGENTS.md` (with
+`.editorconfig` and `.github/copilot-instructions.md` for style).
+Codegraph first located the consumer/caller paths, followed by exact
+source reads of `CandleClient`, `CandleClientSettings`, `FhirPackageService`,
+`FhirStoreManager`, `FhirCiClient`, `DiskPackageCache`, `JsonModels`,
+`AuthorJsonConverter`, `NotificationManager`, and the completed independent
+oracle/fixtures. The new source preserves explicit types, nullable checks,
+public XML documentation, copyright headers, and CRLF.
+
+Cached `Hl7.Fhir.Base` **6.2.1** XML documentation grounds the wrapper
+overloads, `SearchParams.Add`, explicit settings, lenient serializer,
+FHIR patch Parameters, TypeHistory, and `FhirOperationException` outcome/
+status contract. Installed assembly metadata/IL was also inspected for
+the exact request builder, model/nullable identities, and reply
+extraction. `Firely.Fhir.Packages` **5.0.2** ships no XML documentation in
+the installed package; its public assembly signatures and URL/cache
+implementation metadata, plus the exact local callers, ground the
+companion calls instead. No dependency/tool installation was performed.
+
+Two important SDK request boundaries are explicitly retained, not
+silently turned into failing speculative expectations:
+
+- SDK 6's `EntryToHttpExtensions` emits `handling=` for **Search only**.
+  Both strict and lenient settings are supplied, and every exposed
+  wrapper interaction asserts its absence. This does not claim server
+  search handling coverage or justify adding a wrapper search method.
+- `return=` is emitted for ordinary Create/Update/Patch (and Transaction,
+  outside this wrapper inventory), not their conditional interaction
+  variants. These positive and absent headers are asserted separately.
+  The version-in-Accept MIME parameter is **4.0 / 4.3 / 5.0**, not the
+  full patch release; `_format` mode replaces Accept rather than adding
+  a second negotiation mechanism. Unrelated nullable-default mappings
+  and the wrapper's existing public lifecycle remain unchanged.
+
+The **only production edit** in this phase is the previously authorized,
+pre-existing `NotificationManager` teardown defect—not a claimed SDK 6
+regression. It remains in the same manager and public hosted/disposal
+lifecycle:
+
+- Scheduling and shutdown share a manager-local guard. Shutdown disables
+  both timers, detaches subscription events, clears queued work, and
+  prevents racing callbacks/events from starting another delivery.
+- Both timers are disposed asynchronously to join already queued
+  callbacks. Every started delivery is tracked and joined before a
+  successful stop can return. Multiple stops share that same drain.
+- Canceling hosted stop cancels supported sends and throws if the caller
+  stops waiting; it never reports an incomplete drain as success.
+  Subsequent stop/dispose still joins the retained drain. Dispose is
+  idempotent, cancels pending supported transport work, waits for it, and
+  only then disposes the owned HTTP client/cancellation source.
+- The existing HTTP `SendAsync` and MailKit **4.17.0** connect/authenticate/
+  send/disconnect overloads accept cancellation, as verified in their
+  installed docs. REST responses are disposed. The installed Zulip
+  **0.0.1-beta.5** `TrySendStream`/`TrySendPrivate` APIs have **no**
+  cancellation overload; started calls stay awaited and no fictional
+  cancellation API or fire-and-forget replacement is introduced.
+  Existing logging distinguishes failed sends from shutdown cancellation.
+
+No conditional SDK/client/companion/store-loading production repair was
+demonstrated or made by this implementation. `RestOnlyNotificationManager`,
+Common contracts, other DI services, bootstrap/project/alias/copy wiring,
+date/version helpers, and all completed parser/search/O1/O3 changes remain
+untouched. Live registry behavior, SMTP/Zulip account delivery, browser
+workflows, other framework/platform cells, and all phase-6 acceptance
+gates remain unverified by this authored slice.
+
+Execution needs only the existing restored repository dependencies,
+an available OS-assigned IPv4 loopback socket, and writable temporary
+storage outside the repository. The parent's required commands and repeat
+are unchanged; their actual discovery, compilation, pass/fail, warnings,
+teardown, and repeat results must be appended later, not inferred from
+this inventory or static inspection.
+
+The implementation-only checks were read-only source/API inspection,
+in-memory Roslyn **syntax parsing only** (no compilation or emission),
+`git diff --check`, line-ending/path/index checks, and verification that
+the previous README remains an unchanged prefix. These are not the
+parent's build/test gates, and they establish no runtime pass result.
+
+### Recorded phase-6 execution through attempt 3 (2026-09-24)
+
+The runner's exact application build passed in every attempt with zero
+warnings/errors. Attempt 1's exact test command stopped at compilation:
+two new `PerformInteraction` calls placed the named serialization argument
+before the unnamed out argument, and three Patient initializers needed
+their version-local `AdministrativeGender` aliases. Correcting these five
+test-authoring errors retained the original `Other` enum values, all
+inputs, and all assertions.
+
+Attempt 2 executed **3,157 cases: 3,121 passed, 36 failed, zero skipped**,
+with zero compiler/analyzer warnings/errors. All 3,081 retained cases
+passed. All eight package cases, 18 delivery cases, six disposal cases,
+six client error/cancellation cases, and the three inventories passed.
+The 24 client-success rows failed at successful DELETE; six graceful
+shutdown rows recorded a local-fixture response error; six canceled-stop
+rows did not cancel the outstanding sends before the fixture deadline.
+
+The final attempt corrected only new phase-owned mechanisms:
+
+- A 204 fixture response must have an empty authored body and sends no
+  Content-Length or body write. Even a zero-length write was entering
+  Kestrel's forbidden-body path. The expected 204 statuses remain unchanged.
+- Canceled fixture responses abort the connection instead of becoming an
+  implicit successful 200. Unexpected cancellation still fails; fixture
+  assertions now expose full diagnostic messages rather than truncated
+  collection entries.
+- A canceled hosted-stop wait explicitly cancels tracked transports and
+  rethrows. It no longer relies on a separate token callback that the
+  wait's cancellation continuation could dispose before invocation.
+  The same drain remains available for subsequent stop/dispose calls.
+
+Both exact phase-6 commands then passed on Windows Release/net10.0:
+**3,157/3,157**, zero failures/skips, and zero compiler/analyzer warnings
+or errors. Result-header multiset comparison retained every attempt-2
+occurrence unchanged. All **76** new cases pass (8 package, 31 client,
+37 notification), including every previously failing row and its later
+method/teardown assertions. No contract, case, header, status, or
+content assertion was relaxed.
+
+This is the first passing gate before this evidence append. The required
+repeat of the unchanged focused command, with the exact build again on
+the final documentation tree, remains separately recorded by the runner
+before any commit. These results do not establish browser or other
+framework/platform gates or phase-7 completion.

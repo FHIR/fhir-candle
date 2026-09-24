@@ -1,0 +1,18 @@
+{
+  "name": "example.test.sdk6.r4b",
+  "version": "1.0.0",
+  "type": "Conformance",
+  "title": "Synthetic SDK 6 R4B local package",
+  "description": "Locally authored consumer-contract inputs; not a published implementation guide.",
+  "fhirVersions": [ "4.3.0" ],
+  "dependencies": {},
+  "license": "MIT",
+  "author": {
+    "name": "Synthetic Package Author",
+    "email": "author@example.test",
+    "url": "https://example.test/sdk6"
+  },
+  "canonical": "https://example.test/sdk6/r4b",
+  "directories": { "lib": "package" },
+  "date": "20240102120000"
+}
