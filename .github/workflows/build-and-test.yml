@@ -6,11 +6,21 @@ on:
     paths:
     - '**.cs'
     - '**.csproj'
+    - '**.props'
+    - '**.projitems'
+    - '**.razor'
+    - 'src/fhir-candle.Tests/data/sdk6-compatibility/**'
+    - '.github/workflows/build-and-test.yml'
   pull_request:
     branches: [ main ]
     paths:
     - '**.cs'
     - '**.csproj'
+    - '**.props'
+    - '**.projitems'
+    - '**.razor'
+    - 'src/fhir-candle.Tests/data/sdk6-compatibility/**'
+    - '.github/workflows/build-and-test.yml'
 
 jobs:
   build-and-test:

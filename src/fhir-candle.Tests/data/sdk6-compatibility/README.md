@@ -1196,3 +1196,177 @@ repeat of the unchanged focused command, with the exact build again on
 the final documentation tree, remains separately recorded by the runner
 before any commit. These results do not establish browser or other
 framework/platform gates or phase-7 completion.
+
+## UI data-path inventory (phase 7, authored 2026-09-24)
+
+`Sdk6UiContractTests.cs` adds **12 theory rows and one inventory fact** to the
+existing xUnit project: six table rows and six viewer rows, each spanning
+R4/R4B/R5 and JSON/XML input. These are authored counts, **not execution
+results**. Each ordered scenario owns/disposes its actual `CompatibilityReplay`
+stores and bindings; the class joins `CompatibilityHostCollection`. It reuses
+the completed replay/typed BCL assertions and checked-in fixture pairs read-only,
+without a new oracle, expected-side Firely model evaluation, or output capture.
+
+| Test / rows | Consumer and expectation source | Exact content and deliberate variability |
+|---|---|---|
+| `StoreAndResourceTablesPreserveDisplayValues` / 6 | `FhirStorePage.GetFilteredItems`, `ResourceList.GetFilteredItems`, `IResourceStore.GetInstanceTableView`, `InstanceTableRec`, and `ResourceStore.GetName/GetIdentifier/DisplayFor`; existing lenient PUT/create/update/delete contracts. Raw versioned Patient/Observation fixtures plus independently authored inline JSON/XML StructureDefinition. | Per-type counts 0 → 1 → 1 → 0; exact ID/name/ordered identifiers, generic empty URL/description versus conformance URL/description, column flags and case-insensitive filters. Primary updates/deletes must not change same-ID sibling rows/counts. Mutation responses bind version 1 → 2 and matching headers; delete retains the bound resource content with absent resource headers. |
+| `ResourceViewerReadsMetadataAndBothFormats` / 6 | `ResourceViewer.LoadResourceContent`, `VersionedFhirStore.GetMetadata/InstanceRead`, original CRUD fixtures/contracts and the already authored cross-format pairs. | Each input-format row reads JSON → XML → JSON with the actual tenant/resource/ID context and `SerializePretty=true`, not generic dispatch. Complete Patient/Observation content, generated ID/version/time/header relationships, independently expected capability versions/tenant URL, observed update values, unchanged sibling, deletion and missing resource/outcome separation. Reads reuse bindings rather than inventing metadata increments. |
+| `UiTheoryDataIsNonEmptyAndLabeled` / 1 fact | Existing corpus inventory convention. | Requires six uniquely labeled rows in each set, all three versions and both input formats, and the ordered viewer format sequence. This prevents empty/missing-version declarations; only execution can establish a pass. |
+
+The table literals are independently authored: `ui-patient`,
+`Wire, Avery Quinn`, and ordered
+`https://example.test/identifier|wire-{r4|r4b|r5}, https://example.test/secondary|second-{r4|r4b|r5}`.
+The update is `Revised, Avery Quinn` with primary identifier
+`updated-{version}`; the sibling remains `Sibling, Avery Quinn` with
+`sibling-{version}`. Observation has no name/URL/description and displays
+`https://example.test/identifier|quantity-{version}`, then
+`updated-quantity-{version}` under that same system. The inline
+StructureDefinition uses `ui-profile`, name `UiPatientProfile`, canonical
+`https://example.test/fhir/StructureDefinition/ui-profile`, description
+`Synthetic table profile.`, and identifier
+`https://example.test/ui-profiles|ui-profile`. Its name, canonical, description
+and identifier all receive explicit updated literals; its ID is unchanged.
+Its separate `title` is deliberately not the Name column. No new fixture path
+or existing raw fixture was changed.
+
+Viewer assertions preserve the fixture's original tags, `language=en`,
+ordered identifiers/names, month-precision birthDate and primitive extension,
+XHTML spaces/newline/whitespace-only paragraph, multipleBirth and Observation
+choice names, relative references, bound absolute Patient reference,
+`1234567890.123400`, and `2024-06-03T10:11:12.3400-05:00`. Updates require
+`en-US`, the revised family/identifier, `1234567890.123450`, and
+`2024-06-04T10:11:12.3400-05:00`. Decimal tokens never pass through `double`.
+IDs, versions, timestamps and URLs are locally bound; the same bindings must
+match repeated read content, Location, weak ETag and Last-Modified at HTTP-date
+precision. Metadata asserts literal `4.0.1`/`4.3.0`/`5.0.0` and
+`{tenant-base}/CapabilityStatement/metadata`, not `implementation.url`.
+
+Pretty output is checked for structural indentation, not size ordering or
+the narrative's own newline. Direct `Resource`/`Outcome` and their serialized
+fields remain distinct. A valid-context missing read returns false/404, empty
+resource content and the exact `Resource: {type}/{id} not found`
+error/exception outcome, without identity headers. The current viewer only
+displays `SerializedResource`; this test does not claim an outcome banner,
+browser authentication behavior, Razor rendering, or browser event coverage.
+
+### Gate distinctions and supplied verified evidence
+
+The supplied final phase-5 evidence is Windows Release/net10.0:
+the required build and scoped **3,170/3,170** gate passed twice with zero
+warnings/errors/failures/skips, committed as
+`69c8ddb591c14fc4dd8673c613204100028c65bd`.
+The supplied final phase-6 evidence is Windows Release/net10.0:
+the required build and scoped **3,157/3,157** gate passed twice with zero
+warnings/errors/failures/skips, committed as
+`47913dada668331195c212903bc91060a551c2d9`. The latter includes all
+**76** additions (8 package, 31 client, 37 notification). This records the
+verified repeat subsequent to the earlier phase-6 entry without rewriting it.
+These are different scoped filters, not final full-suite totals or matrix
+results.
+
+The phase-7 UI additions remain **unexecuted** in this implementation slice.
+No production change has been demonstrated or made here. The
+[SDK 6 compatibility document](../../../../docs/technical/sdk6-compatibility.md)
+maps the actual UI imports/consumers, preserved aliases/Common/DI/reflection
+boundaries, accepted SDK/companion cohort, and version-specific differences.
+It distinguishes SDK-facing adaptations from the accepted pre-existing
+P1–P4/M1, O1/O3 and notification teardown repairs, fixture-only O2, U1's
+dedicated-method boundary, and the local dual-SUBSETTED contract.
+
+That document separately records the final local/all-target commands,
+nine OS/framework cells, explicit offline RI/browser startup and routes,
+and pending manual results. Windows net8/net9 and final net10 full-suite/UI
+evidence remain pending; Linux/macOS remain not run. Pinned offline RI cache
+setup is outstanding, not a live-registry permission. The current CDex
+table's `Task.code` assumption versus the minimal API hook fixtures is an
+explicit source-level browser-seed caveat, not a speculative runtime repair.
+Neither this inventory nor static inspection marks phase 7 complete or the
+migration finally verified.
+
+### Recorded phase-7 gates and final blocker (2026-09-24)
+
+The exact scoped build passed with zero warnings/errors. Attempt 1's
+scoped test run executed **3,093 cases: 3,087 passed, six failed, zero
+skipped**. All table rows and retained contract cases passed; all viewer
+rows stopped on a new helper's duplicate `metadata-date` scalar capture.
+The completed common oracle deliberately captures each named scalar once.
+
+Attempt 2 changed only that new test helper: later metadata reads receive
+distinct scalar names and explicitly require equality with the original
+captured date. Resource/header bindings remain reused, and no date/content
+assertion or case was removed. Both exact phase-7 commands then passed:
+**3,093/3,093**, zero failures/skips and zero compiler/analyzer warnings
+or errors. Multiset comparison retained every prior case occurrence;
+all **13** new UI cases now execute their full sequences.
+
+The required final solution build for Release/net10.0 also passed without
+warnings/errors. The **unfiltered** suite then failed:
+**4,258 executed / 2,668 passed / 1,590 failed / zero skipped**, with zero
+compiler/analyzer warnings/errors. Every failure reports Windows
+Application Control blocking `FhirCandle.Ui.R4B.dll` with **0x800711C7**:
+1,564 direct `FileLoadException` failures plus 26 fixture-constructor
+failures with that same inner exception. The observed path is
+`FhirStoreManager.LoadPackagePages` during store-manager initialization.
+
+These are failed tests, not skips, proven SDK regressions, or permission
+to bypass the operating-system policy. No discovery workaround, assertion
+waiver, changed launch configuration, or policy bypass was attempted.
+Phase 7 remains **Blocked and uncommitted**, with its owned changes
+preserved. The tested UI source SHA256 is
+`63AB2B9DD121AE7908101E72B4A66CAF12433962B51159029E8F42635629D044`;
+the runtime source remains at phase-6 commit
+`47913dada668331195c212903bc91060a551c2d9`. Only evidence documentation
+changed after the failing full gate.
+
+An authorized environment resolution and a fresh full gate are required;
+assertions masked by the assembly-load failure remain unverified. The
+Windows all-target sequence, all Linux/macOS cells, and all browser/RI
+workflows were not started after this blocker. Their outstanding
+environment/offline-package prerequisites are not waived. Review remains
+conductor-managed after execution prerequisites pass.
+
+### Bounded phase-7 recovery evidence (2026-09-30)
+
+Original phase-7 attempt 3 revalidated the retained tree without changing
+runtime code, test cases, or assertions. Runtime source remains at
+`47913dada668331195c212903bc91060a551c2d9`; the unchanged UI-test source
+SHA256 remains
+`63AB2B9DD121AE7908101E72B4A66CAF12433962B51159029E8F42635629D044`.
+All five retained phase-7 files matched their intake bytes through verification.
+
+| Exact required gate | Windows Release/net10.0 result |
+|---|---|
+| Solution build and unfiltered suite | Build passed; **4,258/4,258** passed, zero failures/skips and zero compiler/analyzer warnings/errors. |
+| Phase-7 application build and scoped UI/contract suite | Build passed; **3,093/3,093** passed, including all 3,080 contract cases and thirteen UI cases; zero failures/skips and zero compiler/analyzer warnings/errors. |
+
+The environment was Windows x64 build 26200 with SDK **10.0.400** and
+runtime **10.0.11**. Exact result-header multiset comparisons against the
+hash-verified historical logs preserve every full-suite and scoped occurrence;
+all **1,590** previously failed occurrences now pass. Normal
+`FhirStoreManager.Init` / `LoadPackagePages`, including its R4B assembly scan,
+remains enabled.
+
+The ordinary documented build/test commands regenerated the R4B UI DLL at
+the same normal test-output path. No forced clean, output relocation,
+policy/trust change, discovery suppression, or weakened assertion was used.
+This is passing current runtime evidence, not a separate load test of the
+historical DLL or proof of a particular administrative policy change. The
+earlier failed results above remain historical facts, not retroactive passes.
+Fresh assets retain the accepted SDK/companion cohort across ten consumers
+and thirty framework graphs, with R6 only in tests.
+
+Recovery stopped on the remaining mandatory setup/evidence gates: WSL has
+no installed distribution, no macOS execution host was supplied, and the
+exact subscriptions-backport **1.1.0** and CDex **2.0.0** packages were not
+found in the checked default cache layouts. Windows SDKs/runtimes 8/9/10 and
+Edge/Chrome are available; the Windows all-target sequence and actual
+browser/RI workflows remain **not run**, not failed or waived. No public
+registry fetch, new environment/tool installation, or remote workflow was
+used as a substitute.
+
+Phase 7 remains **blocked for final acceptance**. Only evidence documentation
+was updated after these passing runs. A local checkpoint commit does not
+replace the remaining matrix/browser gates, final-tree verification, or
+conductor-managed review. See the updated
+[compatibility evidence](../../../../docs/technical/sdk6-compatibility.md)
+for separate OS/framework cells and browser prerequisites.
