@@ -9,6 +9,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Pipes;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -840,6 +841,542 @@ public class PerformanceEvidenceTests
             Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(response with { StatusCode = 422 },
                 201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf", now.AddMinutes(-1)));
         }
+    }
+
+    /// <summary>Both actual scales have reproducible bytes, fixed-width IDs and complete ten-to-one references.</summary>
+    [Fact]
+    public void CorpusIsDeterministicAndReferenceComplete()
+    {
+        Assert.Equal("candle-perf-v1", Workloads.Algorithm);
+        Assert.Equal(100101, Workloads.Seed);
+        foreach (int patients in new[] { 100, 1000 })
+        {
+            WorkloadCorpus reference = Workloads.CreateCorpus("R4", patients);
+            foreach (string version in new[] { "R4", "R4B", "R5" })
+            {
+                WorkloadCorpus corpus = Workloads.CreateCorpus(version, patients);
+                WorkloadCorpus repeated = Workloads.CreateCorpus(version, patients);
+                CorrectnessOracle.ValidateCorpus(corpus);
+                Assert.Equal(patients, corpus.PatientCount);
+                Assert.Equal(patients * 10, corpus.ObservationCount);
+                Assert.Equal(patients * 11, corpus.Resources.Length);
+                Assert.Equal(JsonSerializer.SerializeToUtf8Bytes(corpus), JsonSerializer.SerializeToUtf8Bytes(repeated));
+                Assert.Equal(reference.PatientOrder, corpus.PatientOrder);
+                Assert.Equal(reference.ObservationOrder, corpus.ObservationOrder);
+                Assert.Equal(Enumerable.Range(0, patients), corpus.PatientOrder.Order());
+                Assert.Equal(Enumerable.Range(0, patients * 10), corpus.ObservationOrder.Order());
+                CorpusResource[] order = Workloads.SeedResources(corpus).ToArray();
+                Assert.All(order.Take(patients), resource => Assert.Equal("Patient", resource.ResourceType));
+                Assert.All(order.Skip(patients), resource => Assert.Equal("Observation", resource.ResourceType));
+                Assert.Equal(corpus.Resources.Length, order.Select(resource => resource.Identity).Distinct().Count());
+                int[] families = new int[100];
+                int[] codes = new int[1000];
+                for (int index = 0; index < corpus.Resources.Length; index++)
+                {
+                    CorpusResource resource = corpus.Resources[index];
+                    Assert.Equal(reference.Resources[index].Body, resource.Body);
+                    Assert.Equal(SHA256.HashData(resource.Body), SHA256.HashData(repeated.Resources[index].Body));
+                    Assert.True(resource.Body.Length > 0);
+                    using JsonDocument document = JsonDocument.Parse(resource.Body);
+                    JsonElement root = document.RootElement;
+                    if (index < patients)
+                    {
+                        Assert.Equal("patient-" + index.ToString("D8", CultureInfo.InvariantCulture), resource.Id);
+                        Assert.Equal("Family" + (index % 100).ToString("D3", CultureInfo.InvariantCulture),
+                            root.GetProperty("name")[0].GetProperty("family").GetString());
+                        families[index % 100]++;
+                    }
+                    else
+                    {
+                        int logical = index - patients;
+                        Assert.Equal("observation-" + logical.ToString("D8", CultureInfo.InvariantCulture), resource.Id);
+                        Assert.Equal("Patient/patient-" + (logical / 10).ToString("D8", CultureInfo.InvariantCulture),
+                            root.GetProperty("subject").GetProperty("reference").GetString());
+                        Assert.Equal("Code" + (logical % 1000).ToString("D3", CultureInfo.InvariantCulture),
+                            root.GetProperty("code").GetProperty("coding")[0].GetProperty("code").GetString());
+                        codes[logical % 1000]++;
+                    }
+                }
+
+                Assert.All(families, count => Assert.Equal(patients / 100, count));
+                Assert.All(codes, count => Assert.Equal(patients / 100, count));
+                CorpusResource[] altered = corpus.Resources.ToArray();
+                JsonObject wrong = JsonNode.Parse(altered[patients].Body)!.AsObject();
+                wrong["subject"]!["reference"] = "Patient/not-in-corpus";
+                altered[patients] = altered[patients] with { Body = JsonSerializer.SerializeToUtf8Bytes(wrong) };
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCorpus(corpus with { Resources = altered }));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCorpus(corpus with { PatientOrder = new int[patients] }));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCorpus(corpus with { Resources = corpus.Resources[..^1] }));
+            }
+        }
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => Workloads.CreateCorpus("R6", 100));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Workloads.CreateCorpus("R4", 10));
+    }
+
+    /// <summary>The full matrix and its four-operation request ledger cannot shrink into a smoke subset.</summary>
+    [Fact]
+    public void CaseMatrixContainsExactlySeventyTwoRows()
+    {
+        string[] expectedCases = ["patient-create", "observation-create", "patient-update", "observation-update",
+            "patient-token", "patient-string", "observation-token", "observation-reference", "empty-search",
+            "patient-read", "observation-read", "subscription-receive"];
+        WorkloadCase[] cases = Workloads.CreateCases();
+        Assert.Equal(72, cases.Length);
+        Assert.Equal(72, cases.Select(workload => workload.RowKey).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(cases, Workloads.CreateCases());
+        Assert.Equal(4, Workloads.PreflightOperations);
+        foreach (string version in new[] { "R4", "R4B", "R5" })
+        {
+            foreach (int patients in new[] { 100, 1000 })
+            {
+                WorkloadCorpus corpus = Workloads.CreateCorpus(version, patients);
+                WorkloadCase[] group = cases.Where(workload => workload.FhirVersion == version && workload.PatientCount == patients).ToArray();
+                Assert.Equal(expectedCases, group.Select(workload => workload.CaseId));
+                foreach (WorkloadCase workload in group)
+                {
+                    Assert.Equal(patients * 10, workload.ObservationCount);
+                    Assert.Equal(corpus.Key + "-" + workload.CaseId, workload.RowKey);
+                    WorkloadRequest[] requests = Workloads.CreateRequests(workload, corpus);
+                    CorrectnessOracle.ValidateCaseRequests(workload, corpus, requests, 4);
+                    Assert.Equal(new[] { 1, 2, 3, 4 }, requests.Select(request => request.Number));
+                    Assert.Equal(JsonSerializer.SerializeToUtf8Bytes(requests),
+                        JsonSerializer.SerializeToUtf8Bytes(Workloads.CreateRequests(workload, corpus)));
+                    int expectedMatches = workload.CaseId switch
+                    {
+                        "patient-string" or "observation-token" => patients / 100,
+                        "observation-reference" => 10,
+                        "patient-create" or "observation-create" or "empty-search" => 0,
+                        _ => 1,
+                    };
+                    Assert.All(requests, request => Assert.Equal(expectedMatches, request.ExpectedIdentities.Length));
+                    if (workload.CaseId is "patient-token" or "observation-token" or "empty-search")
+                    {
+                        Assert.All(requests, request =>
+                        {
+                            Assert.Contains("%7C", request.RelativeUrl, StringComparison.Ordinal);
+                            Assert.Contains("%3A%2F%2F", request.RelativeUrl, StringComparison.Ordinal);
+                        });
+                    }
+
+                    if (workload.CaseId.EndsWith("-create", StringComparison.Ordinal))
+                    {
+                        Assert.All(requests, request => Assert.False(JsonNode.Parse(request.Body!)!.AsObject().ContainsKey("id")));
+                        Assert.Equal(4, requests.Select(request => JsonNode.Parse(request.Body!)!["identifier"]![0]!["value"]!.GetValue<string>())
+                            .Distinct(StringComparer.Ordinal).Count());
+                    }
+
+                    WorkloadRequest[] wrong = requests.ToArray();
+                    wrong[0] = wrong[0] with { ExpectedIdentities = ["Patient/unexpected"] };
+                    Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCaseRequests(workload, corpus, wrong, 4));
+                    Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCaseRequests(workload, corpus, requests[..3], 4));
+                }
+            }
+        }
+
+        SuccessfulStatusProfile baseline = CorrectnessOracle.StatusProfile("baseline");
+        SuccessfulStatusProfile candidate = CorrectnessOracle.StatusProfile("candidate");
+        Assert.Equal(200, baseline.PutAsCreate);
+        Assert.Equal(201, candidate.PutAsCreate);
+        foreach (SuccessfulStatusProfile profile in new[] { baseline, candidate })
+        {
+            Assert.Equal(201, profile.Create);
+            Assert.Equal(new[] { 200, 200, 200, 200, 200 },
+                new[] { profile.Update, profile.Read, profile.Search, profile.Delete, profile.Hook });
+        }
+
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.StatusProfile("moving-main"));
+    }
+
+    /// <summary>All notification versions carry exactly one event with distinct Bundle/status identities.</summary>
+    [Fact]
+    public void NotificationShapesHaveOneEventAndVersionCorrectStatus()
+    {
+        foreach (string version in new[] { "R4", "R4B", "R5" })
+        {
+            HashSet<string> bundles = new(StringComparer.Ordinal);
+            HashSet<string> statuses = new(StringComparer.Ordinal);
+            foreach (int number in new[] { 1, 2, 3, 4, 129 })
+            {
+                NotificationInput notification = Workloads.CreateNotification(version, number);
+                CorrectnessOracle.ValidateNotification(notification);
+                Assert.True(bundles.Add(notification.BundleId));
+                Assert.True(statuses.Add(notification.StatusId));
+                Assert.Equal(notification.Body, Workloads.CreateNotification(version, number).Body);
+                JsonObject bundle = JsonNode.Parse(notification.Body)!.AsObject();
+                JsonArray entries = bundle["entry"]!.AsArray();
+                Assert.Equal(3, entries.Count);
+                Assert.Equal(version == "R5" ? "subscription-notification" : "history", bundle["type"]!.GetValue<string>());
+                JsonObject status = entries[0]!["resource"]!.AsObject();
+                Assert.Equal(version == "R4" ? "Parameters" : "SubscriptionStatus", status["resourceType"]!.GetValue<string>());
+                string expectedNumber = number.ToString(CultureInfo.InvariantCulture);
+                if (version == "R4")
+                {
+                    Assert.Equal(6, status["parameter"]!.AsArray().Count);
+                    Assert.Equal(expectedNumber, status["parameter"]![4]!["valueString"]!.GetValue<string>());
+                    Assert.Equal(expectedNumber, status["parameter"]![5]!["part"]![0]!["valueString"]!.GetValue<string>());
+                    status["parameter"]![5]!["part"]![0]!["valueString"] = number;
+                }
+                else
+                {
+                    Assert.Single(status["notificationEvent"]!.AsArray());
+                    Assert.Equal(expectedNumber, status["eventsSinceSubscriptionStart"]!.GetValue<string>());
+                    Assert.Equal(expectedNumber, status["notificationEvent"]![0]!["eventNumber"]!.GetValue<string>());
+                    status["notificationEvent"]![0]!["eventNumber"] = number;
+                }
+
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateNotification(
+                    notification with { Body = JsonSerializer.SerializeToUtf8Bytes(bundle) }));
+                JsonObject wrongContext = JsonNode.Parse(notification.Body)!.AsObject();
+                wrongContext["entry"]![2]!["fullUrl"] = "https://example.org/fhir/source/Patient/wrong";
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateNotification(
+                    notification with { Body = JsonSerializer.SerializeToUtf8Bytes(wrongContext) }));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateNotification(
+                    notification with { EventNumber = number + 1 }));
+            }
+        }
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => Workloads.CreateNotification("R4", 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Workloads.CreateNotification("R5", 100000000));
+    }
+
+    /// <summary>Search errors, incomplete pages, wrong content and unbound body/header identities are failures.</summary>
+    [Fact]
+    public void OracleRejectsErrorTruncatedSearchAndWrongIdentity()
+    {
+        const string BaseUrl = "http://127.0.0.1:58260/fhir/perf";
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        WorkloadCorpus corpus = Workloads.CreateCorpus("R4", 1000);
+        string uri = BaseUrl + "/Patient?family=Family017&_count=100";
+        Dictionary<string, ExpectedResource> expected = new(StringComparer.Ordinal);
+        for (int index = 17; index < 1000; index += 100)
+        {
+            CorpusResource resource = corpus.Resources[index];
+            ResponseEvidence response = ResourceResponse(resource.Body, resource.Id, 200, now);
+            ResourceBinding binding = CorrectnessOracle.ValidateResponse(response, 200, resource.Body, BaseUrl, now.AddSeconds(-1));
+            expected.Add(resource.Identity, new ExpectedResource(resource.Body, binding));
+        }
+
+        HttpExchangeEvidence page = SearchPage(uri, expected.Values.ToArray(), expected.Count, now);
+        CorrectnessOracle.ValidateSearch([page], expected, uri, BaseUrl);
+        string secondUri = uri + "&_page=2";
+        HttpExchangeEvidence first = SearchPage(uri, expected.Values.Take(5).ToArray(), 10, now, secondUri);
+        HttpExchangeEvidence second = SearchPage(secondUri, expected.Values.Skip(5).ToArray(), 10, now);
+        Assert.Equal(secondUri, CorrectnessOracle.NextPageUri(first.Response, uri, BaseUrl));
+        CorrectnessOracle.ValidateSearch([first, second], expected, uri, BaseUrl);
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch([first], expected, uri, BaseUrl));
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch([second, first], expected, uri, BaseUrl));
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch(
+            [SearchPage(uri, expected.Values.Take(5).ToArray(), 10, now)], expected, uri, BaseUrl));
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch([page, page], expected, uri, BaseUrl));
+        foreach (Action<JsonObject> mutate in new Action<JsonObject>[]
+        {
+            root => root["total"] = 9,
+            root => root["type"] = "collection",
+            root => root["entry"]!.AsArray().RemoveAt(0),
+            root => root["entry"]!.AsArray().Add(root["entry"]![0]!.DeepClone()),
+            root => root["entry"]![0]!["search"]!["mode"] = "outcome",
+            root => root["entry"]![0]!["fullUrl"] = BaseUrl + "/Patient/wrong",
+            root => root["entry"]![0]!["resource"]!["name"]![0]!["family"] = "Wrong",
+            root => root["entry"]![0]!["resource"]!["id"] = "wrong",
+            root => root["entry"]![0]!["resource"]!["meta"]!["versionId"] = "2",
+            root => root["link"]![0]!["url"] = BaseUrl + "/Patient?family=Family018&_count=100",
+            root => root["link"]!.AsArray().Add(new JsonObject { ["relation"] = "next", ["url"] = "https://example.org/other" }),
+        })
+        {
+            JsonObject changed = JsonNode.Parse(page.Response.Body)!.AsObject();
+            mutate(changed);
+            HttpExchangeEvidence wrong = page with { Response = page.Response with { Body = JsonSerializer.SerializeToUtf8Bytes(changed) } };
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch([wrong], expected, uri, BaseUrl));
+        }
+
+        foreach (int status in new[] { 201, 400, 500 })
+        {
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch(
+                [page with { Response = page.Response with { StatusCode = status } }], expected, uri, BaseUrl));
+        }
+
+        byte[] outcome = Encoding.UTF8.GetBytes("""{"resourceType":"OperationOutcome","issue":[{"severity":"error","code":"invalid"}]}""");
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSearch(
+            [page with { Response = page.Response with { Body = outcome } }], expected, uri, BaseUrl));
+        string emptyUri = BaseUrl + "/Observation?code=" + Uri.EscapeDataString("https://example.org/candle-perf/code|OutsideDomain") + "&_count=100";
+        CorrectnessOracle.ValidateSearch([SearchPage(emptyUri, [], 0, now)],
+            new Dictionary<string, ExpectedResource>(), emptyUri, BaseUrl);
+        WorkloadCase create = Workloads.CreateCases().Single(workload =>
+            workload.FhirVersion == "R4" && workload.PatientCount == 1000 && workload.CaseId == "patient-create");
+        byte[] input = Workloads.CreateRequests(create, corpus)[0].Body!;
+        ResponseEvidence created = ResourceResponse(input, "server-generated-1", 201, now);
+        _ = CorrectnessOracle.ValidateResponse(created, 201, input, BaseUrl, now.AddSeconds(-1));
+        foreach ((string header, string value) in new[]
+        {
+            ("Location", BaseUrl + "/Patient/other"),
+            ("ETag", "W/\"2\""),
+            ("Last-Modified", now.AddMinutes(-2).UtcDateTime.ToString("r", CultureInfo.InvariantCulture)),
+        })
+        {
+            Dictionary<string, string[]> headers = new(created.Headers, StringComparer.OrdinalIgnoreCase) { [header] = [value] };
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
+                created with { Headers = headers }, 201, input, BaseUrl, now.AddSeconds(-1)));
+        }
+
+        JsonObject alteredBody = JsonNode.Parse(created.Body)!.AsObject();
+        alteredBody["identifier"]![0]!["value"] = "another-request-sentinel";
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
+            created with { Body = JsonSerializer.SerializeToUtf8Bytes(alteredBody) }, 201, input, BaseUrl, now.AddSeconds(-1)));
+    }
+
+    /// <summary>Real field changes, every version step, distinct creations and exact growth are mandatory.</summary>
+    [Fact]
+    public void OracleRejectsNoOpUpdateAndWrongCreateGrowth()
+    {
+        const string BaseUrl = "http://127.0.0.1:58260/fhir/perf";
+        WorkloadCorpus corpus = Workloads.CreateCorpus("R5", 100);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        foreach (string caseId in new[] { "patient-update", "observation-update" })
+        {
+            WorkloadCase workload = Workloads.CreateCases().Single(item =>
+                item.FhirVersion == "R5" && item.PatientCount == 100 && item.CaseId == caseId);
+            WorkloadRequest[] requests = Workloads.CreateRequests(workload, corpus);
+            CorpusResource existing = corpus.Resources.Single(resource => resource.Identity == requests[0].RelativeUrl);
+            byte[] previousContent = existing.Body;
+            ResourceBinding previous = CorrectnessOracle.ValidateResponse(
+                ResourceResponse(existing.Body, existing.Id, 200, now), 200, existing.Body, BaseUrl, now.AddSeconds(-1));
+            foreach (WorkloadRequest request in requests)
+            {
+                string nextVersion = (request.Number + 1).ToString(CultureInfo.InvariantCulture);
+                ResponseEvidence response = ResourceResponse(request.Body!, existing.Id, 200, now.AddSeconds(request.Number), nextVersion);
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    response, 200, previousContent, previousContent, previous, BaseUrl));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    ResourceResponse(request.Body!, existing.Id, 200, now.AddSeconds(request.Number), previous.VersionId),
+                    200, previousContent, request.Body!, previous, BaseUrl));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    ResourceResponse(request.Body!, "wrong-instance", 200, now.AddSeconds(request.Number), nextVersion),
+                    200, previousContent, request.Body!, previous, BaseUrl));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    response with { StatusCode = 201 }, 200, previousContent, request.Body!, previous, BaseUrl));
+                JsonObject wrong = JsonNode.Parse(response.Body)!.AsObject();
+                if (caseId == "patient-update")
+                {
+                    wrong["active"] = !wrong["active"]!.GetValue<bool>();
+                }
+                else
+                {
+                    wrong["subject"]!["reference"] = "Patient/wrong-context";
+                }
+
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    response with { Body = JsonSerializer.SerializeToUtf8Bytes(wrong) },
+                    200, previousContent, request.Body!, previous, BaseUrl));
+                previous = CorrectnessOracle.ValidateUpdateResponse(response, 200, previousContent, request.Body!, previous, BaseUrl);
+                previousContent = request.Body!;
+                Assert.Equal(nextVersion, previous.VersionId);
+            }
+
+            ResponseEvidence finalRead = ResourceResponse(previousContent, existing.Id, 200, now.AddSeconds(4), "5");
+            Assert.Equal(previous, CorrectnessOracle.ValidateResponse(finalRead, 200, previousContent, BaseUrl, now.AddSeconds(-1), previous));
+        }
+
+        WorkloadCase create = Workloads.CreateCases().Single(item =>
+            item.FhirVersion == "R5" && item.PatientCount == 100 && item.CaseId == "patient-create");
+        WorkloadRequest[] inputs = Workloads.CreateRequests(create, corpus);
+        ResourceBinding[] created = inputs.Select(request => CorrectnessOracle.ValidateResponse(
+            ResourceResponse(request.Body!, "new-" + request.Number.ToString("D8", CultureInfo.InvariantCulture), 201, now),
+            201, request.Body!, BaseUrl, now.AddSeconds(-1))).ToArray();
+        string[] initialIds = corpus.Resources.Where(resource => resource.ResourceType == "Patient").Select(resource => resource.Id).ToArray();
+        CorrectnessOracle.ValidateCreateGrowth("Patient", initialIds, 100, 104, 4, created);
+        foreach (int wrongCount in new[] { 100, 103, 105 })
+        {
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCreateGrowth("Patient", initialIds, 100, wrongCount, 4, created));
+        }
+
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCreateGrowth("Patient", initialIds, 100, 104, 4, created[..3]));
+        ResourceBinding[][] invalid = [
+            [created[0], created[0], created[2], created[3]],
+            [created[0] with { Id = initialIds[0] }, .. created[1..]],
+            [created[0] with { VersionId = "2" }, .. created[1..]],
+            [created[0] with { ResourceType = "Observation" }, .. created[1..]],
+        ];
+        foreach (ResourceBinding[] bindings in invalid)
+        {
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCreateGrowth("Patient", initialIds, 100, 104, 4, bindings));
+        }
+
+        ResponseEvidence deletion = ResourceResponse(inputs[0].Body!, created[0].Id, 200, now);
+        deletion.Headers.Remove("Location");
+        deletion.Headers.Remove("ETag");
+        deletion.Headers.Remove("Last-Modified");
+        CorrectnessOracle.ValidateDeleteResponse(deletion, 200, new ExpectedResource(inputs[0].Body!, created[0]));
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateDeleteResponse(
+            deletion with { StatusCode = 204 }, 200, new ExpectedResource(inputs[0].Body!, created[0])));
+        TenantSnapshot initial = ClinicalSnapshot(0, 0);
+        CorrectnessOracle.ValidateState(initial, ClinicalSnapshot(104, 1000), 104, 1000, 0,
+            new Dictionary<string, bool>(), _sourceDirectory);
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateState(initial, ClinicalSnapshot(103, 1000),
+            104, 1000, 0, new Dictionary<string, bool>(), _sourceDirectory));
+    }
+
+    /// <summary>Every receipt entry/event and absence of separately stored embedded clinical content are checked.</summary>
+    [Fact]
+    public void OracleRejectsMissingDuplicateOrMismatchedReceipt()
+    {
+        foreach (string version in new[] { "R4", "R4B", "R5" })
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            ReceiptExpectation[] expected = Enumerable.Range(1, 4).Select(number =>
+                new ReceiptExpectation(Workloads.CreateNotification(version, number), now.AddMinutes(-1), now.AddMinutes(1))).ToArray();
+            ReceiptSnapshot[] receipts = Enumerable.Range(1, 4).Select(number => Receipt(Workloads.CreateProbeChallenge(version, number))).ToArray();
+            Dictionary<string, ResourceIdentity?> identities = new(StringComparer.Ordinal);
+            Dictionary<string, bool> presence = new(StringComparer.Ordinal);
+            foreach (ReceiptExpectation item in expected)
+            {
+                NotificationInput notification = item.Notification;
+                identities.Add("Bundle/" + notification.BundleId, new("Bundle", notification.BundleId));
+                identities.Add("Patient/" + notification.ContextId, null);
+                identities.Add("Observation/" + notification.FocusId, null);
+                presence.Add("Bundle/" + notification.BundleId, true);
+                presence.Add("Patient/" + notification.ContextId, false);
+                presence.Add("Observation/" + notification.FocusId, false);
+            }
+
+            TenantSnapshot initial = ClinicalSnapshot(0, 0);
+            TenantSnapshot snapshot = ClinicalSnapshot(100, 1000, 4, receipts, identities);
+            CorrectnessOracle.ValidateState(initial, snapshot, 100, 1000, 4, presence, _sourceDirectory);
+            CorrectnessOracle.ValidateReceipt(snapshot, expected);
+            string key = Assert.Single(snapshot.ReceivedNotifications).Key;
+            foreach (ReceiptSnapshot[] wrong in new[]
+            {
+                Array.Empty<ReceiptSnapshot>(), receipts[..3],
+                new[] { receipts[0], receipts[1], receipts[2], receipts[2] },
+                receipts.AsEnumerable().Reverse().ToArray(),
+            })
+            {
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(snapshot with
+                {
+                    ReceivedNotifications = new SortedDictionary<string, ReceiptSnapshot[]>(StringComparer.Ordinal) { [key] = wrong },
+                }, expected));
+            }
+
+            foreach (Func<ReceiptSnapshot, ReceiptSnapshot> mutate in new Func<ReceiptSnapshot, ReceiptSnapshot>[]
+            {
+                receipt => receipt with { BundleId = "different" },
+                receipt => receipt with { SubscriptionReference = "wrong-subscription" },
+                receipt => receipt with { SubscriptionTopicCanonical = "wrong-topic" },
+                receipt => receipt with { Status = "off" },
+                receipt => receipt with { NotificationType = "Heartbeat" },
+                receipt => receipt with { EventsSinceSubscriptionStart = 99 },
+                receipt => receipt with { ProcessedDateTime = now.AddMinutes(-10) },
+                receipt => receipt with { Errors = ["error"] },
+                receipt => receipt with { NotificationEvents = [] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0], receipt.NotificationEvents[0]] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { Id = "unexpected" }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { EventNumber = 99 }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { Timestamp = null }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { Timestamp = receipt.NotificationEvents[0].Timestamp?.AddSeconds(1) }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { FocusReference = "Observation/wrong" }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { AdditionalContextReferences = [] }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with { AdditionalContextReferences = ["Patient/wrong"] }] },
+                receipt => receipt with { NotificationEvents = [receipt.NotificationEvents[0] with
+                {
+                    AdditionalContextReferences = [.. receipt.NotificationEvents[0].AdditionalContextReferences,
+                        .. receipt.NotificationEvents[0].AdditionalContextReferences],
+                }] },
+            })
+            {
+                ReceiptSnapshot[] wrong = receipts.ToArray();
+                wrong[3] = mutate(wrong[3]);
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(snapshot with
+                {
+                    ReceivedNotifications = new SortedDictionary<string, ReceiptSnapshot[]>(StringComparer.Ordinal) { [key] = wrong },
+                }, expected));
+            }
+
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(snapshot with
+            {
+                ReceivedNotifications = new SortedDictionary<string, ReceiptSnapshot[]>(StringComparer.Ordinal) { ["wrong-key"] = receipts },
+            }, expected));
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(snapshot with { EventCount = 3 }, expected));
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateState(initial, snapshot with
+            {
+                ResourceCounts = new SortedDictionary<string, int>(snapshot.ResourceCounts, StringComparer.Ordinal) { ["Observation"] = 1001 },
+            }, 100, 1000, 4, presence, _sourceDirectory));
+            foreach ((string type, string id) in new[]
+            {
+                ("Patient", expected[3].Notification.ContextId), ("Observation", expected[3].Notification.FocusId),
+            })
+            {
+                Dictionary<string, ResourceIdentity?> doubleStored = new(identities, StringComparer.Ordinal) { [type + "/" + id] = new(type, id) };
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateState(initial,
+                    snapshot with { RequestedResources = doubleStored }, 100, 1000, 4, presence, _sourceDirectory));
+            }
+        }
+    }
+
+    private static ResponseEvidence ResourceResponse(byte[] content, string id, int status, DateTimeOffset storedAt, string version = "1")
+    {
+        JsonObject resource = JsonNode.Parse(content)!.AsObject();
+        resource["id"] = id;
+        resource["meta"] ??= new JsonObject();
+        resource["meta"]!["versionId"] = version;
+        resource["meta"]!["lastUpdated"] = storedAt.ToString("O", CultureInfo.InvariantCulture);
+        return new(status, new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Content-Type"] = ["application/fhir+json; charset=utf-8"],
+            ["ETag"] = ["W/\"" + version + "\""],
+            ["Last-Modified"] = [storedAt.UtcDateTime.ToString("r", CultureInfo.InvariantCulture)],
+            ["Location"] = ["http://127.0.0.1:58260/fhir/perf/" + resource["resourceType"]!.GetValue<string>() + "/" + id],
+        }, JsonSerializer.SerializeToUtf8Bytes(resource), storedAt, storedAt);
+    }
+
+    private static HttpExchangeEvidence SearchPage(
+        string uri, ExpectedResource[] resources, int total, DateTimeOffset now, string? next = null)
+    {
+        JsonArray links = new(new JsonObject { ["relation"] = "self", ["url"] = uri });
+        if (next is not null)
+        {
+            links.Add(new JsonObject { ["relation"] = "next", ["url"] = next });
+        }
+
+        JsonArray entries = new();
+        foreach (ExpectedResource resource in resources)
+        {
+            ResourceBinding binding = resource.Binding;
+            entries.Add(new JsonObject
+            {
+                ["fullUrl"] = "http://127.0.0.1:58260/fhir/perf/" + binding.ResourceType + "/" + binding.Id,
+                ["resource"] = JsonNode.Parse(ResourceResponse(resource.Content, binding.Id, 200, binding.LastUpdated, binding.VersionId).Body),
+                ["search"] = new JsonObject { ["mode"] = "match" },
+            });
+        }
+
+        JsonObject bundle = new() { ["resourceType"] = "Bundle", ["type"] = "searchset", ["total"] = total, ["link"] = links };
+        if (entries.Count > 0)
+        {
+            bundle["entry"] = entries;
+        }
+
+        return new(uri, new ResponseEvidence(200,
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["Content-Type"] = ["application/fhir+json"] },
+            JsonSerializer.SerializeToUtf8Bytes(bundle), now, now));
+    }
+
+    private static TenantSnapshot ClinicalSnapshot(
+        int patients, int observations, int bundles = 0, ReceiptSnapshot[]? receipts = null,
+        Dictionary<string, ResourceIdentity?>? identities = null)
+    {
+        SortedDictionary<string, ReceiptSnapshot[]> received = new(StringComparer.Ordinal);
+        if (receipts is not null)
+        {
+            received.Add("https://example.org/fhir/source/Subscription/perf-subscription", receipts);
+        }
+
+        return new(["perf"], new Dictionary<string, string?> { ["LoadDirectory"] = _sourceDirectory },
+            new SortedDictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["Bundle"] = bundles, ["CapabilityStatement"] = 3, ["Observation"] = observations, ["Patient"] = patients,
+            }, identities ?? new Dictionary<string, ResourceIdentity?>(StringComparer.Ordinal), received,
+            received.Count, receipts?.Length ?? 0, receipts?.Sum(receipt => receipt.NotificationEvents.Length) ?? 0,
+            [], [], [_sourceDirectory], 0, 0);
     }
 
     private static ExperimentManifest Manifest() => new()

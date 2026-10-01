@@ -1,6 +1,6 @@
 # Sealed-artifact performance comparison
 
-## Current boundary: phase-one feasibility only
+## Current boundary: full untimed semantics preflight
 
 `FhirCandle.Performance` is a BCL-only external HTTP client. Its optional
 reference to `FhirCandle.Performance.Probe` shares the bounded pipe protocol,
@@ -9,20 +9,31 @@ The probe is injected only into experiment-owned children through
 `DOTNET_STARTUP_HOOKS`. Loading the probe without its activation configuration
 does nothing.
 
-This first implementation supports **`prepare`** and **`run --preflight-only`**.
-The latter attempts six disposable challenges: baseline then candidate, for
-each of R4, R4B and R5. A passing challenge is **not a measured trial**.
+The supported commands remain **`prepare`** and **`run --preflight-only`**.
+Preflight now requires all **72 paired rows / 144 fresh artifact-case
+processes**, at the actual 100 Patient + 1,000 Observation and 1,000 Patient +
+10,000 Observation scales. Each child performs exactly **four untimed logical
+case operations**, after complete corpus seeding and read-back validation.
+A passing preflight is **not a measured trial**.
 Full `run` and `render` explicitly return exit code **2** without creating a
 performance report. Other failures return **1**. Only successful preparation
-or all six successful feasibility challenges return **0**.
+or the entire successful preflight returns **0**.
 
 The eventual benchmark still requires twelve cases × three FHIR versions ×
 two scales = **72 paired rows**, with at least three independent trials per
-variant per row: **at least 432 measured child case-trials**. Full-scale
-correctness, 128-operation warm-up/restoration, paired calibration, allocation
+variant per row: **at least 432 measured child case-trials**. Executed full-scale
+correctness is still a gate, not a consequence of this implementation.
+128-operation warm-up/restoration, paired calibration, allocation
 windows, memory sampling, retention checkpoints, statistics and rendering
-remain later-phase work. No phase-one snapshot is a speed, allocation/op,
-sampled-peak or retention result.
+remain Phase 3 work. Neither feasibility nor untimed case snapshots are
+speed, allocation/op, sampled-peak or retention results.
+
+The independently audited `phase1-006` six-artifact/version challenges passed
+on the pinned artifacts and runtime, with clean child exits. That evidence
+does not satisfy the expanded gate. This documentation does **not** claim a
+Phase 2 live pass. Build/test/live execution and runtime output ownership
+belong to the caller; only actual `preflight\completed.json` plus its complete
+matrix establish the new gate.
 
 ## Preconditions and command sources
 
@@ -66,12 +77,12 @@ change is supported.
 
 ## Separate artifact inputs from unique run output
 
-For the first phase-one attempt:
+For a fresh Phase 2 attempt (retain all earlier phase-one directories):
 
 ```text
 C:\ai\git\fhir-candle\scratch\1001-01\
   experiment.json
-  performance.md                         reserved; NOT written by phase one
+  performance.md                         reserved; NOT written by untimed preflight
   performance-data\
     artifacts-001\                       reusable, independently verified inputs
       candidate-source\                  caller's clean detached checkout
@@ -81,7 +92,7 @@ C:\ai\git\fhir-candle\scratch\1001-01\
       isolation.txt                      actual authorized-environment evidence
       fhir-candle.2025.611.1422.nupkg       downloaded or verified cached archive
       baseline\                          unchanged full extracted package layout
-    phase1-001\                          unique OUTPUT; must not exist before prepare
+    phase2-001\                          unique OUTPUT; must not exist before prepare
       manifest.json
       prepare-started.json
       prepared.json
@@ -96,7 +107,7 @@ failed preparation, any earlier preflight, or evidence from another manifest,
 tool/probe binary or protocol. It does not resume partial evidence or append
 new results into an old preflight.
 
-Use a new ID (`phase1-002`, etc.) and matching `OutputDirectory` after failures,
+Use a new ID (`phase2-002`, etc.) and matching `OutputDirectory` after failures,
 tool/probe/protocol edits or another preflight. Preserve failed directories.
 Inputs can be reused only after hash verification. Do not place artifacts or
 the probe beneath the unique output directory. Never replace a seal with
@@ -120,8 +131,8 @@ launch; it is not a request for the runner to create controls.
 {
   "SchemaVersion": 1,
   "ProtocolVersion": "candle-perf-phase1-v1",
-  "RunId": "phase1-001",
-  "OutputDirectory": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\phase1-001",
+  "RunId": "phase2-001",
+  "OutputDirectory": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\phase2-001",
   "ReportPath": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance.md",
   "Baseline": {
     "PackageId": "fhir-candle",
@@ -151,8 +162,8 @@ launch; it is not a request for the runner to create controls.
     "ReadyToRun": true
   },
   "ProbePath": "C:\\ai\\git\\fhir-candle\\src\\FhirCandle.Performance.Probe\\bin\\Release\\net8.0\\FhirCandle.Performance.Probe.dll",
-  "ToolSourceRevision": "21fcb2e7ce7c44de9bc5f12b6af68bee06e90d9b",
-  "ToolSourceDescription": "Uncommitted phase-one tooling on the named revision; prepare seals the actual tool and probe bytes separately.",
+  "ToolSourceRevision": "01edcd71caf223c7738fa65957bd8fae61ebe0ab",
+  "ToolSourceDescription": "Uncommitted phase-two tooling on the named revision; prepare seals the actual tool and probe bytes separately.",
   "Port": 58260,
   "Tenant": "perf",
   "HttpWorkers": 1,
@@ -179,6 +190,19 @@ objects, tool source identity/description and isolation evidence are required.
 The C# definitions beside `ExperimentRunner` are the authoritative typed
 schema. A changed manifest, including changed serialized bytes, requires new
 preparation under a new run ID.
+
+The seed schema and CLI arguments have not changed. The probe protocol remains
+`candle-perf-phase1-v1` because its wire messages and limits are unchanged.
+The **prepared handoff schema is now 2**, with a mandatory `Workload` ledger
+whose `ContractVersion` is **`candle-perf-preflight-v2`**. Old preparation or
+preflight evidence cannot be upgraded/reused in place. The workload ledger
+records `Algorithm`, `Seed`, `PreflightOperations`, six `Corpora`, seventy-two
+`Cases`, and both exact `StatusProfiles`. Every corpus/case descriptor records
+its fixture path, ordered request seals, total payload bytes and
+`RequestOrderSha256`. Each request seal includes number, method, relative URL,
+Prefer, body byte length and SHA-256 (the empty-byte hash for bodyless GETs).
+The order hash covers the indented UTF-8 serialized seal array, without a BOM.
+`FixtureFiles` independently seals all **78** full fixture files.
 
 ## Caller-owned candidate provenance
 
@@ -418,7 +442,7 @@ after its bound, cleanup kills **only the owned process/PID tree** and awaits
 exit. Forced cleanup is recorded and does not turn a failed shutdown or
 challenge into a successful gate. There is no name-based process killing.
 
-### Independent HTTP/receipt challenge
+### Preserved phase-one HTTP/receipt challenge
 
 Inputs use BCL UTF-8 JSON, fixed timestamps and fixed-width IDs, algorithm
 `candle-perf-v1`, and reserved order seed `100101`. They contain synthetic
@@ -476,17 +500,120 @@ Response expectations are specific, not “any 2xx”:
 
 | Interaction | Baseline | Candidate | Source justification |
 |-|-:|-:|-|
-| First PUT Patient | 200 | 201 | Each pinned `ResourceStore.InstanceUpdate` success branch |
-| ID-less POST Observation | 201 | 201 | `VersionedFhirStore.DoInstanceCreate` |
+| First PUT Patient or Observation (seeding) | 200 | 201 | Each pinned `ResourceStore.InstanceUpdate` success branch |
+| ID-less POST Patient or Observation | 201 | 201 | `VersionedFhirStore.DoInstanceCreate` |
+| PUT an existing, changed Patient or Observation | 200 | 200 | `ResourceStore.InstanceUpdate`, numeric version increment |
 | Subsequent instance read | 200 | 200 | Instance read response contract |
+| Type search | 200 | 200 | `VersionedFhirStore.DoTypeSearch`, successful searchset |
+| DELETE a created instance, returning its representation | 200 | 200 | `VersionedFhirStore.DoInstanceDelete` |
 | Incoming hook | 200 | 200 | `OpSubscriptionHook`, materialized success OperationOutcome |
 
-These source-derived expectations must still pass live preflight. First stored
-version is `"1"`; only the explicitly bound ID and validated server
+Both pinned `ResourceStore.cs` / `VersionedFhirStore.cs` sources ground these
+profiles. The six retained live challenges confirm seed/create/read/hook
+behavior; update/search/delete still require the full live preflight.
+The delete contract returns the complete removed resource but supplies no
+ETag, Location or Last-Modified; `FhirController.AddFhirResponse` only adds
+those headers when the response context supplies them. Its absence is
+checked explicitly, not treated as an exemption for create/update/read.
+All actual codes and bodies are retained or, for successful seed interactions,
+validated before summarization.
+
+First stored version is `"1"`; only the explicitly bound ID and validated server
 `meta.versionId`/`meta.lastUpdated` are added to expected resource content.
 ETag, Location and Last-Modified must match. Arrays, all remaining metadata,
 fixed timestamps and cross-resource references are not globally discarded.
 No timing is performed by the oracle.
+
+### Full deterministic workload and preflight lifecycle
+
+`CreateCorpus`, `CreateCases` and `CreateNotification` use BCL UTF-8 JSON,
+not a Firely serializer. Algorithm **`candle-perf-v1`**, seed **`100101`**, and
+the four-operation preflight batch are fixed, not seed-manifest options.
+Clinical inputs are logically identical across all three FHIR versions.
+IDs start at zero: `patient-00000000` and `observation-00000000`, with eight
+decimal digits throughout. Patient index `i` has family `Family{i % 100:D3}`
+and given name `Given{i:D8}`. Observation index `j` has code
+`Code{j % 1000:D3}` and subject `Patient/patient-{floor(j / 10):D8}`.
+Identifiers use their logical IDs and the synthetic `example.org` systems.
+Initial quantity is 37.5 synthetic units; clinical `effectiveDateTime` is
+`2025-01-02T03:04:05Z`.
+
+Request permutations are reproducible across runtime versions: initialize a
+32-bit unsigned state to 100101, shuffle ascending Patient indices, then
+ascending Observation indices, carrying the state between them. For each
+descending Fisher-Yates position `i = count - 1 ... 1`, compute
+`state = (1664525 * state + 1013904223) mod 2^32`, select
+`other = state mod (i + 1)`, and swap. No runtime-dependent `Random` or
+observed server identity chooses expected inputs.
+
+Rows are ordered R4, R4B, R5; within each version, 100 then 1,000 Patients;
+within each scale, the case order below. Each row runs baseline then candidate,
+**never concurrently**. The row key is
+`<version>-<patients>p-<observations>o-<case-id>`, for example
+`R4-100p-1000o-patient-create`. Every artifact/case starts a new process and
+empty clinical tenant. The Phase 1 challenge is **not** inserted into these
+children: no unexplained Patient, Observation, Bundle or receipt is added.
+No `$reset-store` or production change is used.
+
+| Case ID | Four-operation input order and exact independent success evidence |
+|-|-|
+| `patient-create` | ID-less individual POSTs, identifiers `created-patient-00000001` through `00000004`; new distinct body/Location-bound IDs, full content/read-backs, exactly +4 Patients. |
+| `observation-create` | ID-less individual POSTs with unique `created-observation-...` identifiers and the first four permuted seeded Patients as subjects; full content/read-backs, exactly +4 Observations. |
+| `patient-update` | Repeat PUT to the first permuted seeded Patient, toggling active false/true/false/true. Pre-read proves existence; each return must advance versions 1 -> 2 -> 3 -> 4 -> 5 and change the field. Final read preserves version 5; no count growth. |
+| `observation-update` | Repeat PUT to the first permuted seeded Observation; quantities 38.5/39.5/38.5/39.5 and effective times `...06Z`/`...07Z` alternate together. Subject stays unchanged. Every version step and final persisted content/count are checked. |
+| `patient-token` | First four permuted Patient identifiers, one complete expected match per operation. |
+| `patient-string` | Repeat `family=Family017`, exactly indices 17, 117, ...; 1 / 10 complete known matches at the two scales. |
+| `observation-token` | Repeat system/code token `Code017`, exactly indices 17, 1017, ...; 1 / 10 complete known matches. |
+| `observation-reference` | Repeat subject of the first permuted seeded Patient; exactly its ten known Observations. |
+| `empty-search` | Repeat code token `OutsideDomain`; valid searchset total 0 and no entries, not an OperationOutcome. |
+| `patient-read` | First four permuted seeded IDs; full resource and bound metadata/header comparison. |
+| `observation-read` | First four permuted seeded IDs; full content including quantity, time and subject. |
+| `subscription-receive` | Four unique full-content Bundles/status IDs, event numbers 1 through 4. Full stored Bundle reads, +4 Bundles, one dictionary key with four receipts and four individually correct events; no separately stored embedded resources. |
+
+Search values are percent-encoded; requests include `_count=100`. The count
+parameter is **not** a completeness assertion. The client follows every
+`next` link sequentially within the logical operation, rejecting cycles or
+escaped tenant/origin/resource URLs. Evidence retains each page/request.
+The independent audit requires a successful searchset, the exact total and
+identity set across all pages, no duplicates/errors/includes, full resource
+content and previously bound metadata, matching fullUrls and self links, and
+no unconsumed next link. URI query escaping/order can differ in a self link
+only if the decoded name/value pairs are identical; clinical JSON is never
+normalized this way. Current required result sets fit one page, but the
+oracle also has positive multi-page and truncated-page negative controls.
+
+Within each child, `SeedAsync` first PUTs **every Patient**, then **every
+Observation**, following the frozen permutations. It checks every successful
+response's exact status, entire resource, fixed ID, first version and
+Location/ETag/Last-Modified. It then GETs **every seeded resource** in the
+same order, comparing all content and bound metadata after all PUTs have
+finished. Every reference is independently checked against `floor(j / 10)`.
+The probe checks the complete resource-type inventory and exact 1,100 /
+11,000 clinical population, not a 32-identity sample as a substitute for
+the full HTTP content audit. Built-in conformance counts remain untouched.
+The full matrix therefore performs **871,200 seed PUTs and 871,200 seed
+read-backs**, in addition to readiness, case and audit requests.
+
+`PrepareCaseAsync` validates the fixture ledger, proves update pre-existence
+with another ordinary read, and captures prepared counts/identities.
+`AuditCaseAsync` validates every completed case response, reads back all
+creates/final updates/stored Bundles, and checks post-work counts plus every
+receipt-list entry. Hook snapshots explicitly inspect absence of all eight
+embedded clinical identities. Create cases additionally DELETE their four
+new resources **after** recording +4 growth and read-backs, validating each
+200 deleted representation and the restored corpus counts/absent IDs.
+This untimed cleanup exercises the future restoration primitive; it is not
+128-operation warm-up or a measured create batch.
+
+The unchanged probe limits suffice: at most 12 requested identities for a
+four-event hook, five stopped snapshots for create cases, and bounded
+2 MiB snapshot replies / 64 commands. Effective settings, actual empty-source
+registration/filesystem, network ownership and sealed loaded assemblies are
+checked at **every** snapshot, including after the exercised case and cleanup.
+The common **600-second setup deadline includes all seeding, read-backs,
+case operations, audits and cleanup**. Request deadlines and all existing
+startup/shutdown bounds remain active. Exceeding a bound is a retained gate
+failure, never permission to reduce the corpus, omit audits or silently retry.
 
 ### Evidence and failure interpretation
 
@@ -539,25 +666,77 @@ under the local slot. PID 19596 exited normally. The pre-freeze input spelling
 above matches this observed serialized representation without a semantic
 product change or any response-oracle exemption.
 
-All six complete live challenges and their receipt gates, the full 72-case
-preflight, and measurements remain pending. Rebuild the tools and prepare a
-fresh run ID with new tool/fixture hashes before the next attempt. Both
-variants must receive identical version-specific input bytes. Preserve
-earlier evidence and never pool its prior input hashes or observations with
-the corrected inputs.
+The corrected `phase1-006` subsequently passed all six real challenges,
+including stored Bundle and receipt checks, on .NET/ASP.NET 8.0.30, with
+exit 0 and no forced termination for all six children. Preserve that evidence
+and its archived tool/probe bytes. It does not establish the 72-row full-scale
+gate, new update/search/delete semantics, or any performance measurement.
+Rebuild the Phase 2 tools, choose a **fresh Phase 2 run ID**, and prepare new
+tool/fixture seals before attempting the expanded preflight.
 
-Each `preflight\<variant>-<version>` retains launch/handshake/process/exit
-records, capped stdout/stderr, request attempts, full response headers/bytes,
-readiness, ready/seeded/received snapshots, network observations, dependency
-correlations and oracle results. JSON byte arrays are base64-encoded unchanged
-bytes, with lengths and SHA-256 where recorded. Failures retain attempted/
-completed response counts and reasons; they cannot be omitted from a
-successful batch because no measured batch exists yet.
+`prepared.json` now contains the full workload ledger described above;
+`fixtures\corpora\<corpus-key>.json` contains all clinical bytes and
+permutations, and `fixtures\cases\<row-key>.json` contains the complete four
+requests/expected identities/version-specific notification bytes.
+Preflight re-generates and independently validates the sealed inputs before
+launching. The prepared file itself is hashed in `preflight\input-seal.json`
+and rechecked along with artifact/runtime/tool/probe/fixture/manifest seals
+before and after children.
 
-`feasibility-completed.json` requires six successful real challenges, states
-`MeasuredTrials: 0` and `BenchmarkComplete: false`, and lists the remaining
-gates. Unit fixtures, source inspection, this documentation, or existence of
-an output file do not establish actual artifact feasibility. Missing package
+Each `preflight\<row-key>\<variant>` retains launch/handshake/process/exit
+records, capped stdout/stderr, readiness, ready/seeded/prepared/audited (and
+create-cleanup) snapshots, network observations, dependency correlations and
+oracle results. `case-prepared.json` records the fixed input order and zero
+warm-up. `case-NNNN-page-NNNN-request.json` and the matching response file
+retain every case request and complete response headers/bytes; audit reads
+and deletes also retain full responses. Byte arrays are base64-encoded,
+unmodified bytes, not reserialized approximations.
+
+Successful seed interactions use **one `seed-audit.json` per child**, not one
+raw file per request. It records required/attempted/completed/validated
+write and read counts, each validated input hash/length, bound identity/
+metadata, and each validated response's status, byte length, body SHA-256,
+whole-`ResponseEvidence` SHA-256 and response interval. Only responses that
+actually passed full content/header validation enter this summary.
+`seed-failed.json` retains the failing full response when available, its
+identity/stage and counters; earlier validated evidence is still written.
+The seed hash policy does not apply to case or audit responses.
+
+`case-progress.json` keeps attempted, completed and validated operation
+counts separately, as well as actual HTTP and cleanup counts. Failure or
+cancellation preserves progress, raw responses and child cleanup evidence.
+There is no reattempt/resume within a run ID and no best-of selection.
+The full preflight fails fast on an incompatible case, but
+**`preflight\matrix.json` always enumerates all 72 rows and both variants**,
+including failed and `not-attempted` entries. `preflight\failures.json`
+retains the overall failure, failed attempts and every unattempted case;
+`failed.json` additionally records the overall error. A failed preflight,
+including a handoff/seal failure before launch, consumes the run directory.
+Atomic create-new ownership of `started.json` prevents a competing invocation
+from appending failures into another invocation's active evidence.
+
+Only **`preflight\completed.json`** establishes the full untimed gate. It
+requires 72 successful pairs, 144 successful fresh process instances
+(PID **and start time**, since OS PIDs may be reused), four completed and
+validated operations per child, clean shutdown, and unchanged seals.
+It explicitly records **`MeasuredTrials: 0`**, **`BenchmarkComplete: false`**
+and the remaining Phase 3/4 gates. The matrix also carries those flags.
+Completion also requires a zero CLI exit and no failure markers; a cancelled
+or failed final evidence write retains `finalization-failed.json` and cannot
+be accepted merely because a partial `completed.json` exists.
+The unchanged Phase 1 `Program` wrapper still prints its legacy six-gate
+sentence after the runner's new full-matrix message; that sentence is not
+the Phase 2 completion criterion. Full `run`/`render` remain refused.
+
+Six additional named `PerformanceEvidenceTests` facts cover deterministic
+corpora, the exact matrix, all notification shapes, error/truncated/wrong-ID
+searches, no-op/version/growth failures, and every receipt entry including
+embedded double-storage. The twelve earlier tooling facts and existing
+application tests are unchanged. These synthetic controls never count as
+live preflight or measured trials.
+
+Unit fixtures, source inspection, this documentation, or existence of
+an output file do not establish live full-matrix success. Missing package
 provenance, policy rejection, host observation failure, an escaped effective
 cache, wrong runtime, mismatched content/receipt or failed cleanup is an
 execution blocker. Retain it and return to the caller; do not weaken a check,

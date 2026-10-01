@@ -4,6 +4,7 @@
 // </copyright>
 
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO.Compression;
 using System.IO.Pipes;
@@ -120,14 +121,14 @@ public sealed record RuntimeSettings
 /// <summary>Evidence of existing controls; the tool does not change firewall, policy or machine configuration.</summary>
 public sealed record IsolationSettings(bool Authorized, string Description, string EvidencePath);
 
-/// <summary>Bounds shared by all six feasibility launches and reserved for subsequent phases.</summary>
+/// <summary>Common bounds for each fresh case process and subsequent measured trials.</summary>
 public sealed record ExperimentBounds
 {
     /// <summary>Startup/readiness deadline.</summary>
     public int StartupSeconds { get; init; } = 120;
     /// <summary>Entire corpus/setup/challenge deadline.</summary>
     public int SetupSeconds { get; init; } = 600;
-    /// <summary>Future measured-batch deadline; no phase-one window is measured.</summary>
+    /// <summary>Future measured-batch deadline; the current preflight is entirely untimed.</summary>
     public int BatchSeconds { get; init; } = 60;
     /// <summary>Complete HTTP or pipe exchange deadline.</summary>
     public int RequestSeconds { get; init; } = 30;
@@ -186,12 +187,30 @@ public sealed record PreparedExperiment(
     ArtifactIdentity Baseline, ArtifactIdentity Candidate, FrameworkIdentity[] Frameworks,
     Dictionary<string, FileSeal> ToolFiles, FileSeal DotnetHost, string ProbeSha256,
     FileSeal CandidateProvenance, FileSeal CandidateBuildLog, FileSeal IsolationEvidence,
-    FileSeal Archive, FileSeal[] FixtureFiles, DateTimeOffset PreparedUtc);
+    FileSeal Archive, FileSeal[] FixtureFiles, WorkloadPreparation Workload, DateTimeOffset PreparedUtc);
+
+/// <summary>One frozen request's method, address, preference and exact input byte identity.</summary>
+public sealed record WorkloadInputSeal(int Number, string Method, string RelativeUrl, string? Prefer, int BodyBytes, string BodySha256);
+
+/// <summary>Provenance for a complete corpus and its dependency-safe PUT order.</summary>
+public sealed record CorpusFixture(
+    string Key, string FhirVersion, int PatientCount, int ObservationCount, string FixtureFile,
+    WorkloadInputSeal[] SeedRequests, string RequestOrderSha256, long PayloadBytes);
+
+/// <summary>A complete, untimed case fixture rather than a measurement configuration.</summary>
+public sealed record CaseFixture(
+    WorkloadCase Case, string CorpusKey, string FixtureFile, int LogicalOperations,
+    WorkloadInputSeal[] Requests, string RequestOrderSha256, long PayloadBytes);
+
+/// <summary>The sealed full-matrix workload ledger, independent of the probe protocol version.</summary>
+public sealed record WorkloadPreparation(
+    string ContractVersion, string Algorithm, int Seed, int PreflightOperations,
+    CorpusFixture[] Corpora, CaseFixture[] Cases, SuccessfulStatusProfile[] StatusProfiles);
 
 /// <summary>One loaded assembly's correlation to sealed bytes and declared dependency ownership.</summary>
 public sealed record AssemblyCorrelation(AssemblySnapshot Loaded, string Origin, string Dependency, string DependencyVersion, string DependencySha512);
 
-/// <summary>Acquires sealed inputs and owns bounded, strictly sequential feasibility children.</summary>
+/// <summary>Acquires sealed inputs and owns bounded, strictly sequential full-corpus preflight children.</summary>
 public sealed class ExperimentRunner
 {
     /// <summary>The published source commit, never substituted by another baseline.</summary>
@@ -200,7 +219,7 @@ public sealed class ExperimentRunner
     public const string CandidateRevision = "21fcb2e7ce7c44de9bc5f12b6af68bee06e90d9b";
     /// <summary>The exact released archive.</summary>
     public const string PackageUrl = "https://api.nuget.org/v3-flatcontainer/fhir-candle/2025.611.1422/fhir-candle.2025.611.1422.nupkg";
-    /// <summary>The one authorized report target; phase one never writes it.</summary>
+    /// <summary>The one authorized report target; untimed preflight never writes it.</summary>
     public const string RequiredReportPath = @"C:\ai\git\fhir-candle\scratch\1001-01\performance.md";
     /// <summary>All runtime evidence remains beneath the ignored experiment root.</summary>
     public const string DataRoot = @"C:\ai\git\fhir-candle\scratch\1001-01\performance-data";
@@ -214,6 +233,7 @@ public sealed class ExperimentRunner
     private readonly ExperimentManifest _manifest;
     private readonly byte[] _manifestBytes;
     private OwnedChild? _activeChild;
+    private string? _preparedSha256;
 
     private ExperimentRunner(ExperimentManifest manifest, byte[] manifestBytes)
     {
@@ -319,25 +339,13 @@ public sealed class ExperimentRunner
                 ?? throw new InvalidDataException("Probe is not a managed assembly.");
             Require(probe.TargetFramework == ".NETCoreApp,Version=v8.0" && probe.Name == "FhirCandle.Performance.Probe",
                 "Only the actual net8.0 probe may be injected.");
-            foreach (string version in new[] { "R4", "R4B", "R5" })
-            {
-                ProbeChallenge challenge = Workloads.CreateProbeChallenge(version);
-                CorrectnessOracle.ValidateChallenge(challenge);
-                await WriteNewAsync(Output("fixtures", version + ".json"), new
-                {
-                    Workloads.Algorithm, Workloads.Seed, Challenge = challenge,
-                    PatientSha256 = HashBytes(challenge.Patient), ObservationSha256 = HashBytes(challenge.Observation),
-                    NotificationSha256 = HashBytes(challenge.Notification),
-                    PatientBytes = challenge.Patient.Length, ObservationBytes = challenge.Observation.Length,
-                    NotificationBytes = challenge.Notification.Length, RequestOrder = new[] { "patient-put", "observation-post", "reads", "subscription-hook", "bundle-read" },
-                }, cancellationToken);
-            }
+            WorkloadPreparation workload = await PrepareWorkloadsAsync(cancellationToken);
 
-            PreparedExperiment prepared = new(1, ProbeProtocol.Version, _manifest.RunId, HashBytes(_manifestBytes),
+            PreparedExperiment prepared = new(2, ProbeProtocol.Version, _manifest.RunId, HashBytes(_manifestBytes),
                 baseline, candidate, frameworks, tools, SealFile(_manifest.Runtime.DotnetHostPath),
                 SealFile(_manifest.ProbePath).Sha256, SealFile(_manifest.Candidate.BuildProvenancePath),
                 SealFile(provenance.BuildLogPath), isolation, SealFile(_manifest.Baseline.ArchivePath),
-                SealDirectory(Output("fixtures")), DateTimeOffset.UtcNow);
+                SealDirectory(Output("fixtures")), workload, DateTimeOffset.UtcNow);
             await WriteNewAsync(Output("candidate-build.json"), provenance, cancellationToken);
             await WriteNewAsync(Output("prepared.json"), prepared, cancellationToken);
         }
@@ -348,7 +356,89 @@ public sealed class ExperimentRunner
         }
     }
 
-    /// <summary>Runs six real, fresh artifact/version challenges, never accepted measured trials.</summary>
+    private async Task<WorkloadPreparation> PrepareWorkloadsAsync(CancellationToken token)
+    {
+        List<CorpusFixture> corpora = [];
+        List<CaseFixture> fixtures = [];
+        WorkloadCase[] cases = Workloads.CreateCases();
+        foreach (string version in new[] { "R4", "R4B", "R5" })
+        {
+            foreach (int patients in new[] { 100, 1000 })
+            {
+                token.ThrowIfCancellationRequested();
+                WorkloadCorpus corpus = Workloads.CreateCorpus(version, patients);
+                CorrectnessOracle.ValidateCorpus(corpus);
+                CorpusFixture descriptor = DescribeCorpus(corpus);
+                await WriteNewAsync(Output("fixtures", descriptor.FixtureFile), corpus, token);
+                corpora.Add(descriptor);
+                foreach (WorkloadCase workload in cases.Where(item => item.FhirVersion == version && item.PatientCount == patients))
+                {
+                    WorkloadRequest[] requests = Workloads.CreateRequests(workload, corpus);
+                    CorrectnessOracle.ValidateCaseRequests(workload, corpus, requests, Workloads.PreflightOperations);
+                    CaseFixture fixture = DescribeCase(workload, corpus.Key, requests);
+                    await WriteNewAsync(Output("fixtures", fixture.FixtureFile), requests, token);
+                    fixtures.Add(fixture);
+                }
+            }
+        }
+
+        return new(Workloads.ContractVersion, Workloads.Algorithm, Workloads.Seed, Workloads.PreflightOperations,
+            corpora.ToArray(), fixtures.ToArray(),
+            [CorrectnessOracle.StatusProfile("baseline"), CorrectnessOracle.StatusProfile("candidate")]);
+    }
+
+    private static CorpusFixture DescribeCorpus(WorkloadCorpus corpus)
+    {
+        WorkloadInputSeal[] inputs = Workloads.SeedResources(corpus).Select((resource, index) =>
+            new WorkloadInputSeal(index + 1, "PUT", resource.Identity, "return=representation",
+                resource.Body.Length, HashBytes(resource.Body))).ToArray();
+        return new(corpus.Key, corpus.FhirVersion, corpus.PatientCount, corpus.ObservationCount,
+            Path.Combine("corpora", corpus.Key + ".json"), inputs,
+            HashBytes(JsonSerializer.SerializeToUtf8Bytes(inputs, _json)), inputs.Sum(input => (long)input.BodyBytes));
+    }
+
+    private static CaseFixture DescribeCase(WorkloadCase workload, string corpusKey, WorkloadRequest[] requests)
+    {
+        WorkloadInputSeal[] inputs = requests.Select(request => new WorkloadInputSeal(request.Number, request.Method,
+            request.RelativeUrl, request.Prefer, request.Body?.Length ?? 0, HashBytes(request.Body ?? []))).ToArray();
+        return new(workload, corpusKey, Path.Combine("cases", workload.RowKey + ".json"), requests.Length, inputs,
+            HashBytes(JsonSerializer.SerializeToUtf8Bytes(inputs, _json)), inputs.Sum(input => (long)input.BodyBytes));
+    }
+
+    private async Task<PreparedInputs> ReadWorkloadsAsync(PreparedExperiment prepared, CancellationToken token)
+    {
+        Dictionary<string, WorkloadCorpus> corpora = new(StringComparer.Ordinal);
+        Dictionary<string, WorkloadRequest[]> requests = new(StringComparer.Ordinal);
+        foreach (CorpusFixture fixture in prepared.Workload.Corpora)
+        {
+            byte[] bytes = await ReadBoundedFileAsync(Output("fixtures", fixture.FixtureFile), 32 * 1024 * 1024, token);
+            WorkloadCorpus corpus = JsonSerializer.Deserialize<WorkloadCorpus>(bytes, _json)
+                ?? throw new InvalidDataException("Missing complete corpus fixture.");
+            CorrectnessOracle.ValidateCorpus(corpus);
+            Require(bytes.SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(Workloads.CreateCorpus(
+                corpus.FhirVersion, corpus.PatientCount), _json)), "Corpus bytes/order differ from the frozen algorithm.");
+            Require(JsonSerializer.Serialize(DescribeCorpus(corpus), _json) == JsonSerializer.Serialize(fixture, _json),
+                "Corpus provenance, input hashes or lengths differ.");
+            Require(corpora.TryAdd(corpus.Key, corpus), "Duplicate corpus fixture.");
+        }
+
+        foreach (CaseFixture fixture in prepared.Workload.Cases)
+        {
+            Require(corpora.TryGetValue(fixture.CorpusKey, out WorkloadCorpus? corpus), "Case has no complete corpus.");
+            byte[] bytes = await ReadBoundedFileAsync(Output("fixtures", fixture.FixtureFile), MaximumHttpBytes, token);
+            WorkloadRequest[] operations = JsonSerializer.Deserialize<WorkloadRequest[]>(bytes, _json)
+                ?? throw new InvalidDataException("Missing case fixture.");
+            CorrectnessOracle.ValidateCaseRequests(fixture.Case, corpus!, operations, Workloads.PreflightOperations);
+            Require(bytes.SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(Workloads.CreateRequests(fixture.Case, corpus!), _json)) &&
+                JsonSerializer.Serialize(DescribeCase(fixture.Case, corpus!.Key, operations), _json) == JsonSerializer.Serialize(fixture, _json),
+                "Case bytes, order, input hashes or lengths differ.");
+            Require(requests.TryAdd(fixture.Case.RowKey, operations), "Duplicate case fixture.");
+        }
+
+        return new(corpora, requests);
+    }
+
+    /// <summary>Runs all seventy-two paired rows in 144 fresh processes, with zero measured trials.</summary>
     public async Task RunPreflightAsync(CancellationToken cancellationToken)
     {
         RequireWindowsAndUninjectedRunner();
@@ -357,157 +447,565 @@ public sealed class ExperimentRunner
         Require(Directory.Exists(_manifest.OutputDirectory) &&
             Directory.GetFileSystemEntries(_manifest.OutputDirectory).All(path => allowed.Contains(Path.GetFileName(path), StringComparer.Ordinal)),
             "Expected only this run's completed preparation. Existing/failed preflight or unknown evidence requires a new ID.");
-        PreparedExperiment prepared = JsonSerializer.Deserialize<PreparedExperiment>(
-            await ReadBoundedFileAsync(Output("prepared.json"), 32 * 1024 * 1024, cancellationToken), _json)
-                ?? throw new InvalidDataException("Missing completed preparation.");
-        VerifyPrepared(prepared);
         Directory.CreateDirectory(Output("preflight"));
-        string[] versions = ["R4", "R4B", "R5"];
-        string[] schedule = versions.SelectMany(version => new[] { "baseline-" + version, "candidate-" + version }).ToArray();
-        await WriteNewAsync(Output("preflight", "started.json"), new
-        {
-            _manifest.RunId, ProtocolVersion = ProbeProtocol.Version, StartedUtc = DateTimeOffset.UtcNow,
-            Machine = Environment.MachineName, OperatingSystem = RuntimeInformation.OSDescription,
-            Architecture = RuntimeInformation.OSArchitecture.ToString(), LogicalProcessors = Environment.ProcessorCount,
-            Processor = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER"),
-            _manifest.ToolSourceRevision, _manifest.ToolSourceDescription, Schedule = schedule, MeasuredTrials = 0,
-        }, cancellationToken);
-        int completed = 0;
+        WorkloadCase[] cases = Workloads.CreateCases();
+        PreflightAttempt[] attempts = cases.SelectMany(workload => new[] { "baseline", "candidate" }.Select(variant =>
+            new PreflightAttempt(0, workload.RowKey, variant, Path.Combine(workload.RowKey, variant),
+                "not-attempted", null, null, new CaseProgress(), null)))
+            .Select((attempt, index) => attempt with { Ordinal = index + 1 }).ToArray();
+        string startedPath = Output("preflight", "started.json");
+        EnsureNoReparseParents(startedPath);
+        FileStream startRecord = new(startedPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        Exception? failure = null;
         try
         {
-            foreach (string version in versions)
+            await using (startRecord)
             {
-                foreach (ArtifactIdentity artifact in new[] { prepared.Baseline, prepared.Candidate })
+                byte[] started = JsonSerializer.SerializeToUtf8Bytes(new
                 {
+                    _manifest.RunId, ProtocolVersion = ProbeProtocol.Version, Workloads.ContractVersion,
+                    StartedUtc = DateTimeOffset.UtcNow, Machine = Environment.MachineName,
+                    OperatingSystem = RuntimeInformation.OSDescription, Architecture = RuntimeInformation.OSArchitecture.ToString(),
+                    LogicalProcessors = Environment.ProcessorCount, Processor = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER"),
+                    _manifest.ToolSourceRevision, _manifest.ToolSourceDescription,
+                    Schedule = attempts.Select(attempt => new { attempt.Ordinal, attempt.RowKey, attempt.Variant, attempt.EvidenceDirectory }),
+                    RequiredPairedRows = 72, RequiredArtifactCases = 144, Workloads.PreflightOperations,
+                    MeasuredTrials = 0, BenchmarkComplete = false,
+                }, _json);
+                await startRecord.WriteAsync(started, cancellationToken);
+                await startRecord.FlushAsync(cancellationToken);
+            }
+
+            byte[] preparedBytes = await ReadBoundedFileAsync(Output("prepared.json"), 32 * 1024 * 1024, cancellationToken);
+            _preparedSha256 = HashBytes(preparedBytes);
+            PreparedExperiment prepared = JsonSerializer.Deserialize<PreparedExperiment>(preparedBytes, _json)
+                ?? throw new InvalidDataException("Missing completed preparation.");
+            VerifyPrepared(prepared);
+            PreparedInputs inputs = await ReadWorkloadsAsync(prepared, cancellationToken);
+            await WriteNewAsync(Output("preflight", "input-seal.json"), new
+            {
+                PreparedSha256 = _preparedSha256, prepared.ManifestSha256, prepared.ProbeSha256,
+                prepared.ToolFiles, Workloads.ContractVersion, prepared.Workload.StatusProfiles,
+                SeedWritesPerVariantAcrossMatrix = prepared.Workload.Cases.Sum(fixture =>
+                    fixture.Case.PatientCount + fixture.Case.ObservationCount),
+                SeedReadsPerVariantAcrossMatrix = prepared.Workload.Cases.Sum(fixture =>
+                    fixture.Case.PatientCount + fixture.Case.ObservationCount),
+            }, cancellationToken);
+            for (int index = 0; index < attempts.Length; index++)
+            {
+                PreflightAttempt attempt = attempts[index] with { Status = "in-progress", StartedUtc = DateTimeOffset.UtcNow };
+                attempts[index] = attempt;
+                string directory = Output("preflight", attempt.EvidenceDirectory);
+                try
+                {
+                    Directory.CreateDirectory(directory);
                     cancellationToken.ThrowIfCancellationRequested();
                     VerifyPrepared(prepared);
-                    string directory = Output("preflight", artifact.Variant + "-" + version);
-                    Directory.CreateDirectory(directory);
+                    CaseFixture fixture = prepared.Workload.Cases.Single(item => item.Case.RowKey == attempt.RowKey);
+                    ArtifactIdentity artifact = attempt.Variant == "baseline" ? prepared.Baseline : prepared.Candidate;
                     await WriteNewAsync(Path.Combine(directory, "attempt.json"), new
                     {
-                        Variant = artifact.Variant, FhirVersion = version, AttemptedUtc = DateTimeOffset.UtcNow,
-                        Ordinal = completed + 1, MeasuredTrials = 0,
+                        attempt.Ordinal, attempt.RowKey, attempt.Variant, attempt.StartedUtc,
+                        Fixture = fixture, StatusProfile = CorrectnessOracle.StatusProfile(artifact.Variant),
+                        PreparedSha256 = _preparedSha256, Untimed = true, MeasuredTrials = 0,
                     }, cancellationToken);
                     try
                     {
-                        await RunChallengeAsync(artifact, version, directory, prepared, cancellationToken);
-                        VerifyPrepared(prepared);
-                        await WriteNewAsync(Path.Combine(directory, "passed.json"), new
-                        {
-                            PassedUtc = DateTimeOffset.UtcNow, ChallengeOnly = true, MeasuredTrials = 0,
-                        }, cancellationToken);
-                        completed++;
-                    }
-                    catch (Exception exception)
-                    {
-                        await SaveFailureAsync(Path.Combine(directory, "failed.json"), exception);
-                        throw;
+                        await RunCasePreflightAsync(artifact, fixture.Case, inputs.Corpora[fixture.CorpusKey],
+                            inputs.Requests[attempt.RowKey], directory, prepared, attempt.Progress, cancellationToken);
                     }
                     finally
                     {
                         VerifyPrepared(prepared);
                     }
+
+                    await WriteNewAsync(Path.Combine(directory, "passed.json"), new
+                    {
+                        PassedUtc = DateTimeOffset.UtcNow, attempt.RowKey, attempt.Variant,
+                        UntimedSemanticsOnly = true, attempt.Progress, MeasuredTrials = 0, BenchmarkComplete = false,
+                    }, cancellationToken);
+                    attempts[index] = attempt with { Status = "passed", FinishedUtc = DateTimeOffset.UtcNow };
+                }
+                catch (Exception exception)
+                {
+                    attempts[index] = attempt with
+                    {
+                        Status = "failed", FinishedUtc = DateTimeOffset.UtcNow,
+                        Failure = exception.GetType().FullName + ": " + exception.Message,
+                    };
+                    await SaveFailureAsync(Path.Combine(directory, "failed.json"), exception);
+                    throw;
                 }
             }
 
-            await WriteNewAsync(Output("preflight", "feasibility-completed.json"), new
-            {
-                CompletedUtc = DateTimeOffset.UtcNow, SuccessfulArtifactVersionChallenges = completed,
-                RequiredArtifactVersionChallenges = 6, MeasuredTrials = 0, BenchmarkComplete = false,
-                RequiredPairedRows = 72, MinimumFutureMeasuredChildTrials = 432,
-                RemainingGates = new[] { "full-scale workload/oracle matrix", "paired calibration", "all measured trials", "complete evidence-only rendering" },
-            }, cancellationToken);
+            Require(cases.Length == 72 && attempts.Length == 144 && attempts.All(attempt => attempt.Status == "passed" &&
+                attempt.Progress.CompletedOperations == Workloads.PreflightOperations &&
+                attempt.Progress.ValidatedOperations == Workloads.PreflightOperations) &&
+                cases.All(workload => attempts.Where(attempt => attempt.RowKey == workload.RowKey).All(attempt =>
+                    attempt.Progress.ValidatedSeedWrites == workload.PatientCount + workload.ObservationCount &&
+                    attempt.Progress.ValidatedSeedReads == workload.PatientCount + workload.ObservationCount)) &&
+                attempts.All(attempt => attempt.Progress.ProcessId > 0) &&
+                attempts.Select(attempt => (attempt.Progress.ProcessId, attempt.Progress.ProcessStartedUtc)).Distinct().Count() == 144,
+                "The complete successful 144-process preflight matrix is missing.");
+            VerifyPrepared(prepared);
         }
         catch (Exception exception)
         {
+            failure = exception;
             await WriteNewAsync(Output("preflight", "failed.json"), new
             {
-                FailedUtc = DateTimeOffset.UtcNow, CompletedChallenges = completed, exception.Message,
-                Type = exception.GetType().FullName, MeasuredTrials = 0, BenchmarkComplete = false,
+                FailedUtc = DateTimeOffset.UtcNow, exception.Message, Type = exception.GetType().FullName,
+                AttemptedArtifactCases = attempts.Count(attempt => attempt.Status != "not-attempted"),
+                SuccessfulArtifactCases = attempts.Count(attempt => attempt.Status == "passed"),
+                MeasuredTrials = 0, BenchmarkComplete = false,
             }, CancellationToken.None);
-            throw;
-        }
-    }
-
-    private async Task RunChallengeAsync(
-        ArtifactIdentity artifact, string version, string directory, PreparedExperiment prepared, CancellationToken token)
-    {
-        ProbeChallenge challenge = Workloads.CreateProbeChallenge(version);
-        CorrectnessOracle.ValidateChallenge(challenge);
-        OwnedChild child = await LaunchServerAsync(artifact, version, directory, prepared, token);
-        try
-        {
-            using CancellationTokenSource setup = CancellationTokenSource.CreateLinkedTokenSource(token);
-            setup.CancelAfter(TimeSpan.FromSeconds(_manifest.Bounds.SetupSeconds));
-            string[] initialIds = ["Patient/" + challenge.PatientId, "Bundle/" + challenge.BundleId,
-                "Observation/" + challenge.FocusId, "Patient/" + challenge.ContextId];
-            ProbeSnapshot initial = await CaptureAsync(child, "ready", initialIds, prepared, setup.Token);
-            Require(initial.Tenant.ResourceCounts["Patient"] == 0 && initial.Tenant.ResourceCounts["Observation"] == 0 &&
-                initial.Tenant.ResourceCounts["Bundle"] == 0 && initial.Tenant.ReceiptCount == 0 &&
-                initial.Tenant.EventCount == 0 && initial.Tenant.ReceiptKeyCount == 0 &&
-                initial.Tenant.RequestedResources.Values.All(resource => resource is null), "Unexpected initial clinical/challenge state.");
-
-            ResponseEvidence patient = await SendAndSaveAsync(child, "01-patient-put", HttpMethod.Put,
-                "Patient/" + challenge.PatientId, challenge.Patient, "return=representation", setup.Token);
-            // The released ResourceStore returns 200 for PUT-as-create; the pinned candidate returns 201.
-            int putStatus = artifact.Variant == "baseline" ? 200 : 201;
-            ResourceBinding patientBinding = CorrectnessOracle.ValidateResponse(
-                patient, putStatus, challenge.Patient, child.BaseUrl, child.StartedUtc);
-            ResponseEvidence observation = await SendAndSaveAsync(child, "02-observation-post", HttpMethod.Post,
-                "Observation", challenge.Observation, "return=representation", setup.Token);
-            ResourceBinding observationBinding = CorrectnessOracle.ValidateResponse(
-                observation, 201, challenge.Observation, child.BaseUrl, child.StartedUtc);
-            ResponseEvidence patientRead = await SendAndSaveAsync(child, "03-patient-read", HttpMethod.Get,
-                "Patient/" + patientBinding.Id, null, null, setup.Token);
-            _ = CorrectnessOracle.ValidateResponse(patientRead, 200, challenge.Patient, child.BaseUrl, child.StartedUtc, patientBinding);
-            ResponseEvidence observationRead = await SendAndSaveAsync(child, "04-observation-read", HttpMethod.Get,
-                "Observation/" + observationBinding.Id, null, null, setup.Token);
-            _ = CorrectnessOracle.ValidateResponse(observationRead, 200, challenge.Observation, child.BaseUrl, child.StartedUtc, observationBinding);
-            string[] requested = [.. initialIds, "Observation/" + observationBinding.Id];
-            ProbeSnapshot seeded = await CaptureAsync(child, "seeded", requested, prepared, setup.Token);
-            CorrectnessOracle.ValidateState(initial.Tenant, seeded.Tenant, challenge, observationBinding,
-                child.SourceDirectory, received: false);
-
-            ResponseEvidence hook = await SendAndSaveAsync(child, "05-subscription-hook", HttpMethod.Post,
-                "$subscription-hook", challenge.Notification, "return=OperationOutcome", setup.Token);
-            CorrectnessOracle.ValidateHookResponse(hook);
-            ResponseEvidence bundleRead = await SendAndSaveAsync(child, "06-bundle-read", HttpMethod.Get,
-                "Bundle/" + challenge.BundleId, null, null, setup.Token);
-            _ = CorrectnessOracle.ValidateResponse(bundleRead, 200, challenge.Notification, child.BaseUrl, child.StartedUtc);
-            ProbeSnapshot received = await CaptureAsync(child, "received", requested, prepared, setup.Token);
-            CorrectnessOracle.ValidateState(initial.Tenant, received.Tenant, challenge, observationBinding,
-                child.SourceDirectory, received: true);
-            CorrectnessOracle.ValidateReceipt(received.Tenant, challenge, hook.StartedUtc, received.CapturedUtc);
-            Require(!child.Process.HasExited && !child.StandardOutput.Overflow && !child.StandardError.Overflow,
-                "Child exited unexpectedly or exceeded log evidence bounds.");
-            await WriteNewAsync(Path.Combine(directory, "oracle.json"), new
-            {
-                Passed = true, PatientBinding = patientBinding, ObservationBinding = observationBinding,
-                StoredBundle = challenge.BundleId, RegisteredEvents = received.Tenant.EventCount,
-                PutAsCreateStatus = putStatus, PostCreateStatus = 201, HookStatus = 200,
-                StatusSource = artifact.SourceRevision + ": ResourceStore.InstanceUpdate / VersionedFhirStore.DoInstanceCreate / OpSubscriptionHook",
-                ReadinessInventory = "ready-snapshot.json", WarmedChallengeInventory = "received-snapshot.json",
-                PhaseOneOnly = true, MeasuredTrials = 0,
-            }, setup.Token);
-        }
-        catch (Exception exception)
-        {
-            await SaveFailureAsync(Path.Combine(directory, "challenge-failed.json"), exception);
             throw;
         }
         finally
         {
+            await WriteNewAsync(Output("preflight", "matrix.json"), new
+            {
+                Workloads.ContractVersion, RequiredPairedRows = 72, RequiredArtifactCases = 144,
+                SuccessfulArtifactCases = attempts.Count(attempt => attempt.Status == "passed"),
+                SuccessfulPairedRows = cases.Count(workload =>
+                    attempts.Where(attempt => attempt.RowKey == workload.RowKey).All(attempt => attempt.Status == "passed")),
+                Rows = cases.Select(workload => new
+                {
+                    workload.RowKey, workload.CaseId, workload.FhirVersion, workload.PatientCount, workload.ObservationCount,
+                    Baseline = attempts.Single(attempt => attempt.RowKey == workload.RowKey && attempt.Variant == "baseline"),
+                    Candidate = attempts.Single(attempt => attempt.RowKey == workload.RowKey && attempt.Variant == "candidate"),
+                }),
+                SemanticGatePassed = failure is null && attempts.All(attempt => attempt.Status == "passed"),
+                MeasuredTrials = 0, BenchmarkComplete = false,
+            }, CancellationToken.None);
+            await WriteNewAsync(Output("preflight", "failures.json"), new
+            {
+                Failure = failure is null ? null : new { Type = failure.GetType().FullName, failure.Message },
+                FailedAttempts = attempts.Where(attempt => attempt.Status == "failed").ToArray(),
+                NotAttempted = attempts.Where(attempt => attempt.Status == "not-attempted")
+                    .Select(attempt => new { attempt.Ordinal, attempt.RowKey, attempt.Variant }).ToArray(),
+                MeasuredTrials = 0, BenchmarkComplete = false,
+            }, CancellationToken.None);
+        }
+
+        try
+        {
+            await WriteNewAsync(Output("preflight", "completed.json"), new
+            {
+                CompletedUtc = DateTimeOffset.UtcNow, Workloads.ContractVersion,
+                RequiredPairedRows = 72, SuccessfulPairedRows = 72, RequiredArtifactCases = 144, SuccessfulArtifactCases = 144,
+                Workloads.PreflightOperations, WarmupOperations = 0, MeasuredTrials = 0, BenchmarkComplete = false,
+                Matrix = "matrix.json", FailureLedger = "failures.json", MinimumFutureMeasuredChildTrials = 432,
+                RemainingGates = new[] { "128-operation warm-up/restoration", "paired calibration", "fixed-window metrics",
+                    "all measured trials", "complete evidence-only rendering" },
+            }, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            await SaveFailureAsync(Output("preflight", "finalization-failed.json"), exception);
+            throw;
+        }
+
+        Console.WriteLine("Full untimed preflight passed: 72 paired rows, 144 fresh case processes, zero measured trials. Evidence: " +
+            Output("preflight", "completed.json"));
+    }
+
+    private async Task RunCasePreflightAsync(
+        ArtifactIdentity artifact, WorkloadCase workload, WorkloadCorpus corpus, WorkloadRequest[] requests,
+        string directory, PreparedExperiment prepared, CaseProgress progress, CancellationToken token)
+    {
+        OwnedChild child = await LaunchServerAsync(artifact, workload.FhirVersion, directory, prepared, token);
+        progress.ProcessId = child.Process.Id;
+        progress.ProcessStartedUtc = child.StartedUtc;
+        try
+        {
+            using CancellationTokenSource setup = CancellationTokenSource.CreateLinkedTokenSource(token);
+            setup.CancelAfter(TimeSpan.FromSeconds(_manifest.Bounds.SetupSeconds));
+            progress.Stage = "initial";
+            ProbeSnapshot initial = await CaptureAsync(child, "ready", [], prepared, setup.Token);
+            CorrectnessOracle.ValidateState(initial.Tenant, initial.Tenant, 0, 0, 0,
+                new Dictionary<string, bool>(StringComparer.Ordinal), child.SourceDirectory);
+            SeededCorpus seeded = await SeedAsync(child, corpus, initial, prepared, progress, setup.Token);
+            PreparedCase context = await PrepareCaseAsync(child, workload, seeded, requests, initial, prepared, progress, setup.Token);
+            CompletedOperation[] responses = await ExecuteCaseAsync(child, context, progress, setup.Token);
+            await AuditCaseAsync(child, context, responses, prepared, progress, setup.Token);
+            Require(!child.Process.HasExited && !child.StandardOutput.Overflow && !child.StandardError.Overflow,
+                "Child exited unexpectedly or exceeded log evidence bounds.");
+            setup.Token.ThrowIfCancellationRequested();
+            progress.Stage = "audited";
+        }
+        catch (Exception exception)
+        {
+            await SaveFailureAsync(Path.Combine(directory, "case-failed.json"), exception);
+            throw;
+        }
+        finally
+        {
+            progress.TotalHttpRequests = child.AttemptedHttpRequests;
+            progress.TotalCompletedResponses = child.CompletedHttpResponses;
             try
             {
                 await StopServerAsync(child);
             }
             finally
             {
-                // Changed artifacts remain a failure even when a request or cleanup failed first.
+                await WriteNewAsync(Path.Combine(directory, "case-progress.json"), progress, CancellationToken.None);
                 VerifyPrepared(prepared);
             }
         }
     }
+
+    private async Task<SeededCorpus> SeedAsync(
+        OwnedChild child, WorkloadCorpus corpus, ProbeSnapshot initial, PreparedExperiment prepared,
+        CaseProgress progress, CancellationToken token)
+    {
+        SuccessfulStatusProfile profile = CorrectnessOracle.StatusProfile(child.Artifact.Variant);
+        CorpusResource[] order = Workloads.SeedResources(corpus).ToArray();
+        Dictionary<string, ExpectedResource> resources = new(StringComparer.Ordinal);
+        List<SeedResourceEvidence> evidence = new(order.Length);
+        ResponseEvidence? observed = null;
+        string? identity = null;
+        bool passed = false;
+        await WriteNewAsync(Path.Combine(child.Directory, "seed-started.json"), new
+        {
+            corpus.Key, Workloads.Algorithm, Workloads.Seed, corpus.PatientCount, corpus.ObservationCount,
+            RequiredWrites = order.Length, RequiredReadbacks = order.Length,
+            RequestOrder = "All Patient PUTs, all Observation PUTs, then every instance GET in the same frozen order.",
+            StartedUtc = DateTimeOffset.UtcNow, Untimed = true,
+        }, token);
+        try
+        {
+            progress.Stage = "seed-put";
+            foreach (CorpusResource resource in order)
+            {
+                token.ThrowIfCancellationRequested();
+                identity = resource.Identity;
+                observed = null;
+                progress.AttemptedSeedWrites++;
+                observed = await SendAsync(child, HttpMethod.Put, identity, resource.Body, "return=representation", token);
+                progress.CompletedSeedWrites++;
+                ResourceBinding binding = CorrectnessOracle.ValidateResponse(
+                    observed, profile.PutAsCreate, resource.Body, child.BaseUrl, child.StartedUtc);
+                Require(resources.TryAdd(identity, new ExpectedResource(resource.Body, binding)), "Duplicate seed identity.");
+                evidence.Add(new SeedResourceEvidence(evidence.Count + 1, identity, resource.Body.Length,
+                    HashBytes(resource.Body), binding, Digest(observed), null));
+                progress.ValidatedSeedWrites++;
+            }
+
+            progress.Stage = "seed-readback";
+            for (int index = 0; index < order.Length; index++)
+            {
+                token.ThrowIfCancellationRequested();
+                CorpusResource resource = order[index];
+                identity = resource.Identity;
+                observed = null;
+                progress.AttemptedSeedReads++;
+                observed = await SendAsync(child, HttpMethod.Get, identity, null, null, token);
+                progress.CompletedSeedReads++;
+                _ = CorrectnessOracle.ValidateResponse(observed, profile.Read, resource.Body, child.BaseUrl,
+                    child.StartedUtc, resources[identity].Binding);
+                evidence[index] = evidence[index] with { Readback = Digest(observed) };
+                progress.ValidatedSeedReads++;
+            }
+
+            Require(progress.ValidatedSeedWrites == corpus.PatientCount + corpus.ObservationCount &&
+                progress.ValidatedSeedReads == progress.ValidatedSeedWrites, "Incomplete full-corpus audit.");
+            ProbeSnapshot seeded = await CaptureAsync(child, "seeded", [], prepared, token);
+            CorrectnessOracle.ValidateState(initial.Tenant, seeded.Tenant, corpus.PatientCount, corpus.ObservationCount, 0,
+                new Dictionary<string, bool>(StringComparer.Ordinal), child.SourceDirectory);
+            CorrectnessOracle.ValidateReceipt(seeded.Tenant, []);
+            passed = true;
+            return new(corpus, resources, seeded);
+        }
+        catch (Exception exception)
+        {
+            await WriteNewAsync(Path.Combine(child.Directory, "seed-failed.json"), new
+            {
+                progress.Stage, Identity = identity, ObservedResponse = observed, progress.AttemptedSeedWrites,
+                progress.CompletedSeedWrites, progress.ValidatedSeedWrites, progress.AttemptedSeedReads,
+                progress.CompletedSeedReads, progress.ValidatedSeedReads,
+                FailedUtc = DateTimeOffset.UtcNow, Type = exception.GetType().FullName, exception.Message,
+                MeasuredTrials = 0,
+            }, CancellationToken.None);
+            throw;
+        }
+        finally
+        {
+            await WriteNewAsync(Path.Combine(child.Directory, "seed-audit.json"), new
+            {
+                Passed = passed, corpus.Key, RequiredResources = order.Length,
+                progress.AttemptedSeedWrites, progress.CompletedSeedWrites, progress.ValidatedSeedWrites,
+                progress.AttemptedSeedReads, progress.CompletedSeedReads, progress.ValidatedSeedReads,
+                ValidatedResources = evidence, CompletedUtc = DateTimeOffset.UtcNow,
+                EvidencePolicy = "Only actually validated responses are summarized; a failing full response is retained separately.",
+                MeasuredTrials = 0,
+            }, CancellationToken.None);
+        }
+    }
+
+    private async Task<PreparedCase> PrepareCaseAsync(
+        OwnedChild child, WorkloadCase workload, SeededCorpus seeded, WorkloadRequest[] requests,
+        ProbeSnapshot initial, PreparedExperiment prepared, CaseProgress progress, CancellationToken token)
+    {
+        progress.Stage = "case-prepare";
+        CorrectnessOracle.ValidateCaseRequests(workload, seeded.Corpus, requests, Workloads.PreflightOperations);
+        SuccessfulStatusProfile profile = CorrectnessOracle.StatusProfile(child.Artifact.Variant);
+        Dictionary<string, bool> identities = CaseIdentities(requests, received: false);
+        if (workload.CaseId.EndsWith("-update", StringComparison.Ordinal))
+        {
+            string identity = requests[0].RelativeUrl;
+            ExpectedResource existing = seeded.Resources[identity];
+            ResponseEvidence read = await SendAndSaveAsync(child, "update-preexisting-read", HttpMethod.Get, identity, null, null, token);
+            _ = CorrectnessOracle.ValidateResponse(read, profile.Read, existing.Content, child.BaseUrl, child.StartedUtc, existing.Binding);
+        }
+
+        ProbeSnapshot snapshot = await CaptureAsync(child, "prepared", identities.Keys.ToArray(), prepared, token);
+        CorrectnessOracle.ValidateState(initial.Tenant, snapshot.Tenant, seeded.Corpus.PatientCount, seeded.Corpus.ObservationCount,
+            0, identities, child.SourceDirectory);
+        CorrectnessOracle.ValidateReceipt(snapshot.Tenant, []);
+        await WriteNewAsync(Path.Combine(child.Directory, "case-prepared.json"), new
+        {
+            workload.RowKey, seeded.Corpus.Key, LogicalOperations = requests.Length, WarmupOperations = 0,
+            StatusProfile = profile, Input = DescribeCase(workload, seeded.Corpus.Key, requests),
+            PreparedInventory = "prepared-snapshot.json", ClinicalContentAudit = "seed-audit.json",
+            ProbeIdentityChallengeAdded = false, Untimed = true, MeasuredTrials = 0,
+        }, token);
+        return new(workload, seeded, requests, initial, snapshot, profile);
+    }
+
+    private async Task<CompletedOperation[]> ExecuteCaseAsync(
+        OwnedChild child, PreparedCase context, CaseProgress progress, CancellationToken token)
+    {
+        progress.Stage = "case-requests";
+        List<CompletedOperation> completed = [];
+        foreach (WorkloadRequest request in context.Requests)
+        {
+            token.ThrowIfCancellationRequested();
+            progress.AttemptedOperations++;
+            List<HttpExchangeEvidence> exchanges = [];
+            HashSet<string> visited = new(StringComparer.Ordinal);
+            string? uri = child.BaseUrl + "/" + request.RelativeUrl;
+            bool search = request.Method == "GET" && request.RelativeUrl.Contains('?');
+            do
+            {
+                Require(visited.Add(uri) && exchanges.Count <= context.Seeded.Corpus.Resources.Length,
+                    "Cyclic or unbounded search continuation.");
+                string relative = uri[(child.BaseUrl.Length + 1)..];
+                string label = "case-" + request.Number.ToString("D4", CultureInfo.InvariantCulture) +
+                    "-page-" + (exchanges.Count + 1).ToString("D4", CultureInfo.InvariantCulture);
+                progress.AttemptedCaseHttpRequests++;
+                int before = child.CompletedHttpResponses;
+                ResponseEvidence response;
+                try
+                {
+                    response = await SendAndSaveAsync(child, label, new HttpMethod(request.Method), relative,
+                        request.Body, request.Prefer, token);
+                }
+                finally
+                {
+                    progress.CompletedCaseHttpResponses += child.CompletedHttpResponses - before;
+                }
+
+                exchanges.Add(new HttpExchangeEvidence(uri, response));
+                uri = search ? CorrectnessOracle.NextPageUri(response, uri, child.BaseUrl) : null;
+            }
+            while (uri is not null);
+            completed.Add(new CompletedOperation(request.Number, exchanges.ToArray()));
+            progress.CompletedOperations++;
+        }
+
+        return completed.ToArray();
+    }
+
+    private async Task AuditCaseAsync(
+        OwnedChild child, PreparedCase context, CompletedOperation[] completed, PreparedExperiment prepared,
+        CaseProgress progress, CancellationToken token)
+    {
+        progress.Stage = "case-audit";
+        Require(completed.Length == context.Requests.Length && progress.CompletedOperations == context.Requests.Length,
+            "A partial case cannot change its denominator.");
+        Dictionary<string, ExpectedResource> resources = new(context.Seeded.Resources, StringComparer.Ordinal);
+        List<ResourceBinding> created = [];
+        List<string> readbacks = [];
+        List<ReceiptExpectation> receipts = [];
+        List<OperationAudit> audits = [];
+        bool create = context.Workload.CaseId.EndsWith("-create", StringComparison.Ordinal);
+        bool update = context.Workload.CaseId.EndsWith("-update", StringComparison.Ordinal);
+        bool hook = context.Workload.CaseId == "subscription-receive";
+        for (int index = 0; index < context.Requests.Length; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            WorkloadRequest request = context.Requests[index];
+            CompletedOperation operation = completed[index];
+            Require(operation.Number == request.Number && operation.Exchanges.Length > 0 &&
+                operation.Exchanges[0].Uri == child.BaseUrl + "/" + request.RelativeUrl, "Wrong response/request correspondence.");
+            bool search = request.Method == "GET" && request.RelativeUrl.Contains('?');
+            Require(search || operation.Exchanges.Length == 1, "Non-search operation has extra responses.");
+            ResponseEvidence response = operation.Exchanges[0].Response;
+            ResourceBinding[] bindings = [];
+            string[] identities = request.ExpectedIdentities;
+            if (create)
+            {
+                ResourceBinding binding = CorrectnessOracle.ValidateResponse(
+                    response, context.Profile.Create, request.Body!, child.BaseUrl, child.StartedUtc);
+                string identity = binding.ResourceType + "/" + binding.Id;
+                Require(resources.TryAdd(identity, new ExpectedResource(request.Body!, binding)),
+                    "Create returned an already-existing identity.");
+                created.Add(binding);
+                readbacks.Add(identity);
+                identities = [identity];
+                bindings = [binding];
+            }
+            else if (update)
+            {
+                ExpectedResource previous = resources[request.RelativeUrl];
+                ResourceBinding binding = CorrectnessOracle.ValidateUpdateResponse(response, context.Profile.Update,
+                    previous.Content, request.Body!, previous.Binding, child.BaseUrl);
+                resources[request.RelativeUrl] = new ExpectedResource(request.Body!, binding);
+                readbacks.Add(request.RelativeUrl);
+                bindings = [binding];
+            }
+            else if (search)
+            {
+                Dictionary<string, ExpectedResource> expected = request.ExpectedIdentities
+                    .ToDictionary(identity => identity, identity => resources[identity], StringComparer.Ordinal);
+                CorrectnessOracle.ValidateSearch(operation.Exchanges, expected,
+                    child.BaseUrl + "/" + request.RelativeUrl, child.BaseUrl, context.Profile.Search);
+                bindings = expected.Values.Select(resource => resource.Binding).ToArray();
+            }
+            else if (hook)
+            {
+                Require(response.StatusCode == context.Profile.Hook, "Hook status differs from its sealed successful profile.");
+                CorrectnessOracle.ValidateHookResponse(response);
+                NotificationInput notification = request.Notification ?? throw new InvalidDataException("Missing hook input.");
+                receipts.Add(new ReceiptExpectation(notification, response.StartedUtc, response.CompletedUtc));
+            }
+            else
+            {
+                ExpectedResource expected = resources[request.RelativeUrl];
+                bindings = [CorrectnessOracle.ValidateResponse(response, context.Profile.Read, expected.Content,
+                    child.BaseUrl, child.StartedUtc, expected.Binding)];
+            }
+
+            audits.Add(new OperationAudit(request.Number, operation.Exchanges.Length,
+                operation.Exchanges.Select(exchange => exchange.Response.StatusCode).ToArray(), identities, bindings));
+            progress.ValidatedOperations++;
+        }
+
+        int readOrdinal = 0;
+        foreach (string identity in readbacks.Distinct(StringComparer.Ordinal))
+        {
+            ExpectedResource expected = resources[identity];
+            ResponseEvidence read = await SendAndSaveAsync(child, "audit-read-" + (++readOrdinal).ToString("D4", CultureInfo.InvariantCulture),
+                HttpMethod.Get, identity, null, null, token);
+            _ = CorrectnessOracle.ValidateResponse(read, context.Profile.Read, expected.Content,
+                child.BaseUrl, child.StartedUtc, expected.Binding);
+            progress.AuditedReadbacks++;
+        }
+
+        List<ResourceBinding> bundles = [];
+        foreach (ReceiptExpectation receipt in receipts)
+        {
+            NotificationInput notification = receipt.Notification;
+            ResponseEvidence read = await SendAndSaveAsync(child, "audit-bundle-" + notification.EventNumber.ToString("D4", CultureInfo.InvariantCulture),
+                HttpMethod.Get, "Bundle/" + notification.BundleId, null, null, token);
+            bundles.Add(CorrectnessOracle.ValidateResponse(read, context.Profile.Read, notification.Body,
+                child.BaseUrl, receipt.Earliest));
+            progress.AuditedReadbacks++;
+        }
+
+        Dictionary<string, bool> identitiesAfter = CaseIdentities(context.Requests, received: hook);
+        foreach (ResourceBinding binding in created)
+        {
+            identitiesAfter.Add(binding.ResourceType + "/" + binding.Id, true);
+        }
+
+        WorkloadCorpus corpus = context.Seeded.Corpus;
+        int patients = corpus.PatientCount + (context.Workload.CaseId == "patient-create" ? context.Requests.Length : 0);
+        int observations = corpus.ObservationCount + (context.Workload.CaseId == "observation-create" ? context.Requests.Length : 0);
+        ProbeSnapshot audited = await CaptureAsync(child, "audited", identitiesAfter.Keys.ToArray(), prepared, token);
+        CorrectnessOracle.ValidateState(context.Initial.Tenant, audited.Tenant, patients, observations,
+            hook ? context.Requests.Length : 0, identitiesAfter, child.SourceDirectory);
+        CorrectnessOracle.ValidateReceipt(audited.Tenant, receipts);
+        if (create)
+        {
+            string type = context.Workload.CaseId == "patient-create" ? "Patient" : "Observation";
+            string[] initialIds = corpus.Resources.Where(resource => resource.ResourceType == type).Select(resource => resource.Id).ToArray();
+            CorrectnessOracle.ValidateCreateGrowth(type, initialIds, context.Prepared.Tenant.ResourceCounts[type],
+                audited.Tenant.ResourceCounts[type], context.Requests.Length, created);
+            await DeleteCreatedAsync(child, context, created, resources, prepared, progress, token);
+        }
+
+        await WriteNewAsync(Path.Combine(child.Directory, "oracle.json"), new
+        {
+            Passed = true, context.Workload.RowKey, context.Profile, Workloads.ContractVersion,
+            LogicalOperations = context.Requests.Length, CompletedOperations = completed.Length,
+            HttpRequests = completed.Sum(operation => operation.Exchanges.Length), Operations = audits,
+            BundleBindings = bundles, ExpectedReceipts = receipts,
+            InitialInventory = "ready-snapshot.json", SeededInventory = "seeded-snapshot.json",
+            PreparedInventory = "prepared-snapshot.json", PostWorkInventory = "audited-snapshot.json",
+            CleanupInventory = create ? "cleanup-snapshot.json" : null,
+            SeedEvidence = "seed-audit.json", WarmupOperations = 0, MeasuredTrials = 0, BenchmarkComplete = false,
+        }, token);
+    }
+
+    private async Task DeleteCreatedAsync(
+        OwnedChild child, PreparedCase context, IReadOnlyList<ResourceBinding> created,
+        IReadOnlyDictionary<string, ExpectedResource> resources, PreparedExperiment prepared, CaseProgress progress, CancellationToken token)
+    {
+        progress.Stage = "create-cleanup-audit";
+        Dictionary<string, bool> absent = new(StringComparer.Ordinal);
+        for (int index = 0; index < created.Count; index++)
+        {
+            ResourceBinding binding = created[index];
+            string identity = binding.ResourceType + "/" + binding.Id;
+            progress.AttemptedCleanupDeletes++;
+            int before = child.CompletedHttpResponses;
+            ResponseEvidence response;
+            try
+            {
+                response = await SendAndSaveAsync(child, "cleanup-delete-" + (index + 1).ToString("D4", CultureInfo.InvariantCulture),
+                    HttpMethod.Delete, identity, null, "return=representation", token);
+            }
+            finally
+            {
+                progress.CompletedCleanupDeletes += child.CompletedHttpResponses - before;
+            }
+
+            CorrectnessOracle.ValidateDeleteResponse(response, context.Profile.Delete, resources[identity]);
+            progress.ValidatedCleanupDeletes++;
+            absent.Add(identity, false);
+        }
+
+        ProbeSnapshot restored = await CaptureAsync(child, "cleanup", absent.Keys.ToArray(), prepared, token);
+        CorrectnessOracle.ValidateState(context.Initial.Tenant, restored.Tenant,
+            context.Seeded.Corpus.PatientCount, context.Seeded.Corpus.ObservationCount, 0, absent, child.SourceDirectory);
+        CorrectnessOracle.ValidateReceipt(restored.Tenant, []);
+    }
+
+    private static Dictionary<string, bool> CaseIdentities(WorkloadRequest[] requests, bool received)
+    {
+        Dictionary<string, bool> identities = new(StringComparer.Ordinal);
+        foreach (WorkloadRequest request in requests)
+        {
+            foreach (string identity in request.ExpectedIdentities)
+            {
+                identities[identity] = request.Notification is null || received;
+            }
+
+            if (request.Notification is NotificationInput notification)
+            {
+                identities.Add("Patient/" + notification.ContextId, false);
+                identities.Add("Observation/" + notification.FocusId, false);
+            }
+        }
+
+        Require(identities.Count <= 32, "The fixed case exceeds the probe's declared identity bound.");
+        return identities;
+    }
+
+    private static ResponseDigest Digest(ResponseEvidence response) => new(response.StatusCode, response.Body.Length,
+        HashBytes(response.Body), HashBytes(JsonSerializer.SerializeToUtf8Bytes(response, _json)), response.StartedUtc, response.CompletedUtc);
 
     private async Task<OwnedChild> LaunchServerAsync(
         ArtifactIdentity artifact, string version, string directory, PreparedExperiment prepared, CancellationToken token)
@@ -767,45 +1265,24 @@ public sealed class ExperimentRunner
     private async Task<ResponseEvidence> SendAndSaveAsync(
         OwnedChild child, string label, HttpMethod method, string relative, byte[]? body, string? prefer, CancellationToken token)
     {
-        using CancellationTokenSource requestDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        requestDeadline.CancelAfter(TimeSpan.FromSeconds(_manifest.Bounds.RequestSeconds));
         string uri = child.BaseUrl + "/" + relative;
-        using HttpRequestMessage request = new(method, uri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/fhir+json"));
-        if (prefer is not null)
-        {
-            request.Headers.Add("Prefer", prefer);
-        }
-
-        if (body is not null)
-        {
-            request.Content = new ByteArrayContent(body);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/fhir+json");
-        }
-
         DateTimeOffset started = DateTimeOffset.UtcNow;
         await WriteNewAsync(Path.Combine(child.Directory, label + "-request.json"), new
         {
             Method = method.Method, Uri = uri, RequestBody = body, Prefer = prefer, StartedUtc = started,
             Accept = "application/fhir+json", ContentType = body is null ? null : "application/fhir+json",
-            AttemptedRequests = 1, PhaseOneUntimed = true,
+            AttemptedRequests = 1, Untimed = true, Workloads.ContractVersion,
         }, token);
         ResponseEvidence? observed = null;
         try
         {
-            using HttpResponseMessage response = await child.Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestDeadline.Token);
-            await using Stream input = await response.Content.ReadAsStreamAsync(requestDeadline.Token);
-            using MemoryStream output = new();
-            await CopyBoundedAsync(input, output, MaximumHttpBytes, requestDeadline.Token);
-            Dictionary<string, string[]> headers = response.Headers.Concat(response.Content.Headers)
-                .ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
-            ResponseEvidence evidence = new((int)response.StatusCode, headers, output.ToArray(), started, DateTimeOffset.UtcNow);
+            ResponseEvidence evidence = await SendAsync(child, method, relative, body, prefer, token, started);
             observed = evidence;
             await WriteNewAsync(Path.Combine(child.Directory, label + ".json"), new
             {
                 Method = method.Method, Uri = uri, RequestBody = body, Prefer = prefer, Response = evidence,
                 ResponseSha256 = HashBytes(evidence.Body), ResponseBytes = evidence.Body.Length,
-                AttemptedRequests = 1, CompletedResponses = 1, PhaseOneUntimed = true,
+                AttemptedRequests = 1, CompletedResponses = 1, Untimed = true, Workloads.ContractVersion,
             }, token);
             return evidence;
         }
@@ -819,6 +1296,37 @@ public sealed class ExperimentRunner
             }, CancellationToken.None);
             throw;
         }
+    }
+
+    private async Task<ResponseEvidence> SendAsync(
+        OwnedChild child, HttpMethod method, string relative, byte[]? body, string? prefer,
+        CancellationToken token, DateTimeOffset? startedUtc = null)
+    {
+        using CancellationTokenSource requestDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        requestDeadline.CancelAfter(TimeSpan.FromSeconds(_manifest.Bounds.RequestSeconds));
+        using HttpRequestMessage request = new(method, child.BaseUrl + "/" + relative);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/fhir+json"));
+        if (prefer is not null)
+        {
+            request.Headers.Add("Prefer", prefer);
+        }
+
+        if (body is not null)
+        {
+            request.Content = new ByteArrayContent(body);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/fhir+json");
+        }
+
+        DateTimeOffset started = startedUtc ?? DateTimeOffset.UtcNow;
+        child.AttemptedHttpRequests++;
+        using HttpResponseMessage response = await child.Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestDeadline.Token);
+        await using Stream input = await response.Content.ReadAsStreamAsync(requestDeadline.Token);
+        using MemoryStream output = new();
+        await CopyBoundedAsync(input, output, MaximumHttpBytes, requestDeadline.Token);
+        child.CompletedHttpResponses++;
+        Dictionary<string, string[]> headers = response.Headers.Concat(response.Content.Headers)
+            .ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
+        return new ResponseEvidence((int)response.StatusCode, headers, output.ToArray(), started, DateTimeOffset.UtcNow);
     }
 
     private async Task<ProbeSnapshot> CaptureAsync(
@@ -1104,9 +1612,37 @@ public sealed class ExperimentRunner
 
     private void VerifyPrepared(PreparedExperiment prepared)
     {
-        Require(prepared.SchemaVersion == 1 && prepared.ProtocolVersion == ProbeProtocol.Version && prepared.RunId == _manifest.RunId &&
+        Require(prepared.SchemaVersion == 2 && prepared.ProtocolVersion == ProbeProtocol.Version && prepared.RunId == _manifest.RunId &&
             SameHash(prepared.ManifestSha256, HashBytes(_manifestBytes)) &&
             SameHash(prepared.ManifestSha256, SealFile(Output("manifest.json")).Sha256), "Prepare/preflight manifest or protocol mismatch.");
+        Require(_preparedSha256 is not null && SameHash(_preparedSha256, SealFile(Output("prepared.json")).Sha256),
+            "The prepared handoff changed during preflight.");
+        WorkloadPreparation workload = prepared.Workload ?? throw new InvalidDataException("Missing full-matrix workload ledger.");
+        Require(workload.ContractVersion == Workloads.ContractVersion && workload.Algorithm == Workloads.Algorithm &&
+            workload.Seed == Workloads.Seed && workload.PreflightOperations == Workloads.PreflightOperations &&
+            workload.Cases.Length == 72 && workload.Cases.Select(fixture => fixture.Case).SequenceEqual(Workloads.CreateCases()) &&
+            workload.Corpora.Length == 6 && workload.Corpora.Select(fixture => fixture.Key).Distinct(StringComparer.Ordinal).Count() == 6 &&
+            prepared.FixtureFiles.Length == 78 &&
+            workload.StatusProfiles.SequenceEqual(new[] { CorrectnessOracle.StatusProfile("baseline"), CorrectnessOracle.StatusProfile("candidate") }),
+            "Wrong full-matrix workload/status contract. Phase-one preparation cannot be reused.");
+        foreach (CorpusFixture fixture in workload.Corpora)
+        {
+            string key = fixture.FhirVersion + "-" + fixture.PatientCount.ToString(CultureInfo.InvariantCulture) +
+                "p-" + fixture.ObservationCount.ToString(CultureInfo.InvariantCulture) + "o";
+            Require((fixture.FhirVersion is "R4" or "R4B" or "R5") && (fixture.PatientCount is 100 or 1000) &&
+                fixture.ObservationCount == fixture.PatientCount * 10 && fixture.Key == key &&
+                fixture.FixtureFile == Path.Combine("corpora", key + ".json") &&
+                fixture.SeedRequests.Length == fixture.PatientCount + fixture.ObservationCount,
+                "Invalid bounded corpus descriptor.");
+        }
+
+        foreach (CaseFixture fixture in workload.Cases)
+        {
+            Require(fixture.FixtureFile == Path.Combine("cases", fixture.Case.RowKey + ".json") &&
+                fixture.LogicalOperations == Workloads.PreflightOperations && fixture.Requests.Length == Workloads.PreflightOperations,
+                "Invalid fixed case descriptor.");
+        }
+
         Require(prepared.Baseline.SourceRevision == BaselineRevision && prepared.Candidate.SourceRevision == CandidateRevision &&
             prepared.Baseline.Variant == "baseline" && prepared.Candidate.Variant == "candidate" &&
             prepared.Baseline.FirelyPackageVersion == "5.11.4" && prepared.Candidate.FirelyPackageVersion == "6.2.1" &&
@@ -1663,6 +2199,55 @@ public sealed class ExperimentRunner
             "The runner must not inherit any startup hook or probe activation.");
     }
 
+    private sealed record PreparedInputs(
+        Dictionary<string, WorkloadCorpus> Corpora, Dictionary<string, WorkloadRequest[]> Requests);
+
+    private sealed record SeededCorpus(
+        WorkloadCorpus Corpus, Dictionary<string, ExpectedResource> Resources, ProbeSnapshot Snapshot);
+
+    private sealed record PreparedCase(
+        WorkloadCase Workload, SeededCorpus Seeded, WorkloadRequest[] Requests,
+        ProbeSnapshot Initial, ProbeSnapshot Prepared, SuccessfulStatusProfile Profile);
+
+    private sealed record CompletedOperation(int Number, HttpExchangeEvidence[] Exchanges);
+
+    private sealed record OperationAudit(int Number, int HttpRequests, int[] StatusCodes, string[] Identities, ResourceBinding[] Bindings);
+
+    private sealed record ResponseDigest(
+        int StatusCode, int BodyBytes, string BodySha256, string CompleteEvidenceSha256, DateTimeOffset StartedUtc, DateTimeOffset CompletedUtc);
+
+    private sealed record SeedResourceEvidence(
+        int Number, string Identity, int InputBytes, string InputSha256,
+        ResourceBinding Binding, ResponseDigest Put, ResponseDigest? Readback);
+
+    private sealed record PreflightAttempt(
+        int Ordinal, string RowKey, string Variant, string EvidenceDirectory, string Status,
+        DateTimeOffset? StartedUtc, DateTimeOffset? FinishedUtc, CaseProgress Progress, string? Failure);
+
+    private sealed class CaseProgress
+    {
+        public string Stage { get; set; } = "not-started";
+        public int ProcessId { get; set; }
+        public DateTimeOffset ProcessStartedUtc { get; set; }
+        public int AttemptedSeedWrites { get; set; }
+        public int CompletedSeedWrites { get; set; }
+        public int ValidatedSeedWrites { get; set; }
+        public int AttemptedSeedReads { get; set; }
+        public int CompletedSeedReads { get; set; }
+        public int ValidatedSeedReads { get; set; }
+        public int AttemptedOperations { get; set; }
+        public int CompletedOperations { get; set; }
+        public int ValidatedOperations { get; set; }
+        public int AttemptedCaseHttpRequests { get; set; }
+        public int CompletedCaseHttpResponses { get; set; }
+        public int AuditedReadbacks { get; set; }
+        public int AttemptedCleanupDeletes { get; set; }
+        public int CompletedCleanupDeletes { get; set; }
+        public int ValidatedCleanupDeletes { get; set; }
+        public int TotalHttpRequests { get; set; }
+        public int TotalCompletedResponses { get; set; }
+    }
+
     private sealed class OwnedChild : IDisposable
     {
         internal readonly Process Process;
@@ -1685,6 +2270,8 @@ public sealed class ExperimentRunner
         internal bool Authenticated;
         internal DateTimeOffset StartedUtc;
         internal int Sequence;
+        internal int AttemptedHttpRequests;
+        internal int CompletedHttpResponses;
 
         internal OwnedChild(
             Process process, NamedPipeServerStream pipe, ProbeConfiguration configuration, ArtifactIdentity artifact,
@@ -1821,7 +2408,7 @@ public sealed class ExperimentRunner
     private static extern uint GetExtendedTcpTable(
         IntPtr table, ref int size, [MarshalAs(UnmanagedType.Bool)] bool order, int addressFamily, int tableClass, uint reserved);
 
-    private static void Require(bool condition, string message)
+    private static void Require([DoesNotReturnIf(false)] bool condition, string message)
     {
         if (!condition)
         {
