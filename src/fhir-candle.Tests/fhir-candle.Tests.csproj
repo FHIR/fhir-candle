@@ -38,6 +38,8 @@
 		<Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 	<ItemGroup>
+		<ProjectReference Include="..\FhirCandle.Performance\FhirCandle.Performance.csproj" />
+		<ProjectReference Include="..\FhirCandle.Performance.Probe\FhirCandle.Performance.Probe.csproj" />
 		<ProjectReference Include="..\FhirCandle.Ui.R4\FhirCandle.Ui.R4.csproj" />
 		<ProjectReference Include="..\FhirStore.Common\FhirCandle.Common.csproj" />
 		<ProjectReference Include="..\fhir-candle\fhir-candle.csproj" />

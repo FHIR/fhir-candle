@@ -7,6 +7,10 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "fhir-candle", "src\fhir-can
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "fhir-candle.Tests", "src\fhir-candle.Tests\fhir-candle.Tests.csproj", "{FC92614E-5DB0-4C6D-B8D3-667BD55BAB5B}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Performance", "src\FhirCandle.Performance\FhirCandle.Performance.csproj", "{1B8B35B8-A6F2-4420-A518-B52FAABF50C6}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.Performance.Probe", "src\FhirCandle.Performance.Probe\FhirCandle.Performance.Probe.csproj", "{4E813389-C874-44FB-A7AE-924D2669DF0E}"
+EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FhirCandle.R4B", "src\FhirStore.R4B\FhirCandle.R4B.csproj", "{759EB849-EE81-4DAE-8AB4-941E1F2824E7}"
 EndProject
 Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "FhirCandle.Versioned", "src\FhirStore.CommonVersioned\FhirCandle.Versioned.shproj", "{05DD03DE-A22D-4FD8-A8A8-06FD05F20A18}"
@@ -53,6 +57,14 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1B8B35B8-A6F2-4420-A518-B52FAABF50C6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B8B35B8-A6F2-4420-A518-B52FAABF50C6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B8B35B8-A6F2-4420-A518-B52FAABF50C6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B8B35B8-A6F2-4420-A518-B52FAABF50C6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4E813389-C874-44FB-A7AE-924D2669DF0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4E813389-C874-44FB-A7AE-924D2669DF0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4E813389-C874-44FB-A7AE-924D2669DF0E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4E813389-C874-44FB-A7AE-924D2669DF0E}.Release|Any CPU.Build.0 = Release|Any CPU
 		{B9B4F2F7-D077-4E85-A9FF-711549BC7169}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B9B4F2F7-D077-4E85-A9FF-711549BC7169}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B9B4F2F7-D077-4E85-A9FF-711549BC7169}.Release|Any CPU.ActiveCfg = Release|Any CPU

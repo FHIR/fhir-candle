@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\fhir-candle.props" />
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>FhirCandle.Performance.Probe</RootNamespace>
+  </PropertyGroup>
+</Project>
