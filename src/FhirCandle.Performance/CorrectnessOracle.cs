@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using FhirCandle.Performance.Probe;
 
 namespace FhirCandle.Performance;
@@ -17,8 +18,16 @@ public sealed record ResponseEvidence(
     int StatusCode,
     Dictionary<string, string[]> Headers,
     byte[] Body,
-    DateTimeOffset StartedUtc,
-    DateTimeOffset CompletedUtc);
+    [property: JsonRequired] ClockObservation Started,
+    [property: JsonRequired] ClockObservation Completed)
+{
+    /// <summary>Actual wall-clock evidence only; never an elapsed-time or ordering assertion.</summary>
+    [JsonIgnore]
+    public DateTimeOffset StartedUtc => Started.Utc;
+    /// <summary>May precede StartedUtc after a clock correction; the raw value is not clamped.</summary>
+    [JsonIgnore]
+    public DateTimeOffset CompletedUtc => Completed.Utc;
+}
 
 /// <summary>The narrow identity/metadata binding permitted for a newly persisted resource.</summary>
 public sealed record ResourceBinding(string ResourceType, string Id, string VersionId, DateTimeOffset LastUpdated);
@@ -30,7 +39,20 @@ public sealed record ExpectedResource(byte[] Content, ResourceBinding Binding);
 public sealed record HttpExchangeEvidence(string Uri, ResponseEvidence Response);
 
 /// <summary>The individual receiving interval for one expected registered notification.</summary>
-public sealed record ReceiptExpectation(NotificationInput Notification, DateTimeOffset Earliest, DateTimeOffset Latest);
+public sealed record ReceiptExpectation(
+    NotificationInput Notification, [property: JsonRequired] ClockObservation Started,
+    [property: JsonRequired] ClockObservation Completed);
+
+/// <summary>Every consumed page in one complete logical operation, validated only outside timing.</summary>
+public sealed record CompletedOperation(int Number, HttpExchangeEvidence[] Exchanges);
+
+/// <summary>The complete per-operation correctness receipt, never a sampled subset of a batch.</summary>
+public sealed record OperationAudit(int Number, int HttpRequests, int[] StatusCodes, string[] Identities, ResourceBinding[] Bindings);
+
+/// <summary>Known state after independently auditing every returned representation in order.</summary>
+public sealed record BatchValidation(
+    Dictionary<string, ExpectedResource> Resources, ResourceBinding[] Created, string[] Readbacks,
+    ReceiptExpectation[] Receipts, OperationAudit[] Operations);
 
 /// <summary>Exact successful codes from the two pinned sources; live work must confirm every exercised code.</summary>
 public sealed record SuccessfulStatusProfile(
@@ -51,6 +73,114 @@ public static class CorrectnessOracle
         "candidate" => new(variant, ExperimentRunner.CandidateRevision, 201, 201, 200, 200, 200, 200, 200),
         _ => throw new InvalidDataException("Unknown successful-status artifact profile."),
     };
+
+    /// <summary>
+    /// Shared preflight/warm-up/measured response audit. In particular every intermediate update is
+    /// checked even when an even-sized batch finishes with its original Patient clinical fields.
+    /// </summary>
+    public static BatchValidation ValidateBatchResponses(
+        WorkloadCase workload, IReadOnlyList<WorkloadRequest> requests, IReadOnlyList<CompletedOperation> completed,
+        IReadOnlyDictionary<string, ExpectedResource> initialResources, SuccessfulStatusProfile profile,
+        string baseUrl)
+    {
+        Require(requests.Count > 0 && completed.Count == requests.Count, "A partial batch cannot change its denominator.");
+        ValidateSequentialResponses(completed.SelectMany(operation => operation.Exchanges).Select(exchange => exchange.Response));
+        Dictionary<string, ExpectedResource> resources = new(initialResources, StringComparer.Ordinal);
+        List<ResourceBinding> created = [];
+        List<string> readbacks = [];
+        List<ReceiptExpectation> receipts = [];
+        List<OperationAudit> audits = [];
+        bool create = workload.CaseId.EndsWith("-create", StringComparison.Ordinal);
+        bool update = workload.CaseId.EndsWith("-update", StringComparison.Ordinal);
+        bool hook = workload.CaseId == "subscription-receive";
+        for (int index = 0; index < requests.Count; index++)
+        {
+            WorkloadRequest request = requests[index];
+            CompletedOperation operation = completed[index];
+            Require(operation.Number == request.Number && operation.Exchanges.Length > 0 &&
+                operation.Exchanges[0].Uri == baseUrl + "/" + request.RelativeUrl, "Wrong response/request correspondence.");
+            bool search = request.Method == "GET" && request.RelativeUrl.Contains('?');
+            Require(search || operation.Exchanges.Length == 1, "Non-search operation has extra responses.");
+            ResponseEvidence response = operation.Exchanges[0].Response;
+            ResourceBinding[] bindings = [];
+            string[] identities = request.ExpectedIdentities;
+            if (create)
+            {
+                ResourceBinding binding = ValidateResponse(response, profile.Create, request.Body!, baseUrl);
+                string identity = binding.ResourceType + "/" + binding.Id;
+                Require(resources.TryAdd(identity, new ExpectedResource(request.Body!, binding)),
+                    "Create returned an already-existing identity.");
+                created.Add(binding);
+                readbacks.Add(identity);
+                identities = [identity];
+                bindings = [binding];
+            }
+            else if (update)
+            {
+                ExpectedResource previous = resources[request.RelativeUrl];
+                ResourceBinding binding = ValidateUpdateResponse(response, profile.Update,
+                    previous.Content, request.Body!, previous.Binding, baseUrl);
+                resources[request.RelativeUrl] = new ExpectedResource(request.Body!, binding);
+                readbacks.Add(request.RelativeUrl);
+                bindings = [binding];
+            }
+            else if (search)
+            {
+                Dictionary<string, ExpectedResource> expected = request.ExpectedIdentities
+                    .ToDictionary(identity => identity, identity => resources[identity], StringComparer.Ordinal);
+                ValidateSearch(operation.Exchanges, expected, baseUrl + "/" + request.RelativeUrl, baseUrl, profile.Search);
+                bindings = expected.Values.Select(resource => resource.Binding).ToArray();
+            }
+            else if (hook)
+            {
+                Require(response.StatusCode == profile.Hook, "Hook status differs from its sealed successful profile.");
+                ValidateHookResponse(response);
+                NotificationInput notification = request.Notification ?? throw new InvalidDataException("Missing hook input.");
+                receipts.Add(new(notification, response.Started, response.Completed));
+            }
+            else
+            {
+                ExpectedResource expected = resources[request.RelativeUrl];
+                bindings = [ValidateResponse(response, profile.Read, expected.Content, baseUrl, expected.Binding)];
+            }
+
+            audits.Add(new(request.Number, operation.Exchanges.Length,
+                operation.Exchanges.Select(exchange => exchange.Response.StatusCode).ToArray(), identities, bindings));
+        }
+
+        return new(resources, created.ToArray(), readbacks.Distinct(StringComparer.Ordinal).ToArray(), receipts.ToArray(), audits.ToArray());
+    }
+
+    /// <summary>Tests clinical input equality without discarding any field, timestamp, identifier or array.</summary>
+    public static bool SameClinicalContent(byte[] left, byte[] right) =>
+        JsonNode.DeepEquals(JsonNode.Parse(left), JsonNode.Parse(right));
+
+    /// <summary>Checks the ordinary restoration request against the original independently validated corpus.</summary>
+    public static void ValidateRestoration(
+        WorkloadCase workload, WorkloadCorpus corpus, WorkloadRequest restore, ExpectedResource warmed,
+        ExpectedResource restored, ResponseEvidence? mutation)
+    {
+        bool issuedPut = mutation is not null;
+        Require(workload.CaseId is "patient-update" or "observation-update" && restore.Number == 0 &&
+            restore.Method == "PUT" && restore.Prefer == "return=representation", "Invalid ordinary restoration request.");
+        CorpusResource original = corpus.Resources.Single(resource => resource.Identity == restore.RelativeUrl);
+        Require(restore.Body is not null && SameClinicalContent(original.Body, restore.Body) &&
+            SameClinicalContent(original.Body, restored.Content) && warmed.Binding.Id == restored.Binding.Id &&
+            warmed.Binding.ResourceType == restored.Binding.ResourceType, "Warm-up did not restore original clinical content.");
+        long previous = long.Parse(warmed.Binding.VersionId, CultureInfo.InvariantCulture);
+        Require(restored.Binding.VersionId == (previous + (issuedPut ? 1 : 0)).ToString(CultureInfo.InvariantCulture),
+            "Restoration discarded the warm version/history.");
+        Require(issuedPut == !SameClinicalContent(warmed.Content, original.Body), "Restoration used an unexplained no-op or omitted a needed PUT.");
+        if (mutation is not null)
+        {
+            Require(ValidateResponseTiming(mutation).Contains(restored.Binding.LastUpdated),
+                "Restored metadata is not bound to its ordinary mutation request.");
+        }
+        else
+        {
+            Require(restored.Binding == warmed.Binding, "An already-restored Patient must retain its actual metadata.");
+        }
+    }
 
     /// <summary>Checks every clinical input against separately specified fields, groups and references.</summary>
     public static void ValidateCorpus(WorkloadCorpus corpus)
@@ -319,12 +449,21 @@ public static class CorrectnessOracle
         int expectedStatus,
         byte[] expectedContent,
         string baseUrl,
-        DateTimeOffset createdSinceUtc,
-        ResourceBinding? binding = null)
+        ResourceBinding? binding = null,
+        ReceiptExpectation? received = null)
     {
         ValidateStatusAndMediaType(response, expectedStatus);
+        ClockAssessment assignedDuring = ValidateResponseTiming(response);
+        if (received is not null)
+        {
+            Require(SameClinicalContent(expectedContent, received.Notification.Body) &&
+                Text(Parse(expectedContent), "resourceType") == "Bundle" &&
+                ClockObservation.IsOrdered(received.Completed, response.Started), "Unbound received Bundle read-back.");
+            assignedDuring = ClockObservation.Assess(received.Started, received.Completed);
+        }
+
         ResourceBinding result = ValidateResourceContent(Parse(response.Body), expectedContent,
-            binding?.VersionId ?? "1", createdSinceUtc, response.CompletedUtc, binding, unchanged: true);
+            binding?.VersionId ?? "1", assignedDuring, binding, unchanged: true);
         ValidateIdentityHeaders(response, result, baseUrl);
         return result;
     }
@@ -362,7 +501,7 @@ public static class CorrectnessOracle
         string expectedVersion = (version + 1).ToString(CultureInfo.InvariantCulture);
         ValidateStatusAndMediaType(response, expectedStatus);
         ResourceBinding result = ValidateResourceContent(Parse(response.Body), expectedContent, expectedVersion,
-            previous.LastUpdated, response.CompletedUtc, previous, unchanged: false);
+            ValidateResponseTiming(response), previous, unchanged: false);
         ValidateIdentityHeaders(response, result, baseUrl);
         return result;
     }
@@ -372,7 +511,7 @@ public static class CorrectnessOracle
     {
         ValidateStatusAndMediaType(response, expectedStatus);
         _ = ValidateResourceContent(Parse(response.Body), expected.Content, expected.Binding.VersionId,
-            expected.Binding.LastUpdated, response.CompletedUtc, expected.Binding, unchanged: true);
+            null, expected.Binding, unchanged: true);
         Require(!response.Headers.Keys.Any(name => name.Equals("ETag", StringComparison.OrdinalIgnoreCase) ||
             name.Equals("Location", StringComparison.OrdinalIgnoreCase) || name.Equals("Last-Modified", StringComparison.OrdinalIgnoreCase)),
             "Unexpected delete identity headers; the pinned delete contract supplies none.");
@@ -381,12 +520,18 @@ public static class CorrectnessOracle
     /// <summary>New identities and exact batch growth are both necessary, not interchangeable proofs.</summary>
     public static void ValidateCreateGrowth(
         string resourceType, IReadOnlyCollection<string> initialIds, int initialCount, int finalCount,
-        int expectedOperations, IReadOnlyList<ResourceBinding> created)
+        int expectedOperations, IReadOnlyList<ResourceBinding> created, IReadOnlyCollection<string>? retiredWarmIds = null)
     {
         Require(initialIds.Count == initialCount && initialIds.Distinct(StringComparer.Ordinal).Count() == initialCount &&
             expectedOperations > 0 && created.Count == expectedOperations && finalCount == initialCount + expectedOperations,
             "Wrong create batch size or resource-count growth.");
         HashSet<string> identities = new(initialIds, StringComparer.Ordinal);
+        if (retiredWarmIds is not null)
+        {
+            Require(retiredWarmIds.Distinct(StringComparer.Ordinal).Count() == retiredWarmIds.Count &&
+                retiredWarmIds.All(id => identities.Add(id)), "Warm create identities overlap original or each other.");
+        }
+
         foreach (ResourceBinding binding in created)
         {
             Require(binding.ResourceType == resourceType && binding.VersionId == "1" && IsFhirId(binding.Id) && identities.Add(binding.Id),
@@ -396,7 +541,7 @@ public static class CorrectnessOracle
 
     private static ResourceBinding ValidateResourceContent(
         JsonElement actual, byte[] expectedContent, string expectedVersion,
-        DateTimeOffset earliest, DateTimeOffset latest, ResourceBinding? binding, bool unchanged)
+        ClockAssessment? assignedDuring, ResourceBinding? binding, bool unchanged)
     {
         JsonObject expected = JsonNode.Parse(expectedContent)?.AsObject() ?? throw new InvalidDataException("Missing expected resource.");
         string type = expected["resourceType"]!.GetValue<string>();
@@ -419,12 +564,17 @@ public static class CorrectnessOracle
         Equal(expectedVersion, Text(meta, "versionId"), "stored version");
         string lastUpdatedText = Text(meta, "lastUpdated");
         Require(DateTimeOffset.TryParse(lastUpdatedText, CultureInfo.InvariantCulture, DateTimeStyles.None,
-            out DateTimeOffset lastUpdated) && lastUpdated >= earliest && lastUpdated <= latest.AddSeconds(1),
+            out DateTimeOffset lastUpdated) && lastUpdated != default,
             "Unbound server timestamp.");
         if (binding is not null && unchanged)
         {
-            Require(lastUpdated == binding.LastUpdated, "Persisted metadata changed without an update.");
+            Require(lastUpdated.EqualsExact(binding.LastUpdated), "Persisted metadata changed without an update.");
             Equal(binding.VersionId, Text(meta, "versionId"), "persisted version");
+        }
+        else
+        {
+            Require(assignedDuring is ClockAssessment interval && interval.Contains(lastUpdated),
+                "Server timestamp is outside the clock-derived mutation interval.");
         }
 
         expected["id"] = id;
@@ -496,6 +646,7 @@ public static class CorrectnessOracle
         string requestUri, string baseUrl, int expectedStatus = 200)
     {
         Require(pages.Count > 0, "A search has no completed response.");
+        ValidateSequentialResponses(pages.Select(page => page.Response));
         HashSet<string> seen = new(StringComparer.Ordinal);
         HashSet<string> addresses = new(StringComparer.Ordinal);
         string? next = requestUri;
@@ -541,8 +692,7 @@ public static class CorrectnessOracle
                         "Unexpected, duplicate or error search entry: " + identity);
                     Equal(identity, known!.Binding.ResourceType + "/" + known.Binding.Id, "expected search binding");
                     Equal(baseUrl + "/" + identity, Text(entry, "fullUrl"), "search fullUrl identity");
-                    _ = ValidateResourceContent(resource, known.Content, known.Binding.VersionId, known.Binding.LastUpdated,
-                        page.Response.CompletedUtc, known.Binding, unchanged: true);
+                    _ = ValidateResourceContent(resource, known.Content, known.Binding.VersionId, null, known.Binding, unchanged: true);
                 }
             }
 
@@ -648,9 +798,9 @@ public static class CorrectnessOracle
     }
 
     /// <summary>Validates every list entry and event; a correct dictionary key alone is insufficient.</summary>
-    public static void ValidateReceipt(TenantSnapshot snapshot, ProbeChallenge challenge, DateTimeOffset earliest, DateTimeOffset latest) =>
+    public static void ValidateReceipt(TenantSnapshot snapshot, ProbeChallenge challenge, ClockObservation started, ClockObservation completed) =>
         ValidateReceipt(snapshot, [new ReceiptExpectation(new NotificationInput(challenge.FhirVersion, challenge.EventNumber,
-            challenge.BundleId, challenge.StatusId, challenge.FocusId, challenge.ContextId, challenge.Notification), earliest, latest)]);
+            challenge.BundleId, challenge.StatusId, challenge.FocusId, challenge.ContextId, challenge.Notification), started, completed)]);
 
     /// <summary>Requires precisely the ordered receipt list, with one individually bound event per Bundle.</summary>
     public static void ValidateReceipt(TenantSnapshot snapshot, IReadOnlyList<ReceiptExpectation> expected)
@@ -675,13 +825,16 @@ public static class CorrectnessOracle
             ValidateNotification(item.Notification);
             Require(bundles.Add(item.Notification.BundleId) && statuses.Add(item.Notification.StatusId) &&
                 item.Notification.EventNumber > previous, "Expected notification identities/events are not unique and increasing.");
-            ValidateReceiptEntry(receipts![index], item.Notification, item.Earliest, item.Latest);
+            ClockAssessment interval = ClockObservation.Assess(item.Started, item.Completed);
+            Require(index == 0 || ClockObservation.IsOrdered(expected[index - 1].Completed, item.Started),
+                "Receipt request intervals overlap or are reordered.");
+            ValidateReceiptEntry(receipts![index], item.Notification, interval);
             previous = item.Notification.EventNumber;
         }
     }
 
     private static void ValidateReceiptEntry(
-        ReceiptSnapshot receipt, NotificationInput challenge, DateTimeOffset earliest, DateTimeOffset latest)
+        ReceiptSnapshot receipt, NotificationInput challenge, ClockAssessment interval)
     {
         string subscription = Source + "Subscription/perf-subscription";
         Equal(challenge.BundleId, receipt.BundleId, "receipt Bundle ID");
@@ -690,7 +843,7 @@ public static class CorrectnessOracle
         Equal("active", receipt.Status, "receipt status");
         Equal("EventNotification", receipt.NotificationType, "parsed notification type");
         Require(receipt.EventsSinceSubscriptionStart == challenge.EventNumber, "Wrong receipt event total.");
-        Require(receipt.ProcessedDateTime >= earliest && receipt.ProcessedDateTime <= latest.AddSeconds(1), "Wrong receipt processing time.");
+        Require(interval.Contains(receipt.ProcessedDateTime), "Wrong receipt processing time.");
         Require(receipt.Errors.Length == 0 && receipt.NotificationEvents.Length == 1, "Missing event or receipt errors.");
         NotificationEventSnapshot notificationEvent = receipt.NotificationEvents[0];
         Equal(string.Empty, notificationEvent.Id, "unassigned event backbone ID");
@@ -735,7 +888,24 @@ public static class CorrectnessOracle
         Require(response.StatusCode == expectedStatus, $"Expected HTTP {expectedStatus}, got {response.StatusCode}.");
         Equal("application/fhir+json", Header(response, "Content-Type").Split(';')[0], "FHIR media type");
         Require(response.Body.Length > 0, "Missing materialized response.");
-        Require(response.CompletedUtc >= response.StartedUtc, "Invalid response interval.");
+        _ = ValidateResponseTiming(response);
+    }
+
+    /// <summary>Elapsed/order evidence is independent of actual UTC, including for untimed seed/readiness/audit responses.</summary>
+    public static ClockAssessment ValidateResponseTiming(ResponseEvidence response) =>
+        ClockObservation.Assess(response.Started, response.Completed);
+
+    /// <summary>Sequential requests and pages cannot hide overlapping/reordered clocks behind otherwise correct content.</summary>
+    public static void ValidateSequentialResponses(IEnumerable<ResponseEvidence> responses)
+    {
+        ClockObservation? previous = null;
+        foreach (ResponseEvidence response in responses)
+        {
+            _ = ValidateResponseTiming(response);
+            Require(previous is null || ClockObservation.IsOrdered(previous.Value, response.Started),
+                "Overlapping or reordered response observations.");
+            previous = response.Completed;
+        }
     }
 
     private static string Header(ResponseEvidence response, string name)

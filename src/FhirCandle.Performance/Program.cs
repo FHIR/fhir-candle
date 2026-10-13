@@ -8,28 +8,26 @@ namespace FhirCandle.Performance;
 /// <summary>Entry point for the sealed-artifact experiment, not a product server.</summary>
 public static class Program
 {
-    /// <summary>Prepares inputs or performs the six phase-one feasibility launches.</summary>
+    /// <summary>Prepares, calibrates, measures or re-renders one append-only sealed experiment.</summary>
     public static async Task<int> Main(string[] args)
     {
         if ((args.Length == 0) || args.SequenceEqual(new[] { "--help" }))
         {
             Console.WriteLine("prepare --manifest <absolute-path>");
             Console.WriteLine("run --manifest <absolute-path> --preflight-only");
-            Console.WriteLine("Full run and render are unavailable until phases 2 and 3.");
+            Console.WriteLine("run --manifest <absolute-path>");
+            Console.WriteLine("render --run-directory <absolute-path>");
+            Console.WriteLine("Preflight includes all 72 semantic pairs and paired normal/off/control calibration; no accepted trials.");
             return args.Length == 0 ? 2 : 0;
-        }
-
-        if ((args[0] == "render") || ((args[0] == "run") && !args.Contains("--preflight-only", StringComparer.Ordinal)))
-        {
-            Console.Error.WriteLine("Not implemented: full workload, measurement and rendering require later phases. No benchmark is complete.");
-            return 2;
         }
 
         bool prepare = (args.Length == 3) && (args[0] == "prepare");
         bool preflight = (args.Length == 4) && (args[0] == "run") && (args[3] == "--preflight-only");
-        if ((!prepare && !preflight) || (args[1] != "--manifest"))
+        bool run = (args.Length == 3) && (args[0] == "run");
+        bool render = (args.Length == 3) && (args[0] == "render") && (args[1] == "--run-directory");
+        if (!render && ((!prepare && !preflight && !run) || (args[1] != "--manifest")))
         {
-            Console.Error.WriteLine("Expected prepare --manifest <path> or run --manifest <path> --preflight-only.");
+            Console.Error.WriteLine("Expected prepare/run --manifest <path> [--preflight-only on run], or render --run-directory <path>.");
             return 2;
         }
 
@@ -42,19 +40,39 @@ public static class Program
         Console.CancelKeyPress += handler;
         try
         {
+            if (render)
+            {
+                CompletenessResult result = await MeasurementReport.RenderAsync(args[2], cancellation.Token);
+                Console.WriteLine(result.Complete
+                    ? "Complete saved-evidence report: " + ExperimentRunner.RequiredReportPath
+                    : "INCOMPLETE saved-evidence report: " + ExperimentRunner.RequiredReportPath);
+                foreach (string error in result.Errors.Take(12))
+                {
+                    Console.Error.WriteLine(error);
+                }
+
+                return result.Complete ? 0 : 1;
+            }
+
             ExperimentRunner runner = await ExperimentRunner.FromManifestAsync(args[2], cancellation.Token);
             if (prepare)
             {
                 await runner.PrepareAsync(cancellation.Token);
             }
-            else
+            else if (preflight)
             {
                 await runner.RunPreflightAsync(cancellation.Token);
+            }
+            else
+            {
+                await runner.RunAsync(cancellation.Token);
             }
 
             Console.WriteLine(prepare
                 ? "Inputs prepared. No server or measured trial has run."
-                : "Six phase-one feasibility gates passed. The 72-row / 432-trial benchmark remains unmeasured.");
+                : preflight
+                    ? "All 72 semantic pairs and paired normal/off/control calibration passed; counts/schedule frozen. Zero accepted measured trials."
+                    : "All frozen independent trials and saved-evidence completeness checks passed. Use render to write the reproducible report.");
             return 0;
         }
         catch (Exception exception)

@@ -1,6 +1,6 @@
 # Sealed-artifact performance comparison
 
-## Current boundary: full untimed semantics preflight
+## Current boundary: fixed trials, calibration and evidence-only reporting
 
 `FhirCandle.Performance` is a BCL-only external HTTP client. Its optional
 reference to `FhirCandle.Performance.Probe` shares the bounded pipe protocol,
@@ -9,31 +9,86 @@ The probe is injected only into experiment-owned children through
 `DOTNET_STARTUP_HOOKS`. Loading the probe without its activation configuration
 does nothing.
 
-The supported commands remain **`prepare`** and **`run --preflight-only`**.
-Preflight now requires all **72 paired rows / 144 fresh artifact-case
-processes**, at the actual 100 Patient + 1,000 Observation and 1,000 Patient +
-10,000 Observation scales. Each child performs exactly **four untimed logical
-case operations**, after complete corpus seeding and read-back validation.
-A passing preflight is **not a measured trial**.
-Full `run` and `render` explicitly return exit code **2** without creating a
-performance report. Other failures return **1**. Only successful preparation
-or the entire successful preflight returns **0**.
+Supported commands are **`prepare`**, **`run --preflight-only`**, **`run`** and
+**`render`**. They are sequential stages of the **same unique run ID**.
+Preflight preserves all **72 paired rows / 144 fresh semantic processes** at
+the true corpus scales, with four untimed case operations and every seed
+PUT/read-back validated. It then runs real normal-sampling and sampler-off
+paired pilots for **every one of the 72 version/scale/case profiles**, including
+idle/loaded control windows, 128 actual-case warm-up operations, restoration,
+all footprints and full oracles. Calibration is **never an accepted trial**.
 
-The eventual benchmark still requires twelve cases × three FHIR versions ×
-two scales = **72 paired rows**, with at least three independent trials per
-variant per row: **at least 432 measured child case-trials**. Executed full-scale
-correctness is still a gate, not a consequence of this implementation.
-128-operation warm-up/restoration, paired calibration, allocation
-windows, memory sampling, retention checkpoints, statistics and rendering
-remain Phase 3 work. Neither feasibility nor untimed case snapshots are
-speed, allocation/op, sampled-peak or retention results.
+Only after paired coverage succeeds are shared counts and the alternating
+measurement schedule frozen. Full `run` uses at least **432 additional fresh
+children**: twelve cases × three versions × two scales × two variants ×
+three independent repetitions. No reset, simultaneous variants, partial-batch
+denominator changes, best-of retry, or pooling across count/protocol changes
+is supported.
 
-The independently audited `phase1-006` six-artifact/version challenges passed
-on the pinned artifacts and runtime, with clean child exits. That evidence
-does not satisfy the expanded gate. This documentation does **not** claim a
-Phase 2 live pass. Build/test/live execution and runtime output ownership
-belong to the caller; only actual `preflight\completed.json` plus its complete
-matrix establish the new gate.
+CLI usage errors return **2**. Execution/cancellation, failed gates and
+incomplete rendering return **1**. **0** means exactly the requested stage
+succeeded: preparation does not mean execution, calibration does not mean
+accepted measurement, and only full saved-evidence completeness can support
+a complete report. `render` never starts servers or accesses the network; it
+writes an explicitly **INCOMPLETE** report when mandatory evidence is absent.
+The legacy six-gate console sentence is removed.
+
+The parent independently audited `phase2-001`: **72 pairs / 144 fresh
+lifetimes passed**, with 871,200 seed PUTs, 871,200 full read-backs, 576 untimed
+case operations, clean exits and actual .NET/ASP.NET 8.0.30. That evidence and
+the earlier `phase1-006` challenges remain historical gate evidence, not
+measurements. **Phase 3 is not complete; fresh corrected-tool verification and
+full calibration remain required.** The following timeout is historical,
+not the current blocker. The retained
+`phase3-001` v1 pilot `pilot-0033` (baseline R4, 100 Patients/1,000 Observations,
+`observation-token`) completed all 128 warm-ups but only **283/1,024** fixed
+operations (284 attempted) in **59.8725985 seconds** before the common
+60-second runner/probe window canceled. This is an inadequate duration gate,
+**not a baseline/candidate benchmark finding**. All 177 prior children exited;
+the full semantic rerun, 33 calibration attempts and failed partial batch
+remain untouched.
+
+The subsequent v2 capacity recovery introduced the common finite capacities
+below. On the user-confirmed private network, fresh `phase3-003` passed all
+72 semantic pairs / 144 children and 67 of 72 complete sampled/sampler-off
+profiles before baseline large-scale R5 `observation-reference`, `pilot-0424`,
+failed its warm-up audit. All 11,000 seed writes/read-backs and 128 warm
+responses completed. Response 64 was HTTP 200: observed UTC went from
+`2026-10-07T03:14:24.2135622Z` to `2026-10-07T03:14:23.9405349Z`, while the
+independent 10,000,000-Hz Stopwatch interval was positive **0.7471468 seconds**.
+A retained Windows clock-adjustment event corroborates the rollback.
+This was an invalid wall-clock ordering assumption, **not a performance
+finding**. All 568 children exited cleanly; all 23,491 files are preserved.
+No accepted measurements or freeze exists for that run. Its diagnosis and
+independent stop audit remain local historical evidence; neither is rewritten
+or used as accepted data.
+
+The authorized correction uses **`candle-perf-phase3-v3`**,
+**`candle-perf-measurement-v3`** and **`candle-perf-preflight-v3`**. It preserves
+actual UTC while using recorded monotonic evidence for elapsed/order checks.
+It requires **fresh tool bytes/seals, a new schema-3 manifest/run ID and a
+fresh full semantic preflight/calibration**, not an upgrade or continuation
+of `phase3-001`, `phase3-002` or `phase3-003`. Unchanged sealed
+application artifacts may be reverified; old protocol observations cannot be
+pooled or accepted. Source/test success or a longer convenient timeout does
+not prove actual calibration, Phase 3 completion, or the requested comparison.
+The parent owns real launches, the frozen manifest and the populated report.
+A completed live calibration alone does not establish offline evidence
+validity or Phase 3 completion.
+Phase 4 later records the actually validated final reproduction recipe.
+
+Fresh v3 `phase3-004` completed all 144 semantic children and 72 sampled/off
+profiles (446 retained attempts, a 432-trial frozen schedule, CLI exit 0).
+Offline rendering then rejected retained `coverage-insufficient` pilot-0065:
+its 1.0841506-second loaded control had 65 managed but only four process
+samples, without sampler errors. All selected pairs were adequate; the
+renderer incorrectly reapplied the control coverage minimum during
+retention-only validation. This correction preserves every other gate and
+the original insufficient status. `phase3-004` remains unmodified diagnostic
+evidence, not accepted measurement or calibration reusable with changed
+tool bytes. Fresh verification, tooling/seals and a new full run/calibration
+remain required; no pooling is permitted. The schema stays **v3** because
+serialized evidence, bounds and clock semantics are unchanged.
 
 ## Preconditions and command sources
 
@@ -60,11 +115,18 @@ The documented all-target test command is:
 dotnet test --configuration Release --no-restore --verbosity normal
 ```
 
-These are verification instructions, **not a record that verification or live
-feasibility has passed**. Do not run a stale net8 tool after changing source
-and building only net10. In the initial implementation dispatch, the caller
-owns candidate building and all build/test/live execution; the implementer
-does not build in parallel with it.
+The recovery implementer's documented local checks are:
+
+```powershell
+dotnet build --configuration Release --framework net10.0
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.PerformanceEvidenceTests"
+```
+
+These are verification instructions, **not a record that live feasibility or
+calibration has passed**. Do not run a stale net8 tool after changing source
+and building only net10. The caller owns T-project, the all-target sequence,
+candidate provenance, immutable tool copies and all live execution. Do not
+run build/test load concurrently with calibration or measurements.
 
 The installed host must be exactly
 `C:\Program Files\dotnet\dotnet.exe`, Windows x64. Both applications must
@@ -77,12 +139,12 @@ change is supported.
 
 ## Separate artifact inputs from unique run output
 
-For a fresh Phase 2 attempt (retain all earlier phase-one directories):
+For a fresh Phase 3/4 attempt (retain all earlier development directories):
 
 ```text
 C:\ai\git\fhir-candle\scratch\1001-01\
-  experiment.json
-  performance.md                         reserved; NOT written by untimed preflight
+  experiment-clock-run-NEW.json           replace NEW consistently with an unused run ID
+  performance.md                         written only by evidence-only render
   performance-data\
     artifacts-001\                       reusable, independently verified inputs
       candidate-source\                  caller's clean detached checkout
@@ -92,22 +154,33 @@ C:\ai\git\fhir-candle\scratch\1001-01\
       isolation.txt                      actual authorized-environment evidence
       fhir-candle.2025.611.1422.nupkg       downloaded or verified cached archive
       baseline\                          unchanged full extracted package layout
-    phase2-001\                          unique OUTPUT; must not exist before prepare
+      clock-run-NEW-tools\                fresh complete immutable net8 runner/probe copy
+    phase3-001\                          retained failed v1 evidence; never edited/reused
+    phase3-002\                          retained v2 evidence; never edited/reused
+    phase3-003\                          retained clock-failure evidence; never edited/reused
+    clock-run-NEW\                       fresh v3 OUTPUT; must not exist before prepare
       manifest.json
       prepare-started.json
       prepared.json
       fixtures\
       preflight\
+      environment.json
+      calibration\
+      frozen-measurement.json
+      measurement\
+      trials\
 ```
 
-Preparation files are expected: **`prepare` followed by preflight for the same
-manifest/run ID is supported**. Preflight does not reject the directory merely
-because preparation wrote files. It does reject unknown root entries, a
-failed preparation, any earlier preflight, or evidence from another manifest,
-tool/probe binary or protocol. It does not resume partial evidence or append
-new results into an old preflight.
+Preparation and successful preflight/calibration files are expected:
+**`prepare` → preflight → `run` → repeated `render` for the same manifest/run ID
+is supported**. Exclusive create-new stage/attempt records prevent accidental
+reuse. Preparation does not overwrite an existing directory; preflight does
+not resume an earlier preflight; measured `run` rejects any existing measured
+attempt directory. It does not reject the matching preparation/preflight
+files. Only the derived markdown may be overwritten by re-rendering.
 
-Use a new ID (`phase2-002`, etc.) and matching `OutputDirectory` after failures,
+Use a new ID (replace the portable `clock-run-NEW` placeholder consistently)
+and matching `OutputDirectory` after failures,
 tool/probe/protocol edits or another preflight. Preserve failed directories.
 Inputs can be reused only after hash verification. Do not place artifacts or
 the probe beneath the unique output directory. Never replace a seal with
@@ -118,21 +191,23 @@ to stage or force-add. The exact eventual report target remains:
 
 `C:\ai\git\fhir-candle\scratch\1001-01\performance.md`
 
-## Seed manifest (schema 1)
+## Seed manifest (schema 3)
 
 JSON property names are case-sensitive; unknown properties are rejected.
 The example below supplies the actual pinned paths and settings. Before use,
-the caller must supply real candidate provenance and an existing isolation
-evidence file, and change `Isolation.Authorized` to `true` **only after**
-confirming the described controls. `false` deliberately prevents accidental
-launch; it is not a request for the runner to create controls.
+the caller must supply real candidate provenance, an existing isolation
+evidence file, and actual `Conditions`. Change `Isolation.Authorized` to
+`true` **only after** confirming the described controls. `false` and the
+zero/unobserved machine-condition example deliberately prevent accidental
+launch. They are not requests for the runner to create controls, invent
+hardware or assert a quiet machine.
 
 ```json
 {
-  "SchemaVersion": 1,
-  "ProtocolVersion": "candle-perf-phase1-v1",
-  "RunId": "phase2-001",
-  "OutputDirectory": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\phase2-001",
+  "SchemaVersion": 3,
+  "ProtocolVersion": "candle-perf-phase3-v3",
+  "RunId": "clock-run-NEW",
+  "OutputDirectory": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\clock-run-NEW",
   "ReportPath": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance.md",
   "Baseline": {
     "PackageId": "fhir-candle",
@@ -161,9 +236,9 @@ launch; it is not a request for the runner to create controls.
     "TieredPgo": true,
     "ReadyToRun": true
   },
-  "ProbePath": "C:\\ai\\git\\fhir-candle\\src\\FhirCandle.Performance.Probe\\bin\\Release\\net8.0\\FhirCandle.Performance.Probe.dll",
-  "ToolSourceRevision": "01edcd71caf223c7738fa65957bd8fae61ebe0ab",
-  "ToolSourceDescription": "Uncommitted phase-two tooling on the named revision; prepare seals the actual tool and probe bytes separately.",
+  "ProbePath": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\artifacts-001\\clock-run-NEW-tools\\FhirCandle.Performance.Probe.dll",
+  "ToolSourceRevision": "e72c517d21ccb7c2f98b4dbd0b32ae4c9071db80",
+  "ToolSourceDescription": "Uncommitted phase-three v3 clock-aware recovery on the named revision; replace with the actual verified source/build identity. prepare seals fresh immutable tool/probe bytes separately from both unchanged applications.",
   "Port": 58260,
   "Tenant": "perf",
   "HttpWorkers": 1,
@@ -174,27 +249,53 @@ launch; it is not a request for the runner to create controls.
   },
   "Bounds": {
     "StartupSeconds": 120,
-    "SetupSeconds": 600,
-    "BatchSeconds": 60,
+    "SetupSeconds": 1200,
+    "BatchSeconds": 7200,
     "RequestSeconds": 30,
     "SettlingMilliseconds": 1000,
     "ShutdownSeconds": 15,
     "SampleMilliseconds": 10
+  },
+  "Measurement": {
+    "SchemaVersion": 1,
+    "TrialsPerVariant": 3,
+    "InitialMutationOperations": 256,
+    "InitialOtherOperations": 1024,
+    "MaximumPilotOperations": 8192,
+    "MinimumSamples": 10,
+    "ControlMilliseconds": 1000
+  },
+  "Conditions": {
+    "ObservedUtc": "1970-01-01T00:00:00+00:00",
+    "Hardware": "REPLACE with actually observed machine/processor description",
+    "PhysicalMemoryBytes": 0,
+    "PowerConditions": "REPLACE with observed power policy and AC/battery conditions; do not change global settings",
+    "BackgroundConditions": "REPLACE with observed background activity and reserved execution-window conditions",
+    "ToolBuildSdk": "10.0.400",
+    "ObservationSource": "REPLACE with the actual local observation record and observation time"
   }
 }
 ```
 
-`SchemaVersion`, protocol, pins, runtime settings, port, tenant, worker count
-and bounds have the defaults shown. Paths, run ID, both artifact input
-objects, tool source identity/description and isolation evidence are required.
+The C# defaults for schema, protocol, pins, runtime, port, tenant, worker count
+and bounds are shown above. Serialized `SchemaVersion`, `ProtocolVersion`,
+`Bounds` and every bound field are **required**, so omitted old settings
+cannot silently acquire v3 evidence semantics. Paths, run ID, both artifact input
+objects, tool source identity/description, isolation evidence and actual
+execution `Conditions` are required. The example build SDK must likewise be
+confirmed, not copied as evidence. The tool records its actual OS,
+architecture, logical processors, machine name, runtime and invocation in
+`environment.json`; physical RAM/power/background conditions come from the
+caller, never from the renderer's current machine.
 The C# definitions beside `ExperimentRunner` are the authoritative typed
 schema. A changed manifest, including changed serialized bytes, requires new
 preparation under a new run ID.
 
-The seed schema and CLI arguments have not changed. The probe protocol remains
-`candle-perf-phase1-v1` because its wire messages and limits are unchanged.
-The **prepared handoff schema is now 2**, with a mandatory `Workload` ledger
-whose `ContractVersion` is **`candle-perf-preflight-v2`**. Old preparation or
+The seed and prepared schemas are **3**, the probe protocol is
+**`candle-perf-phase3-v3`**, and the distinct measurement contract is
+**`candle-perf-measurement-v3`**. The mandatory prepared `Workload` ledger
+has `ContractVersion` **`candle-perf-preflight-v3`**; this versions the
+changed response/receipt evidence, **not the unchanged clinical generator**. Old preparation or
 preflight evidence cannot be upgraded/reused in place. The workload ledger
 records `Algorithm`, `Seed`, `PreflightOperations`, six `Corpora`, seventy-two
 `Cases`, and both exact `StatusProfiles`. Every corpus/case descriptor records
@@ -203,6 +304,17 @@ its fixture path, ordered request seals, total payload bytes and
 Prefer, body byte length and SHA-256 (the empty-byte hash for bodyless GETs).
 The order hash covers the indented UTF-8 serialized seal array, without a BOM.
 `FixtureFiles` independently seals all **78** full fixture files.
+
+`Measurement.SchemaVersion` is 1. Defaults are intentionally fixed except
+`TrialsPerVariant`, which permits 3–10 before preparation. Exactly 128 warm-up
+operations, 10 ms sampling, ten actual samples per stream, the 8,192-operation
+pilot ceiling and the common bounds are part of this versioned protocol.
+If bounds/capacity are inadequate, retain the failure and explicitly revise
+the common protocol before a **new** run; do not edit an accepted freeze.
+Schema-1/2 manifests, v1/v2 probe/measurement/preflight contracts, old 600/60-second bounds
+and earlier prepared directories are rejected, not silently upgraded.
+The parent writes a **new** manifest such as `experiment-clock-run-NEW.json`; the implementation
+does not edit an existing manifest or any prior runtime evidence.
 
 ## Caller-owned candidate provenance
 
@@ -296,11 +408,15 @@ failures, not trusted caches. No baseline source-build fallback exists.
 ## Prepare and bounded live preflight
 
 These are **new tool invocations**, not alternative build recipes. From the
-implementation repository root, with the seed filled and net8 tools built:
+implementation repository root, after the caller fills the fresh v3 seed,
+verifies all targets and copies the complete net8 runner/probe closure into
+the new immutable input directory (never over an older copy):
 
 ```powershell
-& "C:\Program Files\dotnet\dotnet.exe" .\src\FhirCandle.Performance\bin\Release\net8.0\FhirCandle.Performance.dll prepare --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment.json
-& "C:\Program Files\dotnet\dotnet.exe" .\src\FhirCandle.Performance\bin\Release\net8.0\FhirCandle.Performance.dll run --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment.json --preflight-only
+& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll prepare --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment-clock-run-NEW.json
+& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll run --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment-clock-run-NEW.json --preflight-only
+& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll run --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment-clock-run-NEW.json
+& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll render --run-directory C:\ai\git\fhir-candle\scratch\1001-01\performance-data\clock-run-NEW
 ```
 
 The runner itself must not inherit `DOTNET_STARTUP_HOOKS` or
@@ -358,6 +474,15 @@ security policy. Public `IServerAddressesFeature` addresses and PID-attributed
 Windows TCP tables are retained. Unexpected listeners, outbound TCP or
 non-loopback peers fail the gate. These stopped observations are not a
 continuous network monitor or a replacement for external isolation.
+
+For the authorized recovery, the user confirmed a **private network with no
+other clients connecting**. This is operational isolation, not a claim that
+the firewall blocks external clients. The retained enabled Private-profile
+`.NET Host` inbound allow permits the actual host broadly; it does not make
+the wildcard listeners private. No additional firewall rule is requested or
+changed. Preserve that disclosure and the user's confirmation in the fresh
+manifest's isolation evidence, along with all original runtime/network,
+tenant, population, response and receipt gates.
 
 The historical cache-option parser differs. The public, **effective**
 `CandleConfig.FhirCacheDirectory` must equal the owned
@@ -424,15 +549,56 @@ The runner creates one unpredictable, current-user-only named pipe before
 launch. The handshake checks actual Windows pipe peer PIDs, process start
 times (PID-reuse defense), current-user SID, a 256-bit child-only nonce,
 protocol version and probe hash in both directions. The nonce is redacted
-from evidence. Requests/hellos are limited to 4 KiB, snapshot replies to 2 MiB,
-and a child to 64 commands. Idle setup is bounded by a finite session deadline;
-partial frames and exchanges have the individual request deadline. The
-default total child session is startup + setup + two shutdown intervals
-(750 seconds), and no configured session can exceed 20 minutes.
+from evidence. Commands, hellos and activation configuration remain limited
+to **4 KiB UTF-8**; stopped replies are **256 MiB**. A child still permits
+**4,096 commands** and stopped **32-identity chunks**, not a sample of the
+identity audit or an unbounded protocol. Oversized frame prefixes are
+rejected **before** payload allocation.
+
+`ProbeProtocol` defines the fixed common v3 contract with unchanged v2 capacities. The manifest's
+`Bounds` must match; these are not additional general-purpose tuning knobs.
+The frozen handoff retains those bounds and the versioned contract.
+`launch.json` records `Bounds`, the bracketed `Issued` observation and monotonic
+`DeadlineTimestamp`,
+`RequestTimeoutSeconds` and `ProtocolLimits` (versions, lifetime/export/
+boundary limits, sample capacity, all frame/command/identity caps and saved/
+HTTP caps). Offline validation checks them against the same constants:
+
+| Bound | Both variants, v3 |
+|-|-|
+| Startup/readiness | 120 seconds |
+| Cumulative setup/audit (outside work) | 1,200 seconds |
+| Full fixed batch and probe window | 7,200 seconds |
+| Individual HTTP / ordinary pipe exchange / end acknowledgement | 30 seconds |
+| **Stopped window export** | **Separate 120 seconds on each peer** |
+| Fixed natural/full-GC settling | 1,000 ms |
+| Boundary allowance | 10 seconds |
+| Each graceful / exact-child shutdown interval | 15 seconds |
+| Nominal cadence / fixed capacity per stream | 10 ms / **720,004** |
+| Required actual in-work samples | At least **10 independently from each stream** |
+| Saved large-record reader ceiling | **1 GiB = 1,073,741,824 bytes** |
+
+The exact supported child lifetime is **120 + 1,200 + 7,200 + 30 + 120 +
+10 + 2×15 = 8,710 seconds**. Both activation validation and the actual
+lifetime CTS use the remaining **monotonic** deadline, exactly
+`Issued.Before + Issued.Frequency × 8710`. The bracketed `Issued.Utc`
+remains evidence but cannot extend or consume this budget. A greater,
+expired or unbounded lifetime is rejected; the obsolete 20-minute ceiling
+does not coexist with the longer work window. Parent startup and owned-child
+shutdown limits still apply independently.
+
+Ordinary exchanges and partial command frames remain 30 seconds. Only
+`export-window` selects 120 seconds in the shared exchange-deadline helper.
+The parent disposes the end-ack deadline before starting a fresh export
+exchange, without linking it to the expired end/batch CTS or applying
+`CommandAsync`'s ordinary limit. The child likewise links export only to
+its overall lifetime, not a preceding request. Serialization, buffer copies,
+pipe export and inspection stay **after end counters and all post-work
+footprints**; no capacity repair moves them into an armed window.
 
 Readiness uses fully consumed FHIR metadata responses and checks the declared
 FHIR version. Startup, setup and requests have the manifest deadlines; HTTP
-bodies are capped at 4 MiB and each log stream at two million characters.
+bodies remain capped at **4 MiB** and each log stream at **2,097,152 characters**.
 Pipe establishment races the exact owned child's exit: an early exit fails
 with its PID, exit code and retained `stderr.log` path rather than waiting for
 the full startup deadline.
@@ -522,7 +688,78 @@ First stored version is `"1"`; only the explicitly bound ID and validated server
 `meta.versionId`/`meta.lastUpdated` are added to expected resource content.
 ETag, Location and Last-Modified must match. Arrays, all remaining metadata,
 fixed timestamps and cross-resource references are not globally discarded.
-No timing is performed by the oracle.
+The oracle samples no clock; it audits independently recorded evidence.
+
+### Clock observations, UTC envelopes and limits
+
+Every fully consumed response, including untimed readiness/seed/read-back/
+audit/delete interactions, records required `Started` and `Completed`
+`ClockObservation` values. Each contains the **actual unmodified** `Utc`,
+`Before` and `After` monotonic ticks bracketing that UTC read, and positive
+`Frequency`. Default/missing fields, negative/zero clock identities,
+inverted brackets, frequency mismatch and nonsequential intervals fail.
+No UTC is clamped, synthesized from Stopwatch, or relabelled as an elapsed
+clock. Old response records cannot silently acquire these fields.
+
+The existing batch/per-operation Stopwatch boundaries and fixed operation
+counts are unchanged. Each response bracket must fit its independently
+recorded logical-operation interval, including all search pages. Parent
+observations before launch, after `Process.Start`, and after awaited exit
+prove child ordering inside the enclosing trial observations. Parent
+PID/start-time identity must be constant across a sequential invocation;
+the child PID and OS process-start timestamp still match **exactly** across
+handshake, process, counters/samples and exit records. OS start timestamps
+authenticate identity, not chronological relationships to UTC reads.
+Separate preparation, preflight/freeze and measurement invocations are
+causally linked by verified immutable handoff hashes, not comparisons of
+unrelated parent clocks or wall-clock dates.
+
+For a request with UTC observations `Us`, `Ue`, monotonic brackets
+`[s0,s1]`, `[e0,e1]`, and common frequency `f`, require `0 < s0 <= s1 < e0 <= e1`.
+In 100-ns UTC ticks the evidence gives:
+
+- `dLo = floor((e0-s1) × 10,000,000 / f)` and
+  `dHi = ceil((e1-s0) × 10,000,000 / f)`.
+- Net UTC discrepancy lies in
+  `[(Ue-Us).Ticks-dHi, (Ue-Us).Ticks-dLo]`.
+  A net adjustment is detectable only when zero is outside that interval.
+  This detects forwards/backwards steps or rate/slew discrepancies, without
+  an arbitrary tolerance or a claim about the OS cause.
+- Newly assigned persistence metadata and hook processing times must lie
+  within **`[min(Us, Ue-dHi), max(Ue, Us+dHi)]`**. These are the outer bounds
+  of the two endpoint clock trajectories over that request, not a global
+  process-lifetime allowance. Ordinary unchanged clocks yield the observed
+  interval plus only the measured endpoint uncertainty. The old blanket
+  extra second is not retained.
+
+Creates still require new identity, version `"1"`, correct headers and full
+content. Updates/restoration still require actual changed clinical content,
+identity continuity and exactly one version increment, now with timestamp
+binding to **that mutation request**, not a requirement that UTC exceed the
+previous version's timestamp. Immutable reads/searches/deletes retain exact
+bound versions and `meta.lastUpdated` (including its offset), even if a
+previously validated timestamp lies in the newly corrected clock's future.
+The HTTP Last-Modified comparison retains its defined whole-second precision;
+it is not a metadata timing tolerance.
+
+Each hook expectation carries its own POST observations. Every registered
+processing time and the first persisted Bundle metadata are bound to that
+POST's envelope, not the later audit GET. Repeated Bundle reads retain the
+first exact binding. Receipt ordering, all event/Bundle/subscription/topic/
+context fields, absence of double storage and strict fixed clinical
+timestamp **spellings/offsets** are unchanged.
+
+Offline completeness rechecks seed digest clocks, all response endpoints and
+cross-operation gaps in execution order, operation/batch nesting, launch/
+exit observations, and exact process identities. Reports disclose detected
+within-response, between-response and parent-lifecycle net discrepancies,
+their uncertainty, raw UTC examples and references. **Endpoint observations
+cannot locate a step's exact instant or detect cancelling intermediate
+changes.** The derived envelope is an explicit interpretation limit, not
+proof of an exact wall-time event or a guarantee that no adjustment occurred;
+out-of-envelope metadata still fails rather than widening the bound.
+No clock-setting operation, sleep to provoke NTP, or OS-event-log permission
+is needed for reproduction. Event logs support the historical diagnosis only.
 
 ### Full deterministic workload and preflight lifecycle
 
@@ -602,15 +839,15 @@ receipt-list entry. Hook snapshots explicitly inspect absence of all eight
 embedded clinical identities. Create cases additionally DELETE their four
 new resources **after** recording +4 growth and read-backs, validating each
 200 deleted representation and the restored corpus counts/absent IDs.
-This untimed cleanup exercises the future restoration primitive; it is not
+This untimed cleanup exercises the shared restoration primitive; it is not
 128-operation warm-up or a measured create batch.
 
-The unchanged probe limits suffice: at most 12 requested identities for a
-four-event hook, five stopped snapshots for create cases, and bounded
-2 MiB snapshot replies / 64 commands. Effective settings, actual empty-source
+The semantic substage needs at most 12 requested identities for a four-event
+hook and five stopped snapshots for create cases. It uses the same versioned
+bounded protocol as calibration/measurements. Effective settings, actual empty-source
 registration/filesystem, network ownership and sealed loaded assemblies are
 checked at **every** snapshot, including after the exercised case and cleanup.
-The common **600-second setup deadline includes all seeding, read-backs,
+The common **1,200-second setup deadline includes all seeding, read-backs,
 case operations, audits and cleanup**. Request deadlines and all existing
 startup/shutdown bounds remain active. Exceeding a bound is a retained gate
 failure, never permission to reduce the corpus, omit audits or silently retry.
@@ -671,8 +908,10 @@ including stored Bundle and receipt checks, on .NET/ASP.NET 8.0.30, with
 exit 0 and no forced termination for all six children. Preserve that evidence
 and its archived tool/probe bytes. It does not establish the 72-row full-scale
 gate, new update/search/delete semantics, or any performance measurement.
-Rebuild the Phase 2 tools, choose a **fresh Phase 2 run ID**, and prepare new
-tool/fixture seals before attempting the expanded preflight.
+The later `phase2-001` passed the entire expanded semantic gate, independently
+audited as described above. Neither establishes a Phase 3 metric. Rebuild the
+new tools, choose a **fresh Phase 3 run ID**, and prepare new tool/protocol
+seals before the semantic-plus-calibration preflight.
 
 `prepared.json` now contains the full workload ledger described above;
 `fixtures\corpora\<corpus-key>.json` contains all clinical bytes and
@@ -715,24 +954,395 @@ including a handoff/seal failure before launch, consumes the run directory.
 Atomic create-new ownership of `started.json` prevents a competing invocation
 from appending failures into another invocation's active evidence.
 
-Only **`preflight\completed.json`** establishes the full untimed gate. It
+Only **`preflight\completed.json`**, its complete matrix/raw seals and absence
+of failure markers establish the full untimed gate. It
 requires 72 successful pairs, 144 successful fresh process instances
 (PID **and start time**, since OS PIDs may be reused), four completed and
 validated operations per child, clean shutdown, and unchanged seals.
 It explicitly records **`MeasuredTrials: 0`**, **`BenchmarkComplete: false`**
-and the remaining Phase 3/4 gates. The matrix also carries those flags.
+and the remaining calibration/measurement/report gates. The matrix also carries those flags.
 Completion also requires a zero CLI exit and no failure markers; a cancelled
 or failed final evidence write retains `finalization-failed.json` and cannot
 be accepted merely because a partial `completed.json` exists.
-The unchanged Phase 1 `Program` wrapper still prints its legacy six-gate
-sentence after the runner's new full-matrix message; that sentence is not
-the Phase 2 completion criterion. Full `run`/`render` remain refused.
+The CLI now reports the completed stage precisely. After this semantic
+substage it continues into the calibration below; it does not print the
+legacy six-gate sentence or claim a complete benchmark.
+
+## Calibration, count freezing and expected execution cost
+
+There is deliberately **no small-smoke substitute, implicit calibration skip,
+or separate command that can bless existing phase-two measurements**.
+`run --preflight-only` performs these stages sequentially:
+
+1. The unchanged full 72-pair semantic matrix: **144 children**, four case
+   operations each, true full corpora and all seed read-backs.
+2. For each of the **72 exact version/scale/case profiles**, a fresh sampled
+   baseline/candidate pilot pair, starting at **256** logical operations for
+   `patient-create`, `observation-create`, `subscription-receive`, and
+   **1,024** for every update/read/search case. Both pilots include the real
+   128-operation warm-up/restoration and both one-second controls.
+3. If (and only if) a pilot's only validation failures are fewer than ten
+   actual samples in either stream in a sampled work or control window,
+   retain **both** results, including the `coverage-insufficient` status,
+   and double N for **both** variants.
+   Any other counter, protocol, oracle, timeout, buffer, process, shutdown or
+   state failure stops the run. Continue only up to common N=8,192.
+   Offline retention validation waives only this minimum, not any other
+   evidence check; insufficient pilots cannot be selected or accepted.
+   Accepted repetitions never pool pilot observations or change N.
+4. At the adequate shared N, run a fresh **sampler-off pair**, with the
+   identical corpus, warm-up, histories, boundaries and controls. Counters,
+   CPU and stopped footprints remain active; both in-window sample streams
+   must actually be empty. Sampler-off work is calibration, not a measured
+   cell with missing mandatory memory.
+5. Save `calibration\completed.json` and **`frozen-measurement.json`** only
+   after all profiles have complete adequate selected normal/off pairs.
+   Selected sampled pairs and accepted trials require at least ten actual
+   samples in each stream in both controls **and** work. The frozen handoff
+   (schema 3) binds the prepared
+   manifest/app/runtime/tool/probe identity, settings/bounds, 72 input-file
+   seals/order hashes/payload sizes, every pilot attempt and selected normal/
+   off pair, full semantic raw-file seals, environment and exact schedule.
+
+Without coverage retries this preflight uses **432 fresh children**:
+144 semantic + 144 normal pilot + 144 sampler-off. Each inadequate normal
+pair adds two children. Minimum setup is **2,613,600 seed PUTs plus 2,613,600
+full read-backs** across those stages. Calibration adds 36,864 actual warm-up
+operations, their audits, controls and measured pilot batches.
+
+The separate accepted `run` defaults to **432 more children**, 2,613,600
+seed PUTs plus the same number of read-backs, 55,296 warm-up operations, and
+the fixed measured batches. `TrialsPerVariant` 4–10 increases these counts
+proportionally. Scheduling is repetition, then the frozen 72-row order;
+the first variant of a pair is baseline when
+`(zero-based-case-block + repetition - 1) % 2 == 0`, candidate otherwise.
+Each dispatch has a unique attempt ID/directory; PID **and start time**
+must be independent, sequential and non-overlapping, established by the
+recorded parent monotonic lifecycle rather than wall-clock ordering.
+
+The parent's observed phase-two semantic-only run took about **35 minutes**.
+Using its setup rate alone, the new no-retry preflight and accepted run each
+have about **105 minutes of equivalent seed work**. This is an extrapolation,
+**not a measured Phase 3 duration**, and it seriously understates total work.
+The retained four-operation **untimed semantic diagnostics** project up to
+**2,472.65 seconds for the unchanged 1,024-operation large Observation batch**.
+For the **36 Observation-search variant/version/scale profiles alone**, two
+calibration plus three measured repetitions project **43.62 hours**, or
+**49.08 hours including 128-operation warm-ups**, before other cases, setup,
+audits, settling, hashing and I/O. These are planning projections only,
+**never benchmark comparison results or guarantees**.
+
+The 7,200-second common window gives roughly 2.91× that largest diagnostic
+batch projection; it is a finite adequacy allowance, not proof that a run
+will finish or a performance budget. Reserve a genuinely adequate multi-day
+execution window and memory/disk capacity. No operation reduction, skipped
+fresh gate, duration-driven count, simultaneous variant, reuse of prior
+bytes/run IDs or pooling is justified by that cost. Rendering
+rehashes and revalidates potentially large raw data; allow minutes or longer
+according to actual local evidence volume, with no server execution.
+
+Once prepared, **do not rebuild over the accepted tool/probe output paths**.
+`prepare` seals runner DLL/deps/runtimeconfig, its referenced probe and the
+injected probe; hashes are rechecked around every lifetime. An archived
+tool directory can be used if it contains the complete matching net8 tool
+closure and the manifest names those exact probe bytes. Moving paths or
+rebuilding after preparation changes identity and requires a fresh run.
+Application artifacts remain the independently sealed release and candidate,
+never the moving implementation application's `bin` output.
+
+## Fixed measurement lifecycle and accounting
+
+All calibration and accepted case children use the same lifecycle:
+
+1. Prepare warm/measured inputs once per row/count, request messages, body
+   buffers, response lists and sample storage outside timing. Establish
+   authenticated readiness; warm the probe's real window/export, checkpoint
+   and reflection paths in a no-HTTP primer before IDLE. Retain readiness/
+   warmed inventories, then the one-second **idle control**.
+2. Capture **idle-natural** and **idle-forced**. Full-GC means blocking full
+   collection, finalizer drain, second blocking full collection, then the
+   fixed one-second settle; no compaction-only or candidate-only alternative.
+3. Seed and validate every corpus instance through normal PUT/GET. Warm the
+   **actual case exactly 128 times**. The same shared response oracle used
+   by semantic preflight validates every returned update, create, read,
+   search page and hook outcome; it cannot check only the final update.
+4. Read every created/final-updated resource or full-content warm Bundle.
+   Record +128 growth before deleting warm creates, validate every delete
+   representation, and audit all 128 absent identities in stopped chunks.
+   Restore update clinical fields by an ordinary PUT only when needed:
+   Patient's even 128-toggle batch already ends `active: true`, so it
+   keeps actual version **129** with **zero** extra PUTs. Observation
+   restores quantity 37.5 and original `...05Z` time, preserving the Patient
+   reference and advancing version **129 → 130**. Retain original/warmed/
+   restored metadata plus the final restored read in all cases.
+5. Retain all **128 warm Bundles and all receipt entries** for the hook.
+   No hook resource/receipt cleanup is attempted. Full stored contents,
+   count/order/event timestamps/focus/context and absence of embedded
+   instances are checked. The original empty-source marker and every
+   built-in resource count remain visible.
+6. Capture the complete warm/prepared inventory, the one-second
+   **loaded control**, then **loaded-natural** and **loaded-forced**.
+   Controls measure their own all-server allocation/GC/CPU/samples; they do
+   not share a denominator with work and are not subtracted.
+7. `begin-window` is an ordinary bounded/authenticated command parsed while
+   stopped. The server snapshots `GC.GetTotalAllocatedBytes(true)`, individual
+   generation counts, total GC pause duration and process CPU into a
+   preallocated **88-byte binary boundary**. It starts only its window-scoped
+   sampler. No JSON command parsing, diagnostic DTO/export or reflection
+   occurs while armed: only the fixed one-byte end marker is accepted.
+8. The client records begin-command/ack timestamps, then whole-batch and
+   each logical-operation monotonic timestamps. It sends fixed N sequential
+   requests and fully consumes bodies. It preallocates primary messages,
+   stream buffers and result lists. Client header/body retention and minimal
+   continuation parsing/continuation-message creation are included and
+   disclosed, not called pure store time. Paging remains part of the same
+   logical operation. All full-content validation is outside the window.
+9. Stop client timing before stopping its PID sampler and sending End.
+   Server End stops its sampler before taking the matching end counters.
+   Before any export/diagnostic enumeration or audit reads, the probe
+   captures **post-immediate**, waits one second, captures **post-settled**,
+   then applies the same full-GC/one-second-settle protocol and captures
+   **post-forced**. Only then is the binary end acknowledged and stopped JSON
+   export allowed. The late acknowledgement/GC wait is **not** client T or
+   the saved server counter interval.
+10. Audit all collected responses, persisted creates/final updates, all
+    retained warm plus measured Bundles and every receipt. Full measured
+    create IDs and hook event numbers start at **129**, so none collides with
+    warm-up. Record final inventories; save raw evidence; request ordinary
+    shutdown and await the exact owned child before another starts.
+
+The **1,200-second setup/audit budget** is cumulative outside the separate work
+window. Any incomplete/failed response batch retains attempted/completed
+counts and raw available responses. An HTTP error that fully consumed a
+body is still an **invalid logical batch**, never a faster success.
+Failure cannot change planned N or concatenate later work.
+
+### Memory definitions and observer cost
+
+Both samplers have **720,004 preallocated slots each** (7,200×1,000/10 + four
+boundary slots), nominal 10 ms cadence, actual monotonic timestamps and explicit
+dropped/error counts. The probe stores structs containing
+`GC.GetTotalMemory(false)` plus last-GC heap, fragmentation, committed bytes
+and GC index. The external sampler opens no unrelated PID: it samples only
+the owned `Process` handle and verified start time's working set, private
+bytes and CPU. Each struct is 48 bytes: **34,560,192 bytes per array,
+69,120,384 bytes combined**, before array/object overhead and stopped export
+copies. This identical larger reservation is disclosed observer cost, not an
+optimization or a reason to subtract memory. It sleeps outside windows;
+runner/testhost memory is excluded from server metrics.
+
+At least **ten actual samples from each stream inside client work** are
+required, independently of boundary/control samples. Wrong PID/lifetime,
+out-of-server-window timestamps, nonmonotonic time, overrun, stream absence,
+negative counters and nonpositive durations invalidate completion.
+The maximum inside work is a **sampled lower bound**. No process-lifetime
+high-water substitutes for it. Last-GC metrics are explicitly distinct from
+occupied estimates and forced retention.
+
+Stopped footprint structs capture process/managed values **before** creating
+diagnostic DTOs, enumerating stores/assemblies or issuing further audit
+requests. They retain both natural and forced observations and counters,
+with corresponding known inventories. Natural loaded−idle and
+settled-post−loaded deltas are separate from forced loaded−idle and
+forced-post−loaded deltas. Working-set growth is not allocation; neither
+a peak nor one forced checkpoint proves a leak.
+
+Binary handshakes, pipe/BCL bookkeeping, the sampler and ordinary server
+timers/background work remain in whole-server counter deltas. Capture
+control allocation/GC/CPU and normal-versus-off work on every profile;
+interpret their magnitude and accepted-trial spread, **never subtract a
+guessed constant**. Missing adequacy is a blocker; adequate but noisy data
+can be inconclusive. Identical bytes/settings do not imply zero observer
+perturbation.
+
+## Raw schema, offline completeness and report interpretation
+
+New durable files/types are versioned and append-only:
+
+| Evidence | Meaning |
+|-|-|
+| `environment.json` | Actual preparation OS/architecture/processor/runtime/invocation plus caller-observed hardware/RAM/power/background/build SDK; no inherited secret dump |
+| `calibration\<row>\pilot-NN-inputs.json` | The exact once-generated `TrialInputs`: 128 warm requests, measured requests at offset 128, optional original-content restore PUT |
+| `calibration\...\trial.json` | Schema-3 `TrialRecord` for each normal/off/failed-coverage attempt; never accepted measurement |
+| `frozen-measurement.json` | Schema-3 immutable 72-profile identity/input/count/calibration/schedule handoff, parent identity and bracketed freeze observation |
+| `measurement\started.json`, `ledger.json`, `completed.json` | Actual runner invocation, schema-3 ledger with bracketed lifetime/parent identity, all attempted/unattempted dispatches, failure status and independently checked completion |
+| `trials\trial-NNNN\trial.json` | Origin, unique plan/process lifetime, prepare/freeze/input seals, status/failure, seed totals, warm histories, windows, controls, checkpoints and all raw references |
+| `warmup-raw.json`, `measured-raw.json` | Every logical operation's unchanged monotonic times, separate required response UTC/monotonic observations, attempt/completion/page counts, unmodified bodies and headers; unfinished slots, errors and available partial-body/header evidence remain explicitly incomplete |
+| `audit.json` | Every warm/measured per-operation oracle, ordinary read/delete/restore response and all stopped identity chunks |
+| `seals-before.json`, `seals-after.json` | Exact prepared/probe/protocol/input identity checked around the entire lifetime |
+
+All raw references are relative to the run, carry byte length and SHA-256,
+and reject traversal/reparse points. Trial raw references enumerate the
+entire child directory except the self-describing `trial.json`; the ledger
+or calibration profile hashes that record separately. Seed digests are
+allowed **only after full body/header validation**, retaining every
+original identity/version/timestamp rather than discarding metadata.
+All other warm/measured/audit response bodies are retained.
+
+The v3 writer retains **compact JSON for `BatchWindow` and `TrialRecord`**,
+including the work window and both controls. It does not drop sample
+timestamps, fields or responses. Other input/handoff files retain their
+indented serialization and clinical/order identities. Both saved-evidence
+readers and raw-reference verifier share the **1-GiB** large-record cap, check the advertised file
+length before allocating and reject truncation or growth instead of using
+an unbounded read-to-end. Dedicated 1-MiB manifest, 32-MiB prepared/corpus
+and 4-MiB HTTP limits remain smaller. Oversized writes fail, not truncate.
+
+The deterministic capacity proof uses the widest signed numeric spellings
+(even wider than valid nonnegative metrics), actual serializers and checked
+arithmetic:
+
+- A compact managed sample is at most **216 bytes**; 720,004 entries plus
+  commas/brackets occupy **156,240,869 bytes**. A complete stopped window
+  reply, including counters and all three post-work footprints, fits
+  **157,289,445 bytes even with 1 MiB reserved for its envelope**, below
+  268,435,456 bytes. Full 128+8,192 receipt growth is checked separately.
+- A compact process sample is at most **209 bytes**; its complete array is
+  **151,200,841 bytes**. Conservatively allowing **all three** saved
+  windows to fill **both** arrays gives **922,325,130 bytes**.
+  Adding **128 MiB for non-sample fields** totals **1,056,542,858 bytes**,
+  below the 1-GiB reader cap. The tested full record includes all 8,192
+  operation timings, warm metadata, checkpoints and raw references; even a
+  50,000-reference inventory with synthetic 1-KiB relative names fits that
+  envelope reserve. The updated proof serializes both added maximum-width
+  lifecycle observations (**135 bytes each**) and maximum-width parent
+  identity as part of the actual envelope, not a waived size limit.
+  Response/seed observations are retained in their separately bounded raw
+  files, not added to the sample arrays. Arbitrarily enlarged strings/bodies are not promised
+  acceptance; actual writer/reader caps still fail closed.
+- Small one-/two-entry production-serialization roundtrips verify the
+  analytical expansion of the **whole** records, without a 1-GiB test
+  allocation or a two-hour sleep. In-memory fixtures remain explicitly
+  `unit-fixture`/size-only data, never saved live evidence.
+
+`MeasurementReport.ValidateCompletenessAsync` independently checks:
+
+- Exactly the frozen 72 keys, both variants and all configured independent
+  repetitions; equal N for every paired cell and every repetition; identical
+  schedule/input/config/protocol/app/runtime/tool/probe identity.
+- Full 144-child semantics, complete adequate selected normal/off/control
+  calibration for all profiles, retained coverage-only inadequate pairs
+  (work or sampled controls) and doubling history, no unindexed attempt
+  files or silently dropped failures.
+- Every raw hash/length, clean exact-child shutdown and authenticated
+  PID/start-time/nonce/probe receipt; repeated loaded-assembly/package seals
+  and actual runtime/effective configuration, not a guessed `.Core` name.
+- Every counter component, both sample streams, coverage, ordering,
+  nonnegative deltas, controls, all seven checkpoints and forced-GC ordering.
+  Mandatory JSON numeric fields are marked required: missing gen0 is not
+  mistaken for a valid zero collection count.
+- Full saved corpus digest/order/metadata, all warm/measured returned
+  resources/pages through the same independent oracle, ordinary restoration/
+  deletion/read-backs, exact post populations and every retained Bundle/
+  ordered receipt/event. A 32-ID sample never stands in for a full audit.
+- Real execution origin and all failure/attempt statuses. Unit fixtures
+  retain `Origin: "unit-fixture"` and can never complete a live report.
+
+The renderer reads only these saved files. It does not rehash/open external
+application assemblies, start a server, access a network service, call
+`prepare`, or borrow current-host memory/power state. Missing preparation,
+calibration, a variant/trial/case/metric or raw oracle produces an explicit
+**INCOMPLETE** markdown report and exit **1**, including the auditable fixed
+72-row status shape. It never infers completion from an old report.
+Re-rendering the same unchanged evidence yields the same markdown.
+
+A complete report includes executive **observed improved/regressed/
+inconclusive** findings; artifact/package/source/build/runtime dates and
+names; actual conditions and invocations; all 72 paired rows in every metric
+family; individual trial values/outliers; normal/off/control evidence;
+payload/population/built-in inventories; correctness/failures and raw links.
+Every metric has units, median **across independent trials**, min–max,
+trial counts and N values, candidate/baseline ratio, percent and absolute
+change. Primary time is T/N and throughput N/T; managed B/op uses the
+entire server allocation delta over the same fixed successful N. Gen0/1/2
+counts and counts/1,000 are separate; pause duration is not a fictitious sum
+of generation counts.
+
+Zero-baseline and negative incremental-memory denominator ratios are
+`n/a` with their reason and absolute change. Descriptive direction labels
+require disjoint observed trial ranges and a positive baseline; overlap,
+equal values and unavailable relative interpretation are inconclusive.
+Where normal/off share a metric (time/throughput/allocation and stopped
+occupied/process footprints), a difference no larger than the maximum
+observed within-variant normal/off difference is also inconclusive. No
+sampler-off active peak is invented, and this diagnostic rule subtracts
+nothing. Actual sample counts and mean observed inter-sample intervals have
+their own 72-row descriptive tables. This is not a significance test or a
+regression budget. Historical app/
+SDK/dependency/compiler/built-in/status differences, loopback/client/probe/
+background overhead, ordinary UI/host/data-protection and one-machine scope
+are explicit confounders. The report never attributes differences to the SDK
+alone or promises a win.
+
+## Verification ownership and remaining execution gates
+
+The interrupted implementation added these **nine** facts in the existing xUnit/VSTest
+class, exercising used helpers and real recorder state guards with
+non-performance fixtures:
+
+- `TrialScheduleUsesFreshProcessesAndAlternatesPairs`
+- `WarmupRestoresClinicalStateAndRetainsHookReceipts`
+- `CounterWindowExcludesSetupAuditAndForcedGc`
+- `PeakUsesOnlyServerPidSamplesInsideWindow`
+- `FailedBatchCannotBecomeSuccessfulByChangingDenominator`
+- `SummaryUsesIndependentTrialMedians`
+- `RatiosHandleZeroAndNegativeBaselines`
+- `RendererRejectsMissingVariantCaseTrialOrMetric`
+- `RendererReproducesSavedEvidenceWithoutServerExecution`
+
+The capacity recovery adds six coupled boundary/proof facts:
+
+- `Phase3V3RequiresRevisedManifestAndFixedCapacities` (updated contract; capacities unchanged)
+- `ProbeDeadlineCoversFiniteEndExportAndShutdownEnvelope`
+- `StoppedExportUsesIndependentBudgetWhileOrdinaryRemainsThirtySeconds`
+- `MaximumSampleReplyAndTrialSizesFitWithoutTruncation`
+- `BoundedReadersRejectOversizedFramesAndChangingEvidenceBeforeAllocation`
+- `WindowDurationRejectsOverflowAndPastSupportedBoundary`
+
+They also pin UTF-8 (not character-count) configuration limits, cancellation
+during reply deserialization, finite clock arithmetic and independent
+coverage. Existing incomplete-batch/denominator/counter/oracle tests remain.
+The clock-aware recovery adds seven deterministic facts:
+
+- `ClockObservationsBracketUtcAndBoundForwardBackwardSteps`
+- `RollbackWarmupSearchRetainsEveryOperationAndIndependentTiming`
+- `ClockAwareMutationsAndImmutableReadsKeepStrictMetadata`
+- `HookReceiptRangesSurviveClockStepsWithoutAcceptingWrongTimestamps`
+- `ClockEvidenceRejectsMissingDefaultNegativeAndReorderedObservations`
+- `LifecycleOrderUsesParentMonotonicEvidenceNotUtcChronology`
+- `SavedLifecycleRejectsForgedIdentityAndMissingClockEvidence`
+
+The existing saved-render roundtrip also checks unmodified rollback UTC,
+adjustment/uncertainty disclosure and interpretation limits. The size proof
+includes the new fields, and activation tests retain finite ceilings while
+proving UTC steps cannot change the monotonic budget. The retention-only
+coverage correction adds two facts:
+
+- `RetainedPilotControlCoverageCannotBecomeSelectedOrAccepted`
+- `RetainedPilotCoverageFlagPreservesSamplerOffValidation`
+
+They exercise the actual trial validator with one-second loaded controls
+containing 65 managed/four process samples and the inverse, strict
+selected/accepted rejection, invalid/missing control evidence, and unchanged
+sampler-off behavior. There are **42 tooling facts** (the preceding 40 plus
+two), with **4,300 expected project tests**
+if the previously verified 4,258 application tests remain unchanged. These
+are source counts/expectations, **not a claim of new full-suite or live results**.
+The implementer runs the documented net10 build and focused class; the parent
+must run T-project from `AGENTS.md`, then the
+documented all-target restore/build/test sequence before using the net8 CLI.
+It must seal a fresh complete tool closure, use a fresh schema-3 seed/run ID,
+and run the complete semantic plus
+actual calibration gate, inspect boundary gaps/coverage/cleanup, exercise
+incomplete and reproducible rendering, and only then collect the accepted
+full matrix. Phase 3 is not operationally complete until those gates pass;
+Phase 4's actual populated report remains a separate required outcome.
 
 Six additional named `PerformanceEvidenceTests` facts cover deterministic
 corpora, the exact matrix, all notification shapes, error/truncated/wrong-ID
 searches, no-op/version/growth failures, and every receipt entry including
-embedded double-storage. The twelve earlier tooling facts and existing
-application tests are unchanged. These synthetic controls never count as
+embedded double-storage. The earlier artifact/semantic tooling controls and existing
+application assertions remain in place. These synthetic controls never count as
 live preflight or measured trials.
 
 Unit fixtures, source inspection, this documentation, or existence of

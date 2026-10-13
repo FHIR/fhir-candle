@@ -56,6 +56,9 @@ public sealed record WorkloadRequest(
     int Number, string Method, string RelativeUrl, byte[]? Body, string? Prefer,
     string[] ExpectedIdentities, NotificationInput? Notification = null);
 
+/// <summary>All actual-case inputs are generated once before either warm-up or counter windows.</summary>
+public sealed record TrialInputs(WorkloadRequest[] Warmup, WorkloadRequest[] Measured, WorkloadRequest? Restore);
+
 /// <summary>BCL-only input generation; no product or Firely serializers are involved.</summary>
 public static class Workloads
 {
@@ -65,11 +68,14 @@ public static class Workloads
     /// <summary>The request-order seed, with an explicitly specified 32-bit shuffle.</summary>
     public const int Seed = 100101;
 
-    /// <summary>The untimed workload contract, independent of the unchanged probe wire protocol.</summary>
-    public const string ContractVersion = "candle-perf-preflight-v2";
+    /// <summary>The clock-aware evidence contract; clinical algorithm, bytes, seed and request order are unchanged.</summary>
+    public const string ContractVersion = "candle-perf-preflight-v3";
 
     /// <summary>Exactly four logical operations per untimed case, with no measured warm-up.</summary>
     public const int PreflightOperations = 4;
+
+    /// <summary>Exactly this many actual-case operations precede every pilot and accepted trial.</summary>
+    public const int WarmupOperations = 128;
 
     private static readonly string[] _caseIds =
     [
@@ -214,6 +220,22 @@ public static class Workloads
         }
 
         return requests;
+    }
+
+    /// <summary>Uses disjoint create/event numbers and preserves the same update permutation/history on both sides.</summary>
+    public static TrialInputs CreateTrialInputs(WorkloadCase workload, WorkloadCorpus corpus, int measuredCount)
+    {
+        WorkloadRequest[] warmup = CreateRequests(workload, corpus, WarmupOperations);
+        WorkloadRequest[] measured = CreateRequests(workload, corpus, measuredCount, WarmupOperations);
+        WorkloadRequest? restore = null;
+        if (workload.CaseId.EndsWith("-update", StringComparison.Ordinal))
+        {
+            string identity = warmup[0].RelativeUrl;
+            CorpusResource original = corpus.Resources.Single(resource => resource.Identity == identity);
+            restore = new(0, "PUT", identity, original.Body, "return=representation", [identity]);
+        }
+
+        return new(warmup, measured, restore);
     }
 
     /// <summary>Creates a unique Bundle/status pair and an increasing, single full-content event.</summary>

@@ -9,6 +9,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Pipes;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -24,6 +26,7 @@ public class PerformanceEvidenceTests
     // Pure configured identity; these fixtures never read or create this path.
     private static readonly string _sourceDirectory = OperatingSystem.IsWindows()
         ? @"C:\candle-perf-fixture\child\empty-source" : "/candle-perf-fixture/child/empty-source";
+    private static long _fixtureTimestamp = 1000000;
 
     /// <summary>The manifest cannot silently select another release, source, runtime, output or concurrency.</summary>
     [Fact]
@@ -41,11 +44,16 @@ public class PerformanceEvidenceTests
             manifest with { Runtime = manifest.Runtime with { AspNetCoreVersion = "8.0.28" } },
             manifest with { Runtime = manifest.Runtime with { DotnetHostPath = @"C:\other\dotnet.exe" } },
             manifest with { Runtime = manifest.Runtime with { Architecture = "X86" } },
+            manifest with { Runtime = manifest.Runtime with { ServerGc = false } },
+            manifest with { Runtime = manifest.Runtime with { TieredPgo = false } },
             manifest with { ReportPath = @"C:\ai\git\fhir-candle\scratch\other\performance.md" },
             manifest with { OutputDirectory = ExperimentRunner.DataRoot + @"\another-run" },
             manifest with { ProbePath = manifest.OutputDirectory + @"\probe.dll" },
             manifest with { RunId = @"..\escape" },
             manifest with { ProtocolVersion = "another-protocol" },
+            manifest with { SchemaVersion = 1 },
+            manifest with { Measurement = manifest.Measurement with { TrialsPerVariant = 2 } },
+            manifest with { Measurement = manifest.Measurement with { MinimumSamples = 9 } },
             manifest with { HttpWorkers = 2 },
             manifest with { Isolation = manifest.Isolation with { Authorized = false } },
             manifest with { Bounds = manifest.Bounds with { StartupSeconds = int.MaxValue } },
@@ -341,9 +349,11 @@ public class PerformanceEvidenceTests
     {
         using Process process = Process.GetCurrentProcess();
         string owner = OperatingSystem.IsWindows() ? ProbeProtocol.CurrentOwnerSid() : "fixture-owner";
+        ClockObservation issued = ClockObservation.Capture();
         ProbeConfiguration configuration = new(
             "candle-perf-" + Guid.NewGuid().ToString("N"), process.Id, process.StartTime.ToUniversalTime().Ticks,
-            owner, new string('A', 64), DateTimeOffset.UtcNow.AddMinutes(1), 5);
+            owner, new string('A', 64), issued, issued.Before + (issued.Frequency * ProbeProtocol.ChildLifetimeSeconds),
+            ProbeProtocol.RequestSeconds);
         configuration.Validate();
         ProbeHello hello = new(ProbeProtocol.Version, process.Id, configuration.ParentStartTimeUtcTicks,
             process.Id, configuration.ParentStartTimeUtcTicks, owner, configuration.Token, new string('B', 64));
@@ -376,6 +386,8 @@ public class PerformanceEvidenceTests
             hello with { ParentStartTimeUtcTicks = hello.ParentStartTimeUtcTicks + 1 },
             hello with { ChildStartTimeUtcTicks = hello.ChildStartTimeUtcTicks + 1 },
             hello with { ProbeSha256 = new string('D', 64) },
+            hello with { ProtocolVersion = "candle-perf-phase3-v1" },
+            hello with { ProtocolVersion = "candle-perf-phase3-v2" },
             hello with { ProtocolVersion = "unknown" },
         ];
         foreach (ProbeHello wrong in wrongMessages)
@@ -637,14 +649,15 @@ public class PerformanceEvidenceTests
             storedBundle["meta"] ??= new JsonObject();
             storedBundle["meta"]!["versionId"] = "1";
             storedBundle["meta"]!["lastUpdated"] = storedAt.ToString("O", CultureInfo.InvariantCulture);
+            (ClockObservation bundleStart, ClockObservation bundleEnd) = FixtureClocks(storedAt.AddTicks(-1), storedAt.AddTicks(1));
             ResponseEvidence bundleRead = new(200, new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
                 ["Content-Type"] = ["application/fhir+json; charset=utf-8"],
                 ["ETag"] = ["W/\"1\""], ["Last-Modified"] = [storedAt.UtcDateTime.ToString("r", CultureInfo.InvariantCulture)],
                 ["Location"] = ["http://127.0.0.1:58260/fhir/perf/Bundle/" + challenge.BundleId],
-            }, JsonSerializer.SerializeToUtf8Bytes(storedBundle), storedAt, storedAt);
+            }, JsonSerializer.SerializeToUtf8Bytes(storedBundle), bundleStart, bundleEnd);
             _ = CorrectnessOracle.ValidateResponse(bundleRead, 200, challenge.Notification,
-                "http://127.0.0.1:58260/fhir/perf", storedAt.AddMinutes(-1));
+                "http://127.0.0.1:58260/fhir/perf");
             foreach (Action<JsonObject> mutate in new Action<JsonObject>[]
             {
                 root => root["entry"]!.AsArray().RemoveAt(2),
@@ -664,7 +677,7 @@ public class PerformanceEvidenceTests
                 mutate(returned);
                 Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
                     bundleRead with { Body = JsonSerializer.SerializeToUtf8Bytes(returned) },
-                    200, challenge.Notification, "http://127.0.0.1:58260/fhir/perf", storedAt.AddMinutes(-1)));
+                    200, challenge.Notification, "http://127.0.0.1:58260/fhir/perf"));
             }
 
             foreach (string timestamp in new[]
@@ -699,7 +712,7 @@ public class PerformanceEvidenceTests
                     mutate(returned);
                     Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
                         bundleRead with { Body = JsonSerializer.SerializeToUtf8Bytes(returned) },
-                        200, challenge.Notification, "http://127.0.0.1:58260/fhir/perf", storedAt.AddMinutes(-1)));
+                        200, challenge.Notification, "http://127.0.0.1:58260/fhir/perf"));
                 }
             }
 
@@ -718,7 +731,8 @@ public class PerformanceEvidenceTests
             TenantSnapshot snapshot = StoreInspection.InspectTenant(
                 new ExplicitDictionary(new Dictionary<string, object> { ["perf"] = Store([Receipt(challenge)]) }), "perf", []);
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            CorrectnessOracle.ValidateReceipt(snapshot, challenge, now.AddMinutes(-1), now);
+            (ClockObservation receiptStart, ClockObservation receiptEnd) = FixtureClocks(now.AddMinutes(-1), now);
+            CorrectnessOracle.ValidateReceipt(snapshot, challenge, receiptStart, receiptEnd);
             string key = Assert.Single(snapshot.ReceivedNotifications).Key;
             ReceiptSnapshot receipt = snapshot.ReceivedNotifications[key][0];
             ReceiptSnapshot[][] wrongReceipts = [
@@ -739,12 +753,12 @@ public class PerformanceEvidenceTests
                     // Leave the correct key and claimed totals intact: the lists/events must still be inspected.
                     ReceivedNotifications = new SortedDictionary<string, ReceiptSnapshot[]>(StringComparer.Ordinal) { [key] = invalid },
                 };
-                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(wrong, challenge, now.AddMinutes(-1), now));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(wrong, challenge, receiptStart, receiptEnd));
             }
 
             ResponseEvidence response = CreatedObservation(challenge, now);
             ResourceBinding binding = CorrectnessOracle.ValidateResponse(response, 201, challenge.Observation,
-                "http://127.0.0.1:58260/fhir/perf", now.AddMinutes(-1));
+                "http://127.0.0.1:58260/fhir/perf");
             Assert.Equal("server-assigned-1", binding.Id);
             foreach (string effectiveDateTime in new[] { "2025-01-02T03:04:05+00:00", "2025-01-02T03:04:06Z" })
             {
@@ -756,7 +770,7 @@ public class PerformanceEvidenceTests
                 returned["effectiveDateTime"] = effectiveDateTime;
                 Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
                     response with { Body = JsonSerializer.SerializeToUtf8Bytes(returned) },
-                    201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf", now.AddMinutes(-1)));
+                    201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf"));
             }
 
             TenantSnapshot initial = snapshot with
@@ -837,9 +851,9 @@ public class PerformanceEvidenceTests
                 ["Location"] = ["http://127.0.0.1:58260/fhir/perf/Observation/wrong-id"],
             };
             Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(response with { Headers = wrongHeaders },
-                201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf", now.AddMinutes(-1)));
+                201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf"));
             Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(response with { StatusCode = 422 },
-                201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf", now.AddMinutes(-1)));
+                201, challenge.Observation, "http://127.0.0.1:58260/fhir/perf"));
         }
     }
 
@@ -1053,7 +1067,7 @@ public class PerformanceEvidenceTests
         {
             CorpusResource resource = corpus.Resources[index];
             ResponseEvidence response = ResourceResponse(resource.Body, resource.Id, 200, now);
-            ResourceBinding binding = CorrectnessOracle.ValidateResponse(response, 200, resource.Body, BaseUrl, now.AddSeconds(-1));
+            ResourceBinding binding = CorrectnessOracle.ValidateResponse(response, 200, resource.Body, BaseUrl);
             expected.Add(resource.Identity, new ExpectedResource(resource.Body, binding));
         }
 
@@ -1106,7 +1120,7 @@ public class PerformanceEvidenceTests
             workload.FhirVersion == "R4" && workload.PatientCount == 1000 && workload.CaseId == "patient-create");
         byte[] input = Workloads.CreateRequests(create, corpus)[0].Body!;
         ResponseEvidence created = ResourceResponse(input, "server-generated-1", 201, now);
-        _ = CorrectnessOracle.ValidateResponse(created, 201, input, BaseUrl, now.AddSeconds(-1));
+        _ = CorrectnessOracle.ValidateResponse(created, 201, input, BaseUrl);
         foreach ((string header, string value) in new[]
         {
             ("Location", BaseUrl + "/Patient/other"),
@@ -1116,13 +1130,13 @@ public class PerformanceEvidenceTests
         {
             Dictionary<string, string[]> headers = new(created.Headers, StringComparer.OrdinalIgnoreCase) { [header] = [value] };
             Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
-                created with { Headers = headers }, 201, input, BaseUrl, now.AddSeconds(-1)));
+                created with { Headers = headers }, 201, input, BaseUrl));
         }
 
         JsonObject alteredBody = JsonNode.Parse(created.Body)!.AsObject();
         alteredBody["identifier"]![0]!["value"] = "another-request-sentinel";
         Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
-            created with { Body = JsonSerializer.SerializeToUtf8Bytes(alteredBody) }, 201, input, BaseUrl, now.AddSeconds(-1)));
+            created with { Body = JsonSerializer.SerializeToUtf8Bytes(alteredBody) }, 201, input, BaseUrl));
     }
 
     /// <summary>Real field changes, every version step, distinct creations and exact growth are mandatory.</summary>
@@ -1140,7 +1154,7 @@ public class PerformanceEvidenceTests
             CorpusResource existing = corpus.Resources.Single(resource => resource.Identity == requests[0].RelativeUrl);
             byte[] previousContent = existing.Body;
             ResourceBinding previous = CorrectnessOracle.ValidateResponse(
-                ResourceResponse(existing.Body, existing.Id, 200, now), 200, existing.Body, BaseUrl, now.AddSeconds(-1));
+                ResourceResponse(existing.Body, existing.Id, 200, now), 200, existing.Body, BaseUrl);
             foreach (WorkloadRequest request in requests)
             {
                 string nextVersion = (request.Number + 1).ToString(CultureInfo.InvariantCulture);
@@ -1174,7 +1188,7 @@ public class PerformanceEvidenceTests
             }
 
             ResponseEvidence finalRead = ResourceResponse(previousContent, existing.Id, 200, now.AddSeconds(4), "5");
-            Assert.Equal(previous, CorrectnessOracle.ValidateResponse(finalRead, 200, previousContent, BaseUrl, now.AddSeconds(-1), previous));
+            Assert.Equal(previous, CorrectnessOracle.ValidateResponse(finalRead, 200, previousContent, BaseUrl, previous));
         }
 
         WorkloadCase create = Workloads.CreateCases().Single(item =>
@@ -1182,7 +1196,7 @@ public class PerformanceEvidenceTests
         WorkloadRequest[] inputs = Workloads.CreateRequests(create, corpus);
         ResourceBinding[] created = inputs.Select(request => CorrectnessOracle.ValidateResponse(
             ResourceResponse(request.Body!, "new-" + request.Number.ToString("D8", CultureInfo.InvariantCulture), 201, now),
-            201, request.Body!, BaseUrl, now.AddSeconds(-1))).ToArray();
+            201, request.Body!, BaseUrl)).ToArray();
         string[] initialIds = corpus.Resources.Where(resource => resource.ResourceType == "Patient").Select(resource => resource.Id).ToArray();
         CorrectnessOracle.ValidateCreateGrowth("Patient", initialIds, 100, 104, 4, created);
         foreach (int wrongCount in new[] { 100, 103, 105 })
@@ -1224,7 +1238,7 @@ public class PerformanceEvidenceTests
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             ReceiptExpectation[] expected = Enumerable.Range(1, 4).Select(number =>
-                new ReceiptExpectation(Workloads.CreateNotification(version, number), now.AddMinutes(-1), now.AddMinutes(1))).ToArray();
+                FixtureReceiptExpectation(Workloads.CreateNotification(version, number), now.AddMinutes(-1), now.AddMinutes(1))).ToArray();
             ReceiptSnapshot[] receipts = Enumerable.Range(1, 4).Select(number => Receipt(Workloads.CreateProbeChallenge(version, number))).ToArray();
             Dictionary<string, ResourceIdentity?> identities = new(StringComparer.Ordinal);
             Dictionary<string, bool> presence = new(StringComparer.Ordinal);
@@ -1312,6 +1326,1575 @@ public class PerformanceEvidenceTests
         }
     }
 
+    /// <summary>Scripted reads reproduce the observed rollback without changing the machine clock or waiting for NTP.</summary>
+    [Fact]
+    public void ClockObservationsBracketUtcAndBoundForwardBackwardSteps()
+    {
+        DateTimeOffset startedUtc = DateTimeOffset.Parse("2026-10-07T03:14:24.2135622Z", CultureInfo.InvariantCulture);
+        DateTimeOffset completedUtc = DateTimeOffset.Parse("2026-10-07T03:14:23.9405349Z", CultureInfo.InvariantCulture);
+        const long Start = 18581526495358;
+        const long End = 18581533966826;
+        ScriptedClock clock = new([Start + 1, Start + 2, End - 2, End - 1], [startedUtc, completedUtc], 10000000);
+        ClockObservation first = ClockObservation.Capture(clock);
+        ClockObservation last = ClockObservation.Capture(clock);
+        ClockAssessment rollback = ClockObservation.Assess(first, last);
+        Assert.Equal(startedUtc, first.Utc);
+        Assert.Equal(completedUtc, last.Utc);
+        Assert.True(last.Utc < first.Utc);
+        Assert.Equal(0.7471468, (double)(End - Start) / first.Frequency, 7);
+        Assert.Equal(End - Start - 4, rollback.MinimumElapsedTicks);
+        Assert.Equal(End - Start - 2, rollback.MaximumElapsedTicks);
+        Assert.True(rollback.AdjustmentDetected);
+        Assert.True(rollback.MaximumAdjustmentTicks < -TimeSpan.TicksPerSecond);
+        Assert.Equal(completedUtc.AddTicks(-rollback.MaximumElapsedTicks), rollback.EarliestUtc);
+        Assert.Equal(startedUtc.AddTicks(rollback.MaximumElapsedTicks), rollback.LatestUtc);
+
+        foreach (int stepSeconds in new[] { -2, 0, 2 })
+        {
+            ScriptedClock source = new([100, 102, 1000100, 1000102],
+                [startedUtc, startedUtc.AddTicks(1000000).AddSeconds(stepSeconds)], 10000000);
+            ClockObservation before = ClockObservation.Capture(source);
+            ClockObservation after = ClockObservation.Capture(source);
+            ClockAssessment assessment = ClockObservation.Assess(before, after);
+            Assert.Equal(stepSeconds != 0, assessment.AdjustmentDetected);
+            Assert.InRange(TimeSpan.FromSeconds(stepSeconds).Ticks, assessment.MinimumAdjustmentTicks, assessment.MaximumAdjustmentTicks);
+            Assert.Equal(4, assessment.MaximumElapsedTicks - assessment.MinimumElapsedTicks);
+            Assert.True(assessment.Contains(before.Utc));
+            Assert.True(assessment.Contains(after.Utc));
+            Assert.False(assessment.Contains(assessment.EarliestUtc.AddTicks(-1)));
+            Assert.False(assessment.Contains(assessment.LatestUtc.AddTicks(1)));
+        }
+
+        // Rounding is outwards in UTC ticks, including a frequency that is not a multiple of ten million.
+        ClockAssessment fractional = ClockObservation.Assess(new(startedUtc, 1, 1, 3), new(startedUtc.AddSeconds(1), 2, 2, 3));
+        Assert.Equal(3333333, fractional.MinimumElapsedTicks);
+        Assert.Equal(3333334, fractional.MaximumElapsedTicks);
+    }
+
+    /// <summary>All 128 R5 reference-search warm responses remain complete, including the real operation-64 rollback shape.</summary>
+    [Fact]
+    public void RollbackWarmupSearchRetainsEveryOperationAndIndependentTiming()
+    {
+        const string BaseUrl = "http://127.0.0.1:58260/fhir/perf";
+        WorkloadCorpus corpus = Workloads.CreateCorpus("R5", 1000);
+        WorkloadCase workload = Workloads.CreateCases().Single(item =>
+            item.FhirVersion == "R5" && item.PatientCount == 1000 && item.CaseId == "observation-reference");
+        TrialInputs inputs = Workloads.CreateTrialInputs(workload, corpus, 1024);
+        DateTimeOffset utc = DateTimeOffset.Parse("2026-10-07T03:14:24.2135622Z", CultureInfo.InvariantCulture);
+        DateTimeOffset rollbackUtc = DateTimeOffset.Parse("2026-10-07T03:14:23.9405349Z", CultureInfo.InvariantCulture);
+        Dictionary<string, ExpectedResource> resources = corpus.Resources.ToDictionary(resource => resource.Identity,
+            resource => new ExpectedResource(resource.Body, new(resource.ResourceType, resource.Id, "1", utc.AddDays(-1))));
+        OperationResult[] results = inputs.Warmup.Select(request =>
+        {
+            long start = 18581526495358 + ((request.Number - 64L) * 10000000);
+            long end = start + 7471468;
+            DateTimeOffset first = utc.AddSeconds(request.Number - 64);
+            if (request.Number > 64)
+            {
+                first = first.AddTicks((rollbackUtc - utc).Ticks - (end - start - 3));
+            }
+            DateTimeOffset last = request.Number == 64 ? rollbackUtc : first.AddTicks(end - start - 3);
+            HttpExchangeEvidence page = SearchPage(BaseUrl + "/" + request.RelativeUrl,
+                request.ExpectedIdentities.Select(identity => resources[identity]).ToArray(), 10, first);
+            ResponseEvidence response = ObserveResponse(page.Response, first, last, start, end);
+            return new OperationResult(new(request.Number, start, end, 1, true), [page with { Response = response }], 1);
+        }).ToArray();
+        CorrectnessOracle.ValidateCaseRequests(workload, corpus, inputs.Warmup, 128);
+        MeasurementReport.ValidateOperationResponses(results, 10000000, results[0].Timing.Start, results[^1].Timing.End);
+        BatchValidation valid = CorrectnessOracle.ValidateBatchResponses(workload, inputs.Warmup,
+            results.Select(result => new CompletedOperation(result.Timing.Number, result.Exchanges)).ToArray(),
+            resources, CorrectnessOracle.StatusProfile("baseline"), BaseUrl);
+        Assert.Equal(128, valid.Operations.Length);
+        Assert.All(valid.Operations, operation => Assert.Equal(10, operation.Bindings.Length));
+        ResponseEvidence failedHistorically = results[63].Exchanges[0].Response;
+        Assert.Equal(utc, failedHistorically.StartedUtc);
+        Assert.Equal(rollbackUtc, failedHistorically.CompletedUtc);
+        Assert.True(CorrectnessOracle.ValidateResponseTiming(failedHistorically).AdjustmentDetected);
+        byte[] saved = MeasurementReport.SerializeEvidence(results);
+        OperationResult[] decoded = JsonSerializer.Deserialize<OperationResult[]>(saved, ProbeProtocol.JsonOptions)!;
+        MeasurementReport.ValidateOperationResponses(decoded, 10000000, results[0].Timing.Start, results[^1].Timing.End);
+        Assert.Equal(saved, MeasurementReport.SerializeEvidence(decoded));
+        // Exercise the same evidence-only clock aggregation used for raw seed/readiness/warm/audit streams.
+        Type clockType = typeof(MeasurementReport).GetNestedType("ResponseClock", BindingFlags.NonPublic)!;
+        object clocks = JsonSerializer.Deserialize(JsonSerializer.Serialize(decoded.Select(result => new
+        {
+            Label = "warmup:" + result.Timing.Number.ToString(CultureInfo.InvariantCulture),
+            result.Exchanges[0].Response.Started, result.Exchanges[0].Response.Completed,
+        }), ProbeProtocol.JsonOptions), typeof(List<>).MakeGenericType(clockType), ProbeProtocol.JsonOptions)!;
+        ClockObservation firstClock = decoded[0].Exchanges[0].Response.Started;
+        ClockObservation lastClock = decoded[^1].Exchanges[0].Response.Completed;
+        ClockObservation launched = new(firstClock.Utc.AddTicks(-1000), firstClock.Before - 1000, firstClock.Before - 1000, firstClock.Frequency);
+        ClockObservation exited = new(lastClock.Utc.AddTicks(1000), lastClock.After + 1000, lastClock.After + 1000, lastClock.Frequency);
+        object summary = typeof(MeasurementReport).GetMethod("ValidateResponseClocks", BindingFlags.NonPublic | BindingFlags.Static)!
+            .Invoke(null, [clocks, launched, exited])!;
+        JsonElement summaryJson = JsonSerializer.SerializeToElement(summary, ProbeProtocol.JsonOptions);
+        Assert.Equal(128, summaryJson.GetProperty("Responses").GetInt32());
+        Assert.Equal(1, summaryJson.GetProperty("AdjustedResponses").GetInt32());
+        Assert.Contains(utc.ToString("O", CultureInfo.InvariantCulture),
+            summaryJson.GetProperty("Examples")[0].GetString()!, StringComparison.Ordinal);
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateBatchResponses(workload, inputs.Warmup,
+            decoded[..127].Select(result => new CompletedOperation(result.Timing.Number, result.Exchanges)).ToArray(),
+            resources, CorrectnessOracle.StatusProfile("baseline"), BaseUrl));
+    }
+
+    /// <summary>Clock steps permit only request-derived mutation metadata; old read bindings, content, versions and headers stay exact.</summary>
+    [Fact]
+    public void ClockAwareMutationsAndImmutableReadsKeepStrictMetadata()
+    {
+        const string BaseUrl = "http://127.0.0.1:58260/fhir/perf";
+        DateTimeOffset utc = DateTimeOffset.Parse("2026-10-07T03:14:24Z", CultureInfo.InvariantCulture);
+        WorkloadCorpus corpus = Workloads.CreateCorpus("R5", 100);
+        foreach (string caseId in new[] { "patient-update", "observation-update" })
+        {
+            WorkloadCase workload = Workloads.CreateCases().Single(item =>
+                item.FhirVersion == "R5" && item.PatientCount == 100 && item.CaseId == caseId);
+            WorkloadRequest request = Workloads.CreateRequests(workload, corpus)[0];
+            CorpusResource original = corpus.Resources.Single(resource => resource.Identity == request.RelativeUrl);
+            ResourceBinding previous = new(original.ResourceType, original.Id, "1", utc);
+            foreach (int step in new[] { -2, 0, 2 })
+            {
+                // The request already starts after a between-operation rollback; an additional step can occur inside it.
+                DateTimeOffset first = utc.AddSeconds(-5);
+                DateTimeOffset last = first.AddMilliseconds(100).AddSeconds(step);
+                DateTimeOffset assigned = last.AddTicks(-1);
+                ResponseEvidence update = ObserveResponse(ResourceResponse(request.Body!, original.Id, 200, assigned, "2"),
+                    first, last, 10000000, 11000000);
+                ResourceBinding binding = CorrectnessOracle.ValidateUpdateResponse(
+                    update, 200, original.Body, request.Body!, previous, BaseUrl);
+                Assert.True(binding.LastUpdated < previous.LastUpdated);
+                ClockAssessment interval = CorrectnessOracle.ValidateResponseTiming(update);
+                foreach (DateTimeOffset outside in new[] { interval.EarliestUtc.AddTicks(-1), interval.LatestUtc.AddTicks(1) })
+                {
+                    ResponseEvidence wrong = ResourceResponse(request.Body!, original.Id, 200, outside, "2") with
+                    {
+                        Started = update.Started, Completed = update.Completed,
+                    };
+                    Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                        wrong, 200, original.Body, request.Body!, previous, BaseUrl));
+                }
+
+                ResponseEvidence read = ObserveResponse(ResourceResponse(request.Body!, original.Id, 200, assigned, "2"),
+                    utc.AddDays(-1), utc.AddDays(-1).AddMilliseconds(100), 12000000, 13000000);
+                CorrectnessOracle.ValidateSequentialResponses([update, read]);
+                Assert.Equal(binding, CorrectnessOracle.ValidateResponse(read, 200, request.Body!, BaseUrl, binding));
+                foreach (string alteredTimestamp in new[]
+                {
+                    assigned.AddTicks(1).ToString("O", CultureInfo.InvariantCulture),
+                    assigned.ToOffset(TimeSpan.FromHours(1)).ToString("O", CultureInfo.InvariantCulture),
+                })
+                {
+                    JsonObject wrong = JsonNode.Parse(read.Body)!.AsObject();
+                    wrong["meta"]!["lastUpdated"] = alteredTimestamp;
+                    Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
+                        read with { Body = JsonSerializer.SerializeToUtf8Bytes(wrong) }, 200, request.Body!, BaseUrl, binding));
+                }
+
+                Dictionary<string, string[]> wrongHeaders = new(update.Headers, StringComparer.OrdinalIgnoreCase) { ["ETag"] = ["W/\"3\""] };
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    update with { Headers = wrongHeaders }, 200, original.Body, request.Body!, previous, BaseUrl));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateUpdateResponse(
+                    update, 200, request.Body!, request.Body!, binding, BaseUrl));
+            }
+        }
+
+        WorkloadCase create = Workloads.CreateCases().Single(item =>
+            item.FhirVersion == "R5" && item.PatientCount == 100 && item.CaseId == "patient-create");
+        byte[] content = Workloads.CreateRequests(create, corpus)[0].Body!;
+        ResponseEvidence created = ObserveResponse(ResourceResponse(content, "new-clock-bound-patient", 201, utc.AddMilliseconds(-250)),
+            utc, utc.AddMilliseconds(-273), 18581526495358, 18581533966826);
+        ResourceBinding newlyBound = CorrectnessOracle.ValidateResponse(created, 201, content, BaseUrl);
+        Assert.Equal("1", newlyBound.VersionId);
+        ResponseEvidence wrongCreation = ResourceResponse(content, newlyBound.Id, 201,
+            CorrectnessOracle.ValidateResponseTiming(created).LatestUtc.AddTicks(1)) with
+        {
+            Started = created.Started, Completed = created.Completed,
+        };
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(wrongCreation, 201, content, BaseUrl));
+    }
+
+    /// <summary>Receipts and first Bundle metadata bind to each POST, including steps during and between requests, never to a later GET.</summary>
+    [Fact]
+    public void HookReceiptRangesSurviveClockStepsWithoutAcceptingWrongTimestamps()
+    {
+        const string BaseUrl = "http://127.0.0.1:58260/fhir/perf";
+        DateTimeOffset utc = DateTimeOffset.Parse("2026-10-07T03:14:24Z", CultureInfo.InvariantCulture);
+        foreach (string version in new[] { "R4", "R4B", "R5" })
+        {
+            WorkloadCorpus corpus = Workloads.CreateCorpus(version, 100);
+            WorkloadCase workload = Workloads.CreateCases().Single(item =>
+                item.FhirVersion == version && item.PatientCount == 100 && item.CaseId == "subscription-receive");
+            WorkloadRequest[] requests = Workloads.CreateRequests(workload, corpus);
+            double[] starts = [0, -2, -1.8, 3.1];
+            double[] ends = [0.1, -1.9, 3, 1.2];
+            CompletedOperation[] completed = requests.Select((request, index) =>
+            {
+                ResponseEvidence outcome = new(200, new() { ["Content-Type"] = ["application/fhir+json"] },
+                    Encoding.UTF8.GetBytes("""{"resourceType":"OperationOutcome","id":"00000000-0000-0000-0000-000000000001","issue":[{"severity":"information","code":"success","diagnostics":"Subscription Notification Received"}]}"""),
+                    default, default);
+                ResponseEvidence observed = ObserveResponse(outcome, utc.AddSeconds(starts[index]), utc.AddSeconds(ends[index]),
+                    10000000 + (index * 2000000), 11000000 + (index * 2000000));
+                return new CompletedOperation(request.Number, [new(BaseUrl + "/" + request.RelativeUrl, observed)]);
+            }).ToArray();
+            BatchValidation audit = CorrectnessOracle.ValidateBatchResponses(workload, requests, completed,
+                new Dictionary<string, ExpectedResource>(), CorrectnessOracle.StatusProfile("candidate"), BaseUrl);
+            ReceiptSnapshot[] receipts = audit.Receipts.Select(receipt =>
+                Receipt(Workloads.CreateProbeChallenge(version, receipt.Notification.EventNumber)) with
+                {
+                    ProcessedDateTime = receipt.Completed.Utc.AddTicks(-1),
+                }).ToArray();
+            CorrectnessOracle.ValidateReceipt(ClinicalSnapshot(100, 1000, 4, receipts), audit.Receipts);
+            foreach (int index in Enumerable.Range(0, 4))
+            {
+                ReceiptExpectation expected = audit.Receipts[index];
+                ClockAssessment bounds = ClockObservation.Assess(expected.Started, expected.Completed);
+                foreach (DateTimeOffset wrongTimestamp in new[] { bounds.EarliestUtc.AddTicks(-1), bounds.LatestUtc.AddTicks(1) })
+                {
+                    ReceiptSnapshot[] wrong = receipts.ToArray();
+                    wrong[index] = wrong[index] with { ProcessedDateTime = wrongTimestamp };
+                    Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(
+                        ClinicalSnapshot(100, 1000, 4, wrong), audit.Receipts));
+                }
+
+                ResponseEvidence bundleRead = ObserveResponse(ResourceResponse(expected.Notification.Body,
+                    expected.Notification.BundleId, 200, expected.Completed.Utc.AddTicks(-2)),
+                    utc.AddDays(-1), utc.AddDays(-1).AddMilliseconds(100), 30000000 + (index * 2000000), 31000000 + (index * 2000000));
+                ResourceBinding binding = CorrectnessOracle.ValidateResponse(
+                    bundleRead, 200, expected.Notification.Body, BaseUrl, received: expected);
+                Assert.Equal(binding, CorrectnessOracle.ValidateResponse(bundleRead, 200, expected.Notification.Body, BaseUrl, binding, expected));
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
+                    bundleRead, 200, expected.Notification.Body, BaseUrl)); // The later GET did not create the Bundle.
+                ResponseEvidence wrongMetadata = ResourceResponse(expected.Notification.Body,
+                    expected.Notification.BundleId, 200, bounds.LatestUtc.AddTicks(1)) with
+                {
+                    Started = bundleRead.Started, Completed = bundleRead.Completed,
+                };
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponse(
+                    wrongMetadata, 200, expected.Notification.Body, BaseUrl, received: expected));
+            }
+        }
+    }
+
+    /// <summary>Strict readers and independent oracles cannot substitute defaults or operation timings for missing endpoint evidence.</summary>
+    [Fact]
+    public void ClockEvidenceRejectsMissingDefaultNegativeAndReorderedObservations()
+    {
+        DateTimeOffset utc = DateTimeOffset.Parse("2026-10-07T03:14:24Z", CultureInfo.InvariantCulture);
+        CorpusResource resource = Workloads.CreateCorpus("R4", 100).Resources[0];
+        ResponseEvidence valid = ObserveResponse(ResourceResponse(resource.Body, resource.Id, 200, utc.AddMilliseconds(50)),
+            utc, utc.AddMilliseconds(100), 10000000, 11000000);
+        ClockObservation[] wrongStarts = [
+            default,
+            valid.Started with { Before = 0 },
+            valid.Started with { Before = -1 },
+            valid.Started with { After = valid.Started.Before - 1 },
+            valid.Started with { Frequency = 0 },
+            valid.Started with { Frequency = -1 },
+            valid.Started with { Frequency = long.MaxValue },
+            valid.Started with { Utc = default },
+            valid.Started with { Utc = utc.ToOffset(TimeSpan.FromHours(1)) },
+            valid.Completed,
+        ];
+        foreach (ClockObservation wrong in wrongStarts)
+        {
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponseTiming(valid with { Started = wrong }));
+        }
+
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponseTiming(valid with { Completed = default }));
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateResponseTiming(
+            valid with { Completed = valid.Completed with { Frequency = valid.Started.Frequency + 1 } }));
+        Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateSequentialResponses([valid, valid]));
+        Assert.Throws<InvalidDataException>(() => ClockObservation.Assess(
+            new(DateTimeOffset.MaxValue, 1, 1, 1), new(DateTimeOffset.MaxValue, 2, 2, 1)));
+        foreach (string endpoint in new[] { "Started", "Completed" })
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(valid, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(endpoint));
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ResponseEvidence>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+            foreach (string field in new[] { "Utc", "Before", "After", "Frequency" })
+            {
+                missing = JsonSerializer.SerializeToNode(valid, ProbeProtocol.JsonOptions)!.AsObject();
+                Assert.True(missing[endpoint]!.AsObject().Remove(field));
+                Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ResponseEvidence>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+            }
+        }
+
+        OperationResult result = new(new(64, 10000000, 11000000, 1, true), [new("unit-fixture", valid)], 1);
+        MeasurementReport.ValidateOperationResponses([result], 10000000, 9999999, 11000001);
+        foreach (OperationResult wrong in new[]
+        {
+            result with { Timing = result.Timing with { Start = valid.Started.Before + 1 } },
+            result with { Timing = result.Timing with { End = valid.Completed.After - 1 } },
+            result with { Timing = result.Timing with { End = result.Timing.Start } },
+            result with { Timing = result.Timing with { Start = 0 } },
+            result with { Timing = result.Timing with { Completed = false } },
+            result with { AttemptedHttpRequests = 2 },
+        })
+        {
+            Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateOperationResponses([wrong], 10000000, 1, 12000000));
+        }
+
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateOperationResponses([result], 1000, 1, 12000000));
+        foreach (string field in new[] { "Start", "End", "Number", "HttpRequests", "Completed" })
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(result.Timing, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(field));
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<OperationTiming>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+        }
+
+        TrialRecord trial = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        foreach (string field in new[] { "SchemaVersion", "Parent", "Started", "Finished" })
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(trial, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(field));
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TrialRecord>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+        }
+    }
+
+    /// <summary>Wall-clock steps neither overlap sequential children nor excuse forged identities, clocks or metric origins.</summary>
+    [Fact]
+    public void LifecycleOrderUsesParentMonotonicEvidenceNotUtcChronology()
+    {
+        (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+        trials[0] = trials[0] with { Finished = trials[0].Finished with { Utc = trials[0].StartedUtc.AddSeconds(-1) } };
+        trials[1] = trials[1] with
+        {
+            Started = trials[1].Started with { Utc = trials[0].StartedUtc.AddDays(-1) },
+            Finished = trials[1].Finished with { Utc = trials[0].StartedUtc.AddDays(1) },
+        };
+        Assert.Empty(MeasurementReport.ValidateMatrix(frozen, trials));
+        Assert.True(trials[0].ProcessStartUtcTicks > trials[0].FinishedUtc.UtcTicks);
+        Assert.True(trials[1].StartedUtc < trials[0].FinishedUtc);
+        foreach (TrialRecord invalid in new[]
+        {
+            trials[1] with { Parent = default },
+            trials[1] with { Parent = trials[1].Parent with { ProcessId = trials[1].Parent.ProcessId + 1 } },
+            trials[1] with { Parent = trials[1].Parent with { ProcessStartUtcTicks = trials[1].Parent.ProcessStartUtcTicks + 1 } },
+            trials[1] with { Started = default },
+            trials[1] with { Finished = trials[1].Started },
+            trials[1] with { Started = trials[0].Started },
+            trials[1] with { Started = trials[1].Started with { Frequency = 10000000 } },
+            trials[1] with { ProcessStartUtcTicks = trials[1].ProcessStartUtcTicks + 1 },
+            trials[1] with { SchemaVersion = 1 },
+        })
+        {
+            TrialRecord[] wrong = trials.ToArray();
+            wrong[1] = invalid;
+            Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen, wrong));
+        }
+    }
+
+    /// <summary>Saved launch/process/exit records retain exact OS identities while parent observations prove actual lifetime ordering.</summary>
+    [Fact]
+    public async Task SavedLifecycleRejectsForgedIdentityAndMissingClockEvidence()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "candle-clock-lifecycle-fixture-" + Guid.NewGuid().ToString("N"));
+        const string DirectoryName = "unit-child";
+        Directory.CreateDirectory(Path.Combine(root, DirectoryName));
+        try
+        {
+            TrialRecord trial = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+            ClockObservation issued = trial.Started with { Before = 100010, After = 100011 };
+            ClockObservation requested = issued with { Utc = trial.StartedUtc.AddSeconds(-2), Before = 100020, After = 100021 };
+            ClockObservation launched = requested with { Before = 100030, After = 100031 };
+            ClockObservation exited = requested with { Utc = trial.StartedUtc.AddSeconds(-3), Before = 125000, After = 125001 };
+            async Task Save(string name, object value) => await File.WriteAllBytesAsync(Path.Combine(root, DirectoryName, name),
+                JsonSerializer.SerializeToUtf8Bytes(value, ProbeProtocol.JsonOptions));
+            await Save("launch.json", new
+            {
+                Requested = requested,
+                ProbeConfiguration = new
+                {
+                    ParentProcessId = trial.Parent.ProcessId, ParentStartTimeUtcTicks = trial.Parent.ProcessStartUtcTicks,
+                    Issued = issued, DeadlineTimestamp = issued.Before + (issued.Frequency * ProbeProtocol.ChildLifetimeSeconds),
+                    RequestTimeoutSeconds = ProbeProtocol.RequestSeconds,
+                },
+            });
+            await Save("process.json", new
+            {
+                trial.ProcessId, StartedUtc = new DateTimeOffset(trial.ProcessStartUtcTicks, TimeSpan.Zero),
+                trial.Parent, Observed = launched,
+            });
+            JsonObject exit = JsonSerializer.SerializeToNode(new
+            {
+                trial.ProcessId, StartedUtc = new DateTimeOffset(trial.ProcessStartUtcTicks, TimeSpan.Zero),
+                trial.Parent, Observed = exited, ExitCode = 0, ForcedTermination = false, GracefulFailure = (string?)null,
+                StandardOutputOverflow = false, StandardErrorOverflow = false,
+            }, ProbeProtocol.JsonOptions)!.AsObject();
+            await Save("exit.json", exit);
+            MethodInfo validate = typeof(MeasurementReport).GetMethod("ValidateExitAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
+            Task Validate() => (Task)validate.Invoke(null,
+                [root, DirectoryName, trial.ProcessId, trial.ProcessStartUtcTicks, trial.Parent, trial.Started, trial.Finished, CancellationToken.None])!;
+            await Validate();
+            foreach (Action<JsonObject> mutate in new Action<JsonObject>[]
+            {
+                value => value["ProcessId"] = trial.ProcessId + 1,
+                value => value["StartedUtc"] = new DateTimeOffset(trial.ProcessStartUtcTicks + 1, TimeSpan.Zero),
+                value => value["Parent"]!["ProcessStartUtcTicks"] = trial.Parent.ProcessStartUtcTicks + 1,
+                value => value["Observed"]!["Before"] = 0,
+                value => value["Observed"] = JsonSerializer.SerializeToNode(requested, ProbeProtocol.JsonOptions),
+                value => value["Observed"]!.AsObject().Remove("Frequency"),
+                value => value.Remove("Observed"),
+                value => value["ForcedTermination"] = true,
+            })
+            {
+                JsonObject wrong = (JsonObject)exit.DeepClone();
+                mutate(wrong);
+                await Save("exit.json", wrong);
+                Exception? failure = await Record.ExceptionAsync(Validate);
+                Assert.NotNull(failure);
+                Assert.True(failure is InvalidDataException or JsonException or KeyNotFoundException);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>Both real arrays and the manifest must describe the exact new common protocol, not just a larger timeout.</summary>
+    [Fact]
+    public void Phase3V3RequiresRevisedManifestAndFixedCapacities()
+    {
+        ExperimentManifest manifest = Manifest();
+        ExperimentRunner.ValidateManifest(manifest);
+        Assert.Equal(3, manifest.SchemaVersion);
+        Assert.Equal("candle-perf-phase3-v3", manifest.ProtocolVersion);
+        Assert.Equal("candle-perf-measurement-v3", MeasurementReport.ContractVersion);
+        Assert.Equal(7200, manifest.Bounds.BatchSeconds);
+        Assert.Equal(1200, manifest.Bounds.SetupSeconds);
+        Assert.Equal(10, manifest.Bounds.SampleMilliseconds);
+        Assert.Equal(4, ProbeProtocol.SampleBoundarySlots);
+        Assert.Equal(720004, ProbeProtocol.SampleCapacity);
+        Assert.Equal(ProbeProtocol.SampleCapacity,
+            checked((manifest.Bounds.BatchSeconds * 1000 / manifest.Bounds.SampleMilliseconds) + 4));
+        Assert.Equal(4096, ProbeProtocol.MaximumRequestBytes);
+        Assert.Equal(4096, ProbeProtocol.MaximumCommands);
+        Assert.Equal(32, ProbeProtocol.MaximumIdentities);
+        Assert.Equal(256 * 1024 * 1024, ProbeProtocol.MaximumResponseBytes);
+        Assert.Equal(1024 * 1024 * 1024, MeasurementReport.MaximumEvidenceBytes);
+        Assert.InRange(ProbeProtocol.SampleCapacity, 1, Array.MaxLength);
+        Assert.Equal(48, Marshal.SizeOf<ManagedSample>());
+        Assert.Equal(48, Marshal.SizeOf<ProcessMemorySample>());
+        Assert.Equal(69120384, checked(ProbeProtocol.SampleCapacity *
+            (Marshal.SizeOf<ManagedSample>() + Marshal.SizeOf<ProcessMemorySample>())));
+
+        using ProbeWindowRecorder recorder = new();
+        ManagedSample[] managed = (ManagedSample[])typeof(ProbeWindowRecorder)
+            .GetField("_samples", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(recorder)!;
+        Assert.Equal(ProbeProtocol.SampleCapacity, managed.Length);
+        using Process process = Process.GetCurrentProcess();
+        Type samplerType = typeof(ExperimentRunner).GetNestedType("ProcessSampler", BindingFlags.NonPublic)!;
+        using IDisposable sampler = (IDisposable)Activator.CreateInstance(samplerType,
+            BindingFlags.Instance | BindingFlags.NonPublic, null,
+            [process, process.StartTime.ToUniversalTime().Ticks], CultureInfo.InvariantCulture)!;
+        ProcessMemorySample[] external = (ProcessMemorySample[])samplerType
+            .GetField("_samples", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(sampler)!;
+        Assert.Equal(ProbeProtocol.SampleCapacity, external.Length);
+
+        ExperimentManifest[] incompatible = [
+            manifest with { ProtocolVersion = "candle-perf-phase3-v1" },
+            manifest with { ProtocolVersion = "candle-perf-phase3-v2" },
+            manifest with { SchemaVersion = 2 },
+            manifest with { Bounds = manifest.Bounds with { SetupSeconds = 600, BatchSeconds = 60 } },
+            manifest with { Bounds = manifest.Bounds with { BatchSeconds = 7199 } },
+            manifest with { Bounds = manifest.Bounds with { BatchSeconds = 7201 } },
+            manifest with { Bounds = manifest.Bounds with { SetupSeconds = 1199 } },
+            manifest with { Bounds = manifest.Bounds with { SetupSeconds = 1201 } },
+            manifest with { Bounds = manifest.Bounds with { RequestSeconds = 120 } },
+            manifest with { Bounds = manifest.Bounds with { SampleMilliseconds = 11 } },
+            manifest with { Bounds = manifest.Bounds with { SettlingMilliseconds = 0 } },
+            manifest with { Bounds = manifest.Bounds with { ShutdownSeconds = 30 } },
+            manifest with { Measurement = manifest.Measurement with { InitialMutationOperations = 128 } },
+            manifest with { Measurement = manifest.Measurement with { InitialOtherOperations = 512 } },
+            manifest with { Measurement = manifest.Measurement with { MaximumPilotOperations = 16384 } },
+            manifest with { Measurement = manifest.Measurement with { MinimumSamples = 9 } },
+        ];
+        Assert.All(incompatible, wrong => Assert.Throws<InvalidDataException>(() => ExperimentRunner.ValidateManifest(wrong)));
+        foreach (string field in new[] { "SchemaVersion", "ProtocolVersion", "Bounds" })
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(manifest, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(field));
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ExperimentManifest>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+        }
+
+        foreach (PropertyInfo property in typeof(ExperimentBounds).GetProperties())
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(manifest.Bounds, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(property.Name));
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ExperimentBounds>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+        }
+
+        (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { ContractVersion = "candle-perf-measurement-v1" }, trials));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { ContractVersion = "candle-perf-measurement-v2" }, trials));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { SchemaVersion = 1 }, trials));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { Bounds = frozen.Bounds with { BatchSeconds = 60 } }, trials));
+        Assert.Equal(128, Workloads.WarmupOperations);
+        Assert.Equal(72, frozen.Inputs.Length);
+        Assert.Equal(432, frozen.Schedule.Length);
+    }
+
+    /// <summary>Exact finite activation budget includes end/export/cleanup and feeds the actual lifetime CTS without a twenty-minute ceiling.</summary>
+    [Fact]
+    public void ProbeDeadlineCoversFiniteEndExportAndShutdownEnvelope()
+    {
+        DateTimeOffset now = DateTimeOffset.Parse("2026-01-01T00:00:00+00:00", CultureInfo.InvariantCulture);
+        Assert.Equal(8710, ProbeProtocol.ChildLifetimeSeconds);
+        Assert.Equal(120 + 1200 + 7200 + 30 + 120 + 10 + (2 * 15), ProbeProtocol.ChildLifetimeSeconds);
+        ClockObservation issued = new(now, 1000, 1000, TimeSpan.TicksPerSecond);
+        long deadline = issued.Before + (issued.Frequency * ProbeProtocol.ChildLifetimeSeconds);
+        ProbeConfiguration configuration = new("candle-perf-" + Guid.NewGuid().ToString("N"), 1, 1, "unit-fixture-owner",
+            new string('A', 64), issued, deadline, ProbeProtocol.RequestSeconds);
+        TimeSpan remaining = configuration.RemainingLifetime(issued.After, issued.Frequency);
+        Assert.Equal(TimeSpan.FromSeconds(8710), remaining);
+        using CancellationTokenSource lifetime = new(remaining);
+        Assert.False(lifetime.IsCancellationRequested);
+        Assert.Equal(remaining - TimeSpan.FromSeconds(1), configuration.RemainingLifetime(issued.After + issued.Frequency, issued.Frequency));
+        foreach (long invalid in new[] { deadline + 1, long.MaxValue, issued.After, issued.After - 1 })
+        {
+            Assert.Throws<InvalidDataException>(() => (configuration with { DeadlineTimestamp = invalid })
+                .RemainingLifetime(issued.After, issued.Frequency));
+        }
+
+        Assert.Throws<InvalidDataException>(() => configuration.RemainingLifetime(deadline, issued.Frequency));
+        Assert.Throws<InvalidDataException>(() => configuration.RemainingLifetime(deadline + 1, issued.Frequency));
+        Assert.Throws<InvalidDataException>(() => configuration.RemainingLifetime(issued.After - 1, issued.Frequency));
+        Assert.Throws<InvalidDataException>(() => configuration.RemainingLifetime(issued.After, 0));
+        Assert.Throws<InvalidDataException>(() => (configuration with
+        {
+            Issued = issued with { Before = long.MaxValue - 1, After = long.MaxValue - 1 },
+        }).RemainingLifetime(long.MaxValue - 1, issued.Frequency));
+        foreach (DateTimeOffset adjusted in new[] { now.AddDays(-1), now.AddDays(1) })
+        {
+            Assert.Equal(remaining, (configuration with { Issued = issued with { Utc = adjusted } })
+                .RemainingLifetime(issued.After, issued.Frequency));
+        }
+        foreach (string field in new[] { "Issued", "DeadlineTimestamp" })
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(configuration, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(field));
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ProbeConfiguration>(missing.ToJsonString(), ProbeProtocol.JsonOptions));
+        }
+        foreach (int incompatible in new[] { 0, 5, 29, 31, 60, 120, int.MaxValue })
+        {
+            Assert.Throws<InvalidDataException>(() => (configuration with { RequestTimeoutSeconds = incompatible })            .RemainingLifetime(issued.After, issued.Frequency));
+        }
+
+        // Regression: a configuration is limited in UTF-8 bytes, not UTF-16 characters.
+        string json = JsonSerializer.Serialize(configuration,
+            ProbeProtocol.JsonOptions).Replace("unit-fixture-owner", new string('\u00E9', 2000), StringComparison.Ordinal);
+        Assert.True(json.Length < ProbeProtocol.MaximumRequestBytes);
+        Assert.True(Encoding.UTF8.GetByteCount(json) > ProbeProtocol.MaximumRequestBytes);
+        Assert.Throws<InvalidDataException>(() => ProbeConfiguration.FromEnvironment(_ => json));
+    }
+
+    /// <summary>End-ack cancellation cannot consume the separately created stopped export budget; lifetime cancellation still fails closed.</summary>
+    [Fact]
+    public async Task StoppedExportUsesIndependentBudgetWhileOrdinaryRemainsThirtySeconds()
+    {
+        Assert.Equal(120, ProbeProtocol.ExchangeSeconds("export-window"));
+        foreach (string operation in new[] { "hello", "snapshot", "identities", "begin-window", "end-window",
+            "idle-checkpoints", "loaded-checkpoints", "shutdown" })
+        {
+            Assert.Equal(30, ProbeProtocol.ExchangeSeconds(operation));
+        }
+
+        Assert.Equal(30, new ExperimentBounds().RequestSeconds); // Ordinary HTTP shares this unchanged bound.
+        using CancellationTokenSource lifetime = new();
+        using CancellationTokenSource ending = ProbeProtocol.CreateExchangeDeadline("end-window", lifetime.Token);
+        using CancellationTokenSource ordinary = ProbeProtocol.CreateExchangeDeadline("snapshot", lifetime.Token);
+        ending.Cancel();
+        using CancellationTokenSource export = ProbeProtocol.CreateExchangeDeadline("export-window", lifetime.Token);
+        Assert.False(export.IsCancellationRequested);
+        Assert.False(ordinary.IsCancellationRequested);
+        using MemoryStream stream = new();
+        ProbeReply reply = new(2, null, false, WindowFixture("unit-fixture-export", 0, 1, 1, 1000, false).Server);
+        await ProbeProtocol.WriteAsync(stream, reply, ProbeProtocol.MaximumResponseBytes, export.Token);
+        stream.Position = 0;
+        ProbeReply decoded = await ProbeProtocol.ReadAsync<ProbeReply>(stream, ProbeProtocol.MaximumResponseBytes, export.Token);
+        Assert.Equal(reply.Window!.End, decoded.Window!.End);
+        lifetime.Cancel();
+        Assert.True(export.IsCancellationRequested);
+        Assert.True(ordinary.IsCancellationRequested);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            ProbeProtocol.WriteAsync(stream, reply, ProbeProtocol.MaximumResponseBytes, export.Token));
+
+        using CancellationTokenSource expiredDuringRead = new();
+        using CancelAfterReadStream interrupted = new(stream.ToArray(), expiredDuringRead);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            ProbeProtocol.ReadAsync<ProbeReply>(interrupted, ProbeProtocol.MaximumResponseBytes, expiredDuringRead.Token));
+    }
+
+    /// <summary>Analytical compact-JSON proof covers worst-width numbers, every sample in all three windows, and full trial metadata.</summary>
+    [Fact]
+    public void MaximumSampleReplyAndTrialSizesFitWithoutTruncation()
+    {
+        // Negative extrema are wider than valid nonnegative metrics: this is size-only synthetic data, never live evidence.
+        ManagedSample managed = new(long.MinValue, long.MinValue, long.MinValue, long.MinValue, long.MinValue, long.MinValue);
+        ProcessMemorySample process = new(int.MinValue, long.MinValue, long.MinValue, long.MinValue, long.MinValue, long.MinValue);
+        CounterReading counters = new(long.MinValue, long.MinValue, int.MinValue, int.MinValue, int.MinValue, long.MinValue, long.MinValue);
+        Footprint point = new("post-immediate", false, int.MinValue, long.MinValue, long.MinValue,
+            long.MinValue, long.MinValue, managed, counters);
+        WindowEvidence server = new("GC-process-start", int.MinValue, long.MinValue, long.MinValue, true,
+            ProbeProtocol.SampleCapacity, ProbeProtocol.SampleMilliseconds, counters, counters, [], int.MinValue,
+            int.MinValue, false, [point, point with { Name = "post-settled" }, point with { Name = "post-forced", ForcedGc = true }]);
+        OperationTiming operation = new(int.MinValue, long.MinValue, long.MinValue, int.MinValue, false);
+        BatchWindow window = new("work", long.MinValue, long.MinValue, long.MinValue, long.MinValue, long.MinValue,
+            long.MinValue, long.MinValue, int.MinValue, int.MinValue, int.MinValue,
+            Enumerable.Repeat(operation, new MeasurementSettings().MaximumPilotOperations).ToArray(), server, [], int.MinValue, int.MinValue, null);
+        ClockObservation widestClock = new(DateTimeOffset.MaxValue, long.MinValue, long.MinValue, long.MinValue);
+        Assert.Equal(135, JsonSerializer.SerializeToUtf8Bytes(widestClock, ProbeProtocol.JsonOptions).Length);
+        TrialRecord fixture = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]) with
+        {
+            SchemaVersion = int.MinValue, Status = "size-only-fixture", ProcessId = int.MinValue,
+            Started = widestClock, Finished = widestClock, Parent = new(int.MinValue, long.MinValue),
+            ProcessStartUtcTicks = long.MinValue, ValidatedSeedReads = int.MinValue, ValidatedSeedWrites = int.MinValue,
+            Warmup = new(int.MinValue, int.MinValue, int.MinValue, int.MinValue, int.MinValue, int.MinValue,
+                new("Observation", new string('i', 64), new string('9', 20), DateTimeOffset.MaxValue),
+                new("Observation", new string('i', 64), new string('9', 20), DateTimeOffset.MaxValue),
+                new("Observation", new string('i', 64), new string('9', 20), DateTimeOffset.MaxValue)),
+            Batch = window, Checkpoints = Enumerable.Repeat(point, 7).ToArray(),
+            Controls = [window with { Name = "idle-control", Operations = [] }, window with { Name = "loaded-control", Operations = [] }],
+            RawFiles = [],
+        };
+        long Growth<T>(T value, int count) => count == 0 ? 0 :
+            checked(((long)JsonSerializer.SerializeToUtf8Bytes(value, ProbeProtocol.JsonOptions).Length + 1) * count - 1);
+        Assert.Equal(216, JsonSerializer.SerializeToUtf8Bytes(managed, ProbeProtocol.JsonOptions).Length);
+        Assert.Equal(209, JsonSerializer.SerializeToUtf8Bytes(process, ProbeProtocol.JsonOptions).Length);
+        long managedArray = checked(2 + Growth(managed, ProbeProtocol.SampleCapacity));
+        long processArray = checked(2 + Growth(process, ProbeProtocol.SampleCapacity));
+        Assert.Equal(156240869, managedArray);
+        Assert.Equal(151200841, processArray);
+
+        ProbeReply emptyReply = new(int.MinValue, null, false, server);
+        int replyEnvelope = JsonSerializer.SerializeToUtf8Bytes(emptyReply, ProbeProtocol.JsonOptions).Length;
+        Assert.True(replyEnvelope < 1024 * 1024);
+        long replyBound = checked(managedArray + (1024 * 1024));
+        Assert.Equal(157289445, replyBound);
+        Assert.True(replyBound < ProbeProtocol.MaximumResponseBytes);
+        byte[] envelope = MeasurementReport.SerializeEvidence(fixture);
+        Assert.DoesNotContain((byte)'\n', envelope);
+        // Even the inventory's 50,000-entry ceiling with 1-KiB synthetic relative names is below the metadata reserve.
+        EvidenceReference reference = new(new string('r', 1024), long.MinValue, new string('F', 64));
+        long trialEnvelope = checked(envelope.LongLength + Growth(reference, 50000));
+        Assert.True(trialEnvelope < 128L * 1024 * 1024);
+        long trialBound = checked((3 * (managedArray + processArray)) + (128L * 1024 * 1024));
+        Assert.Equal(1056542858, trialBound);
+        Assert.True(trialBound < MeasurementReport.MaximumEvidenceBytes);
+        Assert.True(trialBound < Array.MaxLength);
+
+        // Check the additive proof against actual production serialization at two small cardinalities, without allocating 1 GiB.
+        foreach (int count in new[] { 1, 2 })
+        {
+            BatchWindow Expand(BatchWindow source) => source with
+            {
+                Server = source.Server with { Samples = Enumerable.Repeat(managed, count).ToArray() },
+                ProcessSamples = Enumerable.Repeat(process, count).ToArray(),
+            };
+            TrialRecord expanded = fixture with
+            {
+                Batch = Expand(fixture.Batch!),
+                Controls = fixture.Controls.Select(Expand).ToArray(),
+                RawFiles = Enumerable.Repeat(reference, count).ToArray(),
+            };
+            byte[] bytes = MeasurementReport.SerializeEvidence(expanded);
+            Assert.Equal(envelope.LongLength + (3 * (Growth(managed, count) + Growth(process, count))) + Growth(reference, count),
+                bytes.LongLength);
+            TrialRecord decoded = JsonSerializer.Deserialize<TrialRecord>(bytes, ProbeProtocol.JsonOptions)!;
+            Assert.Equal("unit-fixture", decoded.Origin);
+            Assert.Equal(count, decoded.Batch!.Server.Samples.Length);
+            Assert.All(decoded.Controls, control => Assert.Equal(count, control.ProcessSamples.Length));
+            ProbeReply reply = emptyReply with { Window = server with { Samples = Enumerable.Repeat(managed, count).ToArray() } };
+            Assert.Equal(replyEnvelope + Growth(managed, count),
+                JsonSerializer.SerializeToUtf8Bytes(reply, ProbeProtocol.JsonOptions).LongLength);
+        }
+
+        // Full receipt growth is separate from window export, but also must fit the unchanged snapshot shape.
+        ReceiptSnapshot receipt = Receipt(Workloads.CreateProbeChallenge("R5")) with
+        {
+            EventsSinceSubscriptionStart = long.MinValue,
+            NotificationEvents = [new(new string('9', 20), long.MinValue, DateTimeOffset.MaxValue,
+                "Observation/" + new string('i', 64), ["Patient/" + new string('i', 64)])],
+        };
+        long receiptArray = checked(2 + Growth(receipt, Workloads.WarmupOperations + new MeasurementSettings().MaximumPilotOperations));
+        Assert.True(receiptArray + (16L * 1024 * 1024) < ProbeProtocol.MaximumResponseBytes);
+    }
+
+    /// <summary>Oversized prefixes/lengths fail before payload allocation; saved-file growth and truncation never become unbounded reads.</summary>
+    [Fact]
+    public async Task BoundedReadersRejectOversizedFramesAndChangingEvidenceBeforeAllocation()
+    {
+        Assert.Equal(MeasurementReport.MaximumEvidenceBytes,
+            MeasurementReport.ValidateEvidenceLength(MeasurementReport.MaximumEvidenceBytes));
+        Assert.Equal((512 * 1024 * 1024) + 1, MeasurementReport.ValidateEvidenceLength((512L * 1024 * 1024) + 1));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateEvidenceLength((long)MeasurementReport.MaximumEvidenceBytes + 1));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateEvidenceLength(-1));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateEvidenceLength(long.MaxValue));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.VerifyReference(Path.GetTempPath(),
+            new("unit-fixture-not-written.json", (long)MeasurementReport.MaximumEvidenceBytes + 1, new string('A', 64))));
+        foreach (int maximum in new[] { ProbeProtocol.MaximumRequestBytes, ProbeProtocol.MaximumResponseBytes })
+        {
+            foreach (int length in new[] { 0, -1, maximum + 1, int.MaxValue })
+            {
+                byte[] header = new byte[sizeof(int)];
+                BinaryPrimitives.WriteInt32LittleEndian(header, length);
+                using MemoryStream frame = new(header);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                await Assert.ThrowsAsync<InvalidDataException>(() => ProbeProtocol.ReadAsync<ProbeReply>(frame, maximum, CancellationToken.None));
+                Assert.InRange(GC.GetAllocatedBytesForCurrentThread() - before, 0, 1024 * 1024);
+                Assert.Equal(sizeof(int), frame.Position);
+            }
+        }
+
+        using MemoryStream invalidBound = new();
+        await Assert.ThrowsAsync<InvalidDataException>(() => ProbeProtocol.ReadAsync<ProbeReply>(
+            invalidBound, ProbeProtocol.MaximumResponseBytes + 1, CancellationToken.None));
+        Assert.Equal(0, invalidBound.Position);
+        foreach (int maximum in new[] { 1024 * 1024, 32 * 1024 * 1024, MeasurementReport.MaximumEvidenceBytes })
+        {
+            using DeclaredLengthStream oversized = new([], (long)maximum + 1);
+            await Assert.ThrowsAsync<InvalidDataException>(() => MeasurementReport.ReadBoundedBytesAsync(
+                oversized, maximum, CancellationToken.None));
+            Assert.False(oversized.ReadAttempted);
+        }
+
+        using DeclaredLengthStream invalidReaderBound = new([], 0);
+        await Assert.ThrowsAsync<InvalidDataException>(() => MeasurementReport.ReadBoundedBytesAsync(
+            invalidReaderBound, MeasurementReport.MaximumEvidenceBytes + 1, CancellationToken.None));
+        Assert.False(invalidReaderBound.ReadAttempted);
+        using DeclaredLengthStream grown = new([1, 2], 1);
+        await Assert.ThrowsAsync<InvalidDataException>(() => MeasurementReport.ReadBoundedBytesAsync(grown, 1, CancellationToken.None));
+        Assert.Equal(2, grown.Position);
+        using DeclaredLengthStream truncated = new([1], 2);
+        await Assert.ThrowsAsync<EndOfStreamException>(() => MeasurementReport.ReadBoundedBytesAsync(truncated, 2, CancellationToken.None));
+        using MemoryStream valid = new([1, 2, 3]);
+        Assert.Equal(new byte[] { 1, 2, 3 }, await MeasurementReport.ReadBoundedBytesAsync(
+            valid, MeasurementReport.MaximumEvidenceBytes, CancellationToken.None));
+    }
+
+    /// <summary>The increased window still rejects an extra tick, overflowing clocks and negative origins; no accounting oracle is relaxed.</summary>
+    [Fact]
+    public void WindowDurationRejectsOverflowAndPastSupportedBoundary()
+    {
+        BatchWindow window = WindowFixture("unit-fixture-boundary", 256, 1, 1, 1000, true);
+        long last = checked(window.Server.Begin.Timestamp + (window.Frequency * ProbeProtocol.WindowSeconds));
+        BatchWindow boundary = window with
+        {
+            ClientEnd = last - 2, EndSent = last - 1, EndAcknowledged = last + 1,
+            Server = window.Server with { End = window.Server.End with { Timestamp = last } },
+        };
+        Assert.Empty(MeasurementReport.ValidateWindow(boundary, 1, 1, true));
+        Assert.Contains("counter duration/deadline", MeasurementReport.ValidateWindow(boundary with
+        {
+            Server = boundary.Server with { End = boundary.Server.End with { Timestamp = last + 1 } },
+            EndAcknowledged = last + 2,
+        }, 1, 1, true));
+        Assert.Contains("counter duration/deadline", MeasurementReport.ValidateWindow(boundary with
+        {
+            Frequency = long.MaxValue, Server = boundary.Server with { Frequency = long.MaxValue },
+        }, 1, 1, true));
+        Assert.False(ProbeProtocol.IsWithinWindow(long.MinValue, long.MaxValue, 1000));
+        Assert.False(ProbeProtocol.IsWithinWindow(0, 1, 0));
+        Assert.False(ProbeProtocol.IsWithinWindow(0, 1, -1));
+        Assert.False(ProbeProtocol.IsWithinWindow(1, 1, 1000));
+        Assert.Contains(MeasurementReport.ValidateWindow(window with { Server = window.Server with { Samples = window.Server.Samples[..9] } },
+            1, 1, true), error => error.StartsWith("coverage:", StringComparison.Ordinal));
+        Assert.Contains(MeasurementReport.ValidateWindow(window with { ProcessSamples = window.ProcessSamples[..9] },
+            1, 1, true), error => error.StartsWith("coverage:", StringComparison.Ordinal));
+    }
+
+    /// <summary>The actual schedule helper fixes N and creates separate alternating dispatches for every repetition/block.</summary>
+    [Fact]
+    public void TrialScheduleUsesFreshProcessesAndAlternatesPairs()
+    {
+        (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+        Assert.Equal(432, frozen.Schedule.Length);
+        Assert.Equal(432, frozen.Schedule.Select(plan => plan.AttemptId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(432, frozen.Schedule.Select(plan => plan.RelativeDirectory).Distinct(StringComparer.Ordinal).Count());
+        Assert.Empty(MeasurementReport.ValidateMatrix(frozen, trials));
+        WorkloadCase[] cases = Workloads.CreateCases();
+        for (int repetition = 1; repetition <= 3; repetition++)
+        {
+            for (int block = 0; block < cases.Length; block++)
+            {
+                TrialPlan[] pair = frozen.Schedule.Where(plan => plan.Repetition == repetition && plan.RowKey == cases[block].RowKey).ToArray();
+                Assert.Equal(2, pair.Length);
+                Assert.Equal((block + repetition - 1) % 2 == 0 ? "baseline" : "candidate", pair[0].Variant);
+                Assert.NotEqual(pair[0].Variant, pair[1].Variant);
+                Assert.Equal(pair[0].Operations, pair[1].Operations);
+                Assert.All(pair, plan => Assert.Equal(new MeasurementSettings().InitialCount(cases[block]), plan.Operations));
+            }
+        }
+
+        TrialRecord[] reused = trials.ToArray();
+        reused[1] = reused[1] with { ProcessId = reused[0].ProcessId, ProcessStartUtcTicks = reused[0].ProcessStartUtcTicks };
+        Assert.Contains(MeasurementReport.ValidateMatrix(frozen, reused), error => error.Contains("reused process", StringComparison.Ordinal));
+        TrialRecord[] overlap = trials.ToArray();
+        overlap[1] = overlap[1] with { Started = overlap[0].Started };
+        Assert.Contains(MeasurementReport.ValidateMatrix(frozen, overlap), error => error.Contains("overlapping", StringComparison.Ordinal));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CreateSchedule(new Dictionary<string, int>(), 3));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CreateSchedule(
+            frozen.Inputs.ToDictionary(input => input.Case.RowKey, input => input.Operations), 2));
+    }
+
+    /// <summary>Exercises generated 128/N inputs and the exact shared clinical/metadata/receipt oracles used by trials.</summary>
+    [Fact]
+    public void WarmupRestoresClinicalStateAndRetainsHookReceipts()
+    {
+        const string BaseUrl = "http://127.0.0.1:58260/fhir/perf";
+        foreach (string version in new[] { "R4", "R4B", "R5" })
+        {
+            WorkloadCorpus corpus = Workloads.CreateCorpus(version, 100);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            foreach (string caseId in new[] { "patient-update", "observation-update" })
+            {
+                WorkloadCase workload = Workloads.CreateCases().Single(item =>
+                    item.FhirVersion == version && item.PatientCount == 100 && item.CaseId == caseId);
+                TrialInputs inputs = Workloads.CreateTrialInputs(workload, corpus, 1024);
+                CorrectnessOracle.ValidateCaseRequests(workload, corpus, inputs.Warmup, 128);
+                CorrectnessOracle.ValidateCaseRequests(workload, corpus, inputs.Measured, 1024, 128);
+                WorkloadRequest restore = Assert.IsType<WorkloadRequest>(inputs.Restore);
+                CorpusResource original = corpus.Resources.Single(resource => resource.Identity == restore.RelativeUrl);
+                ResourceBinding originalBinding = new(original.ResourceType, original.Id, "1", now);
+                Dictionary<string, ExpectedResource> state = new() { [original.Identity] = new(original.Body, originalBinding) };
+                CompletedOperation[] returned = inputs.Warmup.Select(request => new CompletedOperation(request.Number,
+                    [new(BaseUrl + "/" + request.RelativeUrl, ResourceResponse(request.Body!, original.Id, 200,
+                        now.AddMilliseconds(request.Number), (request.Number + 1).ToString(CultureInfo.InvariantCulture)))])).ToArray();
+                BatchValidation warm = CorrectnessOracle.ValidateBatchResponses(workload, inputs.Warmup, returned,
+                    state, CorrectnessOracle.StatusProfile("candidate"), BaseUrl);
+                Assert.Equal(128, warm.Operations.Length);
+                ExpectedResource warmed = warm.Resources[original.Identity];
+                Assert.Equal("129", warmed.Binding.VersionId);
+                bool issueRestore = !CorrectnessOracle.SameClinicalContent(warmed.Content, restore.Body!);
+                Assert.Equal(caseId == "observation-update", issueRestore);
+                ExpectedResource restored = warmed;
+                ResponseEvidence? restoration = null;
+                if (issueRestore)
+                {
+                    restoration = ResourceResponse(restore.Body!, original.Id, 200, now.AddMilliseconds(129), "130");
+                    ResourceBinding binding = CorrectnessOracle.ValidateUpdateResponse(
+                        restoration,
+                        200, warmed.Content, restore.Body!, warmed.Binding, BaseUrl);
+                    restored = new(restore.Body!, binding);
+                }
+
+                CorrectnessOracle.ValidateRestoration(workload, corpus, restore, warmed, restored, restoration);
+                Assert.True(CorrectnessOracle.SameClinicalContent(original.Body, restored.Content));
+                Assert.Equal(issueRestore ? "130" : "129", restored.Binding.VersionId);
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateRestoration(workload, corpus, restore, warmed,
+                    restored with { Binding = restored.Binding with { VersionId = "1" } }, restoration));
+                CompletedOperation[] hiddenBadUpdate = returned.ToArray();
+                hiddenBadUpdate[63] = hiddenBadUpdate[63] with
+                {
+                    Exchanges = [hiddenBadUpdate[63].Exchanges[0] with
+                    {
+                        Response = ResourceResponse(inputs.Warmup[62].Body!, original.Id, 200, now.AddMilliseconds(64), "65") with
+                        {
+                            Started = returned[63].Exchanges[0].Response.Started,
+                            Completed = returned[63].Exchanges[0].Response.Completed,
+                        },
+                    }],
+                };
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateBatchResponses(workload, inputs.Warmup,
+                    hiddenBadUpdate, state, CorrectnessOracle.StatusProfile("candidate"), BaseUrl));
+            }
+
+            foreach (string caseId in new[] { "patient-create", "observation-create" })
+            {
+                WorkloadCase workload = Workloads.CreateCases().Single(item =>
+                    item.FhirVersion == version && item.PatientCount == 100 && item.CaseId == caseId);
+                TrialInputs inputs = Workloads.CreateTrialInputs(workload, corpus, 256);
+                Assert.Equal(Enumerable.Range(1, 128), inputs.Warmup.Select(request => request.Number));
+                Assert.Equal(Enumerable.Range(129, 256), inputs.Measured.Select(request => request.Number));
+                Assert.Null(inputs.Restore);
+                Dictionary<string, ExpectedResource> state = corpus.Resources.ToDictionary(resource => resource.Identity,
+                    resource => new ExpectedResource(resource.Body, new(resource.ResourceType, resource.Id, "1", now)));
+                CompletedOperation[] responses = inputs.Warmup.Select(request => new CompletedOperation(request.Number,
+                    [new(BaseUrl + "/" + request.RelativeUrl, ResourceResponse(request.Body!,
+                        "warm-" + request.Number.ToString("D8", CultureInfo.InvariantCulture), 201, now))])).ToArray();
+                BatchValidation warm = CorrectnessOracle.ValidateBatchResponses(workload, inputs.Warmup, responses,
+                    state, CorrectnessOracle.StatusProfile("candidate"), BaseUrl);
+                string type = warm.Created[0].ResourceType;
+                string[] initial = corpus.Resources.Where(resource => resource.ResourceType == type).Select(resource => resource.Id).ToArray();
+                CorrectnessOracle.ValidateCreateGrowth(type, initial, initial.Length, initial.Length + 128, 128, warm.Created);
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateCreateGrowth(type, initial,
+                    initial.Length, initial.Length + 128, 128, warm.Created, warm.Created.Select(binding => binding.Id).ToArray()));
+                foreach (ResourceBinding created in warm.Created)
+                {
+                    ExpectedResource resource = warm.Resources[created.ResourceType + "/" + created.Id];
+                    ResponseEvidence deleted = ResourceResponse(resource.Content, created.Id, 200, now);
+                    deleted.Headers.Remove("Location");
+                    deleted.Headers.Remove("ETag");
+                    deleted.Headers.Remove("Last-Modified");
+                    CorrectnessOracle.ValidateDeleteResponse(deleted, 200, resource);
+                }
+
+                Dictionary<string, bool> absent = warm.Created.ToDictionary(binding => binding.ResourceType + "/" + binding.Id, _ => false);
+                TenantSnapshot restored = ClinicalSnapshot(100, 1000, identities: absent.Keys.ToDictionary(key => key, _ => (ResourceIdentity?)null));
+                CorrectnessOracle.ValidateState(ClinicalSnapshot(0, 0), restored, 100, 1000, 0, absent, _sourceDirectory);
+                Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateState(ClinicalSnapshot(0, 0), restored with
+                {
+                    ResourceCounts = new SortedDictionary<string, int>(restored.ResourceCounts) { [type] = initial.Length + 1 },
+                }, 100, 1000, 0, absent, _sourceDirectory));
+            }
+
+            WorkloadCase hook = Workloads.CreateCases().Single(item =>
+                item.FhirVersion == version && item.PatientCount == 100 && item.CaseId == "subscription-receive");
+            TrialInputs hookInputs = Workloads.CreateTrialInputs(hook, corpus, 256);
+            ReceiptExpectation[] warmReceipts = hookInputs.Warmup.Select(request =>
+                FixtureReceiptExpectation(request.Notification!, now.AddMinutes(-1), now.AddMinutes(1))).ToArray();
+            ReceiptExpectation[] allReceipts = [.. warmReceipts, .. hookInputs.Measured.Select(request =>
+                FixtureReceiptExpectation(request.Notification!, now.AddMinutes(-1), now.AddMinutes(1)))];
+            ReceiptSnapshot[] actual = allReceipts.Select(receipt =>
+                Receipt(Workloads.CreateProbeChallenge(version, receipt.Notification.EventNumber))).ToArray();
+            CorrectnessOracle.ValidateReceipt(ClinicalSnapshot(100, 1000, 128, actual[..128]), warmReceipts);
+            CorrectnessOracle.ValidateReceipt(ClinicalSnapshot(100, 1000, 384, actual), allReceipts);
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(
+                ClinicalSnapshot(100, 1000, 256, actual[128..]), allReceipts));
+            Assert.Throws<InvalidDataException>(() => CorrectnessOracle.ValidateReceipt(
+                ClinicalSnapshot(100, 1000, 384, actual.AsEnumerable().Reverse().ToArray()), allReceipts));
+            Assert.All(allReceipts, receipt => CorrectnessOracle.ValidateNotification(receipt.Notification));
+        }
+    }
+
+    /// <summary>The real recorder forbids diagnostics/GC while armed and snapshots before exporting diagnostic objects.</summary>
+    [Fact]
+    public void CounterWindowExcludesSetupAuditAndForcedGc()
+    {
+        using ProbeWindowRecorder recorder = new();
+        byte[] setup = new byte[8192];
+        Footprint idle = recorder.CaptureCheckpoint("fixture-idle", false);
+        byte[] boundaryBuffer = new byte[ProbeProtocol.BoundaryBytes];
+        CounterReading begin = recorder.BeginWindow(false);
+        Assert.Throws<InvalidOperationException>(() => recorder.CaptureCheckpoint("forbidden", true));
+        Assert.Throws<InvalidOperationException>(() => recorder.Export());
+        byte[] work = new byte[4096];
+        Thread.Sleep(1);
+        CounterReading end = recorder.EndWindow();
+        Assert.True(end.Timestamp > begin.Timestamp);
+        Assert.True(end.AllocatedBytes >= begin.AllocatedBytes + work.Length);
+        Assert.True(idle.Timestamp < begin.Timestamp);
+        ProbeProtocol.EncodeBoundary(boundaryBuffer, 17, recorder.ProcessId, recorder.ProcessStartUtcTicks, end);
+        Assert.Equal(end, ProbeProtocol.DecodeBoundary(boundaryBuffer, 17, recorder.ProcessId, recorder.ProcessStartUtcTicks));
+        Assert.Throws<InvalidDataException>(() => ProbeProtocol.DecodeBoundary(boundaryBuffer, 18, recorder.ProcessId, recorder.ProcessStartUtcTicks));
+        Assert.Throws<InvalidDataException>(() => ProbeProtocol.DecodeBoundary(boundaryBuffer, 17, recorder.ProcessId + 1, recorder.ProcessStartUtcTicks));
+        WindowEvidence beforeAudit = recorder.Export();
+        byte[] audit = new byte[16384];
+        Footprint forced = recorder.CaptureCheckpoint("fixture-forced", true);
+        WindowEvidence afterAudit = recorder.Export();
+        Assert.Equal(beforeAudit.Begin, afterAudit.Begin);
+        Assert.Equal(beforeAudit.End, afterAudit.End);
+        Assert.True(forced.Counters.Gen2 >= end.Gen2 + 2);
+        Assert.True(forced.Timestamp > end.Timestamp);
+        Assert.Empty(afterAudit.Samples);
+        Assert.Throws<InvalidOperationException>(() => recorder.Sample());
+        CounterReading sampledBegin = recorder.BeginWindow(true);
+        Thread.Sleep(150);
+        CounterReading sampledEnd = recorder.EndWindow();
+        WindowEvidence sampled = recorder.Export();
+        Assert.NotEmpty(sampled.Samples);
+        Assert.All(sampled.Samples, sample => Assert.InRange(sample.Timestamp, sampledBegin.Timestamp, sampledEnd.Timestamp));
+        Assert.Equal(0, sampled.SamplingErrors);
+        Assert.Equal(0, sampled.DroppedSamples);
+        GC.KeepAlive(setup);
+        GC.KeepAlive(work);
+        GC.KeepAlive(audit);
+        TrialRecord fixture = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        Assert.Contains(MeasurementReport.ValidateTrial(fixture with
+        {
+            Batch = fixture.Batch! with { Server = fixture.Batch.Server with { CounterOrigin = "thread-local" } },
+        }), error => error.Contains("counter origin", StringComparison.Ordinal));
+        Assert.Contains(MeasurementReport.ValidateTrial(fixture with
+        {
+            Batch = fixture.Batch! with { Server = fixture.Batch.Server with
+            {
+                End = fixture.Batch.Server.End with { Timestamp = fixture.Batch.ClientEnd - 1 },
+            } },
+        }), error => error.Contains("bracketing", StringComparison.Ordinal));
+        Assert.Contains(MeasurementReport.ValidateTrial(fixture with
+        {
+            Batch = fixture.Batch! with { Server = fixture.Batch.Server with
+            {
+                Begin = fixture.Batch.Server.Begin with { AllocatedBytes = 0 },
+            } },
+        }), error => error.Contains("counter timeline", StringComparison.Ordinal));
+    }
+
+    /// <summary>A large before/after sample cannot turn into a workload peak, and another process is never accepted.</summary>
+    [Fact]
+    public void PeakUsesOnlyServerPidSamplesInsideWindow()
+    {
+        TrialRecord trial = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        BatchWindow batch = trial.Batch!;
+        (long working, long privateBytes) = MeasurementReport.CalculatePeak(batch, trial.ProcessId, trial.ProcessStartUtcTicks);
+        ProcessMemorySample outside = batch.ProcessSamples[0] with
+        {
+            Timestamp = batch.Server.Begin.Timestamp, WorkingSetBytes = long.MaxValue, PrivateBytes = long.MaxValue,
+        };
+        Assert.Equal((working, privateBytes), MeasurementReport.CalculatePeak(batch with
+        {
+            ProcessSamples = [outside, .. batch.ProcessSamples],
+        }, trial.ProcessId, trial.ProcessStartUtcTicks));
+        foreach (ProcessMemorySample wrong in new[]
+        {
+            outside with { ProcessId = trial.ProcessId + 1 },
+            outside with { ProcessStartUtcTicks = trial.ProcessStartUtcTicks + 1 },
+            outside with { Timestamp = batch.Server.Begin.Timestamp - 1 },
+            outside with { Timestamp = batch.Server.End.Timestamp + 1 },
+            outside with { WorkingSetBytes = -1 },
+        })
+        {
+            Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculatePeak(batch with
+            {
+                ProcessSamples = [wrong, .. batch.ProcessSamples],
+            }, trial.ProcessId, trial.ProcessStartUtcTicks));
+        }
+
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculatePeak(batch with
+        {
+            ProcessSamples = [outside],
+        }, trial.ProcessId, trial.ProcessStartUtcTicks));
+        Assert.Contains(MeasurementReport.ValidateTrial(trial with
+        {
+            Batch = batch with { ProcessSamples = batch.ProcessSamples[..9] },
+        }), error => error.StartsWith("coverage:", StringComparison.Ordinal));
+    }
+
+    /// <summary>Retained control coverage failures cannot become adequate selected pilots or accepted measured trials.</summary>
+    [Fact]
+    public void RetainedPilotControlCoverageCannotBecomeSelectedOrAccepted()
+    {
+        const string Coverage = "coverage: fewer than ten actual samples in either stream";
+        (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+        TrialRecord measured = trials.First(trial => trial.Plan.RowKey == "R4-100p-1000o-subscription-receive" &&
+            trial.Plan.Variant == "candidate");
+        TrialRecord pilot = measured with { Plan = measured.Plan with { Purpose = "pilot" }, FrozenSha256 = null };
+        Assert.Empty(MeasurementReport.ValidateTrial(pilot));
+        foreach ((int managedCount, int processCount) in new[] { (65, 4), (4, 65) })
+        {
+            BatchWindow control = pilot.Controls[1];
+            BatchWindow insufficient = control with
+            {
+                Server = control.Server with
+                {
+                    Samples = Enumerable.Range(0, managedCount).Select(index => control.Server.Samples[0] with
+                    {
+                        Timestamp = control.ClientStart + 5 + (index * 10),
+                    }).ToArray(),
+                },
+                ProcessSamples = Enumerable.Range(0, processCount).Select(index => control.ProcessSamples[0] with
+                {
+                    Timestamp = control.ClientStart + 5 + (index * 10),
+                }).ToArray(),
+            };
+            Assert.Equal("loaded-control", insufficient.Name);
+            Assert.Equal(1.0, (insufficient.ClientEnd - insufficient.ClientStart) / (double)insufficient.Frequency);
+            Assert.Equal(managedCount, insufficient.Server.Samples.Count(sample =>
+                sample.Timestamp >= insufficient.ClientStart && sample.Timestamp <= insufficient.ClientEnd));
+            Assert.Equal(processCount, MeasurementReport.WorkSamples(insufficient, pilot.ProcessId, pilot.ProcessStartUtcTicks).Length);
+            TrialRecord retained = pilot with
+            {
+                Status = "coverage-insufficient", Failure = Coverage, Controls = [pilot.Controls[0], insufficient],
+            };
+            Assert.Empty(MeasurementReport.ValidateTrial(retained, requireCoverage: false));
+            Assert.Contains(Coverage, MeasurementReport.ValidateTrial(retained));
+            TrialRecord selected = retained with { Status = "passed", Failure = null };
+            Assert.Equal(Coverage, Assert.Single(MeasurementReport.ValidateTrial(selected)));
+            TrialRecord accepted = measured with { Controls = retained.Controls };
+            Assert.Equal(Coverage, Assert.Single(MeasurementReport.ValidateTrial(accepted)));
+            Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(accepted));
+            TrialRecord[] invalidMatrix = trials.ToArray();
+            invalidMatrix[Array.IndexOf(trials, measured)] = accepted;
+            Assert.Contains(accepted.Plan.AttemptId + ": " + Coverage, MeasurementReport.ValidateMatrix(frozen, invalidMatrix));
+
+            BatchWindow[] invalidControls = [
+                insufficient with { ProcessSamplingErrors = 1 },
+                insufficient with { ProcessDroppedSamples = 1 },
+                insufficient with { Server = insufficient.Server with { SamplingErrors = 1 } },
+                insufficient with { Server = insufficient.Server with { DroppedSamples = 1 } },
+                insufficient with { Server = insufficient.Server with { DeadlineExceeded = true } },
+                insufficient with { Server = insufficient.Server with { ProcessId = pilot.ProcessId + 1 } },
+                insufficient with { Server = insufficient.Server with { ProcessStartUtcTicks = pilot.ProcessStartUtcTicks + 1 } },
+                insufficient with { Server = insufficient.Server with { Frequency = insufficient.Frequency + 1 } },
+                insufficient with
+                {
+                    ProcessSamples = [insufficient.ProcessSamples[0] with { ProcessId = pilot.ProcessId + 1 },
+                        .. insufficient.ProcessSamples[1..]],
+                },
+                insufficient with
+                {
+                    ProcessSamples = [insufficient.ProcessSamples[0] with { ProcessStartUtcTicks = pilot.ProcessStartUtcTicks + 1 },
+                        .. insufficient.ProcessSamples[1..]],
+                },
+                insufficient with
+                {
+                    ProcessSamples = [insufficient.ProcessSamples[0] with { Timestamp = insufficient.Server.Begin.Timestamp - 1 },
+                        .. insufficient.ProcessSamples[1..]],
+                },
+                insufficient with { ProcessSamples = insufficient.ProcessSamples.AsEnumerable().Reverse().ToArray() },
+                insufficient with { Server = insufficient.Server with { Samples = insufficient.Server.Samples.AsEnumerable().Reverse().ToArray() } },
+                insufficient with
+                {
+                    Server = insufficient.Server with
+                    {
+                        Samples = [insufficient.Server.Samples[0] with { Timestamp = insufficient.Server.Begin.Timestamp - 1 },
+                            .. insufficient.Server.Samples[1..]],
+                    },
+                },
+                insufficient with
+                {
+                    Server = insufficient.Server with
+                    {
+                        End = insufficient.Server.End with { AllocatedBytes = insufficient.Server.Begin.AllocatedBytes - 1 },
+                    },
+                },
+                insufficient with { EndSent = insufficient.ClientEnd - 1 },
+                insufficient with { ExpectedOperations = 1 },
+                insufficient with { Failure = "retained control failure" },
+            ];
+            Assert.All(invalidControls, wrong => Assert.NotEmpty(MeasurementReport.ValidateTrial(retained with
+            {
+                Controls = [pilot.Controls[0], wrong],
+            }, requireCoverage: false)));
+            TrialRecord[] invalidTrials = [
+                retained with { Controls = [] },
+                retained with { Controls = [pilot.Controls[0]] },
+                retained with { Controls = [insufficient, pilot.Controls[0]] },
+                retained with { Batch = null },
+                retained with { Batch = retained.Batch! with { CompletedOperations = retained.Plan.Operations - 1 } },
+                retained with { Checkpoints = retained.Checkpoints[..^1] },
+                retained with { OraclePassed = false },
+                retained with { CleanShutdown = false },
+                retained with { SealsBeforeAndAfter = false },
+                retained with { Status = "failed" },
+                retained with { Failure = null },
+            ];
+            Assert.All(invalidTrials, wrong => Assert.NotEmpty(MeasurementReport.ValidateTrial(wrong, requireCoverage: false)));
+            string[][] missingFields = [
+                ["ProcessSamples"], ["Server", "Samples"], ["Server", "Begin", "Gen0"], ["Server", "SamplingErrors"],
+            ];
+            foreach (string[] path in missingFields)
+            {
+                JsonObject document = JsonSerializer.SerializeToNode(retained, ProbeProtocol.JsonOptions)!.AsObject();
+                JsonNode field = document["Controls"]![1]!;
+                foreach (string name in path[..^1])
+                {
+                    field = field[name]!;
+                }
+
+                Assert.True(field.AsObject().Remove(path[^1]));
+                Assert.Throws<JsonException>(() => MeasurementReport.ValidateTrial(
+                    document.Deserialize<TrialRecord>(ProbeProtocol.JsonOptions)!, requireCoverage: false));
+            }
+        }
+    }
+
+    /// <summary>Disabling the retention coverage minimum never permits samples in sampler-off work or controls.</summary>
+    [Fact]
+    public void RetainedPilotCoverageFlagPreservesSamplerOffValidation()
+    {
+        TrialRecord sampled = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        BatchWindow batch = sampled.Batch!;
+        TrialRecord off = sampled with
+        {
+            Plan = sampled.Plan with { Purpose = "sampler-off", Sampling = false }, FrozenSha256 = null,
+            Batch = batch with { Server = batch.Server with { Sampling = false, Samples = [] }, ProcessSamples = [] },
+            Controls = sampled.Controls.Select(control => control with
+            {
+                Server = control.Server with { Sampling = false, Samples = [] }, ProcessSamples = [],
+            }).ToArray(),
+        };
+        Assert.Empty(MeasurementReport.ValidateTrial(off));
+        Assert.Empty(MeasurementReport.ValidateTrial(off, requireCoverage: false));
+        BatchWindow[] windows = [off.Batch!, .. off.Controls];
+        foreach (BatchWindow window in windows)
+        {
+            BatchWindow original = window.Name == "work" ? batch : sampled.Controls.Single(control => control.Name == window.Name);
+            foreach (BatchWindow invalidWindow in new[]
+            {
+                window with { ProcessSamples = original.ProcessSamples[..1] },
+                window with { Server = window.Server with { Samples = original.Server.Samples[..1] } },
+            })
+            {
+                TrialRecord invalid = off with
+                {
+                    Batch = window.Name == "work" ? invalidWindow : off.Batch,
+                    Controls = off.Controls.Select(control => control.Name == window.Name ? invalidWindow : control).ToArray(),
+                };
+                Assert.Contains("sampler-off window contains samples", MeasurementReport.ValidateTrial(invalid));
+                Assert.Contains("sampler-off window contains samples", MeasurementReport.ValidateTrial(invalid, requireCoverage: false));
+            }
+        }
+    }
+
+    /// <summary>Completed HTTP errors/partial operations cannot be erased or relabelled with a smaller N.</summary>
+    [Fact]
+    public void FailedBatchCannotBecomeSuccessfulByChangingDenominator()
+    {
+        TrialRecord trial = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        BatchWindow batch = trial.Batch!;
+        BatchWindow partial = batch with
+        {
+            CompletedOperations = batch.CompletedOperations - 1, Operations = batch.Operations[..^1],
+            Failure = "retained transport failure",
+        };
+        Assert.NotEmpty(MeasurementReport.ValidateTrial(trial with { Batch = partial }));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(trial with { Batch = partial }));
+        BatchWindow relabelled = partial with
+        {
+            ExpectedOperations = partial.CompletedOperations, AttemptedOperations = partial.CompletedOperations, Failure = null,
+        };
+        Assert.Contains(MeasurementReport.ValidateTrial(trial with { Batch = relabelled }),
+            error => error.Contains("fixed operation", StringComparison.Ordinal));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(trial with { Batch = relabelled }));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(trial with { Status = "failed" }));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(trial with { OraclePassed = false }));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(trial with
+        {
+            Batch = batch with { Server = batch.Server with { End = batch.Server.End with { AllocatedBytes = batch.Server.Begin.AllocatedBytes - 1 } } },
+        }));
+    }
+
+    /// <summary>Unequal request populations do not weight independent trial central estimates.</summary>
+    [Fact]
+    public void SummaryUsesIndependentTrialMedians()
+    {
+        MetricSummary summary = MeasurementReport.CalculateSummary([(1.0, 1000), (4.0, 10), (100.0, 1)]);
+        Assert.Equal(4, summary.Median);
+        Assert.Equal(1, summary.Minimum);
+        Assert.Equal(100, summary.Maximum);
+        Assert.Equal(3, summary.Trials);
+        Assert.Equal(new[] { 1000, 10, 1 }, summary.Operations);
+        Assert.Equal(6, MeasurementReport.CalculateSummary([(4.0, 256), (8.0, 256)]).Median);
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculateSummary([]));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculateSummary([(double.NaN, 256)]));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculateSummary([(1.0, 0)]));
+        TrialRecord trial = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        Dictionary<string, double> metrics = MeasurementReport.TrialMetrics(trial);
+        double seconds = (trial.Batch!.ClientEnd - trial.Batch.ClientStart) / (double)trial.Batch.Frequency;
+        Assert.Equal(seconds * 1000 / trial.Plan.Operations, metrics["time.ms/op"]);
+        Assert.Equal(trial.Plan.Operations / seconds, metrics["throughput.op/s"]);
+        Assert.Equal((trial.Batch.Server.End.AllocatedBytes - trial.Batch.Server.Begin.AllocatedBytes) / (double)trial.Plan.Operations,
+            metrics["allocation.B/op"]);
+        Assert.DoesNotContain(metrics.Keys, key => key.Contains("gc.total", StringComparison.Ordinal));
+    }
+
+    /// <summary>Valid zero GC and negative incremental footprint baselines retain absolute changes without fictitious ratios.</summary>
+    [Fact]
+    public void RatiosHandleZeroAndNegativeBaselines()
+    {
+        MetricChange zero = MeasurementReport.CalculateChange(0, 2);
+        Assert.Null(zero.Ratio);
+        Assert.Null(zero.Percent);
+        Assert.Equal(2, zero.Absolute);
+        Assert.Equal("zero baseline", zero.Reason);
+        MetricChange negative = MeasurementReport.CalculateChange(-10, -20);
+        Assert.Null(negative.Ratio);
+        Assert.Null(negative.Percent);
+        Assert.Equal(-10, negative.Absolute);
+        Assert.Equal("negative incremental baseline", negative.Reason);
+        MetricChange decreased = MeasurementReport.CalculateChange(10, 0);
+        Assert.Equal(0.0, decreased.Ratio);
+        Assert.Equal(-100.0, decreased.Percent);
+        Assert.Null(decreased.Reason);
+        MetricChange increased = MeasurementReport.CalculateChange(4, 6);
+        Assert.Equal(1.5, increased.Ratio);
+        Assert.Equal(50.0, increased.Percent);
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculateChange(double.NaN, 1));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.CalculateChange(1, double.PositiveInfinity));
+    }
+
+    /// <summary>Exercises the used matrix/window validators and required JSON fields, including every memory/counter component.</summary>
+    [Fact]
+    public void RendererRejectsMissingVariantCaseTrialOrMetric()
+    {
+        (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+        Assert.Empty(MeasurementReport.ValidateMatrix(frozen, trials));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen, trials[..^1]));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen, trials.Where(trial => trial.Plan.Variant != "candidate").ToArray()));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen, trials.Where(trial => trial.Plan.RowKey != frozen.Inputs[0].Case.RowKey).ToArray()));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { Inputs = frozen.Inputs[..^1] }, trials));
+        TrialRecord valid = trials[0];
+        Assert.All(trials, trial => Assert.Equal("unit-fixture", trial.Origin));
+        for (int index = 0; index < valid.Checkpoints.Length; index++)
+        {
+            Assert.NotEmpty(MeasurementReport.ValidateTrial(valid with
+            {
+                Checkpoints = valid.Checkpoints.Where((_, position) => position != index).ToArray(),
+            }));
+        }
+
+        TrialRecord[] missing = [
+            valid with { Batch = null },
+            valid with { Controls = [] },
+            valid with { Warmup = null },
+            valid with { ValidatedSeedReads = valid.ValidatedSeedReads - 1 },
+            valid with { CleanShutdown = false },
+            valid with { SealsBeforeAndAfter = false },
+            valid with { Batch = valid.Batch! with { ProcessSamples = [] } },
+            valid with { Batch = valid.Batch! with { Server = valid.Batch.Server with { Samples = [] } } },
+            valid with { Batch = valid.Batch! with { ProcessSamplingErrors = 1 } },
+            valid with { Batch = valid.Batch! with { ProcessDroppedSamples = 1 } },
+            valid with { Batch = valid.Batch! with { Server = valid.Batch.Server with { SamplingErrors = 1 } } },
+            valid with { Batch = valid.Batch! with { Server = valid.Batch.Server with { DroppedSamples = 1 } } },
+            valid with { Batch = valid.Batch! with { Server = valid.Batch.Server with { DeadlineExceeded = true } } },
+            valid with { Batch = valid.Batch! with { ClientEnd = valid.Batch.ClientStart } },
+        ];
+        Assert.All(missing, trial => Assert.NotEmpty(MeasurementReport.ValidateTrial(trial)));
+        // JsonRequired makes an absent numeric field distinguishable from a genuine zero GC count.
+        foreach ((object value, Type type, string[] fields) in new[]
+        {
+            ((object)valid.Batch!.Server.Begin, typeof(CounterReading), new[] { "Timestamp", "AllocatedBytes", "Gen0", "Gen1", "Gen2", "PauseTicks", "CpuTicks" }),
+            ((object)valid.Batch.Server.Samples[0], typeof(ManagedSample), new[] { "Timestamp", "OccupiedBytes", "HeapBytes", "FragmentedBytes", "CommittedBytes", "LastGcIndex" }),
+            ((object)valid.Batch.ProcessSamples[0], typeof(ProcessMemorySample), new[] { "ProcessId", "ProcessStartUtcTicks", "Timestamp", "WorkingSetBytes", "PrivateBytes", "CpuTicks" }),
+            ((object)valid.Checkpoints[0], typeof(Footprint), new[] { "Name", "ForcedGc", "ProcessId", "Timestamp", "Frequency", "WorkingSetBytes", "PrivateBytes", "Managed", "Counters" }),
+            ((object)valid.Batch.Server, typeof(WindowEvidence), new[] { "Begin", "End", "Samples", "DroppedSamples", "SamplingErrors", "PostWork", "CounterOrigin", "DeadlineExceeded" }),
+            ((object)valid.Batch, typeof(BatchWindow), new[] { "Frequency", "ClientStart", "ClientEnd", "Server", "Operations", "ProcessSamples", "ExpectedOperations", "CompletedOperations" }),
+        })
+        {
+            foreach (string field in fields)
+            {
+                JsonObject document = JsonSerializer.SerializeToNode(value, type, ProbeProtocol.JsonOptions)!.AsObject();
+                Assert.True(document.Remove(field));
+                Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(document.ToJsonString(), type, ProbeProtocol.JsonOptions));
+            }
+        }
+    }
+
+    /// <summary>Rendering saved incomplete/unit evidence is deterministic, read-only and never tries to launch unavailable artifacts.</summary>
+    [Fact]
+    public async Task RendererReproducesSavedEvidenceWithoutServerExecution()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "candle-perf-render-fixture-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+            trials[0] = trials[0] with { Finished = trials[0].Finished with { Utc = trials[0].StartedUtc.AddSeconds(-1) } };
+            ExperimentManifest manifest = Manifest();
+            PreparedExperiment prepared = new(3, ProbeProtocol.Version, manifest.RunId, new string('A', 64),
+                RequiredAssemblyFixture("baseline", "R4").Artifact, RequiredAssemblyFixture("candidate", "R4").Artifact,
+                [], new Dictionary<string, FileSeal>(), new("unavailable-dotnet", 1, new string('B', 64)), new string('B', 64),
+                new("unavailable-build", 1, new string('B', 64)), new("unavailable-log", 1, new string('B', 64)),
+                new("unavailable-isolation", 1, new string('B', 64)), new("unavailable-archive", 1, new string('B', 64)), [],
+                new(Workloads.ContractVersion, Workloads.Algorithm, Workloads.Seed, 4, [], [], []), DateTimeOffset.UnixEpoch);
+            await File.WriteAllBytesAsync(Path.Combine(directory, "manifest.json"), JsonSerializer.SerializeToUtf8Bytes(manifest, ProbeProtocol.JsonOptions));
+            await File.WriteAllBytesAsync(Path.Combine(directory, "prepared.json"), JsonSerializer.SerializeToUtf8Bytes(prepared, ProbeProtocol.JsonOptions));
+            await File.WriteAllBytesAsync(Path.Combine(directory, "frozen-measurement.json"), JsonSerializer.SerializeToUtf8Bytes(frozen, ProbeProtocol.JsonOptions));
+            await File.WriteAllTextAsync(Path.Combine(directory, "fixture-environment.json"), "{\"Origin\":\"unit-fixture\",\"Observation\":\"not live performance\"}");
+            string trialRelative = Path.Combine(trials[0].Plan.RelativeDirectory, "trial.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(directory, trialRelative))!);
+            byte[] trialBytes = JsonSerializer.SerializeToUtf8Bytes(trials[0], ProbeProtocol.JsonOptions);
+            await File.WriteAllBytesAsync(Path.Combine(directory, trialRelative), trialBytes);
+            Directory.CreateDirectory(Path.Combine(directory, "measurement"));
+            MeasurementLedger ledger = new(3, frozen.RunId,
+                Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(directory, "frozen-measurement.json")))),
+                trials[0].Started with { Utc = trials[0].StartedUtc.AddSeconds(-1), Before = trials[0].Started.Before - 1000, After = trials[0].Started.After - 1000 },
+                trials[0].Finished with { Utc = trials[0].FinishedUtc.AddSeconds(1), Before = trials[0].Finished.Before + 1000, After = trials[0].Finished.After + 1000 },
+                [new(trialRelative, trialBytes.Length, Convert.ToHexString(SHA256.HashData(trialBytes)))],
+                frozen.Schedule[1..], "unit-fixture, not an executed schedule", trials[0].Parent);
+            await File.WriteAllBytesAsync(Path.Combine(directory, "measurement", "ledger.json"), JsonSerializer.SerializeToUtf8Bytes(ledger, ProbeProtocol.JsonOptions));
+            Dictionary<string, string> before = Directory.GetFiles(directory, "*", SearchOption.AllDirectories)
+                .ToDictionary(path => Path.GetRelativePath(directory, path),
+                path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
+            (string first, CompletenessResult result) = await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            (string second, CompletenessResult rerendered) = await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            Assert.False(result.Complete);
+            Assert.False(rerendered.Complete);
+            Assert.Equal(first, second);
+            Assert.Contains("INCOMPLETE", first, StringComparison.Ordinal);
+            Assert.Contains("Unit fixtures", first, StringComparison.Ordinal);
+            Assert.Contains("trial-0001", first, StringComparison.Ordinal);
+            Assert.Contains("parsed attempts: 1", first, StringComparison.Ordinal);
+            Assert.Contains("Clock observations and interpretation", first, StringComparison.Ordinal);
+            Assert.Contains("trial-0001 lifetime", first, StringComparison.Ordinal);
+            Assert.Contains(trials[0].StartedUtc.ToString("O", CultureInfo.InvariantCulture) + " → " +
+                trials[0].FinishedUtc.ToString("O", CultureInfo.InvariantCulture), first, StringComparison.Ordinal);
+            Assert.Contains("net UTC adjustment", first, StringComparison.Ordinal);
+            Assert.Contains("measured UTC-read uncertainty", first, StringComparison.Ordinal);
+            Assert.Contains("endpoints cannot locate its instant or detect cancelling intermediate changes", first, StringComparison.Ordinal);
+            Assert.All(Workloads.CreateCases(), workload => Assert.Contains(workload.RowKey, first, StringComparison.Ordinal));
+            Assert.Equal(before.Count, Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Length);
+            foreach (string file in Directory.GetFiles(directory, "*", SearchOption.AllDirectories))
+            {
+                Assert.Equal(before[Path.GetRelativePath(directory, file)], Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))));
+            }
+
+            await File.WriteAllBytesAsync(Path.Combine(directory, "frozen-measurement.json"),
+                JsonSerializer.SerializeToUtf8Bytes(frozen with
+                {
+                    Bounds = frozen.Bounds with { SetupSeconds = 600, BatchSeconds = 60 },
+                }, ProbeProtocol.JsonOptions));
+            (string incompatibleBounds, CompletenessResult incompatibleResult) =
+                await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            Assert.False(incompatibleResult.Complete);
+
+            File.Delete(Path.Combine(directory, "frozen-measurement.json"));
+            (string manifestOnly, CompletenessResult manifestResult) =
+                await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            Assert.False(manifestResult.Complete);
+            foreach (string markdown in new[] { first, second, manifestOnly })
+            {
+                Assert.Contains("Saved startup/setup/measured/request/settle/shutdown bounds: 120s/1200s/7200s/30s/1s/15s.", markdown, StringComparison.Ordinal);
+                Assert.Contains("Setup+audit share the 1200s budget; the measured window has its separate 7200s limit.", markdown, StringComparison.Ordinal);
+                Assert.Contains("stopped export has its own 120s budget after EndWindow, separate from setup/audit, measured work and the 30s end acknowledgement/ordinary HTTP/pipe exchange limit.", markdown, StringComparison.Ordinal);
+                Assert.Contains("finite child lifetime is 8710s", markdown, StringComparison.Ordinal);
+                Assert.Contains("10s boundary allowance and two 15s shutdown intervals.", markdown, StringComparison.Ordinal);
+                Assert.Contains("configured limits, not observed durations.", markdown, StringComparison.Ordinal);
+            }
+
+            JsonObject incompleteManifest = JsonSerializer.SerializeToNode(manifest, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(incompleteManifest.Remove("Bounds"));
+            await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), incompleteManifest.ToJsonString());
+            (string missingBounds, CompletenessResult missingResult) =
+                await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            Assert.False(missingResult.Complete);
+            incompleteManifest["Bounds"] = null;
+            await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), incompleteManifest.ToJsonString());
+            (string nullBounds, CompletenessResult nullResult) =
+                await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            Assert.False(nullResult.Complete);
+
+            await File.WriteAllBytesAsync(Path.Combine(directory, "manifest.json"),
+                JsonSerializer.SerializeToUtf8Bytes(manifest with { ProtocolVersion = "candle-perf-phase3-v1" }, ProbeProtocol.JsonOptions));
+            (string incompatibleProtocol, CompletenessResult protocolResult) =
+                await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+            Assert.False(protocolResult.Complete);
+            foreach (string markdown in new[] { incompatibleBounds, missingBounds, nullBounds, incompatibleProtocol })
+            {
+                Assert.Contains("Saved timing bounds, stopped-export budget and child lifetime are unavailable:", markdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("Saved startup/setup/measured/request/settle/shutdown bounds:", markdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("stopped export has its own 120s budget", markdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("finite child lifetime is 8710s", markdown, StringComparison.Ordinal);
+            }
+
+            foreach (string markdown in new[] { first, second, manifestOnly, incompatibleBounds, missingBounds, nullBounds, incompatibleProtocol })
+            {
+                Assert.Contains("INCOMPLETE", markdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("600s", markdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("60s", markdown, StringComparison.Ordinal);
+            }
+
+            Assert.False(File.Exists(Path.Combine(directory, "performance.md")));
+            Assert.False(Directory.Exists(Path.Combine(directory, "child")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>Small in-memory input with a hostile advertised length; never allocates a maximum-sized evidence file.</summary>
+    private sealed class DeclaredLengthStream(byte[] bytes, long declaredLength) : MemoryStream(bytes)
+    {
+        /// <inheritdoc />
+        public override long Length => declaredLength;
+
+        /// <summary>Proves that oversized metadata was rejected without attempting a payload read.</summary>
+        public bool ReadAttempted { get; private set; }
+
+        /// <inheritdoc />
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ReadAttempted = true;
+            return base.ReadAsync(buffer, cancellationToken);
+        }
+    }
+
+    /// <summary>Expires an exchange after its payload read to exercise the post-deserialization deadline check deterministically.</summary>
+    private sealed class CancelAfterReadStream(byte[] bytes, CancellationTokenSource deadline) : MemoryStream(bytes)
+    {
+        /// <inheritdoc />
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ValueTask<int> result = base.ReadAsync(buffer, cancellationToken);
+            if (Position == Length)
+            {
+                deadline.Cancel();
+            }
+
+            return result;
+        }
+    }
+
+    private static TrialPlan[] MeasurementFixtureSchedule() => MeasurementReport.CreateSchedule(
+        Workloads.CreateCases().ToDictionary(workload => workload.RowKey, workload => new MeasurementSettings().InitialCount(workload)), 3);
+
+    private static (FrozenMeasurement Frozen, TrialRecord[] Trials) MeasurementFixture()
+    {
+        TrialPlan[] schedule = MeasurementFixtureSchedule();
+        FrozenCaseInput[] inputs = Workloads.CreateCases().Select(workload => new FrozenCaseInput(workload,
+            new MeasurementSettings().InitialCount(workload), FixtureInput(workload.RowKey), new string('C', 64), new string('D', 64), 1, 1)).ToArray();
+        FrozenMeasurement frozen = new(3, MeasurementReport.ContractVersion, "unit-fixture", "fixture-run", new string('A', 64),
+            new string('B', 64), new string('C', 64), new(DateTimeOffset.UnixEpoch, 1, 1, 1000), new(), new(), inputs, schedule, [], [],
+            new("fixture-environment.json", 1, new string('D', 64)), new(42, 1));
+        return (frozen, schedule.Select(MeasurementTrialFixture).ToArray());
+    }
+
+    private static EvidenceReference FixtureInput(string rowKey) =>
+        new(Path.Combine("fixture-inputs", rowKey + ".json"), 1, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rowKey))));
+
+    private static TrialRecord MeasurementTrialFixture(TrialPlan plan)
+    {
+        WorkloadCase workload = Workloads.CreateCases().Single(item => item.RowKey == plan.RowKey);
+        long clock = plan.Ordinal * 100000L;
+        DateTimeOffset started = DateTimeOffset.Parse("2026-01-01T00:00:00+00:00", CultureInfo.InvariantCulture).AddMinutes(plan.Ordinal);
+        int pid = 10000 + plan.Ordinal;
+        long processStart = started.AddMilliseconds(1).UtcTicks;
+        BatchWindow work = WindowFixture("work", plan.Operations, pid, processStart, clock + 9000, true);
+        Footprint Point(string name, long timestamp) => new(name, name.EndsWith("-forced", StringComparison.Ordinal), pid, timestamp, 1000,
+            100000, 200000, new(timestamp, 80000, 90000, 1000, 100000, 1),
+            FixtureCounters(timestamp + 1));
+        Footprint[] checkpoints = [
+            Point("idle-natural", clock + 3000), Point("idle-forced", clock + 4000),
+            Point("loaded-natural", clock + 7000), Point("loaded-forced", clock + 8000),
+            Point("post-immediate", work.Server.End.Timestamp + 10),
+            Point("post-settled", work.Server.End.Timestamp + 1010),
+            Point("post-forced", work.Server.End.Timestamp + 2010),
+        ];
+        work = work with { Server = work.Server with { PostWork = checkpoints[4..] }, EndAcknowledged = checkpoints[^1].Timestamp + 10 };
+        ResourceBinding? original = workload.CaseId.EndsWith("-update", StringComparison.Ordinal)
+            ? new(workload.CaseId == "patient-update" ? "Patient" : "Observation", "fixture-id", "1", started) : null;
+        return new()
+        {
+            Origin = "unit-fixture", Plan = plan, RunId = "fixture-run", PreparedSha256 = new string('A', 64),
+            FrozenSha256 = new string('B', 64), Inputs = FixtureInput(plan.RowKey), Started = new(started, clock, clock, 1000),
+            Finished = new(started.AddSeconds(30), clock + 30000, clock + 30000, 1000),
+            Parent = new(43, 1), ProcessId = pid, ProcessStartUtcTicks = processStart,
+            Status = "passed", SealsBeforeAndAfter = true, CleanShutdown = true, OraclePassed = true,
+            ValidatedSeedWrites = workload.PatientCount + workload.ObservationCount,
+            ValidatedSeedReads = workload.PatientCount + workload.ObservationCount,
+            Warmup = new(128, 128, 128, workload.CaseId.EndsWith("-create", StringComparison.Ordinal) ? 128 : 0,
+                workload.CaseId == "observation-update" ? 1 : 0, workload.CaseId == "subscription-receive" ? 128 : 0,
+                original, original is null ? null : original with { VersionId = "129" },
+                original is null ? null : original with { VersionId = workload.CaseId == "observation-update" ? "130" : "129" }),
+            Batch = work, Checkpoints = checkpoints,
+            Controls = [WindowFixture("idle-control", 0, pid, processStart, clock + 1000, true),
+                WindowFixture("loaded-control", 0, pid, processStart, clock + 5000, true)],
+        };
+    }
+
+    private static BatchWindow WindowFixture(string name, int count, int pid, long processStart, long timestamp, bool sampling)
+    {
+        long start = timestamp + 3;
+        long end = start + Math.Max(count * 2, 1000);
+        CounterReading begin = FixtureCounters(timestamp + 1);
+        CounterReading finish = FixtureCounters(end + 2);
+        ManagedSample[] managed = sampling ? Enumerable.Range(0, 10).Select(index =>
+            new ManagedSample(start + 5 + (index * 10), 80000 + index, 90000, 1000, 100000, 1)).ToArray() : [];
+        ProcessMemorySample[] process = sampling ? Enumerable.Range(0, 10).Select(index =>
+            new ProcessMemorySample(pid, processStart, start + 5 + (index * 10), 100000 + index, 200000 + index, 1000)).ToArray() : [];
+        WindowEvidence server = new("GC-process-start", pid, processStart, 1000, sampling, ProbeProtocol.SampleCapacity,
+            ProbeProtocol.SampleMilliseconds, begin, finish, managed, 0, 0, false, []);
+        return new(name, 1000, timestamp, timestamp + 2, start, end, end + 1, end + 3, count, count, count,
+            Enumerable.Range(0, count).Select(index => new OperationTiming(129 + index, start + (index * 2),
+                start + (index * 2) + 1, 1, true)).ToArray(), server, process, 0, 0, null);
+    }
+
+    private static CounterReading FixtureCounters(long timestamp) => new(
+        timestamp, timestamp * 1000, (int)(timestamp / 100), (int)(timestamp / 200), (int)(timestamp / 500),
+        timestamp * 10, timestamp * 100);
+
     private static ResponseEvidence ResourceResponse(byte[] content, string id, int status, DateTimeOffset storedAt, string version = "1")
     {
         JsonObject resource = JsonNode.Parse(content)!.AsObject();
@@ -1319,13 +2902,14 @@ public class PerformanceEvidenceTests
         resource["meta"] ??= new JsonObject();
         resource["meta"]!["versionId"] = version;
         resource["meta"]!["lastUpdated"] = storedAt.ToString("O", CultureInfo.InvariantCulture);
+        (ClockObservation started, ClockObservation completed) = FixtureClocks(storedAt.AddTicks(-1), storedAt.AddTicks(1));
         return new(status, new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
             ["Content-Type"] = ["application/fhir+json; charset=utf-8"],
             ["ETag"] = ["W/\"" + version + "\""],
             ["Last-Modified"] = [storedAt.UtcDateTime.ToString("r", CultureInfo.InvariantCulture)],
             ["Location"] = ["http://127.0.0.1:58260/fhir/perf/" + resource["resourceType"]!.GetValue<string>() + "/" + id],
-        }, JsonSerializer.SerializeToUtf8Bytes(resource), storedAt, storedAt);
+        }, JsonSerializer.SerializeToUtf8Bytes(resource), started, completed);
     }
 
     private static HttpExchangeEvidence SearchPage(
@@ -1355,9 +2939,10 @@ public class PerformanceEvidenceTests
             bundle["entry"] = entries;
         }
 
+        (ClockObservation started, ClockObservation completed) = FixtureClocks(now.AddTicks(-1), now.AddTicks(1));
         return new(uri, new ResponseEvidence(200,
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["Content-Type"] = ["application/fhir+json"] },
-            JsonSerializer.SerializeToUtf8Bytes(bundle), now, now));
+            JsonSerializer.SerializeToUtf8Bytes(bundle), started, completed));
     }
 
     private static TenantSnapshot ClinicalSnapshot(
@@ -1381,7 +2966,7 @@ public class PerformanceEvidenceTests
 
     private static ExperimentManifest Manifest() => new()
     {
-        RunId = "phase1-001", OutputDirectory = ExperimentRunner.DataRoot + @"\phase1-001",
+        RunId = "unit-fixture-v3", OutputDirectory = ExperimentRunner.DataRoot + @"\unit-fixture-v3",
         ReportPath = ExperimentRunner.RequiredReportPath,
         Baseline = new BaselineInput
         {
@@ -1394,7 +2979,7 @@ public class PerformanceEvidenceTests
             BuildProvenancePath = ExperimentRunner.DataRoot + @"\artifacts-001\candidate-build.json",
         },
         ProbePath = @"C:\ai\git\fhir-candle\src\FhirCandle.Performance.Probe\bin\Release\net8.0\FhirCandle.Performance.Probe.dll",
-        ToolSourceRevision = ExperimentRunner.CandidateRevision, ToolSourceDescription = "uncommitted phase-one tooling fixture",
+        ToolSourceRevision = ExperimentRunner.CandidateRevision, ToolSourceDescription = "unit fixture only; never live execution evidence",
         Isolation = new IsolationSettings(true, "unit-test manifest only, not live authorization",
             ExperimentRunner.DataRoot + @"\artifacts-001\isolation.txt"),
     };
@@ -1440,12 +3025,49 @@ public class PerformanceEvidenceTests
         JsonObject resource = JsonNode.Parse(challenge.Observation)!.AsObject();
         resource["id"] = "server-assigned-1";
         resource["meta"] = new JsonObject { ["versionId"] = "1", ["lastUpdated"] = now.ToString("O", CultureInfo.InvariantCulture) };
+        (ClockObservation started, ClockObservation completed) = FixtureClocks(now.AddTicks(-1), now.AddTicks(1));
         return new ResponseEvidence(201, new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
             ["Content-Type"] = ["application/fhir+json; charset=utf-8"],
             ["ETag"] = ["W/\"1\""], ["Last-Modified"] = [now.UtcDateTime.ToString("r", CultureInfo.InvariantCulture)],
             ["Location"] = ["http://127.0.0.1:58260/fhir/perf/Observation/server-assigned-1"],
-        }, Encoding.UTF8.GetBytes(resource.ToJsonString()), now, now);
+        }, Encoding.UTF8.GetBytes(resource.ToJsonString()), started, completed);
+    }
+
+    private static ResponseEvidence ObserveResponse(
+        ResponseEvidence response, DateTimeOffset started, DateTimeOffset completed, long start, long end)
+    {
+        ScriptedClock clock = new([start, start + 2, end - 2, end], [started, completed], 10000000);
+        return response with { Started = ClockObservation.Capture(clock), Completed = ClockObservation.Capture(clock) };
+    }
+
+    /// <summary>Only returns supplied clock readings; it never sleeps, sets system time or runs a timer.</summary>
+    private sealed class ScriptedClock(long[] timestamps, DateTimeOffset[] observations, long frequency) : TimeProvider
+    {
+        private readonly Queue<long> _timestamps = new(timestamps);
+        private readonly Queue<DateTimeOffset> _observations = new(observations);
+
+        /// <inheritdoc/>
+        public override long TimestampFrequency => frequency;
+        /// <inheritdoc/>
+        public override long GetTimestamp() => _timestamps.Dequeue();
+        /// <inheritdoc/>
+        public override DateTimeOffset GetUtcNow() => _observations.Dequeue();
+    }
+
+    private static (ClockObservation Started, ClockObservation Completed) FixtureClocks(DateTimeOffset started, DateTimeOffset completed)
+    {
+        Assert.True(completed > started);
+        long duration = (completed - started).Ticks;
+        long end = Interlocked.Add(ref _fixtureTimestamp, duration + 10);
+        return (new(started, end - duration, end - duration, TimeSpan.TicksPerSecond),
+            new(completed, end, end, TimeSpan.TicksPerSecond));
+    }
+
+    private static ReceiptExpectation FixtureReceiptExpectation(NotificationInput notification, DateTimeOffset started, DateTimeOffset completed)
+    {
+        (ClockObservation first, ClockObservation last) = FixtureClocks(started, completed);
+        return new(notification, first, last);
     }
 
     private static ReceiptSnapshot Receipt(ProbeChallenge challenge) => new(
