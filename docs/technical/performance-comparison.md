@@ -37,16 +37,24 @@ The parent independently audited `phase2-001`: **72 pairs / 144 fresh
 lifetimes passed**, with 871,200 seed PUTs, 871,200 full read-backs, 576 untimed
 case operations, clean exits and actual .NET/ASP.NET 8.0.30. That evidence and
 the earlier `phase1-006` challenges remain historical gate evidence, not
-measurements. **Phase 3 is not complete; fresh corrected-tool verification and
-full calibration remain required.** The following timeout is historical,
-not the current blocker. The retained
-`phase3-001` v1 pilot `pilot-0033` (baseline R4, 100 Patients/1,000 Observations,
-`observation-token`) completed all 128 warm-ups but only **283/1,024** fixed
+measurements. **Phase 3 is durably complete at
+`74509e3725e92b8154ba2109d5f88c94684568a1`. Phase 4's fresh headroom run
+`phase4-001` has completed all 432 measured trials and produced a COMPLETE
+saved-evidence report.** The independent numerical audit and final repository
+verification/commit are separate caller-owned gates, not claimed complete
+here. The following setbacks are preserved history, not current live blockers.
+The retained `phase3-001` v1 pilot `pilot-0033` (baseline R4,
+100 Patients/1,000 Observations, `observation-token`) completed all 128 warm-ups but only **283/1,024** fixed
 operations (284 attempted) in **59.8725985 seconds** before the common
 60-second runner/probe window canceled. This is an inadequate duration gate,
 **not a baseline/candidate benchmark finding**. All 177 prior children exited;
 the full semantic rerun, 33 calibration attempts and failed partial batch
 remain untouched.
+
+The historical Application Control refusal of older test-output bytes is
+also preserved. Subsequent current-tool verification succeeded without a
+policy change; it does not establish that the old denied binary is permitted.
+That refusal is not a current build or live-experiment blocker.
 
 The subsequent v2 capacity recovery introduced the common finite capacities
 below. On the user-confirmed private network, fresh `phase3-003` passed all
@@ -63,19 +71,18 @@ No accepted measurements or freeze exists for that run. Its diagnosis and
 independent stop audit remain local historical evidence; neither is rewritten
 or used as accepted data.
 
-The authorized correction uses **`candle-perf-phase3-v3`**,
+The clock-aware correction introduced **`candle-perf-phase3-v3`**,
 **`candle-perf-measurement-v3`** and **`candle-perf-preflight-v3`**. It preserves
 actual UTC while using recorded monotonic evidence for elapsed/order checks.
-It requires **fresh tool bytes/seals, a new schema-3 manifest/run ID and a
+It required **fresh tool bytes/seals, a new schema-3 manifest/run ID and a
 fresh full semantic preflight/calibration**, not an upgrade or continuation
 of `phase3-001`, `phase3-002` or `phase3-003`. Unchanged sealed
 application artifacts may be reverified; old protocol observations cannot be
-pooled or accepted. Source/test success or a longer convenient timeout does
-not prove actual calibration, Phase 3 completion, or the requested comparison.
-The parent owns real launches, the frozen manifest and the populated report.
-A completed live calibration alone does not establish offline evidence
-validity or Phase 3 completion.
-Phase 4 later records the actually validated final reproduction recipe.
+pooled or accepted. Source/test success or a longer convenient timeout was
+not proof of live calibration or offline evidence validity. Both were
+subsequently established for `phase3-005` below; that completed Phase 3
+checkpoint remains intact. The fresh headroom outcome and validated same-run
+reproduction procedure are recorded here separately.
 
 Fresh v3 `phase3-004` completed all 144 semantic children and 72 sampled/off
 profiles (446 retained attempts, a 432-trial frozen schedule, CLI exit 0).
@@ -86,9 +93,73 @@ renderer incorrectly reapplied the control coverage minimum during
 retention-only validation. This correction preserves every other gate and
 the original insufficient status. `phase3-004` remains unmodified diagnostic
 evidence, not accepted measurement or calibration reusable with changed
-tool bytes. Fresh verification, tooling/seals and a new full run/calibration
-remain required; no pooling is permitted. The schema stays **v3** because
-serialized evidence, bounds and clock semantics are unchanged.
+tool bytes. That fix required fresh verification, tooling/seals and a new
+full run/calibration; no pooling was permitted. The record schema stayed
+**v3** because serialized evidence, bounds and clock semantics were unchanged.
+
+Fresh sealed `phase3-005` then passed all **144 semantic children**, all
+**72 sampled/sampler-off calibration profiles**, and full offline
+content/clock/metric validation. Its verified Phase 3 commit is the one above.
+Its first measured schedule on **2026-10-13** stopped at `trial-0004`,
+baseline R4 / 100 Patients + 1,000 Observations / `observation-create`.
+All **1,024 fixed operations**, **128 warm-ups**, **1,100 seed PUTs and
+read-backs**, and content/state oracles passed. Work took **0.2697038 seconds**
+with **17 managed / nine process samples** and no sampler errors or drops;
+each control had **33 process samples**. The selected same-N baseline
+`pilot-0016` took **0.3027473 seconds**, with **19 managed / exactly ten
+process samples**: it met the old minimum without headroom.
+
+That run retains **three passed measured records, one rejected record and
+428 unattempted dispatches**; its report is explicitly **INCOMPLETE**.
+This is a measured sampling shortfall, **not a product failure or a completed
+performance comparison**. Preserve the entire consumed `phase3-005` run:
+never relabel, retry, append measurements, or borrow its freeze. Diagnosis
+is retained locally at
+`scratch\1001-01\performance-data\artifacts-001\coverage-recovery-20261008-01\phase4-coverage-failure-diagnosis.json`.
+
+The user-authorized Phase 4 revision requires **20 actual in-client-work
+samples from each stream in both sampled pilots of the same paired round**
+before freezing common N. Accepted measured work and all sampled controls
+still require **10**; sampler-off streams remain empty. It uses nested
+**measurement settings schema 2** and **`candle-perf-measurement-v4`**,
+without changing top-level schema 3, the v3 pipe/clock/semantic layouts,
+application/runtime pins, capacities, bounds or clinical oracles.
+The earlier projection from actual old normal-pilot counts suggested **39/72**
+profiles needed paired doubling and all projected counts fit **8,192**; the
+largest old N was 4,096, with 12–19 minimum work samples in the relevant
+profiles. Those remain **historical planning estimates**, not the evidence
+for the fresh gate. Any future calibration unable to achieve headroom by
+8,192 must still retain the failure and stop.
+
+Fresh sealed `phase4-001` actually passed **72 semantic pairs / 144 children**
+and all **72 complete paired sampled/sampler-off profiles**. Its **544**
+retained calibration attempts comprise **301 passed, 243
+coverage-insufficient and zero failed**; all **288 selected normal/off
+trials** were adequate. The actual selected sampled minima were **36 managed /
+20 process observations in work**, and **59 managed / 28 process observations
+in controls**. The maximum frozen N was **8,192**, within the unchanged cap.
+All **688 distinct semantic/calibration child lifetimes** exited cleanly.
+Exact-tool offline semantic/calibration validation passed twice before
+measurement; those checkpoint reports were deliberately INCOMPLETE solely
+because the measurement ledger did not yet exist.
+
+The same prepared run, immutable tools and frozen schedule then completed
+**all 432 measured trials**. The ledger has **432 attempts, zero
+not-attempted dispatches and `Failure: null`**. Full saved-evidence
+completeness passed; `measurement\completed.json` records **`Complete: true`,
+`Trials: 432`, `RequiredRows: 72`** at
+**`2026-10-15T08:08:26.7488896Z`**. The evidence-only renderer produced the
+populated ignored `scratch\1001-01\performance.md`; the saved complete-render
+execution record contains two exit-0 renders with identical report bytes and no
+server launches. The executed local example below locates their exact
+commands, seals, boundaries and report records.
+
+Application/runtime pins and all **78 clinical fixture identities** are
+unchanged. No earlier run supplied calibration or measurements; failed and
+diagnostic runs remain preserved, not pooled. Headroom is neither a
+performance budget nor a guarantee of coverage in a future reproduction.
+Experiment completion does not imply that the later independent raw/numeric
+audit, final code/documentation verification or integration commit has passed.
 
 ## Preconditions and command sources
 
@@ -119,12 +190,15 @@ The recovery implementer's documented local checks are:
 
 ```powershell
 dotnet build --configuration Release --framework net10.0
+dotnet build --configuration Release --no-restore
 dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.PerformanceEvidenceTests"
 ```
 
-These are verification instructions, **not a record that live feasibility or
-calibration has passed**. Do not run a stale net8 tool after changing source
-and building only net10. The caller owns T-project, the all-target sequence,
+These are reproduction instructions, **not evidence by themselves**; the
+executed pre-run verification and live results are identified separately.
+Do not run a stale net8 tool after changing source
+and building only net10. The implementer also compiles all targets to catch
+net8/net9 binding differences. The caller owns T-project, full all-target tests,
 candidate provenance, immutable tool copies and all live execution. Do not
 run build/test load concurrently with calibration or measurements.
 
@@ -139,11 +213,12 @@ change is supported.
 
 ## Separate artifact inputs from unique run output
 
-For a fresh Phase 3/4 attempt (retain all earlier development directories):
+For a future reproduction, use unused run/tool placeholders and retain all
+earlier directories, including the completed `phase4-001`:
 
 ```text
 C:\ai\git\fhir-candle\scratch\1001-01\
-  experiment-clock-run-NEW.json           replace NEW consistently with an unused run ID
+  experiment-headroom-run-NEW.json        replace NEW consistently with an unused run ID
   performance.md                         written only by evidence-only render
   performance-data\
     artifacts-001\                       reusable, independently verified inputs
@@ -154,11 +229,14 @@ C:\ai\git\fhir-candle\scratch\1001-01\
       isolation.txt                      actual authorized-environment evidence
       fhir-candle.2025.611.1422.nupkg       downloaded or verified cached archive
       baseline\                          unchanged full extracted package layout
-      clock-run-NEW-tools\                fresh complete immutable net8 runner/probe copy
+      headroom-run-NEW-tools\             fresh complete immutable net8 runner/probe copy
     phase3-001\                          retained failed v1 evidence; never edited/reused
     phase3-002\                          retained v2 evidence; never edited/reused
     phase3-003\                          retained clock-failure evidence; never edited/reused
-    clock-run-NEW\                       fresh v3 OUTPUT; must not exist before prepare
+    phase3-004\                          retained control-coverage diagnostic evidence
+    phase3-005\                          completed old calibration and consumed measured failure
+    phase4-001\                          completed headroom experiment; inspect/render only
+    headroom-run-NEW\                    fresh headroom OUTPUT; must not exist before prepare
       manifest.json
       prepare-started.json
       prepared.json
@@ -167,19 +245,22 @@ C:\ai\git\fhir-candle\scratch\1001-01\
       environment.json
       calibration\
       frozen-measurement.json
+      pre-measurement-environment.json   supplementary caller observation before first run
       measurement\
       trials\
 ```
 
 Preparation and successful preflight/calibration files are expected:
-**`prepare` → preflight → `run` → repeated `render` for the same manifest/run ID
-is supported**. Exclusive create-new stage/attempt records prevent accidental
+**`prepare` → preflight → `run` → `render` for the same manifest/run ID
+is the once-through live sequence**. Only the offline `render` may be
+repeated. A verified phase checkpoint does not restart this sequence.
+Exclusive create-new stage/attempt records prevent accidental
 reuse. Preparation does not overwrite an existing directory; preflight does
 not resume an earlier preflight; measured `run` rejects any existing measured
 attempt directory. It does not reject the matching preparation/preflight
 files. Only the derived markdown may be overwritten by re-rendering.
 
-Use a new ID (replace the portable `clock-run-NEW` placeholder consistently)
+Use a new ID (replace the portable `headroom-run-NEW` placeholder consistently)
 and matching `OutputDirectory` after failures,
 tool/probe/protocol edits or another preflight. Preserve failed directories.
 Inputs can be reused only after hash verification. Do not place artifacts or
@@ -187,7 +268,7 @@ the probe beneath the unique output directory. Never replace a seal with
 moving `bin` contents while using the same run ID.
 
 All of these runtime inputs/outputs are ignored local data, not source paths
-to stage or force-add. The exact eventual report target remains:
+to stage or force-add. The exact report target remains:
 
 `C:\ai\git\fhir-candle\scratch\1001-01\performance.md`
 
@@ -206,8 +287,8 @@ hardware or assert a quiet machine.
 {
   "SchemaVersion": 3,
   "ProtocolVersion": "candle-perf-phase3-v3",
-  "RunId": "clock-run-NEW",
-  "OutputDirectory": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\clock-run-NEW",
+  "RunId": "headroom-run-NEW",
+  "OutputDirectory": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\headroom-run-NEW",
   "ReportPath": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance.md",
   "Baseline": {
     "PackageId": "fhir-candle",
@@ -236,9 +317,9 @@ hardware or assert a quiet machine.
     "TieredPgo": true,
     "ReadyToRun": true
   },
-  "ProbePath": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\artifacts-001\\clock-run-NEW-tools\\FhirCandle.Performance.Probe.dll",
-  "ToolSourceRevision": "e72c517d21ccb7c2f98b4dbd0b32ae4c9071db80",
-  "ToolSourceDescription": "Uncommitted phase-three v3 clock-aware recovery on the named revision; replace with the actual verified source/build identity. prepare seals fresh immutable tool/probe bytes separately from both unchanged applications.",
+  "ProbePath": "C:\\ai\\git\\fhir-candle\\scratch\\1001-01\\performance-data\\artifacts-001\\headroom-run-NEW-tools\\FhirCandle.Performance.Probe.dll",
+  "ToolSourceRevision": "74509e3725e92b8154ba2109d5f88c94684568a1",
+  "ToolSourceDescription": "Uncommitted Phase 4 calibration-headroom revision on the named Phase 3 commit; replace with the actual verified source/build identity. prepare seals fresh immutable tool/probe bytes separately from both unchanged applications.",
   "Port": 58260,
   "Tenant": "perf",
   "HttpWorkers": 1,
@@ -257,12 +338,13 @@ hardware or assert a quiet machine.
     "SampleMilliseconds": 10
   },
   "Measurement": {
-    "SchemaVersion": 1,
+    "SchemaVersion": 2,
     "TrialsPerVariant": 3,
     "InitialMutationOperations": 256,
     "InitialOtherOperations": 1024,
     "MaximumPilotOperations": 8192,
     "MinimumSamples": 10,
+    "PilotMinimumSamples": 20,
     "ControlMilliseconds": 1000
   },
   "Conditions": {
@@ -279,8 +361,10 @@ hardware or assert a quiet machine.
 
 The C# defaults for schema, protocol, pins, runtime, port, tenant, worker count
 and bounds are shown above. Serialized `SchemaVersion`, `ProtocolVersion`,
-`Bounds` and every bound field are **required**, so omitted old settings
-cannot silently acquire v3 evidence semantics. Paths, run ID, both artifact input
+`Bounds` and every bound field are **required**, as are `Measurement` and its
+`SchemaVersion` and `PilotMinimumSamples`. Frozen `Settings` requires the same
+nested policy fields. Omitted or old settings cannot silently acquire the
+new headroom policy. Paths, run ID, both artifact input
 objects, tool source identity/description, isolation evidence and actual
 execution `Conditions` are required. The example build SDK must likewise be
 confirmed, not copied as evidence. The tool records its actual OS,
@@ -293,7 +377,7 @@ preparation under a new run ID.
 
 The seed and prepared schemas are **3**, the probe protocol is
 **`candle-perf-phase3-v3`**, and the distinct measurement contract is
-**`candle-perf-measurement-v3`**. The mandatory prepared `Workload` ledger
+**`candle-perf-measurement-v4`**. The mandatory prepared `Workload` ledger
 has `ContractVersion` **`candle-perf-preflight-v3`**; this versions the
 changed response/receipt evidence, **not the unchanged clinical generator**. Old preparation or
 preflight evidence cannot be upgraded/reused in place. The workload ledger
@@ -305,15 +389,19 @@ Prefer, body byte length and SHA-256 (the empty-byte hash for bodyless GETs).
 The order hash covers the indented UTF-8 serialized seal array, without a BOM.
 `FixtureFiles` independently seals all **78** full fixture files.
 
-`Measurement.SchemaVersion` is 1. Defaults are intentionally fixed except
-`TrialsPerVariant`, which permits 3–10 before preparation. Exactly 128 warm-up
-operations, 10 ms sampling, ten actual samples per stream, the 8,192-operation
-pilot ceiling and the common bounds are part of this versioned protocol.
-If bounds/capacity are inadequate, retain the failure and explicitly revise
-the common protocol before a **new** run; do not edit an accepted freeze.
-Schema-1/2 manifests, v1/v2 probe/measurement/preflight contracts, old 600/60-second bounds
-and earlier prepared directories are rejected, not silently upgraded.
-The parent writes a **new** manifest such as `experiment-clock-run-NEW.json`; the implementation
+`Measurement.SchemaVersion` is **2**. Defaults are intentionally fixed except
+`TrialsPerVariant`, which retains its existing 3–10 bound before preparation;
+this authorized experiment uses **3**. `PilotMinimumSamples` must be **20**,
+while `MinimumSamples` remains **10** for accepted work and sampled controls.
+Exactly 128 warm-up operations, 10 ms cadence, 1,000 ms controls, the
+8,192-operation pilot ceiling and all other common bounds are unchanged.
+If these bounds or actual headroom are inadequate, retain the failure and
+stop: increasing the cap, reducing the threshold or padding work is not
+authorized. Do not edit an accepted freeze.
+Schema-1/2 manifests, measurement settings schema 1, v1/v2/v3 measurement
+contracts, v1/v2 probe/preflight contracts, old 600/60-second bounds and earlier
+prepared directories are rejected, not silently upgraded.
+The parent writes a **new** manifest such as `experiment-headroom-run-NEW.json`; the implementation
 does not edit an existing manifest or any prior runtime evidence.
 
 ## Caller-owned candidate provenance
@@ -407,21 +495,183 @@ failures, not trusted caches. No baseline source-build fallback exists.
 
 ## Prepare and bounded live preflight
 
-These are **new tool invocations**, not alternative build recipes. From the
-implementation repository root, after the caller fills the fresh v3 seed,
-verifies all targets and copies the complete net8 runner/probe closure into
-the new immutable input directory (never over an older copy):
+The following end-to-end sequence worked for `phase4-001`. These are tool
+invocations, not alternative build recipes. For a **future reproduction**,
+replace `NEW` consistently in the seed, run ID, output and immutable tool
+directory with an unused identity. Do not execute a live stage against the
+completed local example. The placeholders separate reusable instructions
+from that example; the current CLI still deliberately requires the exact
+Windows host, ignored `performance-data` root and report path documented
+above, not arbitrary relocated roots or another operating system.
 
-```powershell
-& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll prepare --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment-clock-run-NEW.json
-& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll run --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment-clock-run-NEW.json --preflight-only
-& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll run --manifest C:\ai\git\fhir-candle\scratch\1001-01\experiment-clock-run-NEW.json
-& "C:\Program Files\dotnet\dotnet.exe" .\scratch\1001-01\performance-data\artifacts-001\clock-run-NEW-tools\FhirCandle.Performance.dll render --run-directory C:\ai\git\fhir-candle\scratch\1001-01\performance-data\clock-run-NEW
-```
+Before `prepare`, finish the documented source verification, preserve its
+exact commands/logs/results and source/build identity, then copy and seal the
+**complete matching net8 runner/probe closure** outside the run directory.
+Reverify the unchanged application/runtime inputs. Fill the schema-3 seed
+with required measurement settings schema 2 / pilot minimum 20 and actual
+provenance, not placeholder observations.
+Record actual machine/CPU/OS/architecture, RAM and available capacity,
+build SDK, current power/AC conditions, background load, free experiment
+port and isolation authorization **before preparation**. The executed
+example used read-only CIM, power-policy and capacity observations.
+Do not assert an exclusive quiet host, dump inherited secrets, inspect
+data-protection keys or change clock, firewall or power settings.
 
+Reserve sufficient time/disk/memory, end task-owned builds/tests and other
+deliberate load, and keep them stopped throughout live stages. Preserve the
+private-network/no-client authorization and wildcard-listener/allow-rule
+disclosure; it is operational isolation, not firewall-enforced denial.
 The runner itself must not inherit `DOTNET_STARTUP_HOOKS` or
 `FHIR_CANDLE_PERFORMANCE_PROBE`. Do not set either globally. Referencing the
 probe for protocol DTOs does not call `StartupHook.Initialize`.
+
+Run each live stage **once**, checking its exit before proceeding. Retain
+the actual invocation, working directory, start/finish observations, exit
+and complete output for every command. The variables below are used in the
+same PowerShell session, from the implementation repository root:
+
+```powershell
+$Dotnet = "C:\Program Files\dotnet\dotnet.exe"
+$ToolDirectory = "C:\ai\git\fhir-candle\scratch\1001-01\performance-data\artifacts-001\headroom-run-NEW-tools"
+$Runner = Join-Path $ToolDirectory "FhirCandle.Performance.dll"
+$Manifest = "C:\ai\git\fhir-candle\scratch\1001-01\experiment-headroom-run-NEW.json"
+$RunDirectory = "C:\ai\git\fhir-candle\scratch\1001-01\performance-data\headroom-run-NEW"
+$ReportPath = "C:\ai\git\fhir-candle\scratch\1001-01\performance.md"
+
+& $Dotnet $Runner prepare --manifest $Manifest
+if ($LASTEXITCODE -ne 0) { throw "Preparation failed; preserve this run." }
+
+& $Dotnet $Runner run --manifest $Manifest --preflight-only
+if ($LASTEXITCODE -ne 0) { throw "Semantic/calibration gate failed; preserve this run." }
+```
+
+Verify all 78 prepared fixture identities against the unchanged clinical
+contract. Inspect the full semantic matrix/completion, every retained
+calibration attempt and selected sampled/off pair, coverage/control evidence, clean
+child exits and `frozen-measurement.json`. Adequate pilots freeze the same
+N for both variants and every repetition; they are not accepted measurements.
+At this checkpoint an offline `render` can validate the saved semantic and
+calibration evidence: it must still return **1 / INCOMPLETE** for the absent
+measurement ledger. The local example did that twice and retained the exact
+missing-ledger diagnostics and identical checkpoint report. An unrelated
+validation failure is not an expected missing-measurement result.
+
+**Carry that exact freeze across the checkpoint. Do not prepare or calibrate
+again between verified calibration and the first measured `run`.** Later
+repository builds may update `bin`, but every remaining invocation for this
+run uses the original sealed tool directory and matching manifest/probe.
+Do not replace those files or relabel their source identity after a commit
+or documentation edit. Changed sealed inputs need a new run, not a repair
+to this freeze. Before the first measured invocation, both `measurement`
+and `trials` must be absent; after any measured attempt, only offline
+rendering is reusable.
+
+After calibration and before `run`, create
+`<run>\pre-measurement-environment.json` as **supplementary append-only
+evidence** (create-new, never overwrite), with its actual observation time,
+machine/load/free-memory/free-disk/power/network conditions, frozen SHA-256,
+confirmed exited calibration children, free port and absence of task-owned
+build/test load. It records conditions at the handoff without mutating the
+seed, saved `manifest.json`, `prepared.json`, `environment.json` or freeze.
+It does not replace the sealed preparation `Conditions`, enter metric
+calculations or authorize an incompatible environment. Recheck the seals
+and authorized operating conditions before proceeding.
+
+```powershell
+& $Dotnet $Runner run --manifest $Manifest
+if ($LASTEXITCODE -ne 0) { throw "Measurement failed; no retry in this run." }
+
+& $Dotnet $Runner render --run-directory $RunDirectory
+if ($LASTEXITCODE -ne 0) { throw "Saved-evidence report is incomplete; retain the diagnostics." }
+```
+
+Audit `measurement\started.json`, `ledger.json` and `completed.json` together
+with the frozen schedule and all referenced trial/raw files. Require all
+**72 rows × two variants × three independent trials**, complete fixed work,
+clean lifetimes, the unchanged settings/seals, every mandatory metric,
+full resource/receipt correctness and no hidden failures/unattempted work.
+The runner's complete result and renderer validation are necessary, not a
+substitute for the caller's independent raw/numerical audit.
+
+For that audit, recompute representative T/N, N/T, whole-server allocation/N,
+natural/forced footprint deltas, independent-trial medians/ranges and paired
+changes from saved values. Include zero-baseline GC and negative incremental
+memory handling where present; do not fabricate relative ratios or count
+requests as independent trials. Check every row's coverage, populations,
+warm-up history and retained calibration/controls against the methods below.
+Review executive findings for branch-versus-release interpretation, trial
+spread, background/probe/host effects and clock uncertainty, not SDK-only
+causality or a promised win. Keep performance values and findings in the
+ignored report, not this tracked procedure.
+
+Repeat **only** the same archived `render --run-directory` invocation to
+check byte reproducibility, recording the exit and report SHA-256 after
+each render (`Get-FileHash -LiteralPath $ReportPath -Algorithm SHA256`).
+Rendering needs no server, live network, new calibration or current machine
+measurement. Never amend generated `performance.md` manually. Preserve
+checkpoint/failed report copies before a later render replaces the common
+report target, together with their exact execution records.
+
+On any failure, stop live execution and use that run's own archived renderer
+offline to retain an explicitly INCOMPLETE report and its nonzero exit.
+Preserve the entire consumed run, full raw evidence, partial attempts,
+not-attempted schedule, diagnostics and cleanup. Identify the precise failed
+gate; never change N, thresholds, timestamps or status to accept it.
+A corrected tool requires new verified/sealed inputs and a fresh full run,
+not pooling, resuming or upgrading historical evidence. Keep each earlier
+run's own tool archive and reports as well.
+
+### Executed local example and evidence locations
+
+The completed run is
+`C:\ai\git\fhir-candle\scratch\1001-01\performance-data\phase4-001`, seeded by
+`C:\ai\git\fhir-candle\scratch\1001-01\experiment-headroom-20261013.json`.
+Its immutable runner/probe directory is
+`C:\ai\git\fhir-candle\scratch\1001-01\performance-data\artifacts-001\headroom-recovery-20261013-01\phase4-001-tools`.
+These are **read-only executed identities**, not unused reproduction paths.
+
+The following records are relative to
+`scratch\1001-01\performance-data\artifacts-001\headroom-recovery-20261013-01\`:
+
+| Record | Reproduction/audit role |
+|-|-|
+| `phase4-001-tool-seal.json`, `verified-sources\` | Exact seven-file net8 closure, verified source snapshot, hashes and pre-run verification identity; do not replace with later `bin` output or revised documentation |
+| `parent-validation\audit.json`, `final-verification.json` | Pre-execution tool verification, commands/results/log references; not the later final code/documentation acceptance |
+| `machine-observation.json` | Actual pre-prepare observations referenced by seed `Conditions` |
+| `phase4-001-prepare-execution.json`, `phase4-001-preflight-execution.json` | Exact successful commands, working directory, timestamps, exit codes and log hashes |
+| `phase4-001-calibration-audit.json` | All semantic/calibration lifetimes, attempts, selected coverage, cap and frozen identity |
+| `phase4-001-calibrated-render-execution.json`, `phase4-001-calibrated-incomplete-report.md` | Twice-validated calibration-only checkpoint; missing measurement ledger was expected then, not a current failure |
+| `phase4-001-measurement-execution.json` | Exact successful full-run command, wrapper boundaries, start record and complete log hash |
+| `phase4-001-complete-render-execution.json`, `phase4-001-complete-report.md` | Exact offline render commands, exits/log hashes and byte-identical populated report snapshot |
+
+Inside the run, `manifest.json`, `prepared.json` and `environment.json`
+preserve prepared identities/conditions; `preflight` and `calibration`
+preserve the actual gates; `frozen-measurement.json` binds the schedule;
+`measurement\started.json`, `measurement\ledger.json`,
+`measurement\completed.json` and `trials` preserve accepted execution and full
+raw evidence.
+The separate `pre-measurement-environment.json` was observed at
+`2026-10-14T14:22:38.0855596Z`, without changing the prepared environment.
+The frozen SHA-256 carried through calibration, the ledger and completion is
+`47445C78EB092CA4289F8571BD7A38867C3D5B4A19ED3C7C6DC2600DE43D76EB`.
+
+The full-run wrapper executed from `2026-10-14T15:57:43.1104579Z` to
+`2026-10-15T08:08:26.8737851Z`, exit **0**. The ledger's actual measurement
+observations are `2026-10-14T16:01:16.682404Z` through
+`2026-10-15T08:02:52.1357106Z`; saved-evidence completeness finished at the
+`measurement\completed.json` time stated above. Wrapper time, measured-stage
+lifetime and individual client work intervals are distinct boundaries, not
+interchangeable performance denominators.
+
+The complete-render record contains two exit-0, no-server renders with report
+SHA-256 `7BA1C26391C29C1F81743071777195E6E6C73A439AE6094FEFF029501FC89C28`.
+The requested generated report remains
+`C:\ai\git\fhir-candle\scratch\1001-01\performance.md`. Its executive findings
+distinguish observed branch-versus-release outcomes from SDK-only causality;
+uncertainty, variability and background/probe/host costs remain visible.
+This records an executed experiment and reproducible local deliverable, not
+completion of the parent's independent numerical audit or final repository
+verification/commit.
 
 ### Launch and isolation
 
@@ -475,13 +725,14 @@ Windows TCP tables are retained. Unexpected listeners, outbound TCP or
 non-loopback peers fail the gate. These stopped observations are not a
 continuous network monitor or a replacement for external isolation.
 
-For the authorized recovery, the user confirmed a **private network with no
+For the executed headroom run, the user confirmed a **private network with no
 other clients connecting**. This is operational isolation, not a claim that
 the firewall blocks external clients. The retained enabled Private-profile
 `.NET Host` inbound allow permits the actual host broadly; it does not make
-the wildcard listeners private. No additional firewall rule is requested or
-changed. Preserve that disclosure and the user's confirmation in the fresh
-manifest's isolation evidence, along with all original runtime/network,
+the wildcard listeners private. The user explicitly confirmed that no
+additional firewall rule was needed; none was added or used, and no firewall
+setting changed. Preserve that disclosure and the user's confirmation in any
+fresh manifest's isolation evidence, along with all original runtime/network,
 tenant, population, response and receipt gates.
 
 The historical cache-option parser differs. The public, **effective**
@@ -575,7 +826,7 @@ HTTP caps). Offline validation checks them against the same constants:
 | Boundary allowance | 10 seconds |
 | Each graceful / exact-child shutdown interval | 15 seconds |
 | Nominal cadence / fixed capacity per stream | 10 ms / **720,004** |
-| Required actual in-work samples | At least **10 independently from each stream** |
+| Required accepted-trial in-work samples | At least **10 independently from each stream** |
 | Saved large-record reader ceiling | **1 GiB = 1,073,741,824 bytes** |
 
 The exact supported child lifetime is **120 + 1,200 + 7,200 + 30 + 120 +
@@ -676,7 +927,8 @@ Response expectations are specific, not “any 2xx”:
 
 Both pinned `ResourceStore.cs` / `VersionedFhirStore.cs` sources ground these
 profiles. The six retained live challenges confirm seed/create/read/hook
-behavior; update/search/delete still require the full live preflight.
+behavior; update/search/delete were separately verified by the subsequent
+full live semantic preflight.
 The delete contract returns the complete removed resource but supplies no
 ETag, Location or Last-Modified; `FhirController.AddFhirResponse` only adds
 those headers when the response context supplies them. Its absence is
@@ -909,9 +1161,10 @@ exit 0 and no forced termination for all six children. Preserve that evidence
 and its archived tool/probe bytes. It does not establish the 72-row full-scale
 gate, new update/search/delete semantics, or any performance measurement.
 The later `phase2-001` passed the entire expanded semantic gate, independently
-audited as described above. Neither establishes a Phase 3 metric. Rebuild the
-new tools, choose a **fresh Phase 3 run ID**, and prepare new tool/protocol
-seals before the semantic-plus-calibration preflight.
+audited as described above. Neither supplied a Phase 3 metric: the subsequent
+Phase 3 checkpoint and fresh `phase4-001` each established their own full
+semantic/calibration gates with matching tool/protocol seals. A future
+reproduction follows the fresh-run procedure above, not these consumed runs.
 
 `prepared.json` now contains the full workload ledger described above;
 `fixtures\corpora\<corpus-key>.json` contains all clinical bytes and
@@ -981,13 +1234,15 @@ or separate command that can bless existing phase-two measurements**.
    `patient-create`, `observation-create`, `subscription-receive`, and
    **1,024** for every update/read/search case. Both pilots include the real
    128-operation warm-up/restoration and both one-second controls.
-3. If (and only if) a pilot's only validation failures are fewer than ten
-   actual samples in either stream in a sampled work or control window,
+3. If (and only if) a pilot's only validation failures are fewer than **20**
+   actual samples in either stream inside sampled client work, or fewer than
+   **10** in a sampled control window,
    retain **both** results, including the `coverage-insufficient` status,
    and double N for **both** variants.
    Any other counter, protocol, oracle, timeout, buffer, process, shutdown or
-   state failure stops the run. Continue only up to common N=8,192.
-   Offline retention validation waives only this minimum, not any other
+   state failure stops the run. Continue only up to common N=8,192; failure
+   there stops explicitly, without changing the cap or thresholds.
+   Offline retention validation waives only these coverage minima, not any other
    evidence check; insufficient pilots cannot be selected or accepted.
    Accepted repetitions never pool pilot observations or change N.
 4. At the adequate shared N, run a fresh **sampler-off pair**, with the
@@ -997,9 +1252,12 @@ or separate command that can bless existing phase-two measurements**.
    cell with missing mandatory memory.
 5. Save `calibration\completed.json` and **`frozen-measurement.json`** only
    after all profiles have complete adequate selected normal/off pairs.
-   Selected sampled pairs and accepted trials require at least ten actual
-   samples in each stream in both controls **and** work. The frozen handoff
-   (schema 3) binds the prepared
+   Both selected sampled pilots must have at least **20** actual in-work
+   samples per stream **in the same paired round at the same N**.
+   Their sampled controls still require **10**, as do accepted measured work
+   and controls. Passing variants from different rounds cannot be combined.
+   The frozen handoff (schema 3, measurement contract v4, settings schema 2)
+   binds the prepared
    manifest/app/runtime/tool/probe identity, settings/bounds, 72 input-file
    seals/order hashes/payload sizes, every pilot attempt and selected normal/
    off pair, full semantic raw-file seals, environment and exact schedule.
@@ -1046,7 +1304,10 @@ Once prepared, **do not rebuild over the accepted tool/probe output paths**.
 injected probe; hashes are rechecked around every lifetime. An archived
 tool directory can be used if it contains the complete matching net8 tool
 closure and the manifest names those exact probe bytes. Moving paths or
-rebuilding after preparation changes identity and requires a fresh run.
+replacing those sealed bytes after preparation changes identity and requires
+a fresh run. A later repository build elsewhere does not invalidate the
+unchanged archived closure or require calibration again; continue with that
+same archive, manifest and freeze.
 Application artifacts remain the independently sealed release and candidate,
 never the moving implementation application's `bin` output.
 
@@ -1131,8 +1392,12 @@ copies. This identical larger reservation is disclosed observer cost, not an
 optimization or a reason to subtract memory. It sleeps outside windows;
 runner/testhost memory is excluded from server metrics.
 
-At least **ten actual samples from each stream inside client work** are
-required, independently of boundary/control samples. Wrong PID/lifetime,
+Selected sampled pilot work requires at least **20 actual samples from each
+stream inside client work**; accepted measured work and every sampled
+control require **10**. These are independent of boundary samples and other
+windows; no delays, padding or borrowed observations can satisfy them.
+Sampler-off streams must be genuinely empty. The pilot margin is not a
+performance budget or a guarantee of later coverage. Wrong PID/lifetime,
 out-of-server-window timestamps, nonmonotonic time, overrun, stream absence,
 negative counters and nonpositive durations invalidate completion.
 The maximum inside work is a **sampled lower bound**. No process-lifetime
@@ -1162,9 +1427,10 @@ New durable files/types are versioned and append-only:
 | Evidence | Meaning |
 |-|-|
 | `environment.json` | Actual preparation OS/architecture/processor/runtime/invocation plus caller-observed hardware/RAM/power/background/build SDK; no inherited secret dump |
+| `pre-measurement-environment.json` | Supplementary append-only caller observation before the first measured invocation; does not replace frozen preparation conditions or extend the renderer's metric sources |
 | `calibration\<row>\pilot-NN-inputs.json` | The exact once-generated `TrialInputs`: 128 warm requests, measured requests at offset 128, optional original-content restore PUT |
 | `calibration\...\trial.json` | Schema-3 `TrialRecord` for each normal/off/failed-coverage attempt; never accepted measurement |
-| `frozen-measurement.json` | Schema-3 immutable 72-profile identity/input/count/calibration/schedule handoff, parent identity and bracketed freeze observation |
+| `frozen-measurement.json` | Schema-3 immutable 72-profile handoff with measurement contract v4, required settings schema 2 / pilot minimum 20, identity/input/count/calibration/schedule, parent identity and bracketed freeze observation |
 | `measurement\started.json`, `ledger.json`, `completed.json` | Actual runner invocation, schema-3 ledger with bracketed lifetime/parent identity, all attempted/unattempted dispatches, failure status and independently checked completion |
 | `trials\trial-NNNN\trial.json` | Origin, unique plan/process lifetime, prepare/freeze/input seals, status/failure, seed totals, warm histories, windows, controls, checkpoints and all raw references |
 | `warmup-raw.json`, `measured-raw.json` | Every logical operation's unchanged monotonic times, separate required response UTC/monotonic observations, attempt/completion/page counts, unmodified bodies and headers; unfinished slots, errors and available partial-body/header evidence remain explicitly incomplete |
@@ -1179,7 +1445,7 @@ allowed **only after full body/header validation**, retaining every
 original identity/version/timestamp rather than discarding metadata.
 All other warm/measured/audit response bodies are retained.
 
-The v3 writer retains **compact JSON for `BatchWindow` and `TrialRecord`**,
+The unchanged schema-3 writer retains **compact JSON for `BatchWindow` and `TrialRecord`**,
 including the work window and both controls. It does not drop sample
 timestamps, fields or responses. Other input/handoff files retain their
 indented serialization and clinical/order identities. Both saved-evidence
@@ -1223,7 +1489,10 @@ arithmetic:
 - Full 144-child semantics, complete adequate selected normal/off/control
   calibration for all profiles, retained coverage-only inadequate pairs
   (work or sampled controls) and doubling history, no unindexed attempt
-  files or silently dropped failures.
+  files or silently dropped failures. Selected sampled pilots require 20
+  actual in-work samples per stream even if their saved status claims
+  `passed`; accepted work and sampled controls retain 10. Live and offline
+  validation share the same paired freeze/doubling decision.
 - Every raw hash/length, clean exact-child shutdown and authenticated
   PID/start-time/nonce/probe receipt; repeated loaded-assembly/package seals
   and actual runtime/effective configuration, not a guessed `.Core` name.
@@ -1274,9 +1543,9 @@ background overhead, ordinary UI/host/data-protection and one-machine scope
 are explicit confounders. The report never attributes differences to the SDK
 alone or promises a win.
 
-## Verification ownership and remaining execution gates
+## Verification ownership and remaining repository gates
 
-The interrupted implementation added these **nine** facts in the existing xUnit/VSTest
+The Phase 3 implementation added these **nine** facts in the existing xUnit/VSTest
 class, exercising used helpers and real recorder state guards with
 non-performance fixtures:
 
@@ -1324,19 +1593,57 @@ coverage correction adds two facts:
 They exercise the actual trial validator with one-second loaded controls
 containing 65 managed/four process samples and the inverse, strict
 selected/accepted rejection, invalid/missing control evidence, and unchanged
-sampler-off behavior. There are **42 tooling facts** (the preceding 40 plus
-two), with **4,300 expected project tests**
-if the previously verified 4,258 application tests remain unchanged. These
-are source counts/expectations, **not a claim of new full-suite or live results**.
-The implementer runs the documented net10 build and focused class; the parent
-must run T-project from `AGENTS.md`, then the
-documented all-target restore/build/test sequence before using the net8 CLI.
-It must seal a fresh complete tool closure, use a fresh schema-3 seed/run ID,
-and run the complete semantic plus
-actual calibration gate, inspect boundary gaps/coverage/cleanup, exercise
-incomplete and reproducible rendering, and only then collect the accepted
-full matrix. Phase 3 is not operationally complete until those gates pass;
-Phase 4's actual populated report remains a separate required outcome.
+sampler-off behavior. The Phase 4 headroom revision preserves all **42**
+existing facts and adds six:
+
+- `PilotHeadroomSettingsRequireVersionedFixedPolicy`
+- `PilotHeadroomRequiresEachActualWorkStreamAtBoundary`
+- `PilotControlCoverageKeepsTenSampleBoundary`
+- `PilotPairsDoubleTogetherFreezeTogetherAndFailAtCap`
+- `CalibrationSelectionRevalidatesHeadroomAndFirstAdequatePair`
+- `PilotHeadroomRetentionDoesNotWaiveWorkFailures`
+
+These directly cover 9/10/19/20/21 observations in each stream, paired
+selection/doubling/cap failure through shared production helpers, offline
+passed-flag revalidation, retained noncoverage failures and required policy
+serialization. Existing sampler-off and saved-report facts also cover the
+new boundary counts and rendered policy without changing capacities.
+The pre-execution verification actually passed **48 focused tooling facts**
+and **4,306 tests per framework**, **12,918 total** in the all-target suite,
+with zero warnings/errors/failures/skips. The retained
+`headroom-recovery-20261013-01\parent-validation\audit.json` and linked
+execution/log records authenticate those results and the source/net8 output
+identities. They are the verification that preceded tool sealing and
+`phase4-001`, not evidence that the later final documentation tree has
+already passed its repository gates.
+
+The fresh headroom semantics, calibration, **432 measured trials** and
+complete offline report have now executed as described above. The earlier
+Phase 3 completion remains intact, while its consumed failed measured run
+and every other diagnostic run remain separate historical evidence.
+Do not repeat preparation or calibration merely to cross a phase checkpoint
+or because a later repository build changed `bin`; reuse the exact immutable
+tools for the already-prepared run. After measurement is consumed, do not
+launch it again; only offline rendering may be repeated.
+
+The caller still owns the independent raw/numerical report audit and final
+code/documentation-tree verification, followed by integration/commit.
+The final documented commands, from the repository root, are:
+
+```powershell
+dotnet build --configuration Release --framework net10.0
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet restore
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-restore --verbosity normal
+```
+
+Retain final-tree identities, actual diagnostics and results separately from
+the pre-execution tool verification. Recheck the unchanged production pins
+and owned paths, and confirm that the report, manifests, plans, copied
+artifacts and raw evidence remain ignored local deliverables. No later
+build/test/commit gate is asserted here, and no live rerun is needed to
+re-render the sealed evidence.
 
 Six additional named `PerformanceEvidenceTests` facts cover deterministic
 corpora, the exact matrix, all notification shapes, error/truncated/wrong-ID
@@ -1352,8 +1659,10 @@ cache, wrong runtime, mismatched content/receipt or failed cleanup is an
 execution blocker. Retain it and return to the caller; do not weaken a check,
 patch production or substitute a different baseline/runtime.
 
-The later report must distinguish observed branch-versus-release differences
-from SDK-only causation, preserve all 72 rows and mandatory allocation/GC/
-footprint/retention evidence, and label valid noisy comparisons inconclusive.
+The generated report distinguishes observed branch-versus-release differences
+from SDK-only causation, preserves all 72 rows and mandatory allocation/GC/
+footprint/retention evidence, and retains inconclusive/noisy comparisons.
+Its executive findings, per-case values, tables and improvement/regression
+percentages stay in the ignored renderer-owned report, not this tracked file.
 No performance budget, numeric win, smaller matrix or synthetic report is a
 substitute for that executed outcome.

@@ -64,6 +64,7 @@ public sealed record ExperimentManifest
     [JsonRequired]
     public ExperimentBounds Bounds { get; init; } = new();
     /// <summary>Versioned fixed-count calibration/measurement settings.</summary>
+    [JsonRequired]
     public MeasurementSettings Measurement { get; init; } = new();
     /// <summary>Actual caller-observed hardware/build/power/background conditions, required for execution.</summary>
     public MachineConditions? Conditions { get; init; }
@@ -285,6 +286,7 @@ public sealed class ExperimentRunner
     {
         ArgumentNullException.ThrowIfNull(manifest);
         Require(manifest.SchemaVersion == 3 && manifest.ProtocolVersion == ProbeProtocol.Version, "Unsupported manifest/protocol version.");
+        Require(manifest.Measurement is not null, "Missing fixed measurement settings.");
         manifest.Measurement.Validate();
         Require(manifest.RunId.Length is >= 3 and <= 64 &&
             manifest.RunId.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'), "Unsafe run ID.");
@@ -705,7 +707,8 @@ public sealed class ExperimentRunner
                             "Calibration failed (not a coverage retry): " + plan.AttemptId + ": " + result.Failure);
                     }
 
-                    if (pair.All(trial => trial.Status == "passed"))
+                    int? nextCount = MeasurementReport.NextPilotCount(pair, _manifest.Measurement, count);
+                    if (nextCount is null)
                     {
                         normal = pair.Select(trial => trial.Plan.AttemptId).ToArray();
                         acceptedInputs = trialInputs;
@@ -713,9 +716,7 @@ public sealed class ExperimentRunner
                         break;
                     }
 
-                    Require(count < _manifest.Measurement.MaximumPilotOperations,
-                        "Paired sampling coverage is inadequate at the frozen ceiling; retain this run and explicitly revise common bounds.");
-                    count = checked(count * 2);
+                    count = nextCount.Value;
                 }
 
                 List<string> off = [];

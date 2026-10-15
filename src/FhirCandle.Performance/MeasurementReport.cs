@@ -16,8 +16,16 @@ namespace FhirCandle.Performance;
 /// <summary>Versioned measurement settings, distinct from the unchanged four-operation semantic gate.</summary>
 public sealed record MeasurementSettings
 {
+    /// <summary>Fixed pilot-headroom settings schema; pipe and clock layouts are unchanged.</summary>
+    public const int CurrentSchemaVersion = 2;
+    /// <summary>Actual observations per stream in accepted work and sampled controls.</summary>
+    public const int RequiredMinimumSamples = 10;
+    /// <summary>Actual observations per stream in each selected sampled pilot's work window.</summary>
+    public const int RequiredPilotMinimumSamples = 20;
+
     /// <summary>Settings schema, not an application version.</summary>
-    public int SchemaVersion { get; init; } = 1;
+    [JsonRequired]
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     /// <summary>Independent successful repetitions; fixed before calibration.</summary>
     public int TrialsPerVariant { get; init; } = 3;
     /// <summary>Initial create/hook count, increased only by retained paired coverage pilots.</summary>
@@ -26,16 +34,20 @@ public sealed record MeasurementSettings
     public int InitialOtherOperations { get; init; } = 1024;
     /// <summary>Common finite calibration ceiling; exhaustion requires a new explicitly revised experiment.</summary>
     public int MaximumPilotOperations { get; init; } = 8192;
-    /// <summary>Actual samples inside client work, separately required from each sampler.</summary>
-    public int MinimumSamples { get; init; } = 10;
+    /// <summary>Actual samples per stream inside accepted client work and every sampled control.</summary>
+    public int MinimumSamples { get; init; } = RequiredMinimumSamples;
+    /// <summary>Fixed headroom inside sampled pilot work, required for both variants in the same round.</summary>
+    [JsonRequired]
+    public int PilotMinimumSamples { get; init; } = RequiredPilotMinimumSamples;
     /// <summary>Identical idle and loaded no-HTTP control durations.</summary>
     public int ControlMilliseconds { get; init; } = 1000;
 
     /// <summary>Rejects unversioned changes, unequal counts, reduced coverage and unbounded calibration.</summary>
     public void Validate()
     {
-        if (SchemaVersion != 1 || TrialsPerVariant is < 3 or > 10 || InitialMutationOperations != 256 ||
-            InitialOtherOperations != 1024 || MaximumPilotOperations != 8192 || MinimumSamples != 10 ||
+        if (SchemaVersion != CurrentSchemaVersion || TrialsPerVariant is < 3 or > 10 || InitialMutationOperations != 256 ||
+            InitialOtherOperations != 1024 || MaximumPilotOperations != 8192 || MinimumSamples != RequiredMinimumSamples ||
+            PilotMinimumSamples != RequiredPilotMinimumSamples ||
             ControlMilliseconds != 1000)
         {
             throw new InvalidDataException("Unsupported fixed measurement settings.");
@@ -73,7 +85,8 @@ public sealed record CalibrationProfile(
 /// <summary>Immutable handoff produced only after the entire semantic matrix and paired calibration pass.</summary>
 public sealed record FrozenMeasurement(
     [property: JsonRequired] int SchemaVersion, string ContractVersion, string Origin, string RunId, string PreparedSha256,
-    string ManifestSha256, string ProbeSha256, [property: JsonRequired] ClockObservation Frozen, MeasurementSettings Settings,
+    string ManifestSha256, string ProbeSha256, [property: JsonRequired] ClockObservation Frozen,
+    [property: JsonRequired] MeasurementSettings Settings,
     ExperimentBounds Bounds, FrozenCaseInput[] Inputs, TrialPlan[] Schedule, CalibrationProfile[] Calibration,
     EvidenceReference[] SemanticFiles, EvidenceReference Environment, [property: JsonRequired] ParentIdentity Parent)
 {
@@ -214,7 +227,7 @@ public sealed record CompletenessResult(bool Complete, string[] Errors);
 public static class MeasurementReport
 {
     /// <summary>Counter, lifecycle, calibration and reporting contract for this implementation.</summary>
-    public const string ContractVersion = "candle-perf-measurement-v3";
+    public const string ContractVersion = "candle-perf-measurement-v4";
     /// <summary>Set only by the real runner; fixtures must not use this provenance claim.</summary>
     public const string LiveOrigin = "sealed-release-http";
     /// <summary>Common saved-record reader ceiling; dedicated manifest, corpus and prepared limits remain smaller.</summary>
@@ -347,7 +360,8 @@ public static class MeasurementReport
     }
 
     /// <summary>Used by both the live lifecycle and the offline renderer; coverage is the only pilot-retryable error.</summary>
-    public static string[] ValidateWindow(BatchWindow window, int processId, long processStartTicks, bool requireCoverage)
+    public static string[] ValidateWindow(
+        BatchWindow window, int processId, long processStartTicks, bool requireCoverage, bool pilotWork = false)
     {
         List<string> errors = [];
         WindowEvidence server = window.Server;
@@ -395,7 +409,9 @@ public static class MeasurementReport
             {
                 if (requireCoverage)
                 {
-                    Check(errors, process.Length >= 10 && managed >= 10, "coverage: fewer than ten actual samples in either stream");
+                    int minimum = pilotWork ? MeasurementSettings.RequiredPilotMinimumSamples : MeasurementSettings.RequiredMinimumSamples;
+                    Check(errors, process.Length >= minimum && managed >= minimum,
+                        "coverage: fewer than " + minimum.ToString(CultureInfo.InvariantCulture) + " actual samples in either stream");
                 }
             }
             else
@@ -454,7 +470,7 @@ public static class MeasurementReport
         }
         Check(errors, trial.SealsBeforeAndAfter && trial.CleanShutdown && trial.OraclePassed &&
             ((trial.Status == "passed" && trial.Failure is null) ||
-                (!requireCoverage && trial.Status == "coverage-insufficient" && trial.Failure is not null)),
+                (!requireCoverage && trial.Plan.Purpose == "pilot" && trial.Status == "coverage-insufficient" && trial.Failure is not null)),
             "trial failure/oracle/seal/shutdown");
         if (workload is not null)
         {
@@ -483,7 +499,8 @@ public static class MeasurementReport
                 batch.Server.Sampling == trial.Plan.Sampling &&
                 batch.Operations.Select(operation => operation.Number).SequenceEqual(
                     Enumerable.Range(Workloads.WarmupOperations + 1, trial.Plan.Operations)), "fixed operation count/order");
-            errors.AddRange(ValidateWindow(batch, trial.ProcessId, trial.ProcessStartUtcTicks, requireCoverage));
+            errors.AddRange(ValidateWindow(batch, trial.ProcessId, trial.ProcessStartUtcTicks, requireCoverage,
+                pilotWork: trial.Plan.Purpose == "pilot"));
         }
         else
         {
@@ -551,6 +568,86 @@ public static class MeasurementReport
         return errors.Distinct(StringComparer.Ordinal).ToArray();
     }
 
+    /// <summary>Null freezes this adequate sampled pair; otherwise only a common doubling is allowed, within the fixed cap.</summary>
+    public static int? NextPilotCount(IReadOnlyList<TrialRecord> pair, MeasurementSettings settings, int operations)
+    {
+        settings.Validate();
+        Require(pair.Count == 2 && pair.Select(trial => trial.Plan.Variant).Order(StringComparer.Ordinal)
+            .SequenceEqual(new[] { "baseline", "candidate" }), "Calibration requires both variants in one sampled pilot pair.");
+        TrialRecord first = pair[0];
+        WorkloadCase? workload = Workloads.CreateCases().SingleOrDefault(item => item.RowKey == first.Plan.RowKey);
+        Require(workload is not null && IsPilotCount(operations, settings.InitialCount(workload), settings.MaximumPilotOperations) &&
+            first.Plan.Repetition > 0 && pair.All(trial => trial.Plan.RowKey == first.Plan.RowKey &&
+                trial.Plan.Repetition == first.Plan.Repetition && trial.Plan.Operations == operations &&
+                trial.Plan.Purpose == "pilot" && trial.Plan.Sampling && trial.Inputs == first.Inputs),
+            "Changed pilot row, round, common count, sampling or input.");
+        foreach (TrialRecord trial in pair)
+        {
+            ValidateCalibrationTrial(trial);
+        }
+
+        if (pair.All(trial => trial.Status == "passed"))
+        {
+            return null;
+        }
+
+        Require(operations < settings.MaximumPilotOperations,
+            "Paired sampling coverage is inadequate at the fixed " +
+            settings.MaximumPilotOperations.ToString(CultureInfo.InvariantCulture) + "-operation ceiling (pilot work " +
+            settings.PilotMinimumSamples.ToString(CultureInfo.InvariantCulture) + ", sampled controls " +
+            settings.MinimumSamples.ToString(CultureInfo.InvariantCulture) + " samples per stream); retain the failure and stop.");
+        return checked(operations * 2);
+    }
+
+    /// <summary>Rechecks saved pair selection and every common doubling; recorded passed flags cannot supply pilot headroom.</summary>
+    public static void ValidateCalibrationSelection(
+        CalibrationProfile profile, FrozenCaseInput input, MeasurementSettings settings, IReadOnlyList<TrialRecord> trials)
+    {
+        settings.Validate();
+        Require(profile.RowKey == input.Case.RowKey && profile.Operations == input.Operations &&
+            profile.NormalAttempts.Length == 2 && profile.SamplerOffAttempts.Length == 2 &&
+            profile.Attempts.Length == trials.Count && trials.Count >= 4, "Incomplete paired calibration.");
+        TrialRecord[] normal = trials.Where(trial => profile.NormalAttempts.Contains(trial.Plan.AttemptId, StringComparer.Ordinal)).ToArray();
+        TrialRecord[] off = trials.Where(trial => profile.SamplerOffAttempts.Contains(trial.Plan.AttemptId, StringComparer.Ordinal)).ToArray();
+        foreach ((TrialRecord[] pair, bool sampling, string purpose) in new[]
+        {
+            (normal, true, "pilot"), (off, false, "sampler-off"),
+        })
+        {
+            Require(pair.Length == 2 && pair.Select(trial => trial.Plan.Variant).Order(StringComparer.Ordinal)
+                .SequenceEqual(new[] { "baseline", "candidate" }) &&
+                pair.All(trial => trial.Status == "passed" && trial.Plan.RowKey == profile.RowKey &&
+                    trial.Plan.Operations == profile.Operations && trial.Plan.Purpose == purpose &&
+                    trial.Plan.Sampling == sampling && trial.Inputs.Sha256 == input.File.Sha256),
+                "Missing adequate paired normal/off calibration at frozen N.");
+        }
+
+        foreach (TrialRecord trial in trials.Where(trial => trial.Plan.Purpose == "sampler-off"))
+        {
+            ValidateCalibrationTrial(trial);
+        }
+
+        int expectedCount = settings.InitialCount(input.Case);
+        bool selected = false;
+        foreach (TrialRecord[] pair in trials.Where(trial => trial.Plan.Purpose == "pilot").Chunk(2))
+        {
+            Require(!selected, "A pilot pair follows the first adequate pair; best-of calibration is forbidden.");
+            int? next = NextPilotCount(pair, settings, expectedCount);
+            selected = next is null;
+            Require(selected == (expectedCount == profile.Operations),
+                "Changed pilot counts, dropped failed pair, or best-of calibration selection.");
+            if (selected)
+            {
+                Require(pair.Select(trial => trial.Plan.AttemptId).SequenceEqual(profile.NormalAttempts),
+                    "Selected sampled pilots are not the same adequate round.");
+            }
+
+            expectedCount = next ?? expectedCount;
+        }
+
+        Require(selected, "No adequate sampled pilot pair was selected.");
+    }
+
     /// <summary>Exact case/variant/repetition matrix and independent lifetimes, used before rendering any complete report.</summary>
     public static string[] ValidateMatrix(FrozenMeasurement frozen, IReadOnlyList<TrialRecord> trials)
     {
@@ -562,6 +659,7 @@ public static class MeasurementReport
             "frozen case/schema inventory");
         try
         {
+            Require(frozen.Settings is not null, "Missing fixed measurement settings.");
             frozen.Settings.Validate();
             frozen.Bounds.Validate();
             Dictionary<string, int> counts = frozen.Inputs.ToDictionary(input => input.Case.RowKey, input => input.Operations, StringComparer.Ordinal);
@@ -574,7 +672,7 @@ public static class MeasurementReport
             errors.Add(exception.Message);
         }
 
-        Check(errors, trials.Count == 72 * 2 * frozen.Settings.TrialsPerVariant &&
+        Check(errors, frozen.Settings is not null && trials.Count == 72 * 2 * frozen.Settings.TrialsPerVariant &&
             trials.Select(trial => trial.Plan).SequenceEqual(frozen.Schedule), "missing/extra/reordered variant/case/trial");
         Check(errors, trials.Select(trial => (trial.ProcessId, trial.ProcessStartUtcTicks)).Distinct().Count() == trials.Count &&
             trials.Select(trial => trial.Plan.AttemptId).Distinct(StringComparer.Ordinal).Count() == trials.Count,
@@ -701,6 +799,21 @@ public static class MeasurementReport
         }
     }
 
+    private static void ValidateCalibrationTrial(TrialRecord trial)
+    {
+        bool adequate = trial.Status == "passed";
+        Require(adequate || trial.Status == "coverage-insufficient" && trial.Plan.Purpose == "pilot",
+            "Failed calibration cannot be silently dropped.");
+        string[] metrics = ValidateTrial(trial, requireCoverage: adequate);
+        Require(metrics.Length == 0, "Calibration metrics: " + string.Join("; ", metrics));
+        if (!adequate)
+        {
+            string[] inadequacy = ValidateTrial(trial);
+            Require(inadequacy.Any(error => error.StartsWith("coverage:", StringComparison.Ordinal)) &&
+                trial.Failure is not null, "A coverage retry lacks retained actual inadequacy.");
+        }
+    }
+
     /// <summary>Rechecks the full semantic matrix, every calibration profile and failed coverage attempt from saved data.</summary>
     public static async Task<string[]> ValidateCalibrationAsync(
         string runDirectory, FrozenMeasurement frozen, CancellationToken token) =>
@@ -759,47 +872,14 @@ public static class MeasurementReport
                         lifetimes.Add((trial.ProcessId, trial.ProcessStartUtcTicks)) && attemptIds.Add(trial.Plan.AttemptId),
                         "Calibration is synthetic, mixed, overlapping or reuses a child.");
                     lastFinished = trial.Finished;
-                    bool adequate = trial.Status == "passed";
-                    Require(adequate || trial.Status == "coverage-insufficient" && trial.Plan.Purpose == "pilot",
-                        "Failed calibration cannot be silently dropped.");
-                    string[] metrics = ValidateTrial(trial, requireCoverage: adequate);
-                    Require(metrics.Length == 0, "Calibration metrics: " + string.Join("; ", metrics));
-                    if (!adequate)
-                    {
-                        string[] inadequacy = ValidateTrial(trial);
-                        Require(inadequacy.Any(error => error.StartsWith("coverage:", StringComparison.Ordinal)) &&
-                            trial.Failure is not null, "A coverage retry lacks retained actual inadequacy.");
-                    }
+                    ValidateCalibrationTrial(trial);
 
                     PopulationSummary population = await ValidateRawTrialAsync(runDirectory, trial, manifest, prepared, corpora, token);
                     clocks?.Add(trial.Plan.RelativeDirectory, population.Clocks);
                     trials.Add(trial);
                 }
 
-                TrialRecord[] normal = trials.Where(trial => profile.NormalAttempts.Contains(trial.Plan.AttemptId, StringComparer.Ordinal)).ToArray();
-                TrialRecord[] off = trials.Where(trial => profile.SamplerOffAttempts.Contains(trial.Plan.AttemptId, StringComparer.Ordinal)).ToArray();
-                foreach ((TrialRecord[] pair, bool sampling, string purpose) in new[]
-                {
-                    (normal, true, "pilot"), (off, false, "sampler-off"),
-                })
-                {
-                    Require(pair.Length == 2 && pair.Select(trial => trial.Plan.Variant).Order(StringComparer.Ordinal)
-                        .SequenceEqual(new[] { "baseline", "candidate" }) &&
-                        pair.All(trial => trial.Status == "passed" && trial.Plan.Operations == profile.Operations &&
-                            trial.Plan.Purpose == purpose && trial.Plan.Sampling == sampling &&
-                            trial.Inputs.Sha256 == input.File.Sha256), "Missing adequate paired normal/off calibration at frozen N.");
-                }
-
-                int expectedCount = frozen.Settings.InitialCount(input.Case);
-                TrialRecord[] pilots = trials.Where(trial => trial.Plan.Purpose == "pilot").ToArray();
-                foreach (TrialRecord[] pair in pilots.Chunk(2))
-                {
-                    Require(pair.Length == 2 && pair.All(trial => trial.Plan.Operations == expectedCount) &&
-                        pair.Select(trial => trial.Plan.Variant).Distinct(StringComparer.Ordinal).Count() == 2 &&
-                        (pair.All(trial => trial.Status == "passed") == (expectedCount == profile.Operations)),
-                        "Changed pilot counts, dropped failed pair, or best-of calibration selection.");
-                    expectedCount *= 2;
-                }
+                ValidateCalibrationSelection(profile, input, frozen.Settings, trials);
             }
 
             HashSet<string> indexed = frozen.Calibration.SelectMany(profile => profile.Attempts)
@@ -1882,7 +1962,31 @@ public static class MeasurementReport
         text.AppendLine("- Process-wide allocation is GC.GetTotalAllocatedBytes(true) end−begin / full N. Individual gen0/1/2 collection and total-pause deltas use the same server window; checkpoint-induced collections are excluded. Generation counts are not summed into a fictitious exclusive total.");
         text.AppendLine("- Server monotonic counter boundaries precede binary acknowledgements. Begin/end gaps relative to client T are retained. Probe/control/pipe/host/background allocation and CPU are included, never guessed away. Export, reflection, correctness parsing, evidence I/O and forced GC occur only after EndWindow.");
         text.AppendLine("- Both samplers use preallocated " + ProbeProtocol.SampleCapacity.ToString(CultureInfo.InvariantCulture) +
-            "-slot buffers, 10 ms nominal cadence and actual timestamps. At least ten actual samples from each must lie inside the client workload interval. Process samples include only the authenticated owned server PID/start time, never the runner/testhost. Maxima are sampled lower bounds, not continuous peaks; no lifetime high-water is substituted.");
+            "-slot buffers, 10 ms nominal cadence and actual timestamps. Process samples include only the authenticated owned server PID/start time, never the runner/testhost. Maxima are sampled lower bounds, not continuous peaks; no lifetime high-water is substituted.");
+        try
+        {
+            MeasurementSettings? settings = evidence.Frozen?.Settings ?? evidence.Manifest?.Measurement;
+            Require(settings is not null, "No readable manifest/frozen measurement settings.");
+            Require(evidence.Frozen is null || evidence.Frozen.ContractVersion == ContractVersion,
+                "Saved measurement contract is incompatible.");
+            settings.Validate();
+            text.AppendLine("- Saved measurement settings schema " + settings.SchemaVersion.ToString(CultureInfo.InvariantCulture) +
+                ": at least " + settings.PilotMinimumSamples.ToString(CultureInfo.InvariantCulture) +
+                " actual in-client-work samples per stream in each selected sampled pilot; at least " +
+                settings.MinimumSamples.ToString(CultureInfo.InvariantCulture) +
+                " per stream in accepted measured work and every sampled control, including pilot controls. Sampler-off streams must be empty.");
+            text.AppendLine("- Both variants must pass in the same paired round before common N freezes. Initial create/hook N=" +
+                settings.InitialMutationOperations.ToString(CultureInfo.InvariantCulture) + ", other N=" +
+                settings.InitialOtherOperations.ToString(CultureInfo.InvariantCulture) +
+                "; coverage-only failures permit paired doubling up to " + settings.MaximumPilotOperations.ToString(CultureInfo.InvariantCulture) +
+                ", never individual-variant changes. Controls stay fixed at " +
+                settings.ControlMilliseconds.ToString(CultureInfo.InvariantCulture) +
+                " ms. Pilot headroom is not a performance budget or a guarantee of later coverage; no work delays/padding or measured retries are allowed.");
+        }
+        catch (InvalidDataException exception)
+        {
+            text.AppendLine("- Saved pilot/accepted/control coverage policy is unavailable: " + Escape(exception.Message));
+        }
         text.AppendLine("- Managed occupied bytes are GC.GetTotalMemory(false) estimates. Heap/fragmentation/committed values describe the last GC, not continuous live retention. Last-GC indices and raw timestamps are retained.");
         text.AppendLine("- Seven mandatory footprints: idle natural/forced, loaded natural/forced, immediate post-work, fixed-one-second settled post-work, forced post-work. Capture precedes diagnostic DTO/reflection/audit reads. Forced protocol: blocking full GC, finalizer drain, second blocking full GC, same one-second settle. Natural and forced deltas stay separate.");
         try

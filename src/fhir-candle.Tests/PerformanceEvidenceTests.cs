@@ -1759,7 +1759,7 @@ public class PerformanceEvidenceTests
         ExperimentRunner.ValidateManifest(manifest);
         Assert.Equal(3, manifest.SchemaVersion);
         Assert.Equal("candle-perf-phase3-v3", manifest.ProtocolVersion);
-        Assert.Equal("candle-perf-measurement-v3", MeasurementReport.ContractVersion);
+        Assert.Equal("candle-perf-measurement-v4", MeasurementReport.ContractVersion);
         Assert.Equal(7200, manifest.Bounds.BatchSeconds);
         Assert.Equal(1200, manifest.Bounds.SetupSeconds);
         Assert.Equal(10, manifest.Bounds.SampleMilliseconds);
@@ -1827,11 +1827,78 @@ public class PerformanceEvidenceTests
         (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
         Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { ContractVersion = "candle-perf-measurement-v1" }, trials));
         Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { ContractVersion = "candle-perf-measurement-v2" }, trials));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { ContractVersion = "candle-perf-measurement-v3" }, trials));
         Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { SchemaVersion = 1 }, trials));
         Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { Bounds = frozen.Bounds with { BatchSeconds = 60 } }, trials));
         Assert.Equal(128, Workloads.WarmupOperations);
         Assert.Equal(72, frozen.Inputs.Length);
         Assert.Equal(432, frozen.Schedule.Length);
+    }
+
+    /// <summary>Old, omitted or altered headroom settings cannot silently become the new fixed calibration policy.</summary>
+    [Fact]
+    public void PilotHeadroomSettingsRequireVersionedFixedPolicy()
+    {
+        ExperimentManifest manifest = Manifest();
+        MeasurementSettings settings = manifest.Measurement;
+        Assert.Equal(2, settings.SchemaVersion);
+        Assert.Equal(20, settings.PilotMinimumSamples);
+        Assert.Equal(10, settings.MinimumSamples);
+        Assert.Equal(3, settings.TrialsPerVariant);
+        Assert.Equal(256, settings.InitialMutationOperations);
+        Assert.Equal(1024, settings.InitialOtherOperations);
+        Assert.Equal(8192, settings.MaximumPilotOperations);
+        Assert.Equal(1000, settings.ControlMilliseconds);
+        settings.Validate();
+        Assert.Equal(settings, JsonSerializer.Deserialize<MeasurementSettings>(
+            JsonSerializer.Serialize(settings, ProbeProtocol.JsonOptions), ProbeProtocol.JsonOptions));
+        (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
+        MeasurementSettings[] incompatible = [
+            settings with { SchemaVersion = 0 },
+            settings with { SchemaVersion = 1 },
+            settings with { SchemaVersion = 3 },
+            settings with { PilotMinimumSamples = 0 },
+            settings with { PilotMinimumSamples = 9 },
+            settings with { PilotMinimumSamples = 10 },
+            settings with { PilotMinimumSamples = 19 },
+            settings with { PilotMinimumSamples = 21 },
+            settings with { MinimumSamples = 20 },
+            settings with { ControlMilliseconds = 2000 },
+        ];
+        foreach (MeasurementSettings wrong in incompatible)
+        {
+            MeasurementSettings read = JsonSerializer.Deserialize<MeasurementSettings>(
+                JsonSerializer.Serialize(wrong, ProbeProtocol.JsonOptions), ProbeProtocol.JsonOptions)!;
+            Assert.Throws<InvalidDataException>(read.Validate);
+            Assert.Throws<InvalidDataException>(() => ExperimentRunner.ValidateManifest(manifest with { Measurement = read }));
+            Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { Settings = read }, trials));
+        }
+
+        foreach (string field in new[] { "SchemaVersion", "PilotMinimumSamples" })
+        {
+            JsonObject missing = JsonSerializer.SerializeToNode(settings, ProbeProtocol.JsonOptions)!.AsObject();
+            Assert.True(missing.Remove(field));
+            Assert.Throws<JsonException>(() => missing.Deserialize<MeasurementSettings>(ProbeProtocol.JsonOptions));
+            JsonObject seed = JsonSerializer.SerializeToNode(manifest, ProbeProtocol.JsonOptions)!.AsObject();
+            seed["Measurement"] = missing.DeepClone();
+            Assert.Throws<JsonException>(() => seed.Deserialize<ExperimentManifest>(ProbeProtocol.JsonOptions));
+            JsonObject handoff = JsonSerializer.SerializeToNode(frozen, ProbeProtocol.JsonOptions)!.AsObject();
+            handoff["Settings"] = missing.DeepClone();
+            Assert.Throws<JsonException>(() => handoff.Deserialize<FrozenMeasurement>(ProbeProtocol.JsonOptions));
+        }
+
+        JsonObject legacy = JsonSerializer.SerializeToNode(settings, ProbeProtocol.JsonOptions)!.AsObject();
+        legacy["SchemaVersion"] = 1;
+        Assert.True(legacy.Remove("PilotMinimumSamples"));
+        Assert.Throws<JsonException>(() => legacy.Deserialize<MeasurementSettings>(ProbeProtocol.JsonOptions));
+        JsonObject missingSettings = JsonSerializer.SerializeToNode(manifest, ProbeProtocol.JsonOptions)!.AsObject();
+        Assert.True(missingSettings.Remove("Measurement"));
+        Assert.Throws<JsonException>(() => missingSettings.Deserialize<ExperimentManifest>(ProbeProtocol.JsonOptions));
+        Assert.Throws<InvalidDataException>(() => ExperimentRunner.ValidateManifest(manifest with { Measurement = null! }));
+        Assert.NotEmpty(MeasurementReport.ValidateMatrix(frozen with { Settings = null! }, trials));
+        JsonObject missingFrozenSettings = JsonSerializer.SerializeToNode(frozen, ProbeProtocol.JsonOptions)!.AsObject();
+        Assert.True(missingFrozenSettings.Remove("Settings"));
+        Assert.Throws<JsonException>(() => missingFrozenSettings.Deserialize<FrozenMeasurement>(ProbeProtocol.JsonOptions));
     }
 
     /// <summary>Exact finite activation budget includes end/export/cleanup and feeds the actual lifetime CTS without a twenty-minute ceiling.</summary>
@@ -2360,15 +2427,323 @@ public class PerformanceEvidenceTests
         }), error => error.StartsWith("coverage:", StringComparison.Ordinal));
     }
 
+    /// <summary>Each work stream independently needs twenty pilot samples but only ten accepted samples; boundaries cannot pad it.</summary>
+    [Fact]
+    public void PilotHeadroomRequiresEachActualWorkStreamAtBoundary()
+    {
+        TrialRecord measured = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        foreach (string purpose in new[] { "pilot", "measurement" })
+        {
+            foreach (bool varyManaged in new[] { true, false })
+            {
+                foreach (int count in new[] { 9, 10, 19, 20, 21 })
+                {
+                    BatchWindow work = WindowWithSamples(measured.Batch!, varyManaged ? count : 21, varyManaged ? 21 : count);
+                    work = work with
+                    {
+                        Server = work.Server with
+                        {
+                            Samples = [work.Server.Samples[0] with { Timestamp = work.Server.Begin.Timestamp },
+                                .. work.Server.Samples, work.Server.Samples[^1] with { Timestamp = work.Server.End.Timestamp }],
+                        },
+                        ProcessSamples = [work.ProcessSamples[0] with { Timestamp = work.Server.Begin.Timestamp },
+                            .. work.ProcessSamples, work.ProcessSamples[^1] with { Timestamp = work.Server.End.Timestamp }],
+                    };
+                    TrialRecord trial = measured with { Plan = measured.Plan with { Purpose = purpose }, Batch = work };
+                    Assert.Equal(varyManaged ? count : 21, work.Server.Samples.Count(sample =>
+                        sample.Timestamp >= work.ClientStart && sample.Timestamp <= work.ClientEnd));
+                    Assert.Equal(varyManaged ? 21 : count,
+                        MeasurementReport.WorkSamples(work, trial.ProcessId, trial.ProcessStartUtcTicks).Length);
+                    string[] errors = MeasurementReport.ValidateTrial(trial);
+                    Assert.Equal(errors, MeasurementReport.ValidateWindow(work, trial.ProcessId, trial.ProcessStartUtcTicks,
+                        requireCoverage: true, pilotWork: purpose == "pilot"));
+                    if (count >= (purpose == "pilot" ? 20 : 10))
+                    {
+                        Assert.Empty(errors);
+                        Assert.NotEmpty(MeasurementReport.TrialMetrics(trial));
+                    }
+                    else
+                    {
+                        Assert.StartsWith("coverage:", Assert.Single(errors), StringComparison.Ordinal);
+                        Assert.Throws<InvalidDataException>(() => MeasurementReport.TrialMetrics(trial));
+                        if (purpose == "pilot")
+                        {
+                            TrialRecord retained = RetainedCoverageFixture(trial);
+                            Assert.Empty(MeasurementReport.ValidateTrial(retained, requireCoverage: false));
+                            Assert.NotEmpty(MeasurementReport.ValidateTrial(retained));
+                            Assert.Equal(errors, MeasurementReport.ValidateTrial(retained with { Status = "passed", Failure = null }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Idle and loaded controls retain the ten-sample gate even for otherwise adequate twenty-sample pilots.</summary>
+    [Fact]
+    public void PilotControlCoverageKeepsTenSampleBoundary()
+    {
+        TrialRecord measured = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
+        foreach (string purpose in new[] { "pilot", "measurement" })
+        {
+            TrialRecord trial = measured with
+            {
+                Plan = measured.Plan with { Purpose = purpose },
+                Batch = WindowWithSamples(measured.Batch!, purpose == "pilot" ? 20 : 10, purpose == "pilot" ? 20 : 10),
+            };
+            for (int index = 0; index < trial.Controls.Length; index++)
+            {
+                foreach (bool varyManaged in new[] { true, false })
+                {
+                    foreach (int count in new[] { 9, 10, 19, 20, 21 })
+                    {
+                        BatchWindow[] controls = trial.Controls.ToArray();
+                        controls[index] = WindowWithSamples(controls[index], varyManaged ? count : 21, varyManaged ? 21 : count);
+                        TrialRecord changed = trial with { Controls = controls };
+                        string[] errors = MeasurementReport.ValidateTrial(changed);
+                        if (count >= 10)
+                        {
+                            Assert.Empty(errors);
+                        }
+                        else
+                        {
+                            Assert.Equal("coverage: fewer than 10 actual samples in either stream", Assert.Single(errors));
+                            if (purpose == "pilot")
+                            {
+                                Assert.Empty(MeasurementReport.ValidateTrial(RetainedCoverageFixture(changed), requireCoverage: false));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>The shared live/offline decision needs both variants at equal N in one round and stops at the unchanged finite cap.</summary>
+    [Fact]
+    public void PilotPairsDoubleTogetherFreezeTogetherAndFailAtCap()
+    {
+        MeasurementSettings settings = new();
+        foreach (string caseId in new[] { "observation-create", "observation-read" })
+        {
+            WorkloadCase workload = Workloads.CreateCases().First(item => item.CaseId == caseId);
+            int initial = settings.InitialCount(workload);
+            TrialRecord[] pair = PilotPairFixture(workload, initial, 1);
+            Assert.Null(MeasurementReport.NextPilotCount(pair, settings, initial));
+            for (int variant = 0; variant < 2; variant++)
+            {
+                foreach (bool varyManaged in new[] { true, false })
+                {
+                    TrialRecord[] insufficient = pair.ToArray();
+                    insufficient[variant] = RetainedCoverageFixture(insufficient[variant] with
+                    {
+                        Batch = WindowWithSamples(insufficient[variant].Batch!, varyManaged ? 19 : 20, varyManaged ? 20 : 19),
+                    });
+                    Assert.Equal(initial * 2, MeasurementReport.NextPilotCount(insufficient, settings, initial));
+                    insufficient[variant] = insufficient[variant] with { Status = "passed", Failure = null };
+                    Assert.Throws<InvalidDataException>(() => MeasurementReport.NextPilotCount(insufficient, settings, initial));
+                }
+            }
+
+            TrialRecord[] next = PilotPairFixture(workload, initial * 2, 2);
+            Assert.Null(MeasurementReport.NextPilotCount(next, settings, initial * 2));
+            Dictionary<string, int> counts = Workloads.CreateCases().ToDictionary(item => item.RowKey, settings.InitialCount);
+            counts[workload.RowKey] = initial * 2;
+            TrialPlan[] scheduled = MeasurementReport.CreateSchedule(counts, settings.TrialsPerVariant);
+            Assert.Equal(432, scheduled.Length);
+            Assert.Equal(6, scheduled.Count(plan => plan.RowKey == workload.RowKey));
+            Assert.All(scheduled.Where(plan => plan.RowKey == workload.RowKey), plan => Assert.Equal(initial * 2, plan.Operations));
+
+            TrialRecord[][] invalid = [
+                [pair[0]],
+                [pair[0], pair[0]],
+                [pair[0], pair[1] with { Plan = pair[1].Plan with { Operations = initial * 2 } }],
+                [pair[0], pair[1] with { Plan = pair[1].Plan with { Repetition = 2 } }],
+                [pair[0], pair[1] with { Plan = pair[1].Plan with { RowKey = "another-row" } }],
+                [pair[0], pair[1] with { Plan = pair[1].Plan with { Sampling = false } }],
+                [pair[0], pair[1] with { Plan = pair[1].Plan with { Purpose = "measurement" } }],
+                [pair[0], pair[1] with { Inputs = FixtureInput("different-input") }],
+                [pair[0], pair[1] with { Status = "failed", Failure = "oracle failed" }],
+                [pair[0], pair[1] with { Status = "coverage-insufficient", Failure = "no actual inadequacy" }],
+            ];
+            Assert.All(invalid, wrong => Assert.Throws<InvalidDataException>(() => MeasurementReport.NextPilotCount(wrong, settings, initial)));
+            Assert.Throws<InvalidDataException>(() => MeasurementReport.NextPilotCount(pair, settings, initial + 1));
+
+            int[] pilotCounts = caseId == "observation-create" ? [256, 512, 1024, 2048, 4096, 8192] : [1024, 2048, 4096, 8192];
+            for (int round = 0; round < pilotCounts.Length; round++)
+            {
+                int count = pilotCounts[round];
+                TrialRecord[] capped = PilotPairFixture(workload, count, round + 1);
+                Assert.Null(MeasurementReport.NextPilotCount(capped, settings, count));
+                capped[1] = RetainedCoverageFixture(capped[1] with { Batch = WindowWithSamples(capped[1].Batch!, 20, 19) });
+                if (count < 8192)
+                {
+                    Assert.Equal(pilotCounts[round + 1], MeasurementReport.NextPilotCount(capped, settings, count));
+                }
+                else
+                {
+                    InvalidDataException failure = Assert.Throws<InvalidDataException>(() => MeasurementReport.NextPilotCount(capped, settings, count));
+                    Assert.Contains("8192-operation ceiling", failure.Message, StringComparison.Ordinal);
+                    Assert.Contains("retain the failure and stop", failure.Message, StringComparison.Ordinal);
+                }
+            }
+        }
+    }
+
+    /// <summary>The renderer's actual selection helper revalidates saved passed claims and cannot skip or splice pilot rounds.</summary>
+    [Fact]
+    public void CalibrationSelectionRevalidatesHeadroomAndFirstAdequatePair()
+    {
+        MeasurementSettings settings = new();
+        WorkloadCase workload = Workloads.CreateCases().First(item => item.CaseId == "observation-create");
+        TrialRecord[] first = PilotPairFixture(workload, 256, 1);
+        first[0] = RetainedCoverageFixture(first[0] with { Batch = WindowWithSamples(first[0].Batch!, 20, 19) });
+        TrialRecord[] selected = PilotPairFixture(workload, 512, 2);
+        TrialRecord[] off = PilotPairFixture(workload, 512, 3).Select(trial => trial with
+        {
+            Plan = trial.Plan with { Purpose = "sampler-off", Sampling = false },
+            Batch = trial.Batch! with { Server = trial.Batch.Server with { Sampling = false, Samples = [] }, ProcessSamples = [] },
+            Controls = trial.Controls.Select(control => control with
+            {
+                Server = control.Server with { Sampling = false, Samples = [] }, ProcessSamples = [],
+            }).ToArray(),
+        }).ToArray();
+        TrialRecord[] trials = [.. first, .. selected, .. off];
+        EvidenceReference[] References(TrialRecord[] records) => records.Select(trial =>
+            new EvidenceReference(Path.Combine(trial.Plan.RelativeDirectory, "trial.json"), 1, new string('E', 64))).ToArray();
+        CalibrationProfile profile = new(workload.RowKey, 512, References(trials),
+            selected.Select(trial => trial.Plan.AttemptId).ToArray(), off.Select(trial => trial.Plan.AttemptId).ToArray());
+        FrozenCaseInput input = new(workload, 512, selected[0].Inputs, new string('C', 64), new string('D', 64), 1, 1);
+        MeasurementReport.ValidateCalibrationSelection(profile, input, settings, trials);
+        Assert.Empty(MeasurementReport.ValidateTrial(first[0], requireCoverage: false));
+
+        for (int variant = 2; variant < 4; variant++)
+        {
+            foreach (bool varyManaged in new[] { true, false })
+            {
+                foreach (int count in new[] { 9, 10, 19, 20, 21 })
+                {
+                    TrialRecord[] changed = trials.ToArray();
+                    changed[variant] = changed[variant] with
+                    {
+                        Batch = WindowWithSamples(changed[variant].Batch!, varyManaged ? count : 21, varyManaged ? 21 : count),
+                    };
+                    TrialRecord[] saved = JsonSerializer.Deserialize<TrialRecord[]>(
+                        JsonSerializer.Serialize(changed, ProbeProtocol.JsonOptions), ProbeProtocol.JsonOptions)!;
+                    Assert.Equal("passed", saved[variant].Status);
+                    if (count >= 20)
+                    {
+                        MeasurementReport.ValidateCalibrationSelection(profile, input, settings, saved);
+                    }
+                    else
+                    {
+                        InvalidDataException failure = Assert.Throws<InvalidDataException>(() =>
+                            MeasurementReport.ValidateCalibrationSelection(profile, input, settings, saved));
+                        Assert.Contains("coverage: fewer than 20", failure.Message, StringComparison.Ordinal);
+                    }
+                }
+            }
+        }
+
+        TrialRecord[] priorError = trials.ToArray();
+        priorError[0] = priorError[0] with { Batch = priorError[0].Batch! with { ProcessSamplingErrors = 1 } };
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateCalibrationSelection(profile, input, settings, priorError));
+        TrialRecord[] skippedAdequate = trials.ToArray();
+        skippedAdequate[0] = first[0] with { Status = "passed", Failure = null, Batch = WindowWithSamples(first[0].Batch!, 20, 20) };
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateCalibrationSelection(profile, input, settings, skippedAdequate));
+        TrialRecord[] droppedPair = trials[2..];
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateCalibrationSelection(
+            profile with { Attempts = References(droppedPair) }, input, settings, droppedPair));
+        TrialRecord[] extraPair = [.. first, .. selected, .. PilotPairFixture(workload, 1024, 4), .. off];
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateCalibrationSelection(
+            profile with { Attempts = References(extraPair) }, input, settings, extraPair));
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateCalibrationSelection(
+            profile with { NormalAttempts = [first[1].Plan.AttemptId, selected[0].Plan.AttemptId] }, input, settings, trials));
+        TrialRecord[] offSamples = trials.ToArray();
+        offSamples[4] = offSamples[4] with { Batch = offSamples[4].Batch! with { ProcessSamples = selected[0].Batch!.ProcessSamples } };
+        Assert.Throws<InvalidDataException>(() => MeasurementReport.ValidateCalibrationSelection(profile, input, settings, offSamples));
+    }
+
+    /// <summary>Retention waives sample counts only, never work errors, missing metrics, clocks, lifetime, denominator or oracles.</summary>
+    [Fact]
+    public void PilotHeadroomRetentionDoesNotWaiveWorkFailures()
+    {
+        WorkloadCase workload = Workloads.CreateCases().First(item => item.CaseId == "observation-update");
+        TrialRecord[] pair = PilotPairFixture(workload, 1024, 1);
+        TrialRecord retained = RetainedCoverageFixture(pair[0] with { Batch = WindowWithSamples(pair[0].Batch!, 19, 20) });
+        Assert.Empty(MeasurementReport.ValidateTrial(retained, requireCoverage: false));
+        BatchWindow batch = retained.Batch!;
+        BatchWindow[] invalidWindows = [
+            batch with { ProcessSamplingErrors = 1 },
+            batch with { ProcessDroppedSamples = 1 },
+            batch with { Server = batch.Server with { SamplingErrors = 1 } },
+            batch with { Server = batch.Server with { DroppedSamples = 1 } },
+            batch with { Server = batch.Server with { DeadlineExceeded = true } },
+            batch with { Server = batch.Server with { ProcessId = retained.ProcessId + 1 } },
+            batch with { Server = batch.Server with { ProcessStartUtcTicks = retained.ProcessStartUtcTicks + 1 } },
+            batch with { Server = batch.Server with { Frequency = batch.Frequency + 1 } },
+            batch with { ProcessSamples = [batch.ProcessSamples[0] with { ProcessId = retained.ProcessId + 1 }, .. batch.ProcessSamples[1..]] },
+            batch with { ProcessSamples = [batch.ProcessSamples[0] with { ProcessStartUtcTicks = retained.ProcessStartUtcTicks + 1 }, .. batch.ProcessSamples[1..]] },
+            batch with { ProcessSamples = [batch.ProcessSamples[0] with { Timestamp = batch.Server.Begin.Timestamp - 1 }, .. batch.ProcessSamples[1..]] },
+            batch with { ProcessSamples = batch.ProcessSamples.AsEnumerable().Reverse().ToArray() },
+            batch with { Server = batch.Server with { Samples = batch.Server.Samples.AsEnumerable().Reverse().ToArray() } },
+            batch with { Server = batch.Server with { Samples = [batch.Server.Samples[0] with { OccupiedBytes = -1 }, .. batch.Server.Samples[1..]] } },
+            batch with { Server = batch.Server with { End = batch.Server.End with { AllocatedBytes = batch.Server.Begin.AllocatedBytes - 1 } } },
+            batch with { CompletedOperations = batch.CompletedOperations - 1 },
+            batch with { Operations = batch.Operations[..^1] },
+            batch with { ClientEnd = batch.ClientStart },
+            batch with { Failure = "work failure" },
+        ];
+        foreach (BatchWindow invalid in invalidWindows)
+        {
+            TrialRecord wrong = retained with { Batch = invalid };
+            Assert.NotEmpty(MeasurementReport.ValidateTrial(wrong, requireCoverage: false));
+            Assert.Throws<InvalidDataException>(() => MeasurementReport.NextPilotCount([wrong, pair[1]], new(), 1024));
+        }
+
+        TrialRecord[] invalidTrials = [
+            retained with { Batch = null },
+            retained with { OraclePassed = false },
+            retained with { SealsBeforeAndAfter = false },
+            retained with { CleanShutdown = false },
+            retained with { Warmup = retained.Warmup! with { OriginalUpdate = retained.Warmup.OriginalUpdate! with { VersionId = "2" } } },
+            retained with { Plan = retained.Plan with { Operations = 1023 } },
+            retained with { Plan = retained.Plan with { Purpose = "measurement" } },
+            retained with { Status = "failed" },
+            retained with { Failure = null },
+        ];
+        Assert.All(invalidTrials, wrong => Assert.NotEmpty(MeasurementReport.ValidateTrial(wrong, requireCoverage: false)));
+        string[][] missingFields = [
+            ["ProcessSamples"], ["Server", "Samples"], ["Server", "Begin", "Gen0"], ["Server", "SamplingErrors"],
+        ];
+        foreach (string[] path in missingFields)
+        {
+            JsonObject document = JsonSerializer.SerializeToNode(retained, ProbeProtocol.JsonOptions)!.AsObject();
+            JsonNode field = document["Batch"]!;
+            foreach (string name in path[..^1])
+            {
+                field = field[name]!;
+            }
+
+            Assert.True(field.AsObject().Remove(path[^1]));
+            Assert.Throws<JsonException>(() => MeasurementReport.ValidateTrial(document.Deserialize<TrialRecord>(ProbeProtocol.JsonOptions)!,
+                requireCoverage: false));
+        }
+    }
+
     /// <summary>Retained control coverage failures cannot become adequate selected pilots or accepted measured trials.</summary>
     [Fact]
     public void RetainedPilotControlCoverageCannotBecomeSelectedOrAccepted()
     {
-        const string Coverage = "coverage: fewer than ten actual samples in either stream";
+        const string Coverage = "coverage: fewer than 10 actual samples in either stream";
         (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
         TrialRecord measured = trials.First(trial => trial.Plan.RowKey == "R4-100p-1000o-subscription-receive" &&
             trial.Plan.Variant == "candidate");
-        TrialRecord pilot = measured with { Plan = measured.Plan with { Purpose = "pilot" }, FrozenSha256 = null };
+        TrialRecord pilot = measured with
+        {
+            Plan = measured.Plan with { Purpose = "pilot" }, FrozenSha256 = null,
+            Batch = WindowWithSamples(measured.Batch!, 20, 20),
+        };
         Assert.Empty(MeasurementReport.ValidateTrial(pilot));
         foreach ((int managedCount, int processCount) in new[] { (65, 4), (4, 65) })
         {
@@ -2510,19 +2885,23 @@ public class PerformanceEvidenceTests
         foreach (BatchWindow window in windows)
         {
             BatchWindow original = window.Name == "work" ? batch : sampled.Controls.Single(control => control.Name == window.Name);
-            foreach (BatchWindow invalidWindow in new[]
+            foreach (int count in new[] { 1, 9, 10, 19, 20, 21 })
             {
-                window with { ProcessSamples = original.ProcessSamples[..1] },
-                window with { Server = window.Server with { Samples = original.Server.Samples[..1] } },
-            })
-            {
-                TrialRecord invalid = off with
+                BatchWindow populated = WindowWithSamples(original, count, count);
+                foreach (BatchWindow invalidWindow in new[]
                 {
-                    Batch = window.Name == "work" ? invalidWindow : off.Batch,
-                    Controls = off.Controls.Select(control => control.Name == window.Name ? invalidWindow : control).ToArray(),
-                };
-                Assert.Contains("sampler-off window contains samples", MeasurementReport.ValidateTrial(invalid));
-                Assert.Contains("sampler-off window contains samples", MeasurementReport.ValidateTrial(invalid, requireCoverage: false));
+                    window with { ProcessSamples = populated.ProcessSamples },
+                    window with { Server = window.Server with { Samples = populated.Server.Samples } },
+                })
+                {
+                    TrialRecord invalid = off with
+                    {
+                        Batch = window.Name == "work" ? invalidWindow : off.Batch,
+                        Controls = off.Controls.Select(control => control.Name == window.Name ? invalidWindow : control).ToArray(),
+                    };
+                    Assert.Contains("sampler-off window contains samples", MeasurementReport.ValidateTrial(invalid));
+                    Assert.Contains("sampler-off window contains samples", MeasurementReport.ValidateTrial(invalid, requireCoverage: false));
+                }
             }
         }
     }
@@ -2720,6 +3099,22 @@ public class PerformanceEvidenceTests
                 Assert.Equal(before[Path.GetRelativePath(directory, file)], Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))));
             }
 
+            foreach (FrozenMeasurement incompatible in new[]
+            {
+                frozen with { Settings = frozen.Settings with { SchemaVersion = 1 } },
+                frozen with { Settings = frozen.Settings with { PilotMinimumSamples = 10 } },
+                frozen with { ContractVersion = "candle-perf-measurement-v3" },
+            })
+            {
+                await File.WriteAllBytesAsync(Path.Combine(directory, "frozen-measurement.json"),
+                    JsonSerializer.SerializeToUtf8Bytes(incompatible, ProbeProtocol.JsonOptions));
+                (string policyMarkdown, CompletenessResult policyResult) =
+                    await MeasurementReport.RenderSavedAsync(directory, CancellationToken.None);
+                Assert.False(policyResult.Complete);
+                Assert.Contains("Saved pilot/accepted/control coverage policy is unavailable:", policyMarkdown, StringComparison.Ordinal);
+                Assert.DoesNotContain("Saved measurement settings schema 2:", policyMarkdown, StringComparison.Ordinal);
+            }
+
             await File.WriteAllBytesAsync(Path.Combine(directory, "frozen-measurement.json"),
                 JsonSerializer.SerializeToUtf8Bytes(frozen with
                 {
@@ -2735,6 +3130,13 @@ public class PerformanceEvidenceTests
             Assert.False(manifestResult.Complete);
             foreach (string markdown in new[] { first, second, manifestOnly })
             {
+                Assert.Contains("Saved measurement settings schema 2: at least 20 actual in-client-work samples per stream in each selected sampled pilot; at least 10 per stream in accepted measured work and every sampled control, including pilot controls.", markdown, StringComparison.Ordinal);
+                Assert.Contains("Sampler-off streams must be empty.", markdown, StringComparison.Ordinal);
+                Assert.Contains("Both variants must pass in the same paired round before common N freezes.", markdown, StringComparison.Ordinal);
+                Assert.Contains("Initial create/hook N=256, other N=1024; coverage-only failures permit paired doubling up to 8192", markdown, StringComparison.Ordinal);
+                Assert.Contains("Controls stay fixed at 1000 ms.", markdown, StringComparison.Ordinal);
+                Assert.Contains("Pilot headroom is not a performance budget or a guarantee of later coverage", markdown, StringComparison.Ordinal);
+                Assert.Contains("720004-slot buffers, 10 ms nominal cadence", markdown, StringComparison.Ordinal);
                 Assert.Contains("Saved startup/setup/measured/request/settle/shutdown bounds: 120s/1200s/7200s/30s/1s/15s.", markdown, StringComparison.Ordinal);
                 Assert.Contains("Setup+audit share the 1200s budget; the measured window has its separate 7200s limit.", markdown, StringComparison.Ordinal);
                 Assert.Contains("stopped export has its own 120s budget after EndWindow, separate from setup/audit, measured work and the 30s end acknowledgement/ordinary HTTP/pipe exchange limit.", markdown, StringComparison.Ordinal);
@@ -2834,6 +3236,29 @@ public class PerformanceEvidenceTests
     private static EvidenceReference FixtureInput(string rowKey) =>
         new(Path.Combine("fixture-inputs", rowKey + ".json"), 1, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rowKey))));
 
+    private static TrialRecord[] PilotPairFixture(WorkloadCase workload, int operations, int round) =>
+        new[] { "baseline", "candidate" }.Select((variant, index) =>
+        {
+            int ordinal = ((round - 1) * 2) + index + 1;
+            string id = "fixture-pilot-" + ordinal.ToString(CultureInfo.InvariantCulture);
+            TrialPlan plan = new(ordinal, id, workload.RowKey, variant, round, operations, "pilot", true,
+                Path.Combine("calibration", workload.RowKey, id));
+            TrialRecord trial = MeasurementTrialFixture(plan);
+            return trial with
+            {
+                FrozenSha256 = null, Inputs = FixtureInput(workload.RowKey + "-" + operations.ToString(CultureInfo.InvariantCulture)),
+                Batch = WindowWithSamples(trial.Batch!, 20, 20),
+            };
+        }).ToArray();
+
+    private static TrialRecord RetainedCoverageFixture(TrialRecord pilot)
+    {
+        string[] errors = MeasurementReport.ValidateTrial(pilot);
+        Assert.NotEmpty(errors);
+        Assert.All(errors, error => Assert.StartsWith("coverage:", error, StringComparison.Ordinal));
+        return pilot with { Status = "coverage-insufficient", Failure = string.Join("; ", errors) };
+    }
+
     private static TrialRecord MeasurementTrialFixture(TrialPlan plan)
     {
         WorkloadCase workload = Workloads.CreateCases().Single(item => item.RowKey == plan.RowKey);
@@ -2890,6 +3315,21 @@ public class PerformanceEvidenceTests
             Enumerable.Range(0, count).Select(index => new OperationTiming(129 + index, start + (index * 2),
                 start + (index * 2) + 1, 1, true)).ToArray(), server, process, 0, 0, null);
     }
+
+    private static BatchWindow WindowWithSamples(BatchWindow window, int managedCount, int processCount) => window with
+    {
+        Server = window.Server with
+        {
+            Samples = Enumerable.Range(0, managedCount).Select(index => window.Server.Samples[0] with
+            {
+                Timestamp = window.ClientStart + 5 + (index * 10),
+            }).ToArray(),
+        },
+        ProcessSamples = Enumerable.Range(0, processCount).Select(index => window.ProcessSamples[0] with
+        {
+            Timestamp = window.ClientStart + 5 + (index * 10),
+        }).ToArray(),
+    };
 
     private static CounterReading FixtureCounters(long timestamp) => new(
         timestamp, timestamp * 1000, (int)(timestamp / 100), (int)(timestamp / 200), (int)(timestamp / 500),
