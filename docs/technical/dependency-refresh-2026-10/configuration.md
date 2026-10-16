@@ -370,3 +370,163 @@ The owned temporary root was removed; no helper is intended to survive.
 No live registry, clinical input, SMTP/Zulip account or credential was used.
 The separate phase-32 Configuration trial, final Windows all-target gate,
 and Linux/macOS post-pass checks remain outstanding.
+
+---
+
+## 2026-10-16 — phase 32, attempt 1: independent Configuration trial
+
+**Candidate 10.0.13 passes the scoped Windows gates; parent acceptance and
+commit remain pending.** Neither historical result above is replaced.
+
+### Identity and frozen unit
+
+Predecessor/unchanged HEAD: **`2790efb0a2830f86e55225581f5ca5a9afabf87c`**,
+the verified phase-3 repair; initial index/owned paths were clean. Its
+Configuration-10.0.9 B/T-config/startup baseline (**99/99 passed**) is reused
+at the same source/environment identity, without redundant execution.
+Only the Host/Common Configuration pins changed **10.0.9 → 10.0.13**.
+Binder/providers remain **10.0.9**, CLI **2.0.13**. No production adaptation
+or new test was needed. `ConfigTests.cs` remains 24,706 bytes, SHA-256
+`3e4298f736ac6f581213c83f9483c4c59f75de3b984e3b0aa11a210602fc7b2e`;
+all repaired assertions, provider ordering and CLI contracts are retained.
+
+Source patch: **1,500 bytes**, SHA-256
+**`4ff30e932dec1219abae22ae41019ec5b260708d91723a1ab4d274bbb6f51e86`**.
+Hash raw stdout without encoding/newline conversion, excluding this append:
+
+```powershell
+git --no-pager diff --no-ext-diff --binary 2790efb0a2830f86e55225581f5ca5a9afabf87c -- src/fhir-candle/fhir-candle.csproj src/FhirStore.Common/FhirCandle.Common.csproj src/fhir-candle.Tests/ConfigTests.cs
+```
+
+Re-read the linked supplier/core/provider evidence and public metadata:
+**10.0.13** remains highest stable/listed, published 2026-10-13. HTTP automatic
+decompression handled gzip registration. October servicing notes include
+this cohort; original/candidate nuspecs and in-memory archives retain real
+DLL/XML assets for **net8.0/net9.0/net10.0**, without saving/installing archives.
+
+- Core requires Abstractions/Primitives **[10.0.13, )**; Abstractions requires
+  Primitives **[10.0.13, )**; Primitives has no dependencies on these targets.
+  Original minima were **[10.0.9, )**.
+- Retained Binder/EnvironmentVariables accept core/Abstractions **[10.0.9, )**.
+  Json retains FileExtensions/FileProviders minima 10.0.9 and System.Text.Json
+  **[10.0.9, )** on net8/net9; UserSecrets retains Json/Abstractions/FileProviders
+  minima 10.0.9. No upper bound or required direct co-update was found.
+- Inventory: **36 direct IDs / 46 declarations / seven files**, exactly two core pins.
+
+### Actual Windows commands and case comparison
+
+Authority: `AGENTS.md`, the related-filter documentation and phase 32.
+Windows **10.0.26200 x64**, SDK **10.0.400**, runner **.NET 10.0.11**,
+xUnit VSTest adapter **3.1.5+1b188a7b0a**; harness defaults unchanged.
+
+```powershell
+dotnet build --configuration Release --framework net10.0
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.ConfigTests|FullyQualifiedName~fhir.candle.Tests.StrictModeStartupTests"
+```
+
+| Order | Exit | Actual result |
+|-|-|-|
+| B | 0 | All twelve projects restored; 8 warnings, 0 errors; elapsed 3.98 s |
+| T-config | 0 | 99 executed/passed, 0 failed/skipped; 8 warnings, 0 errors; test time 1.1890 s |
+
+Both ran once, capturing normal output in memory: **zero failures/retries**.
+All **23 original + 76 repair** occurrences passed (90 Config + nine Strict).
+Every repaired parameter tuple matched, with no missing/duplicate rows;
+all original scalar/bool/help/error/response-file cases remain.
+
+| Repaired method (prefix `fhir.candle.Tests.ConfigTests.`) | Executed/passed rows |
+|-|-|
+| `ExternalConfigurationBindsTenantArraysWithoutCli` | 4 |
+| `TenantOptionParsingDistinguishesOmittedAndExplicitEmpty` | 20 |
+| `ExternalTenantArraysApplyWhenCliIsAbsent` | 12 |
+| `ExplicitEmptyTenantCliOverridesExternalConfiguration` | 4 |
+| `ExplicitTenantCliValuesOverrideExternalConfiguration` | 4 |
+| `AbsentTenantConfigurationUsesEmptyDefaults` | 24 |
+| `TenantCliOverridesOnlyItsOwnVersion` | 8 |
+
+All four flags and every scenario/default/boolean combination match the
+repair inventory. Full 99-name multiset SHA-256:
+**`aa0f16ebb429ff54513a060f3784571110bc1af3f468466265363b7cf762cc51`**,
+identical to the repaired baseline under the existing normalization.
+The retained 23 also reproduce their historical fingerprint above.
+No independent numeric discovery total was emitted.
+
+### Fresh 36-target closure and baseline diagnostics
+
+Used **`git ls-files '*.csproj'`**, not recursive worktree search: twelve
+assets, **36 graphs / 946 package nodes**, inspected before edits and after
+B/T/startup. Only Configuration (**26**), Abstractions (**25**) and Primitives
+(**25**) advance 10.0.9 → 10.0.13; **870 nodes identical**, no added/removed IDs.
+
+| Graphs | Actual core/Abstractions/Primitives delta and asset selection |
+|-|-|
+| Host net10 (1) | Core 10.0.13 remains `lib/net10.0/_._`; dependencies pruned, no Abstractions/Primitives nodes |
+| Common, three stores, Tests net10 (5) | All three 10.0.13, real matching `lib/net10.0/<ID>.dll` and related XML |
+| Ten non-performance projects net9 (10) | All three 10.0.13, real matching net9 DLL/XML |
+| Ten non-performance projects net8 (10) | All three 10.0.13, real matching net8 DLL/XML |
+| Four UI net10 + both performance projects/all TFMs (10) | No affected nodes; graphs unchanged |
+
+Core/Abstractions minima advance; asset paths, build entries and all other
+nodes/edges are unchanged. Host net10's prune range remains `(,10.0.32767]`:
+startup exercises the shared framework, not a placeholder loading a 10.0.13 DLL.
+Binder resolves 10.0.9 in 26 graphs, each direct provider in five, and CLI
+2.0.13 in 30. Feeds remain nuget.org and Visual Studio Offline Packages.
+
+Normalization: package-only `<csproj>|<TFM>` map, recursively sorted compact
+JSON, UTF-8, no terminal LF/project nodes. Baseline: **385,976 bytes**, SHA-256
+`91ebedf8083924c7fad156ddda99d2ddea89d7cb5a9601008195c38e06befe0c`.
+After B/T/startup: **386,127 bytes** (+151), identically
+**`b795db5dabb2b641aa7d4a14cc87db964d9a883afbac5667fc9f5f0f46df9e24`**.
+An intervening post-edit/pre-B asset refresh was reconciled by inverse
+core-only version/minimum substitution matching the actual pre-edit hash;
+B then freshly restored all twelve projects.
+
+Existing **NU1902/NU1903** Pkcs advisories above persist: Host/Tests MailKit
+4.17.0 → MimeKit 4.17.0 → Pkcs **10.0.0** (net10), **8.0.1** (net9/net8).
+No new compiler/analyzer warning or suppression; the repair's four-warning
+host build had narrower scope.
+
+### Actual isolated production startup and cleanup
+
+One [documented Debug/net10.0 startup](../sdk6-compatibility.md#isolated-startup)
+used fresh owned TEMP `$root` (recorded privately), empty `source`/`cache`,
+no packages/data/accounts. Only a child copy received `Tenants_R4__0=external-r4`,
+`Tenants_R4B__0=external-r4b`, `Tenants_R5__0=external-r5`, `Listen_Port=5827`.
+Configuration screening was child-only; ambient values were not logged/changed.
+
+```powershell
+dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 -- --r5 cli-r5 --fhir-source "$root\source" --fhir-package-cache "$root\cache" --use-official-registries false --open-browser false --port 5826
+```
+
+Ready in **7.445 s**, listening at `http://[::]:5826` (IPv4/IPv6), proving
+CLI port precedence over 5827. Loopback GETs (`Accept: application/fhir+json`)
+returned **200** metadata: `external-r4` (**4.0.1**), `external-r4b`
+(**4.3.0**), `cli-r5` (**5.0.0**), each with canonical URL
+`http://localhost:5826/fhir/{tenant}/CapabilityStatement/metadata`.
+`external-r5` returned **404**, proving CLI replacement; its expected
+`GetMetadata <<< no tenant` log is not an unexplained startup error.
+Both isolated paths were reported and remained **empty**; normal package-page
+discovery skipped unmatched pages, with no package load. Four service-start
+messages appeared once; SMTP/Zulip configuration was absent. Only the four
+existing host Pkcs diagnostics repeated across restore/build.
+
+Literal-PID cleanup stopped owned tree **75120, 44468, 62564, 46272, 129128,
+74044, 108900**. Root exit **-1** was forced, not graceful; check wrapper
+exit 0. Rechecked: owned PIDs absent, port 5826 free, owned root removed,
+ambient environment unchanged. No complete singleton lifecycle is claimed.
+
+### Rollback and remaining limits
+
+Reverting both pins leaves the repair and CLI 2.0.13 intact, subject to
+downstream minima: Binder/EnvironmentVariables/Json 10.0.13 require core
+`>=10.0.13`; UserSecrets 10.0.13 requires Json `>=10.0.13`. Reconsider dependents
+first, restore through B and repeat graph/T-config/startup checks; unlocked
+resolution is not an arbitrary independent-rollback guarantee.
+
+Read-only path/XML-namespace/newline/timing probes were corrected. A variable-PID
+wrapper was rejected **before execution**; actual startup used literal-PID cleanup.
+No product fix, assertion relaxation, tooling install or redirected log file.
+Windows net9/net8, final all-target/full-suite and Linux/macOS post-pass checks
+remain pending; no R6 hosting, browser/RI, graceful lifecycle or SDK final claim.
+The preceding **25,586-byte historical prefix remains verbatim**. Only the
+two pins and this append changed; no plan, other pin, stage or commit changed.
