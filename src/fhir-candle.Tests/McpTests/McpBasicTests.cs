@@ -15,7 +15,7 @@ public class McpBasicTests
     public async Task FhirMcpTools_ListTools_ReturnsExpectedTools()
     {
         // Arrange
-        var mcp = new FhirMcpTools();
+        FhirMcpTools mcp = new();
 
         // Act
         ListToolsResult result = await mcp.HandleListToolsRequest(null!, CancellationToken.None);
@@ -23,9 +23,9 @@ public class McpBasicTests
         // Assert
         result.ShouldNotBeNull();
         result.Tools.ShouldNotBeNull();
-        result.Tools.Count.ShouldBeGreaterThan(0);
+        result.Tools.Count.ShouldBe(9);
 
-        var names = result.Tools.Select(t => t.Name).ToHashSet();
+        System.Collections.Generic.HashSet<string> names = result.Tools.Select(t => t.Name).ToHashSet();
 
         // Core tool set
         names.ShouldContain("getStoreList");
@@ -39,7 +39,7 @@ public class McpBasicTests
         names.ShouldContain("validateTypeSearch");
 
         // Basic sanity: name/description present
-        foreach (var tool in result.Tools)
+        foreach (Tool tool in result.Tools)
         {
             tool.Name.ShouldNotBeNullOrWhiteSpace();
             tool.Description.ShouldNotBeNullOrWhiteSpace();
@@ -49,7 +49,7 @@ public class McpBasicTests
     [Fact]
     public void FhirMcpTools_CanBeConstructed()
     {
-        var mcp = new FhirMcpTools();
+        FhirMcpTools mcp = new();
         mcp.ShouldNotBeNull();
     }
 }

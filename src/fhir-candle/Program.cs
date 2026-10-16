@@ -19,6 +19,7 @@ using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.JSInterop;
+using ModelContextProtocol.AspNetCore;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -264,7 +265,8 @@ public static partial class Program
 
                 // add MCP services
                 builder.Services.AddMcpServer()
-                    .WithHttpTransport()
+                    // Preserve initialize-handshake sessions and GET/DELETE routes across the SDK's stateless default change.
+                    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateful)
                     .WithListToolsHandler(fMcpTools.HandleListToolsRequest)
                     .WithCallToolHandler(fMcpTools.HandleCallToolRequest);
                 // .WithToolsFromAssembly();
