@@ -55,6 +55,8 @@ public sealed class OpenTelemetryCompatibilityTests
         await host.StartAsync();
         host.AssertProviders(string.Empty);
         await host.RequestAsync("/phase11/first");
+        using HttpResponseMessage failed = await host.Client.GetAsync("/phase16/request/exception-error");
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
         host.Flush();
         await host.DisposeAsync();
         await Task.Delay(250);
@@ -90,6 +92,70 @@ public sealed class OpenTelemetryCompatibilityTests
         Assert.Equal("0123456789ABCDEF0123456789ABCDEF", Convert.ToHexString(Assert.Single(Fields(span, 1))));
         Assert.Equal("0123456789ABCDEF", Convert.ToHexString(Assert.Single(Fields(span, 4))));
         Report("inbound W3C parent/tracestate/baggage retained across await and delivered over gRPC");
+    }
+
+    /// <summary>Decoded server spans and duration histograms retain successful and failed request semantics.</summary>
+    [Theory]
+    [InlineData("success", 200)]
+    [InlineData("status-error", 500)]
+    [InlineData("exception-error", 500)]
+    public async Task AspNetCoreRequestProducesConfiguredTelemetry(string outcome, int statusCode)
+    {
+        using IsolatedProcessState state = new();
+        await using Receiver receiver = new(false);
+        await receiver.StartAsync();
+        await using TelemetryHost host = new(Configuration(receiver, "http/protobuf", "traces,metrics", "signals"));
+        await host.StartAsync();
+        host.AssertProviders("traces,metrics");
+        const string Route = "/phase16/request/{outcome}";
+        using HttpResponseMessage response = await host.Client.GetAsync("/phase16/request/" + outcome);
+        Assert.Equal(statusCode, (int)response.StatusCode);
+        await host.FlushRequestAsync(receiver, "traces,metrics", Route);
+        AssertDelivery(receiver, "traces,metrics", Route);
+        byte[] span = Assert.Single(receiver.Records("traces"), record => IsRequestRecord(record, "traces", Route));
+        Dictionary<string, string> tags = Attributes(span, 9);
+        Assert.Equal("GET " + Route, Text(span, 5));
+        Assert.Equal(2UL, Number(span, 6)); // SPAN_KIND_SERVER
+        Assert.Equal("GET", tags["http.request.method"]);
+        Assert.Equal("http", tags["url.scheme"]);
+        Assert.Equal("/phase16/request/" + outcome, tags["url.path"]);
+        Assert.Equal("1.1", tags["network.protocol.version"]);
+        Assert.Equal((ulong)statusCode, IntegerAttribute(span, 9, "http.response.status_code"));
+        byte[] status = Fields(span, 15).SingleOrDefault() ?? [];
+        Assert.Equal(statusCode == 200 ? 0UL : 2UL, Number(status, 3)); // UNSET / ERROR
+        Assert.True(Number(span, 7, 1) > 0);
+        Assert.True(Number(span, 8, 1) > Number(span, 7, 1));
+
+        // Supplier 1.20 adds error.type for returned 5xx; observed exceptions already take precedence.
+        Assembly instrumentation = typeof(OpenTelemetry.Instrumentation.AspNetCore.AspNetCoreTraceInstrumentationOptions).Assembly;
+        string version = instrumentation.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+        string? errorType = outcome == "exception-error" ? "System.InvalidOperationException" :
+            outcome == "status-error" && Version.Parse(version.Split('+')[0]) >= new Version(1, 20, 0) ? "500" : null;
+        Assert.Equal(errorType, tags.GetValueOrDefault("error.type"));
+        byte[][] metrics = receiver.Records("metrics").Where(record => IsRequestRecord(record, "metrics", Route)).ToArray();
+        Assert.NotEmpty(metrics);
+        foreach (byte[] metric in metrics)
+        {
+            Assert.Equal("http.server.request.duration", Text(metric, 1));
+            Assert.Equal("s", Text(metric, 3));
+            byte[] histogram = Assert.Single(Fields(metric, 9));
+            Assert.Equal(2UL, Number(histogram, 2)); // CUMULATIVE
+            byte[] point = Assert.Single(Fields(histogram, 1), record => Attributes(record, 9).GetValueOrDefault("http.route") == Route);
+            Dictionary<string, string> dimensions = Attributes(point, 9);
+            Assert.Equal("GET", dimensions["http.request.method"]);
+            Assert.Equal("http", dimensions["url.scheme"]);
+            Assert.Equal("1.1", dimensions["network.protocol.version"]);
+            Assert.Equal((ulong)statusCode, IntegerAttribute(point, 9, "http.response.status_code"));
+            Assert.Equal(errorType, dimensions.GetValueOrDefault("error.type"));
+            Assert.Equal(1UL, Number(point, 4, 1));
+            Assert.True(Number(point, 3, 1) >= Number(point, 2, 1));
+            double duration = BitConverter.UInt64BitsToDouble(Number(point, 5, 1));
+            Assert.InRange(duration, double.Epsilon, _deadline.TotalSeconds);
+        }
+        AssertConsole(state.ConsoleText, "traces,metrics", Route);
+        Report($"{outcome}: HTTP {statusCode}, server span/status, service/route and one duration observation; " +
+            $"error.type={errorType ?? "(absent)"}");
+        _output.WriteLine($"Instrumentation: {version}; {instrumentation.Location}");
     }
 
     /// <summary>Preserves endpoint composition, conditional signal registration and service.name on the wire.</summary>
@@ -513,8 +579,33 @@ public sealed class OpenTelemetryCompatibilityTests
     private static string Text(byte[] message, int field) =>
         Encoding.UTF8.GetString(Fields(message, field).SingleOrDefault() ?? []);
 
+    private static ulong IntegerAttribute(byte[] message, int field, string name)
+    {
+        byte[] pair = Assert.Single(Fields(message, field), attribute => Text(attribute, 1) == name);
+        return Number(Assert.Single(Fields(pair, 2)), 3);
+    }
+
+    private static ulong Number(byte[] message, int field, int wire = 0)
+    {
+        byte[]? value = Fields(message, field, wire).SingleOrDefault();
+        if (value is null)
+        {
+            return 0;
+        }
+        if (wire == 1)
+        {
+            return BinaryPrimitives.ReadUInt64LittleEndian(value);
+        }
+        ulong result = 0;
+        for (int index = 0; index < value.Length; index++)
+        {
+            result |= (ulong)(value[index] & 127) << (index * 7);
+        }
+        return result;
+    }
+
     // A bounded wire reader for the OTLP fields asserted above, not a generated telemetry model.
-    private static IEnumerable<byte[]> Fields(byte[] message, int field)
+    private static IEnumerable<byte[]> Fields(byte[] message, int field, int wireType = 2)
     {
         int offset = 0;
         while (offset < message.Length)
@@ -525,7 +616,7 @@ public sealed class OpenTelemetryCompatibilityTests
             {
                 int length = checked((int)ReadVarint());
                 Assert.InRange(length, 0, message.Length - offset);
-                if ((int)(tag >> 3) == field)
+                if ((int)(tag >> 3) == field && wireType == wire)
                 {
                     yield return message.AsSpan(offset, length).ToArray();
                 }
@@ -533,13 +624,23 @@ public sealed class OpenTelemetryCompatibilityTests
             }
             else if (wire == 0)
             {
+                int start = offset;
                 _ = ReadVarint();
+                if ((int)(tag >> 3) == field && wireType == wire)
+                {
+                    yield return message.AsSpan(start, offset - start).ToArray();
+                }
             }
             else
             {
                 Assert.Contains(wire, new[] { 1, 5 });
+                int start = offset;
                 offset += wire == 1 ? 8 : 4;
                 Assert.InRange(offset, 0, message.Length);
+                if ((int)(tag >> 3) == field && wireType == wire)
+                {
+                    yield return message.AsSpan(start, offset - start).ToArray();
+                }
             }
         }
 
@@ -598,6 +699,16 @@ public sealed class OpenTelemetryCompatibilityTests
             observe?.Invoke(builder.Services);
             _app = builder.Build();
             Lifetime = _app.Services.GetRequiredService<IHostApplicationLifetime>();
+            _app.MapGet("/phase16/request/{outcome}", async (string outcome) =>
+            {
+                await Task.Yield();
+                return outcome switch
+                {
+                    "success" => Results.StatusCode(StatusCodes.Status200OK),
+                    "status-error" => Results.StatusCode(StatusCodes.Status500InternalServerError),
+                    _ => throw new InvalidOperationException("phase16 synthetic failure"),
+                };
+            });
             foreach (string route in new[] { "/phase11/first", "/phase11/final" })
             {
                 _app.MapGet(route, async (HttpContext context) =>
