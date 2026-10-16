@@ -231,10 +231,100 @@ public sealed class OpenTelemetryCompatibilityTests
         Report($"{protocol}: explicit flush plus final unflushed request delivered on disposal; export traffic stopped");
     }
 
+    /// <summary>Default no-retry exports report failure without poisoning subsequent exports.</summary>
+    [Theory]
+    [InlineData("grpc")]
+    [InlineData("http/protobuf")]
+    public async Task OtlpExporterRecoversAfterTransientReceiverFailure(string protocol)
+    {
+        using IsolatedProcessState state = new();
+        await using Receiver receiver = new(protocol == "grpc", "/phase11/first", true);
+        await receiver.StartAsync();
+        await using TelemetryHost host = new(Configuration(receiver, protocol, "all", "general"));
+        await host.StartAsync();
+        await host.RequestAsync("/phase11/first");
+        Stopwatch elapsed = Stopwatch.StartNew();
+        bool metricExportFailed = false;
+        do
+        {
+            // Batch trace/log ForceFlush reports draining, not exporter success. Metrics reports export failure.
+            Assert.True(host.Services.GetRequiredService<TracerProvider>().ForceFlush(10000));
+            metricExportFailed |= !host.Services.GetRequiredService<MeterProvider>().ForceFlush(10000);
+            Assert.True(host.Services.GetRequiredService<LoggerProvider>().ForceFlush(10000));
+            Assert.Empty(receiver.Errors);
+            if (receiver.RejectedRequests.Count == 3)
+            {
+                break;
+            }
+            await Task.Delay(25);
+        }
+        while (elapsed.Elapsed < _deadline);
+        Assert.True(metricExportFailed);
+        foreach (string signal in new[] { "traces", "metrics", "logs" })
+        {
+            ExportRequest rejected = Assert.Single(receiver.RejectedRequests, request => request.Signal == signal);
+            AssertWireRequest(receiver, rejected);
+            Assert.Contains(Records(rejected), record => IsRequestRecord(record, signal, "/phase11/first"));
+        }
+        await host.RequestAsync("/phase11/final");
+        await host.FlushRequestAsync(receiver, "all", "/phase11/final");
+        AssertDelivery(receiver, "all", "/phase11/final");
+        AssertConsole(state.ConsoleText, "all", "/phase11/final");
+        Assert.Equal(3, receiver.RejectedRequests.Count);
+        // Cumulative metrics may include the earlier route; dropped spans/logs must not be replayed.
+        foreach (string signal in new[] { "traces", "logs" })
+        {
+            Assert.DoesNotContain(receiver.Records(signal), record => IsRequestRecord(record, signal, "/phase11/first"));
+        }
+        Report($"{protocol}: all signals rejected once with {(receiver.Grpc ? "grpc-status 14" : "HTTP 503")}, " +
+            "metric flush failed, trace/log batches drained without replay; subsequent request delivered");
+    }
+
+    /// <summary>Non-retryable receiver failures do not prevent warmed providers from shutting down.</summary>
+    [Theory]
+    [InlineData("grpc")]
+    [InlineData("http/protobuf")]
+    public async Task OtlpExporterShutsDownAfterReceiverRejection(string protocol)
+    {
+        using IsolatedProcessState state = new();
+        await using Receiver receiver = new(protocol == "grpc", "/phase11/final", false);
+        await receiver.StartAsync();
+        await using TelemetryHost host = new(Configuration(receiver, protocol, "all", "general"));
+        await host.StartAsync();
+        await host.RequestAsync("/phase11/first");
+        await host.FlushRequestAsync(receiver, "all", "/phase11/first");
+        AssertDelivery(receiver, "all", "/phase11/first");
+        await host.RequestAsync("/phase11/final");
+        // Do not flush again: disposal must attempt the pending export despite rejection.
+        await host.DisposeAsync();
+        Assert.True(host.Lifetime.ApplicationStopped.IsCancellationRequested);
+        Assert.Throws<ObjectDisposedException>(() => host.Services.GetRequiredService<TracerProvider>());
+        Assert.Empty(receiver.Errors);
+        foreach (string signal in new[] { "traces", "metrics", "logs" })
+        {
+            ExportRequest[] rejected = receiver.RejectedRequests.Where(request => request.Signal == signal).ToArray();
+            Assert.NotEmpty(rejected);
+            Assert.All(rejected, request => AssertWireRequest(receiver, request));
+            Assert.Contains(rejected.SelectMany(Records), record => IsRequestRecord(record, signal, "/phase11/final"));
+            Assert.DoesNotContain(receiver.Records(signal), record => IsRequestRecord(record, signal, "/phase11/final"));
+        }
+        AssertConsole(state.ConsoleText, "all", "/phase11/final");
+        int requests = receiver.Requests.Count;
+        int rejections = receiver.RejectedRequests.Count;
+        string console = state.ConsoleText;
+        await Task.Delay(300);
+        Assert.Equal(requests, receiver.Requests.Count);
+        Assert.Equal(rejections, receiver.RejectedRequests.Count);
+        Assert.Equal(console, state.ConsoleText);
+        Report($"{protocol}: final unflushed records rejected with {(receiver.Grpc ? "grpc-status 3" : "HTTP 400")}; " +
+            "no false delivery, bounded disposal completed and all export traffic stopped");
+    }
+
     private void Report(string result)
     {
         _output.WriteLine($"{System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}: {result}");
         _output.WriteLine($"SDK: {typeof(Sdk).Assembly.Location}; API: {typeof(Baggage).Assembly.Location}");
+        _output.WriteLine($"OTLP: {typeof(OpenTelemetry.Exporter.OtlpExporterOptions).Assembly.Location}");
     }
 
     private static bool Enabled(string signals, string signal) => signals == "all" || signals.Split(',').Contains(signal);
@@ -286,20 +376,29 @@ public sealed class OpenTelemetryCompatibilityTests
             Assert.True(requests.Length != 0, $"No {signal} export requests received.");
             foreach (ExportRequest request in requests)
             {
-                Assert.Equal("POST", request.Method);
-                Assert.Equal(receiver.Grpc ? "HTTP/2" : "HTTP/1.1", request.Protocol);
-                Assert.Equal(receiver.Grpc ? "application/grpc" : "application/x-protobuf", request.ContentType);
-                foreach (byte[] resourceSignals in Fields(request.Body, 1))
-                {
-                    byte[] resource = Assert.Single(Fields(resourceSignals, 1));
-                    Assert.Equal("fhir-candle", Attributes(resource, 1)["service.name"]);
-                }
+                AssertWireRequest(receiver, request);
             }
             byte[][] records = receiver.Records(signal).ToArray();
             Assert.Contains(records, record => IsRequestRecord(record, signal, route));
         }
         Assert.All(receiver.Requests, request => Assert.Contains(request.Signal, new[] { "traces", "metrics", "logs" }));
     }
+
+    private static void AssertWireRequest(Receiver receiver, ExportRequest request)
+    {
+        Assert.Equal("POST", request.Method);
+        Assert.Equal(receiver.Grpc ? "HTTP/2" : "HTTP/1.1", request.Protocol);
+        Assert.Equal(receiver.Grpc ? "application/grpc" : "application/x-protobuf", request.ContentType);
+        foreach (byte[] resourceSignals in Fields(request.Body, 1))
+        {
+            byte[] resource = Assert.Single(Fields(resourceSignals, 1));
+            Assert.Equal("fhir-candle", Attributes(resource, 1)["service.name"]);
+        }
+    }
+
+    private static IEnumerable<byte[]> Records(ExportRequest request) => Fields(request.Body, 1)
+        .SelectMany(resource => Fields(resource, 2))
+        .SelectMany(scope => Fields(scope, 2));
 
     private static bool IsRequestRecord(byte[] record, string signal, string route) => signal switch
     {
@@ -517,8 +616,9 @@ public sealed class OpenTelemetryCompatibilityTests
     private sealed class Receiver : IAsyncDisposable
     {
         private readonly WebApplication _app;
+        private readonly ConcurrentDictionary<string, byte> _rejectedSignals = new(StringComparer.Ordinal);
 
-        internal Receiver(bool grpc)
+        internal Receiver(bool grpc, string? rejectRoute = null, bool retryable = false)
         {
             Grpc = grpc;
             _app = Builder(grpc ? HttpProtocols.Http2 : HttpProtocols.Http1).Build();
@@ -540,13 +640,25 @@ public sealed class OpenTelemetryCompatibilityTests
                     }
                     string path = context.Request.Path.Value!;
                     string signal = new[] { "traces", "metrics", "logs" }.Single(name => path == PathFor(name));
-                    Requests.Enqueue(new(signal, context.Request.Method, context.Request.Protocol, context.Request.ContentType!, bytes));
+                    ExportRequest request = new(signal, context.Request.Method, context.Request.Protocol, context.Request.ContentType!, bytes);
+                    bool reject = rejectRoute is not null &&
+                        OpenTelemetryCompatibilityTests.Records(request).Any(record => IsRequestRecord(record, signal, rejectRoute)) &&
+                        (!retryable || _rejectedSignals.TryAdd(signal, 0));
+                    (reject ? RejectedRequests : Requests).Enqueue(request);
                     context.Response.ContentType = Grpc ? "application/grpc" : "application/x-protobuf";
                     if (Grpc)
                     {
                         context.Response.DeclareTrailer("grpc-status");
                         await context.Response.Body.WriteAsync(new byte[5], timeout.Token);
-                        context.Response.AppendTrailer("grpc-status", "0");
+                        context.Response.AppendTrailer("grpc-status", reject ? (retryable ? "14" : "3") : "0");
+                    }
+                    else if (reject)
+                    {
+                        context.Response.StatusCode = retryable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status400BadRequest;
+                        if (retryable)
+                        {
+                            context.Response.Headers.RetryAfter = "0";
+                        }
                     }
                 }
                 catch (Exception exception)
@@ -560,6 +672,7 @@ public sealed class OpenTelemetryCompatibilityTests
         internal bool Grpc { get; }
         internal string Address => AddressOf(_app);
         internal ConcurrentQueue<ExportRequest> Requests { get; } = new();
+        internal ConcurrentQueue<ExportRequest> RejectedRequests { get; } = new();
         internal ConcurrentQueue<Exception> Errors { get; } = new();
         internal string Endpoint(string signal) => Grpc ? Address : Address.TrimEnd('/') + PathFor(signal);
 
@@ -568,9 +681,7 @@ public sealed class OpenTelemetryCompatibilityTests
             : "/v1/" + signal;
 
         internal IEnumerable<byte[]> Records(string signal) => Requests.Where(request => request.Signal == signal)
-            .SelectMany(request => Fields(request.Body, 1))
-            .SelectMany(resource => Fields(resource, 2))
-            .SelectMany(scope => Fields(scope, 2));
+            .SelectMany(OpenTelemetryCompatibilityTests.Records);
 
         internal async Task StartAsync()
         {
