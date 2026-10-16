@@ -7,6 +7,8 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.ComponentModel.Design;
 using System.Net;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Text.Json;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
@@ -273,6 +275,20 @@ public class ConfigTests
         {
             directory.Delete(recursive: true);
         }
+    }
+
+    [Fact]
+    public void OptionalUserSecretsConfigurationPreservesMissingAttributeBehavior()
+    {
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName($"UserSecretsAbsence_{Guid.NewGuid():N}"),
+            AssemblyBuilderAccess.RunAndCollect);
+        ConfigurationBuilder builder = new();
+
+        IConfigurationBuilder result = builder.AddUserSecrets(assembly, optional: true, reloadOnChange: true);
+
+        result.ShouldBeSameAs(builder);
+        builder.Sources.ShouldBeEmpty();
     }
 
     [Theory]
