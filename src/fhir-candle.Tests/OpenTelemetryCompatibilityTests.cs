@@ -130,6 +130,77 @@ public sealed class OpenTelemetryCompatibilityTests
         Report($"{protocol}; {signals}; {endpoints}: actual console and OTLP delivery, resource and ForceFlush verified");
     }
 
+    /// <summary>Console output retains synthetic signal fields and the configured logger's scope metadata.</summary>
+    [Theory]
+    [InlineData("traces")]
+    [InlineData("metrics")]
+    [InlineData("logs")]
+    [InlineData("all")]
+    public async Task ConsoleExporterEmitsConfiguredSignals(string signals)
+    {
+        using IsolatedProcessState state = new();
+        await using Receiver receiver = new(false);
+        await receiver.StartAsync();
+        await using TelemetryHost host = new(Configuration(receiver, "http/protobuf", signals, "signals"));
+        await host.StartAsync();
+        host.AssertProviders(signals);
+        await host.RequestAsync("/phase11/first");
+        await host.FlushRequestAsync(receiver, signals, "/phase11/first");
+        AssertDelivery(receiver, signals, "/phase11/first");
+        string text = state.ConsoleText;
+        AssertConsole(text, signals, "/phase11/first");
+        string[] lines = text.Split('\n').Select(line => line.Trim()).ToArray();
+        if (Enabled(signals, "traces"))
+        {
+            Assert.Contains(lines, line => line.StartsWith("Activity.DisplayName:", StringComparison.Ordinal) &&
+                line.EndsWith("GET /phase11/first", StringComparison.Ordinal));
+            Assert.Contains(lines, line => line.StartsWith("Activity.Kind:", StringComparison.Ordinal) &&
+                line.EndsWith("Server", StringComparison.Ordinal));
+            Assert.Contains("http.route: /phase11/first", lines);
+            Assert.Contains("Resource associated with Activity:", lines);
+        }
+        if (Enabled(signals, "metrics"))
+        {
+            Assert.Contains(lines, line => line.StartsWith("Metric Name: http.server.request.duration", StringComparison.Ordinal));
+            Assert.Contains("Instrumentation scope (Meter):", lines);
+            Assert.Contains("Name: Microsoft.AspNetCore.Hosting", lines);
+            Assert.Contains("Resource associated with Metrics:", lines);
+        }
+        if (Enabled(signals, "logs"))
+        {
+            Assert.Contains(lines, line => line.StartsWith("LogRecord.CategoryName:", StringComparison.Ordinal) &&
+                line.EndsWith("fhir-candle", StringComparison.Ordinal));
+            Assert.Contains(lines, line => line.StartsWith("LogRecord.SeverityText:", StringComparison.Ordinal) &&
+                line.EndsWith("Warning", StringComparison.Ordinal));
+            Assert.Contains(lines, line => line.StartsWith("LogRecord.Body:", StringComparison.Ordinal) &&
+                line.EndsWith("phase11 {Marker}", StringComparison.Ordinal));
+            Assert.Contains("Marker: /phase11/first", lines);
+            Assert.Contains("Resource associated with LogRecord:", lines);
+        }
+        // 1.20 adds logger scope rendering; keep the same regression runnable on retained 1.16.
+        string exporterVersion = typeof(OpenTelemetry.Exporter.ConsoleExporterOptions).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+        Version consoleVersion = Version.Parse(exporterVersion.Split('+')[0]);
+        bool writesLoggerScope = consoleVersion >= new Version(1, 20, 0);
+        Assert.Equal(Enabled(signals, "logs") && writesLoggerScope, lines.Contains("Instrumentation scope (Logger):"));
+        if (Enabled(signals, "logs") && writesLoggerScope)
+        {
+            Assert.Contains("Name: fhir-candle", lines);
+        }
+        // 1.17 adds the schema URL supplied by the SDK's default resource, distinct from logger metadata.
+        Assert.Equal(consoleVersion >= new Version(1, 17, 0),
+            lines.Any(line => line.StartsWith("Schema URL: https://opentelemetry.io/schemas/", StringComparison.Ordinal)));
+        if (signals == "logs" && writesLoggerScope)
+        {
+            // Production does not configure a logger version or logger schema URL.
+            string[] loggerScope = lines.SkipWhile(line => line != "Instrumentation scope (Logger):").Skip(1)
+                .TakeWhile(line => line != "Resource associated with LogRecord:").ToArray();
+            Assert.DoesNotContain(loggerScope, line => line.StartsWith("Version:", StringComparison.Ordinal) ||
+                line.StartsWith("Schema URL:", StringComparison.Ordinal));
+        }
+        Report($"{signals}: console signal fields, service resource and configured scope metadata verified");
+    }
+
     /// <summary>Explicit flush and subsequent host disposal both deliver pending records, then stop exporting.</summary>
     [Theory]
     [InlineData("grpc")]
