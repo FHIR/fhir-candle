@@ -181,6 +181,332 @@ public class ConfigTests
     }
 
     [Fact]
+    public void ExternalConfigurationAppliesWhenCliIsAbsent()
+    {
+        string[] args = [];
+
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Listen_Port"] = "9090",
+                ["Public_Url"] = "http://external.invalid/",
+                ["Open_Browser"] = "true",
+                ["Tenants_R4:0"] = "external-primary",
+                ["Tenants_R4:1"] = "external-secondary",
+            })
+            .Build();
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        config.ListenPort.ShouldBe(9090);
+        config.PublicUrl.ShouldBe("http://external.invalid/");
+        config.OpenBrowser.ShouldBeTrue();
+        config.TenantsR4.ShouldBe(new[] { "external-primary", "external-secondary" });
+    }
+
+    [Theory]
+    [InlineData("--r4", "Tenants_R4")]
+    [InlineData("--r4b", "Tenants_R4B")]
+    [InlineData("--r5", "Tenants_R5")]
+    [InlineData("--r6", "Tenants_R6")]
+    public void ExternalConfigurationBindsTenantArraysWithoutCli(string optionName, string configurationKey)
+    {
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{configurationKey}:0"] = "external-secondary",
+                [$"{configurationKey}:1"] = "external-primary",
+            })
+            .Build();
+
+        CandleConfig? config = extConfig.Get<CandleConfig>((options) =>
+        {
+            options.BindNonPublicProperties = false;
+            options.ErrorOnUnknownConfiguration = false;
+        });
+
+        config.ShouldNotBeNull();
+        GetTenantArray(config, optionName).ShouldBe(new[] { "external-secondary", "external-primary" });
+    }
+
+    [Theory]
+    [InlineData("--r4", "omitted")]
+    [InlineData("--r4", "explicit-empty")]
+    [InlineData("--r4", "explicit-values")]
+    [InlineData("--r4", "implicit-empty")]
+    [InlineData("--r4", "implicit-values")]
+    [InlineData("--r4b", "omitted")]
+    [InlineData("--r4b", "explicit-empty")]
+    [InlineData("--r4b", "explicit-values")]
+    [InlineData("--r4b", "implicit-empty")]
+    [InlineData("--r4b", "implicit-values")]
+    [InlineData("--r5", "omitted")]
+    [InlineData("--r5", "explicit-empty")]
+    [InlineData("--r5", "explicit-values")]
+    [InlineData("--r5", "implicit-empty")]
+    [InlineData("--r5", "implicit-values")]
+    [InlineData("--r6", "omitted")]
+    [InlineData("--r6", "explicit-empty")]
+    [InlineData("--r6", "explicit-values")]
+    [InlineData("--r6", "implicit-empty")]
+    [InlineData("--r6", "implicit-values")]
+    public void TenantOptionParsingDistinguishesOmittedAndExplicitEmpty(string optionName, string scenario)
+    {
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        Option<string[]?> option = GetTenantOption(rootCommand.CommandCliOptions, optionName);
+        string[] args = scenario switch
+        {
+            "explicit-empty" => [optionName],
+            "explicit-values" => [optionName, "cli-secondary", optionName, "cli-primary", optionName, "cli-secondary"],
+            _ => [],
+        };
+        if (scenario == "implicit-empty")
+        {
+            SetTenantDefault(option, "empty");
+        }
+        else if (scenario == "implicit-values")
+        {
+            SetTenantDefault(option, "values");
+        }
+
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+        OptionResult? optionResult = pr.GetResult(option);
+        string[]? parsedValues = pr.GetValue(option);
+
+        pr.Errors.ShouldBeEmpty();
+        if (scenario == "omitted")
+        {
+            optionResult.ShouldBeNull();
+        }
+        else
+        {
+            optionResult.ShouldNotBeNull();
+            optionResult.Implicit.ShouldBe(scenario is "implicit-empty" or "implicit-values");
+        }
+
+        string[] expectedValues = scenario switch
+        {
+            "explicit-values" => ["cli-secondary", "cli-primary", "cli-secondary"],
+            "implicit-values" => ["implicit-secondary", "implicit-primary"],
+            _ => [],
+        };
+        parsedValues.ShouldNotBeNull();
+        parsedValues.ShouldBe(expectedValues);
+    }
+
+    [Theory]
+    [InlineData("--r4", "Tenants_R4", "none")]
+    [InlineData("--r4", "Tenants_R4", "empty")]
+    [InlineData("--r4", "Tenants_R4", "values")]
+    [InlineData("--r4b", "Tenants_R4B", "none")]
+    [InlineData("--r4b", "Tenants_R4B", "empty")]
+    [InlineData("--r4b", "Tenants_R4B", "values")]
+    [InlineData("--r5", "Tenants_R5", "none")]
+    [InlineData("--r5", "Tenants_R5", "empty")]
+    [InlineData("--r5", "Tenants_R5", "values")]
+    [InlineData("--r6", "Tenants_R6", "none")]
+    [InlineData("--r6", "Tenants_R6", "empty")]
+    [InlineData("--r6", "Tenants_R6", "values")]
+    public void ExternalTenantArraysApplyWhenCliIsAbsent(string optionName, string configurationKey, string defaultKind)
+    {
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{configurationKey}:0"] = "external-secondary",
+                [$"{configurationKey}:1"] = "external-primary",
+            })
+            .Build();
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        SetTenantDefault(GetTenantOption(rootCommand.CommandCliOptions, optionName), defaultKind);
+        ParseResult pr = rootCommand.Parse([], new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        GetTenantArray(config, optionName).ShouldBe(new[] { "external-secondary", "external-primary" });
+    }
+
+    [Theory]
+    [InlineData("--r4", "Tenants_R4")]
+    [InlineData("--r4b", "Tenants_R4B")]
+    [InlineData("--r5", "Tenants_R5")]
+    [InlineData("--r6", "Tenants_R6")]
+    public void ExplicitEmptyTenantCliOverridesExternalConfiguration(string optionName, string configurationKey)
+    {
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{configurationKey}:0"] = "external-secondary",
+                [$"{configurationKey}:1"] = "external-primary",
+            })
+            .Build();
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        ParseResult pr = rootCommand.Parse([optionName], new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        GetTenantArray(config, optionName).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("--r4", "Tenants_R4")]
+    [InlineData("--r4b", "Tenants_R4B")]
+    [InlineData("--r5", "Tenants_R5")]
+    [InlineData("--r6", "Tenants_R6")]
+    public void ExplicitTenantCliValuesOverrideExternalConfiguration(string optionName, string configurationKey)
+    {
+        string[] args = [optionName, "cli-secondary", optionName, "cli-primary", optionName, "cli-secondary"];
+
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{configurationKey}:0"] = "external-secondary",
+                [$"{configurationKey}:1"] = "external-primary",
+            })
+            .Build();
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        GetTenantArray(config, optionName).ShouldBe(new[] { "cli-secondary", "cli-primary", "cli-secondary" });
+    }
+
+    [Theory]
+    [InlineData("--r4", "Tenants_R4", false, "none")]
+    [InlineData("--r4", "Tenants_R4", false, "empty")]
+    [InlineData("--r4", "Tenants_R4", false, "values")]
+    [InlineData("--r4", "Tenants_R4", true, "none")]
+    [InlineData("--r4", "Tenants_R4", true, "empty")]
+    [InlineData("--r4", "Tenants_R4", true, "values")]
+    [InlineData("--r4b", "Tenants_R4B", false, "none")]
+    [InlineData("--r4b", "Tenants_R4B", false, "empty")]
+    [InlineData("--r4b", "Tenants_R4B", false, "values")]
+    [InlineData("--r4b", "Tenants_R4B", true, "none")]
+    [InlineData("--r4b", "Tenants_R4B", true, "empty")]
+    [InlineData("--r4b", "Tenants_R4B", true, "values")]
+    [InlineData("--r5", "Tenants_R5", false, "none")]
+    [InlineData("--r5", "Tenants_R5", false, "empty")]
+    [InlineData("--r5", "Tenants_R5", false, "values")]
+    [InlineData("--r5", "Tenants_R5", true, "none")]
+    [InlineData("--r5", "Tenants_R5", true, "empty")]
+    [InlineData("--r5", "Tenants_R5", true, "values")]
+    [InlineData("--r6", "Tenants_R6", false, "none")]
+    [InlineData("--r6", "Tenants_R6", false, "empty")]
+    [InlineData("--r6", "Tenants_R6", false, "values")]
+    [InlineData("--r6", "Tenants_R6", true, "none")]
+    [InlineData("--r6", "Tenants_R6", true, "empty")]
+    [InlineData("--r6", "Tenants_R6", true, "values")]
+    public void AbsentTenantConfigurationUsesEmptyDefaults(
+        string optionName,
+        string configurationKey,
+        bool externalArrayIsEmpty,
+        string defaultKind)
+    {
+        Dictionary<string, string[]> externalValues = new();
+        if (externalArrayIsEmpty)
+        {
+            externalValues[configurationKey] = [];
+        }
+
+        using MemoryStream json = new(JsonSerializer.SerializeToUtf8Bytes(externalValues));
+        IConfiguration extConfig = new ConfigurationBuilder().AddJsonStream(json).Build();
+        CandleConfig? boundConfig = extConfig.Get<CandleConfig>();
+        if (externalArrayIsEmpty)
+        {
+            boundConfig.ShouldNotBeNull();
+            GetTenantArray(boundConfig, optionName).ShouldBeEmpty();
+        }
+        else
+        {
+            boundConfig.ShouldBeNull();
+        }
+
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        SetTenantDefault(GetTenantOption(rootCommand.CommandCliOptions, optionName), defaultKind);
+        ParseResult pr = rootCommand.Parse([], new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        GetTenantArray(config, optionName).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("--r4", false)]
+    [InlineData("--r4", true)]
+    [InlineData("--r4b", false)]
+    [InlineData("--r4b", true)]
+    [InlineData("--r5", false)]
+    [InlineData("--r5", true)]
+    [InlineData("--r6", false)]
+    [InlineData("--r6", true)]
+    public void TenantCliOverridesOnlyItsOwnVersion(string optionName, bool explicitEmpty)
+    {
+        string[] args = explicitEmpty
+            ? [optionName]
+            : [optionName, "cli-secondary", optionName, "cli-primary", optionName, "cli-secondary"];
+
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Tenants_R4:0"] = "external-r4-secondary",
+                ["Tenants_R4:1"] = "external-r4-primary",
+                ["Tenants_R4B:0"] = "external-r4b-secondary",
+                ["Tenants_R4B:1"] = "external-r4b-primary",
+                ["Tenants_R5:0"] = "external-r5-secondary",
+                ["Tenants_R5:1"] = "external-r5-primary",
+                ["Tenants_R6:0"] = "external-r6-secondary",
+                ["Tenants_R6:1"] = "external-r6-primary",
+            })
+            .Build();
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        string[] expectedCliTenants = explicitEmpty ? [] : ["cli-secondary", "cli-primary", "cli-secondary"];
+        config.TenantsR4.ShouldBe(optionName == "--r4" ? expectedCliTenants : new[] { "external-r4-secondary", "external-r4-primary" });
+        config.TenantsR4B.ShouldBe(optionName == "--r4b" ? expectedCliTenants : new[] { "external-r4b-secondary", "external-r4b-primary" });
+        config.TenantsR5.ShouldBe(optionName == "--r5" ? expectedCliTenants : new[] { "external-r5-secondary", "external-r5-primary" });
+        config.TenantsR6.ShouldBe(optionName == "--r6" ? expectedCliTenants : new[] { "external-r6-secondary", "external-r6-primary" });
+    }
+
+    [Fact]
     public void TestParseCliValuesOverrideExternalConfiguration()
     {
         string[] args = ["--port", "8080", "-u", "http://cli.invalid/", "-o", "false", "--r4", "primary", "--r4", "secondary"];
@@ -282,5 +608,46 @@ public class ConfigTests
         exitCode.ShouldBe(1);
         actionInvoked.ShouldBeFalse();
         error.ToString().ShouldContain(value ?? argument);
+    }
+
+    private static Option<string[]?> GetTenantOption(CliOptions options, string optionName)
+    {
+        return optionName switch
+        {
+            "--r4" => options.TenantsR4,
+            "--r4b" => options.TenantsR4B,
+            "--r5" => options.TenantsR5,
+            "--r6" => options.TenantsR6,
+            _ => throw new ArgumentOutOfRangeException(nameof(optionName)),
+        };
+    }
+
+    private static string[] GetTenantArray(CandleConfig config, string optionName)
+    {
+        return optionName switch
+        {
+            "--r4" => config.TenantsR4,
+            "--r4b" => config.TenantsR4B,
+            "--r5" => config.TenantsR5,
+            "--r6" => config.TenantsR6,
+            _ => throw new ArgumentOutOfRangeException(nameof(optionName)),
+        };
+    }
+
+    private static void SetTenantDefault(Option<string[]?> option, string defaultKind)
+    {
+        switch (defaultKind)
+        {
+            case "none":
+                break;
+            case "empty":
+                option.DefaultValueFactory = (_) => [];
+                break;
+            case "values":
+                option.DefaultValueFactory = (_) => ["implicit-secondary", "implicit-primary"];
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(defaultKind));
+        }
     }
 }

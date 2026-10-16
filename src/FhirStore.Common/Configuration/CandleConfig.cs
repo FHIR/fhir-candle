@@ -541,10 +541,19 @@ public record class CandleConfig
         }
 
         ProtectLoadedContent = pr.GetValue(opt.ProtectLoadedContent) ?? envConfig?.ProtectLoadedContent ?? false;
-        TenantsR4 = pr.GetValue(opt.TenantsR4) ?? envConfig?.TenantsR4 ?? [];
-        TenantsR4B = pr.GetValue(opt.TenantsR4B) ?? envConfig?.TenantsR4B ?? [];
-        TenantsR5 = pr.GetValue(opt.TenantsR5) ?? envConfig?.TenantsR5 ?? [];
-        TenantsR6 = pr.GetValue(opt.TenantsR6) ?? envConfig?.TenantsR6 ?? [];
+        // Only explicit CLI tenant options override external values, including when clearing them.
+        TenantsR4 = pr.GetResult(opt.TenantsR4) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR4) ?? []
+            : envConfig?.TenantsR4 ?? [];
+        TenantsR4B = pr.GetResult(opt.TenantsR4B) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR4B) ?? []
+            : envConfig?.TenantsR4B ?? [];
+        TenantsR5 = pr.GetResult(opt.TenantsR5) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR5) ?? []
+            : envConfig?.TenantsR5 ?? [];
+        TenantsR6 = pr.GetResult(opt.TenantsR6) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR6) ?? []
+            : envConfig?.TenantsR6 ?? [];
         RawSupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged;
         RawAllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId;
         RawAllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate;
