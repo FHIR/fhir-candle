@@ -12,6 +12,8 @@ using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
 using FhirCandle.Configuration;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.FileProviders;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Xunit.Abstractions;
@@ -209,6 +211,68 @@ public class ConfigTests
         config.PublicUrl.ShouldBe("http://external.invalid/");
         config.OpenBrowser.ShouldBeTrue();
         config.TenantsR4.ShouldBe(new[] { "external-primary", "external-secondary" });
+    }
+
+    [Fact]
+    public void OptionalJsonConfigurationPreservesMissingFileBehavior()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("fhir-candle-json-");
+
+        try
+        {
+            using PhysicalFileProvider files = new(directory.FullName);
+            using ConfigurationRoot extConfig = (ConfigurationRoot)new ConfigurationBuilder()
+                .AddJsonFile(files, "optional.json", optional: true, reloadOnChange: false)
+                .Build();
+
+            File.Exists(Path.Combine(directory.FullName, "optional.json")).ShouldBeFalse();
+            extConfig.AsEnumerable().ShouldBeEmpty();
+            extConfig.Get<CandleConfig>().ShouldBeNull();
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"Listen_Port\":", true)]
+    [InlineData("[]", false)]
+    [InlineData("{\"Listen_Port\":8090,\"listen_port\":8091}", false)]
+    public void OptionalJsonConfigurationPreservesParseErrors(string json, bool hasJsonException)
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("fhir-candle-json-");
+
+        try
+        {
+            string path = Path.Combine(directory.FullName, "invalid.json");
+            File.WriteAllText(path, json);
+
+            using PhysicalFileProvider files = new(directory.FullName);
+            ConfigurationBuilder builder = new();
+            builder.AddJsonFile(files, "invalid.json", optional: true, reloadOnChange: false);
+            using JsonConfigurationProvider provider = (JsonConfigurationProvider)builder.Sources.Single().Build(builder);
+
+            InvalidDataException error = Should.Throw<InvalidDataException>(() =>
+            {
+                using ConfigurationRoot extConfig = new([provider]);
+            });
+
+            error.Message.ShouldContain(path);
+            FormatException parseError = error.InnerException.ShouldBeOfType<FormatException>();
+            if (hasJsonException)
+            {
+                parseError.InnerException.ShouldBeAssignableTo<JsonException>();
+            }
+            else
+            {
+                parseError.InnerException.ShouldBeNull();
+            }
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 
     [Theory]
