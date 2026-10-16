@@ -231,6 +231,95 @@ public sealed class OpenTelemetryCompatibilityTests
         Report($"{protocol}: explicit flush plus final unflushed request delivered on disposal; export traffic stopped");
     }
 
+    /// <summary>The real hosted initializer creates singleton providers once; host disposal owns their shutdown.</summary>
+    [Fact]
+    public async Task TelemetryHostedProvidersStartAndStopOnce()
+    {
+        using IsolatedProcessState state = new();
+        await using Receiver receiver = new(false);
+        await receiver.StartAsync();
+        int traceBuilds = 0;
+        int metricBuilds = 0;
+        int logBuilds = 0;
+        await using TelemetryHost host = new(Configuration(receiver, "http/protobuf", "all", "general"), services =>
+        {
+            // Observe real SDK construction without resolving providers before the hosted initializer.
+            services.ConfigureOpenTelemetryTracerProvider((_, _) => Interlocked.Increment(ref traceBuilds));
+            services.ConfigureOpenTelemetryMeterProvider((_, _) => Interlocked.Increment(ref metricBuilds));
+            services.ConfigureOpenTelemetryLoggerProvider((_, _) => Interlocked.Increment(ref logBuilds));
+        });
+        Assert.Equal(0, traceBuilds);
+        Assert.Equal(0, metricBuilds);
+        int starts = 0;
+        int stops = 0;
+        using CancellationTokenRegistration started = host.Lifetime.ApplicationStarted.Register(() => Interlocked.Increment(ref starts));
+        using CancellationTokenRegistration stopped = host.Lifetime.ApplicationStopped.Register(() => Interlocked.Increment(ref stops));
+        await host.StartAsync();
+        Assert.Equal(1, starts);
+        Assert.Equal(0, stops);
+        AssertBuildsOnce();
+        IHostedService initializer = Assert.Single(host.Services.GetServices<IHostedService>(),
+            service => service.GetType().FullName == "OpenTelemetry.Extensions.Hosting.Implementation.TelemetryHostedService");
+        TracerProvider traces = Assert.Single(host.Services.GetServices<TracerProvider>());
+        MeterProvider metrics = Assert.Single(host.Services.GetServices<MeterProvider>());
+        LoggerProvider logs = Assert.Single(host.Services.GetServices<LoggerProvider>());
+        Assert.Single(host.Services.GetServices<ILoggerProvider>().OfType<OpenTelemetryLoggerProvider>());
+        using (IServiceScope scope = host.Services.CreateScope())
+        {
+            AssertSameProviders(scope.ServiceProvider);
+        }
+        await host.RequestAsync("/phase11/first");
+        await host.FlushRequestAsync(receiver, "all", "/phase11/first");
+        AssertDelivery(receiver, "all", "/phase11/first");
+        AssertConsole(state.ConsoleText, "all", "/phase11/first");
+        await host.RequestAsync("/phase11/final");
+        await host.StopAsync();
+        Assert.True(host.Lifetime.ApplicationStopping.IsCancellationRequested);
+        Assert.Equal(1, stops);
+        AssertSameProviders(host.Services);
+        AssertBuildsOnce();
+        // TelemetryHostedService.StopAsync is a no-op in both versions; DI disposal flushes providers.
+        await host.DisposeAsync();
+        Assert.Throws<ObjectDisposedException>(() => host.Services.GetRequiredService<TracerProvider>());
+        AssertDelivery(receiver, "all", "/phase11/final");
+        AssertConsole(state.ConsoleText, "all", "/phase11/final");
+        foreach (string route in new[] { "/phase11/first", "/phase11/final" })
+        {
+            foreach (string signal in new[] { "traces", "logs" })
+            {
+                Assert.Single(receiver.Records(signal), record => IsRequestRecord(record, signal, route));
+            }
+        }
+        int requests = receiver.Requests.Count;
+        string console = state.ConsoleText;
+        await host.DisposeAsync();
+        await Task.Delay(300);
+        Assert.Equal(requests, receiver.Requests.Count);
+        Assert.Equal(console, state.ConsoleText);
+        Assert.Equal(1, starts);
+        Assert.Equal(1, stops);
+        AssertBuildsOnce();
+        Report("one real hosted initializer; providers constructed once and identical across scopes/stop; " +
+            "explicit flush and disposal-only final delivery without duplicate spans/logs; exports stopped");
+        _output.WriteLine($"Hosting: {initializer.GetType().Assembly.Location}");
+
+        void AssertBuildsOnce()
+        {
+            Assert.Equal(1, traceBuilds);
+            Assert.Equal(1, metricBuilds);
+            Assert.Equal(1, logBuilds);
+        }
+
+        void AssertSameProviders(IServiceProvider services)
+        {
+            Assert.Same(traces, Assert.Single(services.GetServices<TracerProvider>()));
+            Assert.Same(metrics, Assert.Single(services.GetServices<MeterProvider>()));
+            Assert.Same(logs, Assert.Single(services.GetServices<LoggerProvider>()));
+            Assert.Same(initializer, Assert.Single(services.GetServices<IHostedService>(),
+                service => service.GetType() == initializer.GetType()));
+        }
+    }
+
     /// <summary>Default no-retry exports report failure without poisoning subsequent exports.</summary>
     [Theory]
     [InlineData("grpc")]
@@ -498,13 +587,15 @@ public sealed class OpenTelemetryCompatibilityTests
     {
         private readonly WebApplication _app;
         private bool _disposed;
+        private bool _stopped;
 
-        internal TelemetryHost(CandleConfig config)
+        internal TelemetryHost(CandleConfig config, Action<IServiceCollection>? observe = null)
         {
             WebApplicationBuilder builder = Builder(HttpProtocols.Http1);
             MethodInfo configure = typeof(Program).GetMethod("ConfigureOpenTelemetry", BindingFlags.Static | BindingFlags.NonPublic)
                 ?? throw new MissingMethodException(typeof(Program).FullName, "ConfigureOpenTelemetry");
             configure.Invoke(null, [config, builder]);
+            observe?.Invoke(builder.Services);
             _app = builder.Build();
             Lifetime = _app.Services.GetRequiredService<IHostApplicationLifetime>();
             foreach (string route in new[] { "/phase11/first", "/phase11/final" })
@@ -591,6 +682,17 @@ public sealed class OpenTelemetryCompatibilityTests
             AssertDelivery(receiver, signals, route);
         }
 
+        internal async Task StopAsync()
+        {
+            if (_stopped)
+            {
+                return;
+            }
+            using CancellationTokenSource timeout = new(_deadline);
+            await _app.StopAsync(timeout.Token);
+            _stopped = true;
+        }
+
         public async ValueTask DisposeAsync()
         {
             if (_disposed)
@@ -601,8 +703,7 @@ public sealed class OpenTelemetryCompatibilityTests
             Client?.Dispose();
             try
             {
-                using CancellationTokenSource timeout = new(_deadline);
-                await _app.StopAsync(timeout.Token);
+                await StopAsync();
             }
             finally
             {
