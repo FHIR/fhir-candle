@@ -332,3 +332,121 @@ Inspection-only errors were corrected without product/test changes: an assumed C
 Cleanup reconciled creation time, command line and parent **7320** for 22 build-owned reusable MSBuild workers, then stopped only exact PIDs **99432, 4920, 99040, 137456, 117280, 114420, 69716, 133620, 82572, 14080, 48544, 131952, 30408, 84692, 138676, 9456, 104888, 31984, 113604, 105172, 56056, 123448**, plus their compiler **25136** (parent 69716), using guarded `Stop-Process -Id`. The all-target command reused those workers and left no new worker list. Final process inspection found no owned worker/compiler/testhost or descendants remaining; unrelated pre-existing processes were untouched.
 
 No plan/skill/project/package/fixture edit, staging, commit, push, PR, new listener or external test traffic. Only the two owned C# files and this append change in the repository; ignored build outputs and authorized session evidence are not Git deliverables. **This is the focused Windows prerequisite baseline only: candidate evaluation, final Windows full-suite verification and all Linux/macOS validation remain unexecuted/pending.** Parent integration and a separate repair commit must precede phase 33.
+
+## Phase 33 joint IdentityModel upgrade — 2026-10-16
+
+**Selected and Windows-focused verified: Tokens / JsonWebTokens 8.19.1 → 8.23.0 together. Ready for parent review and one joint upgrade commit; not committed here.** Original phase 10 remains absorbed. Phase 9's separate code-only repair commit is **`46576e0ba28aaa5bc0665c5f27bc965e33e30e71`** (`fix(auth): resolve standard P-384 signing keys`), not a package upgrade. No Tokens-only build/checkpoint occurred. The failed history above remains history, not candidate failure or retroactive success.
+
+### Predecessor, unchanged consumers and candidate identity
+
+Read `AGENTS.md` (conventions/commands), `docs\technical\building-and-testing.md`, phase 33, the unit contract and V-accept; inspected both projects, registration model, repaired key helper, signing/assertion validation, AuthTests and SMART interface/controller callers. Entry HEAD matched the repair commit, with clean worktree and empty index. Reused its attributable host-build/all-target baseline without rerunning it: 16 passes per target, zero failures/skips, aligned 8.19.1 graphs. SDK/runtimes and source hashes match that execution.
+
+- `AuthTests.cs` remains **30,542 bytes / SHA256 `80b59e9d65bf5c27100f1fc5a07f974c4c24ae4352d76aa5d8487988fcc258e1`**.
+- `SmartAuthManager.cs` remains **80,763 bytes / `478be218775768185f308cdeb326af84067ec52576e0e03d015ba150065d1c8c`**. The exact standard-P-384 mapping, nonstandard-name path, registration semantics and all validation policy are untouched.
+- `SmartClientRegistration.cs` remains unchanged, SHA256 **`a53425c7c44646dc7c39c36c855bb1a6b2e4c4024ea7e9faae1eab98b4e1f42e`**. No compatibility code, new tests, fixture changes, speculative work or assertion relaxation was necessary.
+- The entire preexisting dossier is preserved as a **48,220-byte prefix**, SHA256 **`919056561b00439410cf0547475e53f850769cad4ce81987d619fbab7fadbb56`**, including the original assessment, failed recovery and repair evidence.
+
+Only the two authorized PackageReference versions change. Common project: **1,070 bytes / `f7d4cd9b294104354140345285543fcba93945418869733f5a609eca07afa7ae`**; host project: **7,822 bytes / `68ae67899846a12caf64bd9c78d120d5838762d7cf11bae45dec78426d942836`**. Both retain BOM/CRLF. Candidate source patch, excluding this append: **1,639 bytes / SHA256 `801925dc88e9a3566eb2d0d33881ff748a2aff320ac80702fb5fc493e49acc9d`**, from:
+
+```powershell
+git --no-pager diff --no-ext-diff --binary 46576e0ba28aaa5bc0665c5f27bc965e33e30e71 -- src/FhirStore.Common/FhirCandle.Common.csproj src/fhir-candle/fhir-candle.csproj src/FhirStore.Common/Smart/SmartClientRegistration.cs src/fhir-candle/Services/SmartAuthManager.cs src/fhir-candle.Tests/AuthTests.cs
+```
+
+### Fresh selection and supplier eligibility
+
+Before editing either pin, rechecked on **2026-10-16**:
+
+- `dotnet nuget list source`: enabled `https://api.nuget.org/v3/index.json` and `C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\`. The offline source contains no IdentityModel package; no credentials/configuration secrets were read or printed.
+- Both public flat-container indexes ([Tokens][versions], [JsonWebTokens][phase33-jwt-versions]) still identify **8.23.0 as highest stable**, with no newer stable/major requiring revised phase inputs. Both registrations and linked catalogs ([Tokens][registration], [JsonWebTokens][joint-jwt-registration]) mark it listed, published **2026-09-18**. Both original 8.19.1 entries are also listed, published June 3. Queried catalogs expose no deprecation/vulnerability field; this is not security certification.
+- Re-read the official recursive [8.x alignment reminder][alignment] and version-tagged [support policy][support]. Their SHA256 values remain **`ac32bce4a60c18dd235842ac58956782b3ec24b2494165ffdae5cf1bef9ef289`** (2,503 bytes) and **`cf97724e29625383f5da03dbad477998660ed4c9618cffb7becac3a075d0dc93`** (5,812 bytes). The policy lists 8.x active/from 8.0.1 through latest, tied to .NET 9/10 through approximately November 2028; security fixes go to the current supported release. It does not authorize mixed recursive versions. The reminder's introductory 8.0.0 wording is alignment guidance, not a downgrade instruction or nuspec equality.
+- Re-read the [supplier release index][joint-releases]: 8.19.2 serializer/JWE handling; 8.21.0 JWT header/claims allocation; 8.22.0 optional audience case matching; 8.23.0 SHR path handling, WS-Trust reinstatement, decryption diagnostics and gated ML-DSA/AKP/composite keys. GitHub's 8.23.0 release entry is dated **September 21**, distinct from NuGet publication on September 18. No new algorithm/switch is enabled.
+- Re-read [candidate validation defaults][joint-defaults], SHA256 **`02297a34dc396467dcc65491787c3887921d1540a015a4f3f9a0bef0497db54b`**: case-insensitive audience matching remains opt-in/false; trailing-slash tolerance true, signed-token and expiration requirements true, clock skew 300 seconds. Existing repaired tests already cover the relevant audience-default gap; no candidate-specific test additions were needed.
+
+Downloaded archives into memory only, inspecting both 8.19.1 and 8.23.0 of all four IdentityModel members plus the complete affected Bcl.Cryptography/Asn1/Logging.Abstractions/DependencyInjection.Abstractions/DiagnosticSource closure. All have native net10/net9/net8 library assets; no native/RID payload was found. Candidate archive SHA256: Tokens **`4e491ce07152fc5c3a67a8ea50ab88f1348b198bad4ecfabd6602f5ee250e9f7`**, JsonWebTokens **`47e2203de8ea687eb56a05411ce10fd9e8a27956f2accef04ef2aa2c0db85d9a`**, Logging **`f47a39e5555502c5e65ae5105cab8687cdc6cfa98ee2e411f3a1a78dbf92552a`**, Abstractions **`ce27e9a50dc831c519bf2a69d01ecb2c04a18c649fda3511780de34674cf0bbb`**.
+
+On every target, JsonWebTokens → Tokens → Logging → Abstractions minima advance together from **>=8.19.1 to >=8.23.0**. Abstractions has no further package dependency. Unchanged edges: Tokens → Bcl.Cryptography >=10.0.2 and Extensions.Logging.Abstractions >=8.0.0; Bcl.Cryptography → Asn1 >=10.0.2 on net8 only; Logging.Abstractions 10.0.13 → DependencyInjection.Abstractions >=10.0.13 and, on net8/net9, DiagnosticSource >=10.0.13. Those latter leaves have no further dependencies in these native target groups. These are minimum ranges, not equality constraints; supplier recursive alignment supplies the additional eligibility condition. No other direct-pin movement, override or new tool was required.
+
+### Exact commands and retained/candidate execution
+
+From `C:\ai\git\fhir-candle`, Windows **10.0.26200 x64**, SDK **10.0.400**, installed .NET/ASP.NET Core **10.0.11 / 9.0.19 / 8.0.30**. Actual testhost banners report those .NET patches and xUnit VSTest adapter **3.1.5+1b188a7b0a**, 64-bit. Both commands ran synchronously with 180-second initial waits; no duplicate baseline/net10-only test or full suite was run.
+
+| Exact command | Result |
+|-|-|
+| `dotnet build --configuration Release --framework net10.0` | Exit **0**, **10.93 s**, **8 warnings / 0 errors**; shell interval **16:55:20.608–16:55:33.756 -05:00**. Solution build/restore covered all twelve projects. |
+| `dotnet test --configuration Release --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.AuthTests"` | Exit **0**, **14.60 s**, **24 warnings / 0 errors**; shell interval **16:55:39.955–16:55:54.947 -05:00**. Three successful 16/16 runs; net10 also supplies T-auth. |
+
+| Windows target | Repaired 8.19.1 baseline | Joint 8.23.0 candidate | Failed / skipped |
+|-|-:|-:|-:|
+| net10.0 | 16 passed | 16 passed | 0 / 0 |
+| net9.0 | 16 passed | 16 passed | 0 / 0 |
+| net8.0 | 16 passed | 16 passed | 0 / 0 |
+| Total | 48 passed | 48 passed | 0 / 0 |
+
+Every case/parameter row in the phase-9 repair inventory above appears **three times as Passed** in each aggregate log: all six legacy cases; three exact/case-mismatch/trailing-slash audience rows; RSA wrong-signer/unknown-key control; RS384 and ES384 positive rows; EC wrong-signer control; and three missing-crv/x/y registration rows. No addition, omission, skip or weakened expectation. Three target banners and three 16/16 summaries establish target coverage; interleaved individual result lines are not TFM-tagged, so no per-target order/duration attribution is invented.
+
+Reparsed the retained native log and candidate native spool with the same duration-only regex, counting sorted `[status,display name,count]` rows, compact JSON, `ensure_ascii=False`, UTF-8/no LF. Consistently normalize any replacement characters in runner truncation markers to the displayed middle dots. **Both inventories: 16 distinct / 48 occurrences / 2,399 bytes / SHA256 `0dc30667ea211803b0d51723d8b56e98af64f9e4367cadbf9d4d561d20c1fac6`**. This identifies runner-displayed/truncated parameters, not full fixture contents; unchanged test/fixture sources retain the underlying inputs.
+
+Warnings are only existing Pkcs **10.0.0 / 8.0.1 NU1902/NU1903**, advisories **GHSA-2fmv-rv2c-59x7 / GHSA-846f-f764-76mx**. Candidate all-target warning-code/text multiset equals the repaired baseline exactly: **48 printed occurrences / 24 reported warnings** (12 occurrences of each of four messages). B has **24 printed occurrences / eight reported target warnings**, versus the narrower predecessor host build's 12/four because B includes Tests as well as Host. No new compiler/analyzer warning, suppression or missing-dependency diagnostic.
+
+### Real SMART behavior on the selected pair
+
+- Both **RS384 and ES384** generate fresh in-memory key pairs, register public JWKs, sign through production `GenerateSignedJwt` with private JWKs and exchange through `TryClientAssertionExchange`. ES384 still asserts standard **P-384** on both JWKs. JWT algorithm/key ID/issuer/subject/JTI/audience, advertised algorithm, bearer response, client/scopes, access/refresh/ID tokens and usable intended-tenant authorization lookup all pass.
+- Wrong RSA and EC signers with registered key IDs are rejected with **IDX10511**, null response and unchanged authorization count. Unknown kid rejects with the existing key-not-found message. Missing crv/x/y retains true-with-diagnostics registration, exact field/unusable-key/no-keys messages, empty registered keys and rejection of the subsequently signed assertion without tokens.
+- Exact and trailing-slash audiences succeed; case-only path mismatch rejects with **IDX10214** and no authorization. The legacy invalid assertion retains exactly two audience/lifetime diagnostics, **IDX10214 / IDX10223**. `RequestAuth` success/wrong-audience rejection, authorization lookup/update and authorization-code token exchange also pass.
+
+These are executions of the real service, not mock substitutes. Signing/issuer/audience/lifetime validation, clock skew, supported algorithms and authorization policy were not changed. No SMART HTTP/browser/external-JWKS, new algorithm, clock-skew boundary or non-Windows execution is claimed.
+
+### Fresh all-project graphs, target assets and loaded assemblies
+
+Inspected all **12 Git-tracked projects / 36 targets / 946 package-only nodes** after B and the all-target test. Their assets timestamps fall within B's restore interval. Normalization remains Git slash-relative csproj plus `|TFM` → full package-only target nodes, recursively sorted compact JSON, `ensure_ascii=False`, UTF-8/no LF:
+
+| Graph identity | Bytes | SHA256 |
+|-|-:|-|
+| Repaired baseline, verified before B | 386,811 | `06c0659d2a30e4e33ad9b359c97a3395450d9c79cd0af1c8f3e7b84c196c209b` |
+| Joint candidate | 386,811 | `3c965533d9a1d4224024c3d61da4ee886faaef63dbd2819cfc929930d3e80089` |
+
+**Complete delta explanation:** 96 IdentityModel node version keys advance to 8.23.0 and 66 IdentityModel dependency minima advance to 8.23.0. Inverting only those named node/edge changes reproduces the exact baseline bytes/hash above; no other node, dependency edge, selected asset path or metadata changes remain. No graph nodes are added/removed, and no additional recursive IdentityModel member appears. Asset paths retain their native `lib/<TFM>/` shape but now resolve from the 8.23.0 package directories/binaries, not the retained DLLs.
+
+| Resolved member(s) | Candidate version | net10 / net9 / net8 graph occurrences |
+|-|-|-|
+| Tokens, Logging, Abstractions (each) | 8.23.0 | 10 / 10 / 10 |
+| JsonWebTokens (Host and Tests) | 8.23.0 | 2 / 2 / 2 |
+| Bcl.Cryptography | 10.0.2, unchanged | 10 / 10 / 10 |
+| Asn1 | 10.0.2, unchanged | 0 / 0 / 10 |
+| Extensions.Logging.Abstractions and DependencyInjection.Abstractions (each) | 10.0.13, unchanged | 5 / 10 / 10 |
+| DiagnosticSource | 10.0.13, unchanged | 0 / 10 / 10 |
+
+The performance projects' six graphs contain none of this closure. Net10 Host/UI continue pruning framework-provided abstraction edges. Verified existence of all selected compile/runtime/build closure assets: **24 distinct DLL paths, four `_._` placeholders and one Logging.Abstractions build target**. This expands the earlier 19-DLL inspection by explicitly including the five DI/DiagnosticSource DLLs; it is not a new dependency delta. All selected DLL paths are target-native, with no lower-TFM fallback; the three IdentityModel target binaries differ.
+
+Namespace-aware XML comparison across all tracked csproj/props confirms **36 direct IDs / 46 declarations / seven files** and exactly the two authorized version changes; unrelated direct pins/metadata are unchanged. Compact sorted-attribute direct inventory SHA256 changes from **`aece75df0f472299a43a023d5065c7a12967b912c26e0672640e517ff061daf6`** to **`97f95c5496491bf6ad0fab01da42081ce15ddce42f22d64a2c28edf8caa8c62c`**. No direct transitive pin or override was added.
+
+Runtime snapshots contain **five RS384 and five ES384 markers per TFM**. Each observed assembly appears ten times per applicable target:
+
+| Actually loaded member | Assembly version / targets |
+|-|-|
+| Tokens, JsonWebTokens, Logging, Abstractions | **8.23.0.0**, all three targets |
+| Extensions.Logging.Abstractions | **10.0.0.0**, all three targets; package remains 10.0.13 |
+| Bcl.Cryptography | **10.0.0.2**, net9/net8; not observed on net10 |
+| Asn1 | Not observed; its net8 restored node is not load evidence |
+
+All **17 distinct observed DLL locations** under `src\fhir-candle.Tests\bin\Release\<TFM>\` were byte-compared with the corresponding selected package's native target DLL and match. The twelve loaded IdentityModel DLL SHA256 values match those read from the public candidate archives. No inferred load from a restore alone.
+
+### Logs, inspection diagnostics, cleanup and disposition
+
+Session evidence directory: `C:\Users\ginoc\.copilot\session-state\085617bb-4d9a-475b-99ad-a7708b939326\files`.
+
+| Evidence | Bytes / SHA256 |
+|-|-|
+| Reused `phase9-repair-auth-all-targets-output.log` | 2,299,170 / `dc7ccf7cb98fdb19493a8f462f146be36f55ab45923e92a338faa3dc29301b57` |
+| `phase33-auth-all-targets-output.log` | 2,091,957 / `7db4cb59b57729ac02d7b72547ef72b0fbb2613f7000c371b06536ad582c169b` |
+| `phase33-build-output.log` | 7,946 / `14c9a9af065042eb6330afe73dc7e11db596ef1921bbb93ed59433087967f019` |
+
+**Logging limitation:** requested direct redirection/Tee was not used. The complete native test spool was copied byte-for-byte with `Copy-Item` from `C:\Users\ginoc\AppData\Local\Temp\1792187741585-copilot-tool-output-33128-fe0c5e21-b698-4c71-aa92-20e90bdbd0bf.txt`. B's complete returned native output was manually transcribed with command/timing/exit metadata into the explicitly labelled build log; original tool session `phase33-build` remains the primary build result. No transcript-only evidence or repeated command is substituted for native output.
+
+Read-only checks also included public HTTPS metadata/nuspec/archive reads, `git status/rev-parse/diff/ls-files/show`, XML/JSON/hash and output-inventory inspections, `dotnet --version`, `dotnet --list-runtimes`, `Get-CimInstance Win32_Process`, and `Get-FileHash`-equivalent SHA256 inspection. An inspection assertion caught one advisory-URL typo in the manually transcribed build log; it was corrected against the original output and the four-message/24-occurrence check passed. An initial correction patch matched the wrong project line and made no change. The first cleanup invocation using a variable PID was rejected before execution; the guarded literal-PID retry succeeded. None is a product/test failure or candidate retry.
+
+Reconciled eleven reusable MSBuild workers by creation within B's interval, common parent **92376** and worker command line; stopped only exact PIDs **129648, 112204, 86740, 52908, 33172, 102772, 17460, 19884, 88668, 119868, 13668**, plus compiler child **134496** (parent 19884). Subsequent process inspection found no remaining listed worker/descendant. No helper service/listener, tool installation, credentials, external test traffic or new persistent key fixture was needed; unrelated processes were untouched.
+
+**Disposition:** retain the successful joint **8.23.0/8.23.0** upgrade for parent review/commit, not a documentation-only retention of 8.19.1. There is no speculative candidate code to withdraw. Preserve the separately committed phase-9 repair/tests; do not roll them back with this package unit. Only both project pins and this append are repository deliverables. Index remains empty; no plan/skill edit, staging, commit, push, PR or delegation. **Final Windows full-suite verification and all Linux/macOS cells remain pending**; this is phase 33's focused Windows acceptance only.
+
+[phase33-jwt-versions]: https://api.nuget.org/v3-flatcontainer/microsoft.identitymodel.jsonwebtokens/index.json
