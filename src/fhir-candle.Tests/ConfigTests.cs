@@ -212,6 +212,61 @@ public class ConfigTests
     }
 
     [Theory]
+    [InlineData(null, null, null, 8090)]
+    [InlineData("8091", null, null, 8091)]
+    [InlineData("8091", "8092", null, 8092)]
+    [InlineData("8091", "8092", "8093", 8093)]
+    public void EnvironmentProvidersPreserveExistingPrecedence(
+        string? prefixedPort,
+        string? unprefixedPort,
+        string? cliPort,
+        int expectedPort)
+    {
+        string sectionName = $"EnvironmentPrecedence_{Guid.NewGuid():N}";
+        string prefixedKey = $"Candle{sectionName}__Listen_Port";
+        string unprefixedKey = $"{sectionName}__Listen_Port";
+        string? originalPrefixedValue = Environment.GetEnvironmentVariable(prefixedKey);
+        string? originalUnprefixedValue = Environment.GetEnvironmentVariable(unprefixedKey);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(prefixedKey, prefixedPort);
+            Environment.SetEnvironmentVariable(unprefixedKey, unprefixedPort);
+
+            using MemoryStream json = new(JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, Dictionary<string, int>>
+            {
+                [sectionName] = new()
+                {
+                    ["Listen_Port"] = 8090,
+                },
+            }));
+            IConfiguration extConfig = new ConfigurationBuilder()
+                .AddJsonStream(json)
+                .AddEnvironmentVariables("Candle")
+                .AddEnvironmentVariables()
+                .Build()
+                .GetSection(sectionName);
+            CliRootCommand rootCommand = new();
+            rootCommand.SetAction((ParseResult _) => 0);
+            string[] args = cliPort is null ? [] : ["--port", cliPort];
+            ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
+            {
+                ResponseFileTokenReplacer = null,
+            });
+
+            CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+            pr.Errors.ShouldBeEmpty();
+            config.ListenPort.ShouldBe(expectedPort);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(prefixedKey, originalPrefixedValue);
+            Environment.SetEnvironmentVariable(unprefixedKey, originalUnprefixedValue);
+        }
+    }
+
+    [Theory]
     [InlineData("--r4", "Tenants_R4")]
     [InlineData("--r4b", "Tenants_R4B")]
     [InlineData("--r5", "Tenants_R5")]
