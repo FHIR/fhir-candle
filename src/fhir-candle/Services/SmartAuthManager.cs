@@ -751,8 +751,10 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
 
                     try
                     {
-                        // try to use the named curve
-                        curve = ECCurve.CreateFromFriendlyName(webKey.Crv);
+                        // resolve the standard JWK name before trying other friendly names
+                        curve = webKey.Crv == "P-384"
+                            ? ECCurve.NamedCurves.nistP384
+                            : ECCurve.CreateFromFriendlyName(webKey.Crv);
                     }
                     catch (Exception)
                     {
