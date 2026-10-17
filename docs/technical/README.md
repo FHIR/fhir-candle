@@ -19,3 +19,5 @@ If you only want to run or call the server, see the [user docs](../user/).
   copyright header, namespace naming, and null-handling conventions.
 - [`$validate` implementation note](validate-implementation.md) — implementation
   approach and the follow-up path to profile/terminology validation.
+- [October 2026 dependency refresh](dependency-refresh-2026-10/README.md) — final
+  Windows dispositions, unit commits, preserved baseline and pending platform checks.

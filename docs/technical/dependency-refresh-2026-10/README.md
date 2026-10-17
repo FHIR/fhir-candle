@@ -1,5 +1,184 @@
 # NuGet dependency refresh — October 2026
 
+## Final Windows disposition — 2026-10-16
+
+**Windows pass complete; Linux/macOS validation pending.** All 36 direct IDs have a final assessment: **20 upgraded to the evaluated latest stable, one upgraded at a cap (Emoji), nine outdated IDs deferred, four current, two legacy prereleases retained**. The 21 upgraded IDs belong to **18 package-unit commits**, not 21 commits. Two separately authorized code-only repairs are not upgrades.
+Last implementation: **`839613a4e08bc39ce9fcf689db5233177c5b206f`** (phase 29). Inspected documentation predecessor: **`d0626ce5635095c5c4589af4dac1571987cf149b`** (phase 30). This rolling phase-31 document cannot name its own future commit; its integration is one separate logical documentation commit, parent-owned.
+This section supersedes earlier checkpoint wording about pending acceptance/final gates, **not** their recorded failures, baselines or unperformed browser/collector checks. The complete phase-1 record below and [September compatibility history](../sdk6-compatibility.md) are preserved.
+
+### Final declaration ownership and targets
+
+Read-only XML/import/assets reconciliation: **46 declarations / 36 IDs / seven owners / twelve projects / three TFMs**. All projects import `src/fhir-candle.props` (`net10.0;net9.0;net8.0`, C# 14). Paths below are relative to `src/`; project references and aliases remain as in the historical inventory.
+
+| Key | Project or declaration owner | Own declarations / UI import |
+|---|---|---|
+| H | `fhir-candle/fhir-candle.csproj` | 20 + U |
+| C | `FhirStore.Common/FhirCandle.Common.csproj` | 5 |
+| T | `fhir-candle.Tests/fhir-candle.Tests.csproj` | 14, of which 12 active per TFM |
+| R4 | `FhirStore.R4/FhirCandle.R4.csproj` | 1 |
+| R4B | `FhirStore.R4B/FhirCandle.R4B.csproj` | 1 |
+| R5 | `FhirStore.R5/FhirCandle.R5.csproj` | 1 |
+| UC | `FhirCandle.Ui.Common/FhirCandle.Ui.Common.csproj` | 0 + U |
+| U4 | `FhirCandle.Ui.R4/FhirCandle.Ui.R4.csproj` | 0 + U |
+| U4B | `FhirCandle.Ui.R4B/FhirCandle.Ui.R4B.csproj` | 0 + U |
+| U5 | `FhirCandle.Ui.R5/FhirCandle.Ui.R5.csproj` | 0 + U |
+| P | `FhirCandle.Performance/FhirCandle.Performance.csproj` | 0 |
+| PP | `FhirCandle.Performance.Probe/FhirCandle.Performance.Probe.csproj` | 0 |
+| U | `fhir-candle-ui.props` (not a project) | 4; imported by H, UC, U4, U4B, U5 |
+
+R4/R4B/R5 import the package-free `FhirStore.CommonVersioned.projitems`; `FhirCandle.Ui.Versioned.projitems` remains unimported. XML comments are excluded. U expands into five consumers, yielding **60 direct applications per TFM / 180 total**, not extra source declarations. Every application resolves to its declared lower bound in the final assets.
+T's three TestHost item groups retain exactly `"'$(TargetFramework)' == 'net10.0'"`, `"'$(TargetFramework)' == 'net9.0'"`, and `"'$(TargetFramework)' == 'net8.0'"`; vectors below follow that order. Every other occurrence applies to all three TFMs.
+Host/Tests `AddPackageAliases`, store `candleR4/R4B/R5` and model `coreR4/R4B/R5` aliases remain; T also retains `coreR6`. **R6 is test-only**, not a fourth product tenant. Adapter/collector retain `PrivateAssets=all` and `IncludeAssets=runtime; build; native; contentfiles; analyzers; buildtransitive`; Monaco retains `IncludeAssets=all`. Fixture copies, project/import edges and packaged-tool asset policy are unchanged.
+
+### One final outcome per direct ID
+
+Original means phase-1 declared **and resolved** version; selected means final declared **and resolved** version. Evaluated availability is not a candidate execution claim. Dates in the evaluated column are **NuGet publication dates (UTC, 2026 unless stated)**. Linked unit records contain source URLs, supplier/range reviews, exact gates and limitations: assessments were 2026-10-16, except CLI on 2026-10-15. No redundant requery of those 30 assessed IDs was needed. Four current IDs and both previews were freshly rechecked at **2026-10-17 01:32 UTC / October 16 local** below.
+
+| Direct ID | Occurrences | Original | Evaluated version(s); publication | Selected | Final outcome / unit evidence |
+|---|---|---|---|---|---|
+| System.CommandLine | H, C, T | 2.0.9 | 2.0.13; 10-13 | 2.0.13 | Upgraded P2; [CLI](system-commandline.md) |
+| Microsoft.Extensions.Configuration | H, C | 10.0.9 | 10.0.13; 10-13 | 10.0.13 | Upgraded P32 after repair P3; [configuration](configuration.md#2026-10-16--phase-32-attempt-1-independent-configuration-trial) |
+| Microsoft.Extensions.Configuration.Binder | H, C | 10.0.9 | 10.0.13; 10-13 | 10.0.13 | Upgraded P4; [typed binding](configuration-binder.md) |
+| Microsoft.Extensions.Configuration.EnvironmentVariables | H | 10.0.9 | 10.0.13; 10-13 | 10.0.13 | Upgraded P5; [provider precedence](configuration-environmentvariables.md) |
+| Microsoft.Extensions.Configuration.Json | H | 10.0.9 | 10.0.13; 10-13 | 10.0.13 | Upgraded P6; [optional/error JSON](configuration-json.md) |
+| Microsoft.Extensions.Configuration.UserSecrets | H | 10.0.9 | 10.0.13; 10-13 | 10.0.13 | Upgraded P7; [synthetic absence/startup](configuration-usersecrets.md) |
+| Microsoft.Extensions.Hosting.Abstractions | C | 10.0.9 | 10.0.13; 10-13 | 10.0.13 | Upgraded P8; [real singleton lifecycle](hosting-abstractions.md) |
+| Microsoft.IdentityModel.Tokens | C | 8.19.1 | 8.23.0; 09-18 | 8.23.0 | Upgraded P33 jointly after P9; [SMART/aligned closure](identitymodel-tokens.md#phase-33-joint-identitymodel-upgrade--2026-10-16) |
+| Microsoft.IdentityModel.JsonWebTokens | H | 8.19.1 | 8.23.0; 09-18 | 8.23.0 | Upgraded P33, same single unit; [evidence](identitymodel-tokens.md#phase-33-joint-identitymodel-upgrade--2026-10-16) |
+| OpenTelemetry | H | 1.16.0 | 1.20.0; 10-15 | 1.20.0 | Upgraded P11 joint API/SDK; [signals/propagation](opentelemetry-api-sdk.md) |
+| OpenTelemetry.Api | H | 1.16.0 | 1.20.0; 10-15 | 1.20.0 | Upgraded P11, same unit; [evidence](opentelemetry-api-sdk.md) |
+| OpenTelemetry.Exporter.Console | H | 1.16.0 | 1.20.0; 10-15 | 1.20.0 | Upgraded P13; [actual console signals](opentelemetry-console.md) |
+| OpenTelemetry.Exporter.OpenTelemetryProtocol | H | 1.16.0 | 1.20.0; 10-15 | 1.20.0 | Upgraded P14; [HTTP/protobuf and gRPC](opentelemetry-otlp.md) |
+| OpenTelemetry.Extensions.Hosting | H | 1.16.0 | 1.20.0; 10-15 | 1.20.0 | Upgraded P15; [start/flush/dispose](opentelemetry-hosting.md) |
+| OpenTelemetry.Instrumentation.AspNetCore | H | 1.16.0 | 1.20.0; 10-15 | 1.20.0 | Upgraded P16; [success/error requests](opentelemetry-aspnetcore.md), including supplier-added `error.type=500` |
+| ModelContextProtocol | H | 1.4.0 | 2.2.0; 08-13 (fallback 1.4.1; 07-09) | 2.2.0 | Upgraded P17 pair; [actual stateful HTTP](mcp.md) |
+| ModelContextProtocol.AspNetCore | H | 1.4.0 | 2.2.0; 08-13 (fallback 1.4.1; 07-09) | 2.2.0 | Upgraded P17, same unit; [evidence](mcp.md) |
+| MailKit | H | 4.17.0 | 4.18.1; 09-27 | 4.17.0 | Deferred P18; [trusted implicit-TLS/auth/send evidence unavailable](mailkit.md) |
+| Hl7.Fhir.R4 | R4, T | 6.2.1 | 6.7.0; 10-15 | 6.2.1 | Deferred P19 aligned cohort; [offline RI/browser gap](hl7-fhir-sdk.md) |
+| Hl7.Fhir.R4B | R4B, T | 6.2.1 | 6.7.0; 10-15 | 6.2.1 | Deferred P19, same cohort; [evidence](hl7-fhir-sdk.md) |
+| Hl7.Fhir.R5 | R5, T | 6.2.1 | 6.7.0; 10-15 | 6.2.1 | Deferred P19, same cohort; [evidence](hl7-fhir-sdk.md) |
+| Hl7.Fhir.R6 | T | 6.2.1 | 6.7.0; 10-15 | 6.2.1 | Deferred P19, test-only member; [evidence](hl7-fhir-sdk.md) |
+| Firely.Fhir.Packages | H | 5.0.2 | 6.2.0; 10-07 (6.0.0/6.1.0 also assessed) | 5.0.2 | Deferred P23; [higher Base minima plus RI gap](firely-packages.md) |
+| Microsoft.FluentUI.AspNetCore.Components | U | 4.14.3 | 5.0.1 / 4.14.5 / 4.14.4; dates below | 4.14.3 | Deferred P24; [v5 broad migration; v4 browser/installed-asset gap](fluentui-components.md) |
+| Microsoft.FluentUI.AspNetCore.Components.Emoji | U | 4.14.3 | 5.0.1 / 4.14.5 / 4.14.4; dates below | 4.14.4 | **Capped upgrade P25**; [higher Components minima; unused symbols/no asset hooks](fluentui-emoji.md) |
+| Microsoft.FluentUI.AspNetCore.Components.Icons | U | 4.14.3 | 5.0.1 / 4.14.5 / 4.14.4; dates below | 4.14.3 | Deferred P26; [eligible 4.14.4 needs active glyph rendering evidence](fluentui-icons.md) |
+| Microsoft.AspNetCore.TestHost | T net10, T net9, T net8 | 10.0.9 / 9.0.17 / 8.0.28 | 10.0.13 / 9.0.21 / 8.0.32; 10-13 | 10.0.13 / 9.0.21 / 8.0.32 | Upgraded P27; [highest stable per framework major](testhost.md) |
+| Microsoft.NET.Test.Sdk | T | 18.7.0 | 18.11.0; 10-13 | 18.11.0 | Upgraded P28; [VSTest full-inventory proof](test-sdk.md) |
+| xunit.runner.visualstudio | T | 3.1.5 | 4.0.1; 10-09 | 4.0.1 | Upgraded P29; [v2 retained, exact full inventory](xunit-vs-adapter.md) |
+| coverlet.collector | T | 10.0.1 | 10.1.0; 09-27 | 10.0.1 | Deferred P30; [no sanctioned collection-verification procedure](coverlet-collector.md) |
+| BlazorMonaco | U | 3.5.0 | 3.5.0; 06-28 | 3.5.0 | Current; fresh index/listing/consumer review below |
+| ini-parser-netcore | H | 3.0.0 | 3.0.0; 2020-02-02 | 3.0.0 | Current; fresh index/listing/consumer review below |
+| Shouldly | T | 4.3.0 | 4.3.0; 2025-01-23 | 4.3.0 | Current; fresh index/listing/consumer review below |
+| xunit | T | 2.9.3 | 2.9.3; 2025-01-08 | 2.9.3 | Current **for this ID**; no xUnit v3 migration |
+| System.CommandLine.NamingConventionBinder | H, T | 2.0.0-beta5.25306.1 | No stable; retained preview published 2025-06-19 | 2.0.0-beta5.25306.1 | Pre-release retained; [actual CLI use and minimum](system-commandline-namingconventionbinder.md) |
+| zulip-cs-lib | H | 0.0.1-beta.5 | No stable; retained preview published 06-22 | 0.0.1-beta.5 | Pre-release retained; [active notification API/constraints](zulip.md) |
+
+FluentUI publication dates: **5.0.1 10-14; 4.14.5 09-30; 4.14.4 07-30**, all three IDs. Asset minima are Components **>=4.14.5 / >=4.14.4 / >=4.14.2**, respectively; Emoji/Icons do not depend on each other. Components remains 4.14.3, not an implicitly accepted 4.14.5.
+Firely.Packages 6.0.0 (08-06), 6.1.0 (09-14), 6.2.0 (10-07) require Base **>=6.4.0 / >=6.5.0 / >=6.6.0**; no newer 5.x exists. Retained models/Conformance/Base remain 6.2.1; minimum ranges alone do not certify mixed common assemblies. These are completed reasoned deferrals, not pending assessments or demonstrated runtime failures.
+
+### Fresh current-package checks
+
+All four public flat-container indexes and retained-version registration/catalogs were fetched at the time above: highest stable equals the pin, and each is **listed**. Nuspecs and existing final all-target assets were also inspected. “Current” describes package availability, not security, browser or cross-platform certification.
+
+| ID / public evidence | Actual consumer and selected constraints |
+|---|---|
+| [BlazorMonaco index][final-monaco-index] / [listing][final-monaco-listing] | Active `FhirEditor.razor` / `ResourceViewer.razor`; `App.razor` loads jsInterop/loader/editor scripts. Native net10/net9/net8 requires ASP.NET Components/Web >=10.0.0/9.0.0/8.0.0; Tests resolves 10.0.9/9.0.17/8.0.28, host/UI framework references prune those edges. No FluentUI edge; actual browser/installed-tool checks remain unperformed. |
+| [ini-parser-netcore index][final-ini-index] / [listing][final-ini-listing] | H declares it; H/T select dependency-free `lib/netcoreapp3.1/IniParser.dll` on all targets. Bounded tracked-source searches found the declaration but no active IniParser/INI-file API invocation. Retention is not proof of exercised parsing; no removal or consumer rewrite. |
+| [Shouldly index][final-shouldly-index] / [listing][final-shouldly-listing] | Test assertions and `Extensions/ShouldlyExtensions.cs`; net9 assets for net10/net9, net8 for net8. DiffEngine >=11.3.0 and EmptyFiles >=4.4.0 resolve those versions; DiffEngine → System.Management >=6.0.1 → System.CodeDom >=6.0.0 resolve 6.0.1/6.0.0. Indexed 5.0 previews are not adopted. |
+| [xunit index][final-xunit-index] / [listing][final-xunit-listing] | Global Xunit, facts/theories, MemberData, fixtures and custom DataAttribute consumers remain v2/VSTest. core **[2.9.3]**, assert >=2.9.3, analyzers >=1.18.0 resolve 2.9.3/2.9.3/1.18.0; core pins both extensibility packages **[2.9.3]**, abstractions resolves 2.0.3. Adapter 4.0.1 is not xUnit v3. |
+
+### Actual local commit map
+
+All **27 prior phase commits** were matched to the Progress Log by full SHA, exact subject, ancestor membership and declaration deltas. Source declaration keys/conditions remain identical throughout. There are **18 package commits + two code-only repairs + seven documentation assessments/baseline commits**. P10 is absorbed by P33, P12 by P11, and P20–22 by P19: no invented completion or extra package commit.
+
+| Phase | Kind / evidence | Actual SHA |
+|---|---|---|
+| 1 | Historical baseline below | `dc7a51a60394a1e3570d2f50ff3288dd09aad6b4` |
+| 2 | [CLI upgrade](system-commandline.md) | `0cbb7656447866e4990de8431cd297e8a098b2dc` |
+| 3 | [Code-only external-tenant fallback repair](configuration.md#2026-10-16--phase-3-recovery-attempt-2-diagnosis-and-prerequisite-repair) | `2790efb0a2830f86e55225581f5ca5a9afabf87c` |
+| 32 | [Configuration upgrade after P3](configuration.md#2026-10-16--phase-32-attempt-1-independent-configuration-trial) | `863d6f496741f6e7c5bc0984160b89dcbf379037` |
+| 4 | [Binder upgrade](configuration-binder.md) | `ea54a11db694e77c2952d51c5b472270d0999e8e` |
+| 5 | [EnvironmentVariables upgrade](configuration-environmentvariables.md) | `a5bb1cd743f55d8781bc3c50fd06ff16d395c894` |
+| 6 | [Json upgrade](configuration-json.md) | `71fb959d3c9c533c3ffcb35b7b64baf4a185e363` |
+| 7 | [UserSecrets upgrade](configuration-usersecrets.md) | `72a13ca36618737ab42d7c9cb2152007ab2d1f91` |
+| 8 | [Hosting.Abstractions upgrade](hosting-abstractions.md) | `afb8d90651ed7e7556148947754ffeb556fd9fae` |
+| 9 | [Code-only standard-P-384 ES384 repair](identitymodel-tokens.md#phase-9-code-only-es384-prerequisite-repair--2026-10-16) | `46576e0ba28aaa5bc0665c5f27bc965e33e30e71` |
+| 33 | [Sole joint IdentityModel upgrade](identitymodel-tokens.md#phase-33-joint-identitymodel-upgrade--2026-10-16) | `d23a2e81cb1b7184f70fd2386131e3402a9124ba` |
+| 11 | [Joint OTel API/SDK upgrade](opentelemetry-api-sdk.md) | `77e4507e152bebd8808555ca96b9e20125751e08` |
+| 13 | [Console upgrade](opentelemetry-console.md) | `e261e0d8e28d76643e79347a41b2f292adff8d50` |
+| 14 | [OTLP upgrade](opentelemetry-otlp.md) | `b2edb4dfb93a22373c7f9e9abd4a135fc85b8187` |
+| 15 | [OTel hosting upgrade](opentelemetry-hosting.md) | `39595c2989f1ed17f0c207652435892d69fa3ca8` |
+| 16 | [ASP.NET instrumentation upgrade](opentelemetry-aspnetcore.md) | `a1bf503c44bc5c48bde72faedc3a6f941219c3fc` |
+| 17 | [MCP pair upgrade; explicit Stateful mode](mcp.md) | `3502b0474f3e30eaf3c68ab9f3dba214c5b1f0f9` |
+| 18 | [MailKit docs-only deferral](mailkit.md) | `3bb62a3baf4382d01c319d15783f6ecfdf93dad9` |
+| 19 | [Four SDK IDs, docs-only deferral](hl7-fhir-sdk.md) | `e088f73b1f7f594d61da9c1ad33d80aeaeb33e72` |
+| 23 | [Firely.Packages docs-only deferral](firely-packages.md) | `276972d2d2f141e45fa4a412c9d013310ff1273f` |
+| 24 | [Components docs-only deferral](fluentui-components.md) | `555f0b966670ed86aac62780cf5e65662d171ded` |
+| 25 | [Emoji capped upgrade](fluentui-emoji.md) | `11394f5e24e78c42336d4f9a424b3a962df9302e` |
+| 26 | [Icons docs-only deferral](fluentui-icons.md) | `de5d2d4afbc62a11f9dbb5818e9cf5d771bfeb7c` |
+| 27 | [TestHost vector upgrade](testhost.md) | `7b409017b61b526d2f3e9d8dfaaeffe2c5d8cd46` |
+| 28 | [Test SDK upgrade](test-sdk.md) | `be8e9c6d4774b50bc4f9d3368b06d1d1cb6cb9bf` |
+| 29 | [Adapter upgrade; last implementation](xunit-vs-adapter.md) | `839613a4e08bc39ce9fcf689db5233177c5b206f` |
+| 30 | [Collector docs-only deferral](coverlet-collector.md) | `d0626ce5635095c5c4589af4dac1571987cf149b` |
+
+P31 adds this roll-up and the two preview assessments, with no new package unit or self-SHA. Later integration must preserve these logical boundaries and historical failed attempts, not squash repairs into dependency acceptance or amend away evidence. No publication, CI dispatch, push or PR is part of this pass.
+
+### Final Windows gate reused at the identical implementation
+
+The [phase-29 adapter record](xunit-vs-adapter.md#executed-gates-and-complete-inventories) supplies the actual final restore/build/full-test commands (each exit **0**) and the **108-case net10 configuration smoke**. Windows **10.0.26200 win-x64**, SDK **10.0.400**, MSBuild **18.9.6**, .NET/ASP.NET Core **10.0.11 / 9.0.19 / 8.0.30**. No new restore/build/test was run for this documentation-only phase.
+Independent phase-31 read-only rechecks reproduce the following identities and an empty `git diff 839613a4e08bc39ce9fcf689db5233177c5b206f HEAD -- src`; all 384 working source-file hashes also equal the parent's `final-tested-source-map.json`.
+
+| Identity | Size/count | SHA-256 |
+|---|---|---|
+| Tracked source map | 384 files; 47,054 normalized bytes | `49d74c79a2e1418a52ebc6303cae01f35ffbfb35d62ebff6dcd7f8d896ec5cf3` |
+| Final package-only graph | 12 projects; 36 targets; 946 nodes; 387,338 bytes | `1069cacc596aab8d664278b593c251fe746fbfea494d6af5c55876d45eb4a464` |
+| Test-data map | 101 files; 13,498 bytes | `c2af1ed1ad3ac8fb69932e76fc35f62c63d27f8aa5ccb03eb1812ad72cf824f4` |
+| Full executed-name multiset | 13,362 occurrences; 4,451 distinct display names; 2,545,646 bytes | `129151667759ffdf40439f8cdeebe49270bb4e601e0b04c3dd15760bc83300a3` |
+| Archived phase29 full native + JSON | 19,554,254 bytes | `3ea280681eed9378950699d87b57e800c6bfd5a623642e334012b746dd999e7f` |
+
+Source/data normalization: sorted compact JSON of git-relative slash paths → raw-file SHA-256; graph: slash `csproj|target` → full package-only nodes, all metadata retained. Both use UTF-8, `ensure_ascii=False`, no terminal LF, as in the adapter dossier. Counts are maps/graphs, not source-file content byte totals.
+The full native inventory was independently re-extracted from parent `phase29-capture-01.log`, prefiltering duration lines and stopping at `NATIVE_END`, excluding appended JSON; it equals `phase27-full-inventory.json` exactly. Parent archival directory: `C:\Users\ginoc\.copilot\session-state\085617bb-4d9a-475b-99ad-a7708b939326\files`. Name normalization is ordinal-sort, LF-join without final LF, UTF-8, preserving parameters/duplicates/truncation. 4,448 names occur three times; three truncated names occur six times.
+
+| OS / final implementation | net10.0 | net9.0 | net8.0 |
+|---|---|---|---|
+| Windows | **4,454/4,454 passed; 0 failed/skipped** | **4,454/4,454 passed; 0 failed/skipped** | **4,454/4,454 passed; 0 failed/skipped** |
+| Linux | **Pending** | **Pending** | **Pending** |
+| macOS | **Pending** | **Pending** | **Pending** |
+
+Original 4,306 → final 4,454 is **+148 executed cases per TFM**: configuration +93, hosting +2, Auth +10, telemetry +36, MCP +7, supported by the linked unit comparisons/additions. P27–29 full comparisons establish exact unchanged assembled-prefix occurrences, not merely equal totals. No exact phase-1-to-final full-name comparison was performed here: the original display hash also differs because of truncated-name collisions. Interleaved native output supplies aggregate names and individual target summaries, **not per-TFM name hashes or numeric discovery totals**.
+Final diagnostics match the preceding baseline: **24 reported / 48 printed warning occurrences**, only Pkcs NU1902/NU1903 at **10.0.0 (H/T net10)** and **8.0.1 (H/T net9/net8)**, [GHSA-2fmv-rv2c-59x7](https://github.com/advisories/GHSA-2fmv-rv2c-59x7) / [GHSA-846f-f764-76mx](https://github.com/advisories/GHSA-846f-f764-76mx). MailKit/MimeKit 4.17.0 still supplies that closure. No suppression/remediation/security waiver; installed runtime patches are not claimed current. Candle remains a development/test server, not production-ready.
+
+### Manual applicability and later platform checklist
+
+Real configuration/startup and singleton lifecycle evidence remains in P2–8; Auth P9/P33 covers actual standard-P-384 registration/signing/exchange and rejection controls. Final full tests include those regressions, actual OTel HTTP/protobuf **and** HTTP/2 gRPC signal/failure/flush/disposal checks, and actual MCP initialize/list/call/error/disabled/GET/DELETE sessions. These are not browser, SMTP/Zulip delivery, collector persistence or coverage-collection proof.
+Since MCP, the only source-tree changes are **unused Emoji** and **test-project infrastructure pins**; no application code or active UI payload changed. Emoji's no-use/no-hook applicability finding remains valid, and P27–29 full gates cover changed test infrastructure. No later delta invalidates an accepted manual proof or creates a new active browser gate. Missing SDK/Components/Icons browser/RI/installed-asset evidence remains the reason for their deferrals, not a pass supplied by the full suite.
+- [ ] On authorized Linux and macOS hosts, identify the same implementation/source/graph and run the documented all-target sequence below, recording OS/architecture, SDK/runtime, actual resolution, warnings, exact executed occurrences, failures/skips and cleanup. All **six cells remain pending**; no host provisioning or workflow trigger was performed.
+- [ ] Exercise platform-sensitive SDK/package/cache paths, SMART RSA/EC keys (Windows CNG evidence is not Unix crypto evidence), MCP HTTP/session behavior, OTel HTTP/2 and shutdown, and test/native/runtime assets including Shouldly's System.Management closure. Do not infer a non-Windows pass from metadata or managed-only package names.
+- [ ] Keep applicable [browser/RI checklist](../sdk6-compatibility.md#browser-checklist), installed-tool assets/Monaco, trusted SMTP, Zulip account delivery and sanctioned collector checks separately pending. SDK evidence found CDex 2.0.0 present but backport 1.1.0 and four dependency manifests missing in checked layouts; this is not universal cache absence. Supply isolated synthetic inputs and authorized facilities before reconsidering affected units; no credentials or live clinical data.
+
+From the repository root, [AGENTS.md](../../../AGENTS.md) and its [existing workflow](../../../.github/workflows/build-and-test.yml) document exactly:
+
+```powershell
+dotnet restore
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-restore --verbosity normal
+```
+
+Later source/dependency changes invalidate matching evidence and require affected Windows gates again; later platform failures need separately scoped follow-up commits and retesting, not rewritten history. No collector-enabled procedure is documented, so none is invented here.
+
+[final-monaco-index]: https://api.nuget.org/v3-flatcontainer/blazormonaco/index.json
+[final-monaco-listing]: https://api.nuget.org/v3/registration5-gz-semver2/blazormonaco/3.5.0.json
+[final-ini-index]: https://api.nuget.org/v3-flatcontainer/ini-parser-netcore/index.json
+[final-ini-listing]: https://api.nuget.org/v3/registration5-gz-semver2/ini-parser-netcore/3.0.0.json
+[final-shouldly-index]: https://api.nuget.org/v3-flatcontainer/shouldly/index.json
+[final-shouldly-listing]: https://api.nuget.org/v3/registration5-gz-semver2/shouldly/4.3.0.json
+[final-xunit-index]: https://api.nuget.org/v3-flatcontainer/xunit/index.json
+[final-xunit-listing]: https://api.nuget.org/v3/registration5-gz-semver2/xunit/2.9.3.json
+
+## Historical phase 1 — original inventory and baseline (unchanged)
+
+**Everything below records the 2026-10-15 phase-1 checkpoint.** Its present-tense “no changes”, “zero upgrades” and “pending” statements describe that historical assessment only, not the final disposition above. Original metadata, declared/resolved graphs, grouping rationale, results and limitations are retained verbatim.
+
 Assessment date: **2026-10-15**. Source under assessment:
 `5c2dd5f8817a9fc911a3e74785a970bd12eeb675`.
 
