@@ -1,4 +1,4 @@
-name: Publish on GitHub Container Registry
+name: Publish minimal image on GitHub Container Registry
 # Basics from https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
 on:
   workflow_dispatch:
@@ -59,7 +59,8 @@ jobs:
       uses: docker/build-push-action@v7
       with:
         context: .
-        file: Dockerfile_chiseled
+        build-args: |
+          RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:11.0-resolute-chiseled-extra
         platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.meta.outputs.tags }}

@@ -1,6 +1,7 @@
 ﻿@using FhirCandle.Configuration
 @using Microsoft.FluentUI.AspNetCore.Components;
 @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
+@using Microsoft.Extensions.Logging
 
 @namespace fhir.candle.Layout
 
@@ -12,6 +13,7 @@
 @inject CandleConfig ServerConfig
 @inject IJSRuntime JS
 @inject IDialogService DialogService
+@inject ILogger<MainLayout> Logger
 
 @implements INavTracker
 
@@ -151,8 +153,14 @@
     /// <returns>An asynchronous result.</returns>
     public async Task JsLogAsync(string message)
     {
-        // note this has to be awaited or the call never happens
-        await JS.InvokeVoidAsync("console.log", message);
+        try
+        {
+            await JS.InvokeVoidAsync("console.log", message);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping browser logging because the Blazor circuit disconnected.");
+        }
     }
 
     /// <summary>Js clipboard copy.</summary>
@@ -160,7 +168,14 @@
     /// <returns>An asynchronous result.</returns>
     public async Task JsClipboardCopy(string content)
     {
-        await JS.InvokeVoidAsync("navigator.clipboard.writeText", content);
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", content);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping clipboard copying because the Blazor circuit disconnected.");
+        }
     }
 
     /// <summary>Toggle mode.</summary>
@@ -185,12 +200,13 @@
 
     /// <summary>Executes the after render action.</summary>
     /// <param name="firstRender">True to first render.</param>
-    protected override void OnAfterRender(bool firstRender)
+    /// <returns>An asynchronous result.</returns>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             // first render of layout should log the version
-            _ = JsLogAsync($"fhir-candle: {GetType()?.Assembly?.GetName()?.Version?.ToString()}");
+            await JsLogAsync($"fhir-candle: {GetType()?.Assembly?.GetName()?.Version?.ToString()}");
 
             try
             {
@@ -209,7 +225,14 @@
             }
         }
 
-        _ = JS.InvokeVoidAsync("processCopyable");
+        try
+        {
+            await JS.InvokeVoidAsync("processCopyable");
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping copyable element initialization because the Blazor circuit disconnected.");
+        }
     }
     
     /// <summary>Notifies the navigation manager about the current location.</summary>

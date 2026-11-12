@@ -1,7 +1,5 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
-@inject IJSRuntime JS
-
 @implements IDisposable
 
 
@@ -230,8 +228,6 @@
 
     private void HandleRowFocus(FluentDataGridRow<InstanceTableRec> row)
     {
-        // _ = JsLogAsync($"Focused row item id: {row.Item?.Id}");
-
         if (AllowMultipleSelection)
         {
             if (row?.Item is not null)
@@ -256,18 +252,6 @@
         }
 
         SelectedIdsChanged.InvokeAsync(SelectedIds);
-
-        // SelectedIds = SelectedIds.AsEnumerable<string>();
-        StateHasChanged();
-    }
-
-    /// <summary>Logs an asynchronous.</summary>
-    /// <param name="message">The message.</param>
-    /// <returns>An asynchronous result.</returns>
-    private async Task JsLogAsync(string message)
-    {
-        // note this has to be awaited or the call never happens
-        await JS.InvokeVoidAsync("console.log", message);
     }
 
     /// <summary>Executes the search action.</summary>

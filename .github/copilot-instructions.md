@@ -5,18 +5,18 @@ fhir-candle is a small in-memory FHIR server for testing and development. It sup
 ## Build and Test
 
 ```bash
-# Build (multi-targets net10.0, net9.0, net8.0)
-dotnet build --configuration Release --framework net10.0
+# Build (multi-targets net11.0 and net10.0)
+dotnet build --configuration Release --framework net11.0
 
 # Run all tests
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal
 
 # Run a single test (xUnit — use FullyQualifiedName filter)
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal \
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal \
   --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
 
 # Run the server locally
-dotnet run --project src/fhir-candle/fhir-candle.csproj
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
 ```
 
 Prefer running single tests over the full suite for performance. Tests use xUnit with `FullyQualifiedName` filter expressions.
@@ -122,4 +122,4 @@ Named with `Op` prefix (e.g., `OpConvert`, `OpResetStore`). Implement `IFhirOper
 
 ### Multi-targeting
 
-The solution targets `net10.0;net9.0;net8.0` via `src/fhir-candle.props`. CI tests on all three. When building locally, specify `--framework net10.0`.
+The solution targets `net11.0;net10.0` via `src/fhir-candle.props`. Use the .NET 11 SDK. CI tests both targets on Windows, Linux, and macOS. When building locally, specify `--framework net11.0`; also check `net10.0` for shared changes.

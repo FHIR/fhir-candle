@@ -39,10 +39,10 @@ persistence are deliberate design choices.
 ## Toolchain pins
 
 - `src\fhir-candle.props` sets C# **14.0**, targets
-  **net10.0;net9.0;net8.0**, and enables nullable reference types and
-  implicit usings. Use the .NET 10 SDK for local development.
+  **net11.0;net10.0**, and enables nullable reference types and
+  implicit usings. Use the .NET 11 SDK for local development.
 - There is no checked-in `global.json` pinning an exact SDK patch.
-  `.github\workflows\build-and-test.yml` installs .NET 10, 9, and 8 and
+  `.github\workflows\build-and-test.yml` installs .NET 11 and 10 and
   builds/tests on Windows, Linux, and macOS.
 - NuGet versions are explicit in project files and shared props; there is
   no checked-in central package manifest or package lock file.
@@ -57,20 +57,20 @@ persistence are deliberate design choices.
 Run commands from the repository root. The documented local build is:
 
 ```powershell
-dotnet build --configuration Release --framework net10.0
+dotnet build --configuration Release --framework net11.0
 ```
 
 Scoped to the application and its dependencies:
 
 ```powershell
-dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net11.0
 ```
 
 Build after a series of code changes. Success requires zero errors; a
 warning-free baseline is not documented. Investigate diagnostics and compare
 with `HEAD` before calling them regressions.
 
-CI covers all three target frameworks by omitting `--framework`. Changes to
+CI covers both target frameworks by omitting `--framework`. Changes to
 shared versioned code must remain compatible with all three Firely SDKs,
 not merely the first version compiled locally.
 
@@ -85,19 +85,19 @@ Tests use **xUnit v2 with VSTest**, through `Microsoft.NET.Test.Sdk` and
 ### Full suite
 
 ```powershell
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal
 ```
 
 ### Scoped - one project
 
 ```powershell
-dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal
 ```
 
 ### Focused - one class or one test
 
 ```powershell
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
 ```
 
 **Prefer the smallest command that covers the change.** Combine related
@@ -123,7 +123,7 @@ complete a task.
 The application is multi-targeted, so select the local target framework:
 
 ```powershell
-dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0
+dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net11.0
 ```
 
 Pass application arguments after `--`. See `docs\user\getting-started.md`

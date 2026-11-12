@@ -1,7 +1,9 @@
 @using BlazorMonaco
 @using BlazorMonaco.Editor
+@using Microsoft.Extensions.Logging
 
 @inject IJSRuntime JS
+@inject ILogger<FhirEditor> Logger
 
 @implements IDisposable
 
@@ -100,9 +102,16 @@
             return;
         }
 
-        await UpdateTheme();
-        await JS.InvokeVoidAsync("setMonacoEditorResize", _editor.Id);
-        await _editor.SetValue(_editorContent ?? string.Empty);
+        try
+        {
+            await UpdateTheme();
+            await JS.InvokeVoidAsync("setMonacoEditorResize", _editor.Id);
+            await _editor.SetValue(_editorContent ?? string.Empty);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping editor initialization because the Blazor circuit disconnected.");
+        }
     }
 
     /// <summary>Updates the theme.</summary>
@@ -114,9 +123,16 @@
             return;
         }
 
-        await JS.InvokeVoidAsync(
-            "blazorMonaco.editor.setTheme",
-            _darkMode ? "vs-dark" : "vs-light");
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "blazorMonaco.editor.setTheme",
+                _darkMode ? "vs-dark" : "vs-light");
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping the editor theme update because the Blazor circuit disconnected.");
+        }
     }
 
     /// <summary>Sets hightlight language.</summary>
@@ -127,12 +143,18 @@
             return;
         }
 
-        // need to get the editor model uri
-        TextModel tm = await _editor.GetModel();
-        await JS.InvokeVoidAsync(
-            "blazorMonaco.editor.setModelLanguage",
-            tm.Uri,
-            _language);
+        try
+        {
+            TextModel tm = await _editor.GetModel();
+            await JS.InvokeVoidAsync(
+                "blazorMonaco.editor.setModelLanguage",
+                tm.Uri,
+                _language);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping the editor language update because the Blazor circuit disconnected.");
+        }
     }
 
 

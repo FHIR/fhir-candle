@@ -60,7 +60,7 @@ The sections below are a quick-start; deeper detail lives in `docs/`.
 
 ## Get Started with .Net
 
-[Install .NET 8 or newer](https://get.dot.net) and run this command:
+[Install .NET 10 or 11](https://get.dot.net) and run this command:
 
 ```
 dotnet tool install --global fhir-candle
@@ -91,8 +91,11 @@ This runs the Docker image with the default configuration, mapping port 5826 fro
 ## Get Started by cloning this repository
 
 ```
-dotnet run --project src/fhir-candle/fhir-candle.csproj
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
 ```
+
+Building from source requires the .NET 11 SDK. Projects target .NET 11 and
+.NET 10; .NET 8 and 9 are no longer supported. Container images use .NET 11.
 
 For arguments, build, and release-output details on all platforms, see
 [Getting started](docs/user/getting-started.md).

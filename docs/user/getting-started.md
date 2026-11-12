@@ -6,7 +6,7 @@ run it: as a global .NET tool, via Docker, or by cloning this repository.
 
 ## Get started with .NET
 
-[Install .NET 8 or newer](https://get.dot.net) and run this command:
+[Install .NET 10 or 11](https://get.dot.net) and run this command:
 
 ```
 dotnet tool install --global fhir-candle
@@ -46,25 +46,35 @@ example, to run the server with only an R4 endpoint named `test`:
 docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest --r4 test
 ```
 
+Both `latest` and `minimal` images use .NET 11 on Ubuntu 26.04 and support
+Linux amd64 and arm64. The `minimal` tag uses the chiseled-extra runtime,
+which retains ICU and time-zone data but has no shell or package manager.
+Existing Kubernetes deployments using `ghcr.io/fhir/fhir-candle:latest`
+receive the .NET 11 image on their next rollout; the port and arguments are
+unchanged.
+
 ## Get started by cloning this repository
+
+Install the .NET 11 SDK. All projects target .NET 11 and .NET 10; .NET 8 and 9
+are no longer supported.
 
 To run the default server from the command line:
 
 ```
-dotnet run --project src/fhir-candle/fhir-candle.csproj
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
 ```
 
 To pass arguments when using `dotnet run`, add an extra `--`. For example, to see
 help:
 
 ```
-dotnet run --project src/fhir-candle/fhir-candle.csproj -- --help
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0 -- --help
 ```
 
 To build a release version of the project:
 
 ```
-dotnet build src/fhir-candle/fhir-candle.csproj -c Release
+dotnet build src/fhir-candle/fhir-candle.csproj -c Release --framework net11.0
 ```
 
 The output of the release build can be run from the root directory of the repo:
@@ -72,19 +82,19 @@ The output of the release build can be run from the root directory of the repo:
 - on all platforms:
 
   ```
-  dotnet ./src/fhir-candle/bin/Release/net8.0/fhir-candle.dll
+  dotnet ./src/fhir-candle/bin/Release/net11.0/fhir-candle.dll
   ```
 
 - if you built on Windows:
 
   ```
-  .\src\fhir-candle\bin\Release\net8.0\fhir-candle.exe
+  .\src\fhir-candle\bin\Release\net11.0\fhir-candle.exe
   ```
 
 - if you built on Linux or macOS:
 
   ```
-  ./src/fhir-candle/bin/Release/net8.0/fhir-candle
+  ./src/fhir-candle/bin/Release/net11.0/fhir-candle
   ```
 
 ## Next steps

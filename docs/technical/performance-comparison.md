@@ -163,10 +163,19 @@ audit, final code/documentation verification or integration commit has passed.
 
 ## Preconditions and command sources
 
-Repository guidance comes from root `AGENTS.md`. Build with the documented
-.NET 10 SDK and the installed .NET 10, 9 and 8 prerequisites. The existing
-all-target sequence in `.github\workflows\build-and-test.yml` and
-`docs\technical\sdk6-compatibility.md` produces the required **net8.0** tooling:
+**Historical reproduction only.** The sealed experiment below pins .NET 8
+artifacts, tool assemblies, and runtime identities. Current projects target
+only .NET 11 and 10, so a current build is not a replacement for those sealed
+tools and cannot prepare or run this experiment. Use the recorded historical
+revision and isolated archived prerequisites for reproduction. Existing
+evidence and runtime guards remain unchanged; a supported-runtime experiment
+requires new artifacts, a new protocol/manifest boundary, and fresh evidence.
+Current tooling can still render saved evidence offline.
+
+At the recorded revision, root `AGENTS.md` required the .NET 10 SDK and
+installed .NET 10, 9 and 8 prerequisites. That revision's all-target sequence
+in `.github\workflows\build-and-test.yml` and
+`docs\technical\sdk6-compatibility.md` produced the required **net8.0** tooling:
 
 ```powershell
 dotnet restore

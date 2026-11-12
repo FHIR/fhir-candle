@@ -2,28 +2,32 @@
 
 ## Multi-targeting
 
-The solution targets `net10.0;net9.0;net8.0` via `src/fhir-candle.props`. CI
-is configured to build and test all three on Windows, Linux, and macOS.
-Use the .NET 10 SDK and run the commands below from the repository root,
+The solution targets `net11.0;net10.0` via `src/fhir-candle.props`. CI
+is configured to build and test both on Windows, Linux, and macOS.
+Use the .NET 11 SDK and run the commands below from the repository root,
 as documented in [AGENTS.md](../../AGENTS.md). When iterating locally,
-select `net10.0`; a local result does not establish the other matrix cells.
+select `net11.0`; repeat relevant checks with `--framework net10.0` for
+compatibility. A local result does not establish the other matrix cells.
+
+.NET 8 and 9 reached end of support on November 10, 2026 and are no longer
+project targets. See the [Microsoft support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core).
 
 ## Build
 
 ```powershell
-dotnet build --configuration Release --framework net10.0
+dotnet build --configuration Release --framework net11.0
 ```
 
 Or build just the host project:
 
 ```powershell
-dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net11.0
 ```
 
 ## Run the server
 
 ```powershell
-dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0
+dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net11.0
 ```
 
 Pass application arguments after `--`. The default launch profile is not an
@@ -36,13 +40,13 @@ for that verification.
 Run the full suite:
 
 ```powershell
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal
 ```
 
 Or scope to the existing test project:
 
 ```powershell
-dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal
 ```
 
 Tests use **xUnit v2 with VSTest**, through `Microsoft.NET.Test.Sdk` and
@@ -50,14 +54,14 @@ Tests use **xUnit v2 with VSTest**, through `Microsoft.NET.Test.Sdk` and
 `-method` filters. Use AGENTS.md's `FullyQualifiedName~...` form:
 
 ```powershell
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
 ```
 
 Prefer the smallest relevant filter while iterating; combine related names
 with `|`. For the UI data-path and cross-version contract cases:
 
 ```powershell
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6UiContractTests|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests"
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6UiContractTests|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests"
 ```
 
 The normal build restores dependencies; these test commands reuse that
@@ -96,9 +100,28 @@ serializer, and expectations are not recorded snapshots.
 A focused pass is not a full-suite pass, a browser check, or platform evidence.
 The [SDK 6 compatibility record](sdk6-compatibility.md) separates the required
 local full-suite commands, the existing workflow's all-target sequence, all
-nine OS/framework cells, and the manual browser records. UI data-path tests
+six current OS/framework cells, and the manual browser records. UI data-path tests
 do not exercise Blazor rendering or user interaction. Keep unexecuted cells
 and workflows explicitly pending rather than treating compilation as a pass.
+
+## Delivery
+
+The NuGet tool contains `net11.0` and `net10.0` payloads, each with its own
+published `wwwroot`. Startup prefers the selected payload's assets so that
+Blazor scripts and component assets are not merged across frameworks.
+Publishing uses `dotnet pack` without rewriting the resulting archive.
+Both container workflows build the same Dockerfile for Linux amd64 and arm64, publishing
+`net11.0` with the .NET 11 SDK. The standard runtime is
+`mcr.microsoft.com/dotnet/aspnet:11.0`; the minimal workflow selects
+`mcr.microsoft.com/dotnet/aspnet:11.0-resolute-chiseled-extra` through the
+`RUNTIME_IMAGE` build argument. These rolling tags receive servicing updates.
+Do not add shell commands to the shared runtime stage: chiseled images have
+no shell. The application creates its own per-user FHIR package cache.
+
+The Kubernetes manifests continue to consume `ghcr.io/fhir/fhir-candle:latest`
+with `imagePullPolicy: Always`. The existing deployment workflow restarts them
+after a successful standard-image publication; no cluster runtime installation
+or endpoint changes are needed.
 
 ## See also
 

@@ -193,25 +193,29 @@ public static partial class Program
 
             WebApplicationBuilder? builder = null;
 
-            // when packaging as a dotnet tool, we need to do some directory shenanigans for the static content root
+            // Tool payloads carry framework-specific assets; prefer them over package-level assets.
             string root = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location ?? AppContext.BaseDirectory) ?? string.Empty;
             if (!string.IsNullOrEmpty(root))
             {
-                string staticWebRoot = FindRelativeDir(root, "staticwebassets", false);
-                string wwwRoot = FindRelativeDir(root, "wwwroot", false);
-
-                if ((!string.IsNullOrEmpty(staticWebRoot)) && Directory.Exists(staticWebRoot))
+                string wwwRoot = Path.Combine(root, "wwwroot");
+                if (!Directory.Exists(wwwRoot))
                 {
-                    builder = WebApplication.CreateBuilder(new WebApplicationOptions()
-                    {
-                        WebRootPath = staticWebRoot,
-                    });
+                    wwwRoot = FindRelativeDir(root, "wwwroot", false);
                 }
-                else if ((!string.IsNullOrEmpty(wwwRoot)) && Directory.Exists(wwwRoot))
+
+                string staticWebRoot = FindRelativeDir(root, "staticwebassets", false);
+                if ((!string.IsNullOrEmpty(wwwRoot)) && Directory.Exists(wwwRoot))
                 {
                     builder = WebApplication.CreateBuilder(new WebApplicationOptions()
                     {
                         WebRootPath = wwwRoot,
+                    });
+                }
+                else if ((!string.IsNullOrEmpty(staticWebRoot)) && Directory.Exists(staticWebRoot))
+                {
+                    builder = WebApplication.CreateBuilder(new WebApplicationOptions()
+                    {
+                        WebRootPath = staticWebRoot,
                     });
                 }
             }

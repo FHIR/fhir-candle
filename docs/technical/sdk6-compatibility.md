@@ -22,14 +22,16 @@ The compatible Base/Conformance closure remains **6.2.1** and the host uses
 `Firely.Fhir.Packages` **5.0.2**. The existing `Hl7.Fhir.R6` **6.2.1**
 reference is test-only; it creates no R6 product tenant. Pins remain explicit
 in the existing projects, not in a new package-management layer. Fresh
-Windows asset inventory agrees with this cohort across the ten consumers
-and their three target-framework graphs. This is dependency evidence,
+Windows migration-time asset inventory agrees with this cohort across the ten
+consumers and their then-current three target-framework graphs. This is dependency evidence,
 not a passing all-target runtime matrix.
 
 `src/fhir-candle.props` specifies C# 14 and
-`net10.0;net9.0;net8.0`. Windows, Linux, and macOS remain supported verification
-obligations. The existing workflow installs .NET 10, 9, and 8 and runs its
-unchanged restore/build/test sequence on all three operating systems.
+`net11.0;net10.0`. Windows, Linux, and macOS remain supported verification
+obligations. The workflow installs .NET 11 and 10 and runs its
+restore/build/test sequence on all three operating systems. Historical migration
+evidence below retains its original framework identities; it does not establish
+.NET 11 compatibility.
 
 Preserved architectural boundaries:
 
@@ -268,8 +270,8 @@ final acceptance.
 From the repository root, using [AGENTS.md](../../AGENTS.md):
 
 ```powershell
-dotnet build --configuration Release --framework net10.0
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet build --configuration Release --framework net11.0
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal
 ```
 
 At the final implementation tree, run the existing workflow's exact all-target
@@ -281,28 +283,25 @@ dotnet build --configuration Release --no-restore
 dotnet test --configuration Release --no-restore --verbosity normal
 ```
 
-Prerequisites are the .NET 10, 9 and 8 SDKs/runtimes. Record tree/commit identity,
+Prerequisites are the .NET 11 SDK and .NET 11 and 10 runtimes. Record tree/commit identity,
 command outcome and diagnostics per cell. Require the full existing suite plus
 new cases, no new skips/quarantines or weakened expectations, zero errors and
 no newly introduced warnings. Recheck dependency assets/aliases. Do not replace
 missing operating systems with cross-OS claims, containers, or a remote workflow
-publication. The CI edit only adds symmetric path triggers for props, shared
-project items, Razor, corpus data and the workflow itself; jobs, action versions,
-branch filters, SDK/OS matrix, and commands are unchanged.
+publication. The migration's CI edit added symmetric path triggers for props,
+shared project items, Razor, corpus data and the workflow itself. The current
+SDK matrix has since moved to .NET 11 and 10.
 
-### Nine-cell framework/platform record
+### Six-cell current framework/platform record
 
 | OS | Target | Evidence / identity | Remaining requirement |
 |---|---|---|---|
+| Windows | net11.0 | No full-suite migration acceptance record | Required final-tree Windows all-target sequence outstanding |
 | Windows | net10.0 | 2026-09-30: full suite 4,258/4,258 and scoped UI/contract gate 3,093/3,093; zero warnings/errors/skips; runtime tree and UI source identified above | Local gate passes; the final-tree Windows all-target sequence remains required |
-| Windows | net9.0 | Not run; SDK/runtime available, no final-tree command result or warning count | Required Windows all-target sequence outstanding |
-| Windows | net8.0 | Not run; SDK/runtime available, no final-tree command result or warning count | Required Windows all-target sequence outstanding |
+| Linux | net11.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
 | Linux | net10.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
-| Linux | net9.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
-| Linux | net8.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
+| macOS | net11.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
 | macOS | net10.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
-| macOS | net9.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
-| macOS | net8.0 | Not run; no tree/result/diagnostics | Required environment and build/test evidence outstanding |
 
 Environment inspection on 2026-09-30 confirmed Windows SDKs
 **8.0.424, 9.0.317, 10.0.400**, corresponding runtime availability, Edge
