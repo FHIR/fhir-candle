@@ -10,7 +10,21 @@ The 2026-09-30 recovery passes the normal Windows net10.0 full-suite and
 scoped gates. Remaining platform, all-target, browser, and offline RI-package
 requirements still prevent final acceptance; see the dated evidence below.
 
-## Accepted dependency and product envelope
+## Current dependency versions
+
+The 2026-11-12 same-major dependency refresh uses **6.8.0** for the R4, R4B,
+R5, and test-only R6 SDK packages, with matching Base/Conformance dependencies.
+`Firely.Fhir.Packages` remains **5.0.2**. FHIR tenant versions and assembly
+aliases are unchanged. The migration-time inventory and evidence below retain
+their original **6.2.1** identities; they are not new acceptance evidence for
+the refreshed dependencies.
+
+On Windows, the refreshed solution builds for both `net11.0` and `net10.0`
+with zero warnings or errors. The full test suite passes **4,458 tests per
+framework**, with no failures or skips. This does not close the historical
+platform, browser, or offline RI-package acceptance gates below.
+
+## Migration-time dependency and product envelope
 
 | Product | SDK package / model assembly | Capability `fhirVersion` | Store assembly |
 |---|---|---|---|
