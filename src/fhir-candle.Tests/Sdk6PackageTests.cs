@@ -4,6 +4,8 @@
 // </copyright>
 
 using System.Net;
+using System.Formats.Tar;
+using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -17,17 +19,15 @@ using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
-using Firely.Fhir.Packages;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit.Abstractions;
 using DiskPackageCache = fhir.candle._ForPackages.DiskPackageCache;
 using PackageManifest = fhir.candle._ForPackages.PackageManifest;
-using PackageReference = Firely.Fhir.Packages.PackageReference;
-using PackageListing = Firely.Fhir.Packages.PackageListing;
-using PackageRelease = Firely.Fhir.Packages.PackageRelease;
-using Dist = Firely.Fhir.Packages.Dist;
-using CandlePackageReference = FhirCandle.Models.PackageReference;
+using PackageReference = FhirCandle.Models.PackageReference;
+using PackageListing = FhirCandle.Models.PackageListing;
+using PackageRelease = FhirCandle.Models.PackageRelease;
+using Dist = FhirCandle.Models.Dist;
 
 namespace fhir.candle.Tests;
 
@@ -72,57 +72,57 @@ public sealed class Sdk6PackageTests
             (string.Empty, "Example.Name", string.Empty), ("scope", "Example.Name", "1.0.0"),
             ("other", "example.name", "1.0.0-BETA+Build"), ("@literal", "name@literal", "dev$feature"),
         ];
-        List<PackageReference> legacy = [];
-        List<CandlePackageReference> neutral = [];
-        foreach ((string? scope, string? name, string? version) in cases)
+        string[] monikers = ["@", "@", "Example.Name@", "Example.Name@", "Example.Name@1.0.0",
+            "example.name@1.0.0-BETA+Build", "name@literal@dev$feature"];
+        bool[] found = [false, true, false, true, true, true, true];
+        List<PackageReference> neutral = [];
+        for (int index = 0; index < cases.Length; index++)
         {
-            PackageReference oldReference = new(scope, name!, version);
-            CandlePackageReference newReference = new(scope, name!, version);
-            Assert.Equal(oldReference.Scope, newReference.Scope);
-            Assert.Equal(oldReference.Name, newReference.Name);
-            Assert.Equal(oldReference.Version, newReference.Version);
-            Assert.Equal(oldReference.Moniker, newReference.Moniker);
-            Assert.Equal(oldReference.ToString(), newReference.ToString());
-            Assert.Equal(oldReference.Found, newReference.Found);
-            Assert.Equal(oldReference.NotFound, newReference.NotFound);
-            Assert.Equal(oldReference.GetHashCode(), newReference.GetHashCode());
-            (string? oldName, string? oldVersion) = oldReference;
+            (string? scope, string? name, string? version) = cases[index];
+            PackageReference newReference = new(scope, name!, version);
+            Assert.Equal(scope, newReference.Scope);
+            Assert.Equal(name, newReference.Name);
+            Assert.Equal(version, newReference.Version);
+            Assert.Equal(monikers[index], newReference.Moniker);
+            Assert.Equal(monikers[index] + (found[index] ? string.Empty : " (NOT FOUND)"), newReference.ToString());
+            Assert.Equal(found[index], newReference.Found);
+            Assert.Equal(!found[index], newReference.NotFound);
+            // The characterized hash is the name/version tuple hash, not a runtime-stable number.
+            Assert.Equal((name, version).GetHashCode(), newReference.GetHashCode());
             (string? newName, string? newVersion) = newReference;
-            Assert.Equal((oldName, oldVersion), (newName, newVersion));
-            legacy.Add(oldReference);
+            Assert.Equal((name, version), (newName, newVersion));
             neutral.Add(newReference);
-            oldReference.Scope = "changed";
             newReference.Scope = "changed";
-            Assert.True(oldReference == legacy[^1]);
             Assert.True(newReference == neutral[^1]);
-            Assert.Equal(legacy[^1].GetHashCode(), oldReference.GetHashCode());
-            Assert.Equal(neutral[^1].GetHashCode(), newReference.GetHashCode());
-            Assert.Equal(oldReference.Moniker, newReference.Moniker);
+            Assert.Equal((name, version).GetHashCode(), newReference.GetHashCode());
+            Assert.Equal(monikers[index], newReference.Moniker);
         }
         for (int left = 0; left < cases.Length; left++)
         {
             for (int right = 0; right < cases.Length; right++)
             {
-                Assert.Equal(legacy[left] == legacy[right], neutral[left] == neutral[right]);
-                Assert.Equal(legacy[left] != legacy[right], neutral[left] != neutral[right]);
-                Assert.Equal(legacy[left].Equals((object)legacy[right]), neutral[left].Equals((object)neutral[right]));
+                bool equal = cases[left].name == cases[right].name && cases[left].version == cases[right].version;
+                Assert.Equal(equal, neutral[left] == neutral[right]);
+                Assert.Equal(!equal, neutral[left] != neutral[right]);
+                Assert.Equal(equal, neutral[left].Equals((object)neutral[right]));
             }
         }
-        Assert.Equal(PackageReference.None.Moniker, CandlePackageReference.None.Moniker);
-        Assert.Equal(PackageReference.None.GetHashCode(), CandlePackageReference.None.GetHashCode());
-        Assert.Equal(default, CandlePackageReference.None);
-        Assert.False(CandlePackageReference.None.Equals(null));
-        Assert.False(CandlePackageReference.None.Equals(PackageReference.None));
-        PackageReference unscopedOld = new("Case.Name", "1.0.0-BETA");
-        CandlePackageReference unscopedNew = new("Case.Name", "1.0.0-BETA");
+        Assert.Equal("@", PackageReference.None.Moniker);
+        Assert.Equal(((string?)null, (string?)null).GetHashCode(), PackageReference.None.GetHashCode());
+        Assert.Equal(default, PackageReference.None);
+        Assert.False(PackageReference.None.Equals(null));
+        Assert.False(PackageReference.None.Equals(((string?)null, (string?)null)));
+        PackageReference unscopedNew = new("Case.Name", "1.0.0-BETA");
         Assert.Null(unscopedNew.Scope);
-        Assert.Equal(unscopedOld.Moniker, unscopedNew.Moniker);
+        Assert.Equal("Case.Name@1.0.0-BETA", unscopedNew.Moniker);
         foreach ((string name, string version) in new[] { ("case.name", "1.0.0-BETA"), ("Case.Name", "1.0.0-beta") })
         {
-            Assert.False(unscopedOld == new PackageReference(name, version));
-            Assert.False(unscopedNew == new CandlePackageReference(name, version));
+            Assert.False(unscopedNew == new PackageReference(name, version));
         }
-        Assert.True(unscopedNew == new CandlePackageReference("other", "Case.Name", "1.0.0-BETA"));
+        Assert.True(unscopedNew == new PackageReference("other", "Case.Name", "1.0.0-BETA"));
+        Assert.Equal("FhirCandle.Common", typeof(PackageReference).Assembly.GetName().Name);
+        Assert.DoesNotContain(typeof(FhirPackageService).Assembly.GetReferencedAssemblies(),
+            assembly => assembly.Name == "Firely.Fhir.Packages");
 
         // The remaining Common shapes carry data only, including nullable CI dictionaries.
         FhirCandle.Models.PackageCatalogEntry catalog = new() { Name = "name", Description = "repo/branches/feature/qa.json", FhirVersion = "5.0.0" };
@@ -651,7 +651,7 @@ public sealed class Sdk6PackageTests
         Assert.Single(registry.Requests);
     }
 
-    /// <summary>Uses the real CI entry point and companion cache, including both inherited author representations.</summary>
+    /// <summary>Uses the real CI entry point and companion cache, including both authored author representations.</summary>
     [Theory]
     [MemberData(nameof(VersionCases))]
     public async Task CiPackageClientPreservesListingDownloadAndManifestContract(string label, FhirReleases.FhirSequenceCodes version)
@@ -718,6 +718,8 @@ public sealed class Sdk6PackageTests
         string contentDirectory = cache.PackageContentFolder(tagged);
         WireContractAssertions.Content(coldManifest, File.ReadAllText(Path.Combine(contentDirectory, "package.json")), CompatibilityFormat.Json);
         WireContractAssertions.Content(OriginalResource, File.ReadAllText(Path.Combine(contentDirectory, "Patient-ci-original.json")), CompatibilityFormat.Json);
+        Assert.Equal(Encoding.UTF8.GetBytes(coldManifest), File.ReadAllBytes(Path.Combine(contentDirectory, "package.json")));
+        Assert.Equal(Encoding.UTF8.GetBytes(OriginalResource), File.ReadAllBytes(Path.Combine(contentDirectory, "Patient-ci-original.json")));
 
         int beforeWarm = listener.Requests.Count;
         await client.InstallOrUpdate(tagged, cache).WaitAsync(LocalHttpFixture.Deadline);
@@ -738,6 +740,8 @@ public sealed class Sdk6PackageTests
         Assert.False(File.Exists(Path.Combine(contentDirectory, "Patient-ci-original.json")));
         WireContractAssertions.Content(ReplacementResource, File.ReadAllText(Path.Combine(contentDirectory, "Patient-ci-replacement.json")), CompatibilityFormat.Json);
         WireContractAssertions.Content(replacementManifest, File.ReadAllText(Path.Combine(contentDirectory, "package.json")), CompatibilityFormat.Json);
+        Assert.Equal(Encoding.UTF8.GetBytes(replacementManifest), File.ReadAllBytes(Path.Combine(contentDirectory, "package.json")));
+        Assert.Equal(Encoding.UTF8.GetBytes(ReplacementResource), File.ReadAllBytes(Path.Combine(contentDirectory, "Patient-ci-replacement.json")));
 
         PackageReference missing = new(FhirCiClient.FhirCiScope, "example.test.sdk6.missing", "current");
         Assert.Null(await client.DownloadListingAsync(missing.Name!));
@@ -763,6 +767,241 @@ public sealed class Sdk6PackageTests
         }
         mapping.AssertComplete();
         listener.AssertComplete();
+    }
+
+    /// <summary>Native imports preserve raw distribution bytes, requested paths, neighbors, and operation-local cleanup.</summary>
+    [Fact]
+    public async Task NativeImportPreservesLegacyPublicationAndCleanup()
+    {
+        string? exportRoot = Environment.GetEnvironmentVariable("FHIR_CANDLE_PACKAGE_CACHE_EXPORT_ROOT");
+        if (!string.IsNullOrEmpty(exportRoot))
+        {
+            Assert.True(Path.IsPathFullyQualified(exportRoot), "Export requires a verifier-owned absolute temporary root.");
+            Assert.Contains(Environment.Version.Major, new[] { 10, 11 });
+            string runtimeRoot = Path.Combine(exportRoot, $"net{Environment.Version.Major}.0");
+            Assert.False(Directory.Exists(runtimeRoot) || File.Exists(runtimeRoot), $"Refusing to overwrite export: {runtimeRoot}");
+            Directory.CreateDirectory(runtimeRoot);
+        }
+        foreach (FhirReleases.FhirSequenceCodes version in _versions)
+        {
+            using LocalPackageFixture files = new();
+            DiskPackageCache cache = new(files.CacheDirectory);
+            string name = LocalPackageFixture.PackageName(version);
+            PackageReference ordinary = new(name, "1.0.0");
+            PackageReference neighbor = new(name + ".neighbor", "2.0.0");
+            HashSet<string> persistentEntries = [name + "#1.0.0", neighbor.Name + "#" + neighbor.Version];
+            WritePinnedCache(files.CacheDirectory, neighbor, ProtocolManifest(neighbor.Name!), new Dictionary<string, string>());
+            string neighborPath = LegacyContentPath(files.CacheDirectory, neighbor);
+            byte[] neighborBytes = File.ReadAllBytes(Path.Combine(neighborPath, "package.json"));
+            string parent = Path.GetDirectoryName(LegacyContentPath(files.CacheDirectory, ordinary))!;
+            Directory.CreateDirectory(parent);
+            byte[] metadata = Encoding.UTF8.GetBytes("Pinned parent metadata: café");
+            File.WriteAllBytes(Path.Combine(parent, "neighbor-metadata.txt"), metadata);
+
+            Dictionary<string, byte[]> distribution = new(StringComparer.Ordinal)
+            {
+                ["package/package.json"] = Encoding.UTF8.GetBytes(LocalPackageFixture.Manifest(version)),
+                ["package/Patient-wire-patient.json"] = Encoding.UTF8.GetBytes(
+                    LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "patient.json"), "wire-patient")),
+                ["package/Observation-package-observation.xml"] = Encoding.UTF8.GetBytes(
+                    LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "observation.xml"), "package-observation")),
+                ["examples/Patient-example.json"] = Encoding.UTF8.GetBytes("""{"resourceType":"Patient","id":"example","name":[{"family":"café"}]}"""),
+                ["siblings/nested/authored.bin"] = [0, 1, 2, 128, 255],
+                ["authored-readme.txt"] = Encoding.UTF8.GetBytes("Distributed sibling: café\r\n"),
+            };
+            byte[] archive = DistributedArchive(distribution);
+            string? originalHome = Environment.GetEnvironmentVariable("UserProfile");
+            string? originalUnixHome = Environment.GetEnvironmentVariable("HOME");
+            string? originalNativeRoot = Environment.GetEnvironmentVariable("PACKAGE_CACHE_FOLDER");
+            string ownedHome = Path.Combine(files.Root, "unused-home");
+            string nativeDefault = Path.Combine(files.Root, "unused-native-cache");
+            try
+            {
+                Environment.SetEnvironmentVariable("UserProfile", ownedHome);
+                Environment.SetEnvironmentVariable("HOME", ownedHome);
+                Environment.SetEnvironmentVariable("PACKAGE_CACHE_FOLDER", nativeDefault);
+                await cache.Install(ordinary, archive).WaitAsync(LocalHttpFixture.Deadline);
+                AssertDistribution(parent, distribution);
+                Assert.True(Directory.Exists(Path.Combine(parent, "empty-distributed-directory")));
+                PackageManifest ordinaryManifest = Assert.IsType<PackageManifest>(await cache.ReadManifestEx(ordinary));
+                AssertAuthor(ordinaryManifest, "Synthetic Package Author", "author@example.test", "https://example.test/sdk6");
+                Assert.False(ordinaryManifest.AuthorInformation!.ParsedFromString);
+                Assert.Equal(metadata, File.ReadAllBytes(Path.Combine(parent, "neighbor-metadata.txt")));
+                Assert.Equal(neighborBytes, File.ReadAllBytes(Path.Combine(neighborPath, "package.json")));
+                AssertClean();
+
+                // Import discovers the concrete identity, but publication retains the requested scope/tag/range.
+                foreach (PackageReference requested in new PackageReference[]
+                {
+                    new("scope", name + ".requested", "current$feature"),
+                    new("scope", name + ".requested", "1.x"),
+                    new("another-scope", name + ".requested", "~1.0.0"),
+                })
+                {
+                    await cache.Install(requested, archive).WaitAsync(LocalHttpFixture.Deadline);
+                    persistentEntries.Add(requested.Name + "#" + requested.Version);
+                    string requestedRoot = Path.GetDirectoryName(LegacyContentPath(files.CacheDirectory, requested))!;
+                    Assert.Equal(Path.Combine(files.CacheDirectory, requested.Name + "#" + requested.Version, "package"), cache.PackageContentFolder(requested));
+                    AssertDistribution(requestedRoot, distribution);
+                    Assert.Equal(name, Assert.IsType<PackageManifest>(await cache.ReadManifestEx(requested)).Name);
+                    AssertClean();
+                }
+
+                (Dictionary<string, byte[]> files, string[] directories) beforeFailures = Snapshot(files.CacheDirectory);
+                foreach (byte[] invalid in new[]
+                {
+                    Encoding.UTF8.GetBytes("invalid gzip"),
+                    LocalPackageFixture.Archive("{invalid-json", new Dictionary<string, string>()),
+                    LocalPackageFixture.Archive("""{"name":"invalid","version":null}""", new Dictionary<string, string>()),
+                })
+                {
+                    await Assert.ThrowsAnyAsync<Exception>(() => cache.Install(ordinary, invalid).WaitAsync(LocalHttpFixture.Deadline));
+                    AssertSnapshot(beforeFailures, files.CacheDirectory);
+                    AssertClean();
+                }
+                PackageReference blocked = new(name + ".blocked", "1.0.0");
+                string blockedRoot = Path.GetDirectoryName(LegacyContentPath(files.CacheDirectory, blocked))!;
+                byte[] obstacle = Encoding.UTF8.GetBytes("Owned publication obstacle");
+                File.WriteAllBytes(blockedRoot, obstacle);
+                persistentEntries.Add(blocked.Name + "#" + blocked.Version);
+                (Dictionary<string, byte[]> files, string[] directories) beforePublicationFailure = Snapshot(files.CacheDirectory);
+                await Assert.ThrowsAnyAsync<IOException>(() => cache.Install(blocked, archive).WaitAsync(LocalHttpFixture.Deadline));
+                AssertSnapshot(beforePublicationFailure, files.CacheDirectory);
+                Assert.Equal(obstacle, File.ReadAllBytes(blockedRoot));
+                AssertClean();
+
+                // Deletion affects only content. Reinstallation retains parent metadata and neighbors.
+                await cache.Delete(ordinary);
+                Assert.False(await cache.IsInstalled(ordinary));
+                Assert.Equal(metadata, File.ReadAllBytes(Path.Combine(parent, "neighbor-metadata.txt")));
+                Assert.Equal(distribution["examples/Patient-example.json"], File.ReadAllBytes(Path.Combine(parent, "examples", "Patient-example.json")));
+                Assert.Equal(neighborBytes, File.ReadAllBytes(Path.Combine(neighborPath, "package.json")));
+                await cache.Install(ordinary, archive).WaitAsync(LocalHttpFixture.Deadline);
+                AssertDistribution(parent, distribution);
+                AssertClean();
+
+                PackageReference ci = new(FhirCiClient.FhirCiScope, name + ".ci", "current");
+                string finalCiManifest = CiManifest(version, ci.Name!, replacement: true);
+                Dictionary<string, string> finalCiResources = new()
+                {
+                    ["Patient-ci-replacement.json"] = """{"resourceType":"Patient","id":"ci-replacement","active":false,"name":[{"family":"Replacement synthetic CI"}]}""",
+                };
+                await cache.Install(ci, LocalPackageFixture.Archive(finalCiManifest, finalCiResources)).WaitAsync(LocalHttpFixture.Deadline);
+                persistentEntries.Add(ci.Name + "#" + ci.Version);
+                Assert.Equal(Encoding.UTF8.GetBytes(finalCiManifest), File.ReadAllBytes(Path.Combine(cache.PackageContentFolder(ci), "package.json")));
+                Assert.Equal(Encoding.UTF8.GetBytes(finalCiResources.Single().Value),
+                    File.ReadAllBytes(Path.Combine(cache.PackageContentFolder(ci), finalCiResources.Single().Key)));
+                PackageManifest ciManifest = Assert.IsType<PackageManifest>(await cache.ReadManifestEx(ci));
+                AssertCiManifest(ciManifest, version, ci.Name!, replacement: true);
+                Assert.True(ciManifest.AuthorInformation!.ParsedFromString);
+                Assert.Equal(new[] { "Patient-ci-replacement.json", "package.json" },
+                    Directory.GetFiles(Path.GetDirectoryName(cache.PackageContentFolder(ci))!, "*", SearchOption.AllDirectories)
+                        .Select(Path.GetFileName).Order(StringComparer.Ordinal));
+                AssertClean();
+
+                if (!string.IsNullOrEmpty(exportRoot))
+                {
+                    ExportTree(parent, ordinary);
+                    ExportTree(Path.GetDirectoryName(cache.PackageContentFolder(ci))!, ci);
+                }
+                _output.WriteLine($"Native import / net{Environment.Version.Major}.0 / {version}: exact UTF8/XML/binary bytes, full tree, requested identities, targeted delete/reinstall, import/publication cleanup.");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("UserProfile", originalHome);
+                Environment.SetEnvironmentVariable("HOME", originalUnixHome);
+                Environment.SetEnvironmentVariable("PACKAGE_CACHE_FOLDER", originalNativeRoot);
+            }
+
+            void AssertClean()
+            {
+                Assert.Empty(Directory.GetDirectories(files.CacheDirectory, ".candle-package-import-*"));
+                Assert.False(Directory.Exists(ownedHome));
+                Assert.False(Directory.Exists(nativeDefault));
+                // Every persistent root entry is independently fixture-authored.
+                Assert.Equal(persistentEntries.Order(), Directory.GetFileSystemEntries(files.CacheDirectory)
+                    .Select(Path.GetFileName).Order());
+            }
+
+            void ExportTree(string source, PackageReference reference)
+            {
+                string destination = Path.Combine(exportRoot!, $"net{Environment.Version.Major}.0", reference.Name + "#" + reference.Version);
+                Assert.False(Directory.Exists(destination) || File.Exists(destination), $"Refusing to overwrite export package: {destination}");
+                CopyExportTree(source, destination);
+                AssertSnapshot(Snapshot(source), destination);
+                _output.WriteLine($"Verifier-owned replacement cache export: {destination}");
+            }
+        }
+
+        static void AssertDistribution(string root, IReadOnlyDictionary<string, byte[]> expected)
+        {
+            foreach (KeyValuePair<string, byte[]> file in expected)
+            {
+                Assert.Equal(file.Value, File.ReadAllBytes(Path.Combine(root, file.Key)));
+            }
+            string[] authored = expected.Keys.Append("neighbor-metadata.txt")
+                .Where(path => File.Exists(Path.Combine(root, path))).Order().ToArray();
+            Assert.Equal(authored, Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')).Order());
+            HashSet<string> directories = ["empty-distributed-directory"];
+            foreach (string file in expected.Keys)
+            {
+                string? directory = Path.GetDirectoryName(file);
+                while (!string.IsNullOrEmpty(directory))
+                {
+                    directories.Add(directory.Replace('\\', '/'));
+                    directory = Path.GetDirectoryName(directory);
+                }
+            }
+            Assert.Equal(directories.Order(), Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')).Order());
+        }
+    }
+
+    private static (Dictionary<string, byte[]> files, string[] directories) Snapshot(string root) =>
+        (Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(root, path), File.ReadAllBytes, StringComparer.Ordinal),
+        Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path)).Order().ToArray());
+
+    private static void AssertSnapshot((Dictionary<string, byte[]> files, string[] directories) expected, string root)
+    {
+        (Dictionary<string, byte[]> files, string[] directories) actual = Snapshot(root);
+        Assert.Equal(expected.directories, actual.directories);
+        Assert.Equal(expected.files.Keys.Order(), actual.files.Keys.Order());
+        foreach (KeyValuePair<string, byte[]> file in expected.files)
+        {
+            Assert.Equal(file.Value, actual.files[file.Key]);
+        }
+    }
+
+    private static byte[] DistributedArchive(IReadOnlyDictionary<string, byte[]> files)
+    {
+        using MemoryStream output = new();
+        using (GZipStream gzip = new(output, CompressionLevel.SmallestSize, leaveOpen: true))
+        using (TarWriter tar = new(gzip, TarEntryFormat.Ustar, leaveOpen: true))
+        {
+            tar.WriteEntry(new UstarTarEntry(TarEntryType.Directory, "empty-distributed-directory/"));
+            foreach (KeyValuePair<string, byte[]> file in files)
+            {
+                using MemoryStream content = new(file.Value, writable: false);
+                tar.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, file.Key) { DataStream = content });
+            }
+        }
+        return output.ToArray();
+    }
+
+    private static void CopyExportTree(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (string directory in Directory.GetDirectories(source))
+        {
+            CopyExportTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+        foreach (string file in Directory.GetFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: false);
+        }
     }
 
     /// <summary>The documented custom tenant directory fallback loads JSON and separately authored XML without sibling leakage.</summary>
@@ -851,7 +1090,7 @@ public sealed class Sdk6PackageTests
         fixture.AssertComplete();
     }
 
-    private static void AssertCatalog(Firely.Fhir.Packages.PackageCatalogEntry entry, string name)
+    private static void AssertCatalog(PackageCatalogEntry entry, string name)
     {
         Assert.Equal(name, entry.Name);
         Assert.Equal("example/sdk6/branches/feature/qa.json", entry.Description);
@@ -1005,6 +1244,7 @@ public sealed class Sdk6PackageTests
         Assert.Equal("https://example.test/sdk6/" + LocalPackageFixture.VersionName(version), manifest.Canonical);
         AssertAuthor(manifest, "Synthetic Package Author", "author@example.test", "https://example.test/sdk6");
         WireContractAssertions.Content(LocalPackageFixture.Manifest(version), File.ReadAllText(Path.Combine(directory, "package.json")), CompatibilityFormat.Json);
+        Assert.Equal(Encoding.UTF8.GetBytes(LocalPackageFixture.Manifest(version)), File.ReadAllBytes(Path.Combine(directory, "package.json")));
         WireContractAssertions.Content(LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "patient.json"), "wire-patient"),
             File.ReadAllText(Path.Combine(directory, "Patient-wire-patient.json")), CompatibilityFormat.Json);
         WireContractAssertions.Content(LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "observation.xml"), "package-observation"),
@@ -1109,7 +1349,7 @@ public sealed class Sdk6PackageTests
 
     private static void AssertAuthor(PackageManifest manifest, string name, string email, string url)
     {
-        Firely.Fhir.Packages.AuthorInfo author = Assert.IsAssignableFrom<Firely.Fhir.Packages.AuthorInfo>(manifest.AuthorInformation);
+        fhir.candle._ForPackages.AuthorInfo author = Assert.IsAssignableFrom<fhir.candle._ForPackages.AuthorInfo>(manifest.AuthorInformation);
         Assert.Equal(name, author.Name);
         Assert.Equal(email, author.Email);
         Assert.Equal(url, author.Url);

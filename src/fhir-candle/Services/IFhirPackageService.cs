@@ -5,10 +5,9 @@
 
 using FhirCandle.Utils;
 using FhirCandle.Models;
-using Firely.Fhir.Packages;
 using Microsoft.Extensions.Hosting;
 using static fhir.candle.Services.FhirPackageService;
-using PackageReference = Firely.Fhir.Packages.PackageReference;
+using PackageReference = FhirCandle.Models.PackageReference;
 
 namespace fhir.candle.Services;
 

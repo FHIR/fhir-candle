@@ -9,7 +9,8 @@ using FhirCandle.Utils;
 using FhirCandle.Configuration;
 using FhirCandle.Extensions;
 using FhirCandle.Models;
-using Firely.Fhir.Packages;
+using FhirPkg.Registry;
+using Microsoft.Extensions.Logging.Abstractions;
 using Hl7.Fhir.Specification;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
@@ -18,8 +19,10 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
 using System.Text.RegularExpressions;
-using PackageReference = Firely.Fhir.Packages.PackageReference;
-using PackageCatalogEntry = Firely.Fhir.Packages.PackageCatalogEntry;
+using PackageReference = FhirCandle.Models.PackageReference;
+using PackageCatalogEntry = FhirCandle.Models.PackageCatalogEntry;
+using NativePackageReference = FhirPkg.Models.PackageReference;
+using SemVer = SemanticVersioning.Version;
 
 namespace fhir.candle.Services;
 
@@ -70,7 +73,10 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     private _ForPackages.DiskPackageCache? _cache = null;
 
     /// <summary>(Immutable) The package clients.</summary>
-    private readonly List<PackageClient> _packageClients = [];
+    private readonly List<IRegistryClient> _packageClients = [];
+
+    /// <summary>The HTTP transport owned by the introduced registry clients.</summary>
+    private readonly HttpClient _registryHttpClient = new();
 
     /// <summary>(Immutable) The FHIR CI client (build.fhir.org).</summary>
     private readonly FhirCiClient _ciClient = new();
@@ -166,7 +172,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
         if (_config.FhirCacheDirectory is null)
         {
-            _config.FhirCacheDirectory = Platform.GetFhirPackageRoot();
+            _config.FhirCacheDirectory = _ForPackages.DiskPackageCache.GetDefaultRoot();
         }
 
         _logger.LogInformation($"Initializing FhirPackageService with cache: {_config.FhirCacheDirectory}");
@@ -194,7 +200,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         {
             foreach (string url in _officialRegistryUrls)
             {
-                _packageClients.Add(PackageClient.Create(url));
+                AddRegistry(url, FhirPkg.Models.RegistryType.FhirNpm);
             }
         }
 
@@ -202,7 +208,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         {
             foreach (string url in _config.AdditionalFhirRegistryUrls)
             {
-                _packageClients.Add(PackageClient.Create(url, npm: false));
+                AddRegistry(url, FhirPkg.Models.RegistryType.FhirNpm);
             }
         }
 
@@ -210,9 +216,57 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         {
             foreach (string url in _config.AdditionalNpmRegistryUrls)
             {
-                _packageClients.Add(PackageClient.Create(url, npm: true));
+                AddRegistry(url, FhirPkg.Models.RegistryType.Npm);
             }
         }
+    }
+
+    private void AddRegistry(string url, FhirPkg.Models.RegistryType type)
+    {
+        RegistryEndpoint endpoint = new() { Url = url, Type = type };
+        _packageClients.Add(RegistryClientFactory.CreateClientForEndpoint(
+            endpoint, _registryHttpClient, NullLoggerFactory.Instance));
+    }
+
+    private static PackageReference ParseReference(string directive)
+    {
+        // Retain the old accepted envelope: bare scope, first slash segment and
+        // first @ version, without trimming or interpreting a scoped #.
+        string? scope = null;
+        string input = directive;
+        if (input.StartsWith('@'))
+        {
+            string[] segments = input.Split('/');
+            scope = segments[0][1..];
+            input = segments[1];
+        }
+        string[] parts = input.Split('@');
+        string name = parts[0];
+        string? version = parts.Length > 1 ? parts[1] : null;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return new(scope, name, version);
+        }
+        NativePackageReference native = NativePackageReference.Parse(input);
+        return new(scope, native.Name == name ? native.Name : name,
+            native.Version == version ? native.Version : version);
+    }
+
+    private static async Task<List<SemVer>> GetVersions(IRegistryClient client, string name)
+    {
+        // A legacy # in Name was a URI fragment, not an escaped package ID.
+        string transportName = name.Split('#')[0];
+        FhirPkg.Models.PackageListing? listing = await client.GetPackageListingAsync(transportName);
+        List<SemVer> versions = [];
+        foreach (string value in listing?.Versions.Keys ?? Enumerable.Empty<string>())
+        {
+            if (SemVer.TryParse(value, out SemVer? version) && version is not null)
+            {
+                versions.Add(version);
+            }
+        }
+        versions.Sort();
+        return versions;
     }
 
     /// <summary>Triggered when the application host is ready to start the service.</summary>
@@ -289,7 +343,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 ? inputDirective
                 : inputDirective.Replace('#', '@');
 
-            PackageReference packageReference = PackageReference.Parse(directive);
+            PackageReference packageReference = ParseReference(directive);
 
             if (packageReference.Name is null)
             {
@@ -306,8 +360,8 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             {
                 case VersionHandlingTypes.Latest:
                     {
-                        // resolve the version via Firely Packages so that we have access to the actual version number
-                        (PackageReference pr, IPackageServer? _) = await ResolveLatest(packageReference.Name);
+                        // Resolve the version before retaining the legacy requested cache identity.
+                        PackageReference pr = await ResolveLatest(packageReference.Name);
 
                         if ((pr == PackageReference.None) || (pr.Name is null))
                         {
@@ -421,26 +475,26 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         return localPackages;
     }
 
-    private async ValueTask<(PackageReference, IPackageServer?)> ResolveLatest(string name)
+    private async ValueTask<PackageReference> ResolveLatest(string name)
     {
-        List<(PackageReference pr, IPackageServer server)> latestRecs = new();
+        List<PackageReference> latestRecs = new();
 
-        foreach (IPackageServer server in _packageClients)
+        foreach (IRegistryClient server in _packageClients)
         {
-            PackageReference pr = await server.GetLatest(name);
-            if (pr == PackageReference.None)
+            List<SemVer> versions = await GetVersions(server, name);
+            if (versions.Count == 0)
             {
                 continue;
             }
-            latestRecs.Add((pr, server));
+            latestRecs.Add(new(name, versions[^1].ToString()));
         }
 
         if (latestRecs.Count == 0)
         {
-            return (PackageReference.None, null);
+            return PackageReference.None;
         }
 
-        return latestRecs.OrderByDescending(v => v.pr.Version).First();
+        return latestRecs.OrderByDescending(v => v.Version).First();
     }
 
     /// <summary>
@@ -461,15 +515,34 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return true;
         }
 
-        foreach (IPackageServer pc in _packageClients)
+        foreach (IRegistryClient pc in _packageClients)
         {
             try
             {
                 // try to download this package
-                byte[] data = await pc.GetPackage(packageReference);
+                string root = pc.Endpoint.Url.TrimEnd('/');
+                string name = packageReference.Name!;
+                string version = packageReference.Version!;
+                string path = pc.Endpoint.Type == FhirPkg.Models.RegistryType.Npm
+                    ? (string.IsNullOrEmpty(packageReference.Scope) ? string.Empty : "@" + packageReference.Scope + "/")
+                        + $"{name}/-/{name}-{version}.tgz"
+                    : $"{name}/{version}";
+                FhirPkg.Models.ResolvedDirective resolved = new()
+                {
+                    Reference = new NativePackageReference(name, version),
+                    TarballUri = new Uri(root + "/" + path),
+                    SourceRegistry = pc.Endpoint,
+                };
+                await using FhirPkg.Models.PackageDownloadResult? download = await pc.DownloadAsync(resolved);
+                if (download is null)
+                {
+                    continue;
+                }
+                using MemoryStream buffer = new();
+                await download.Content.CopyToAsync(buffer);
 
                 // try to install this package
-                await _cache.Install(packageReference, data);
+                await _cache.Install(packageReference, buffer.ToArray());
 
                 // only need to install from first hit
                 return true;
@@ -490,13 +563,13 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return false;
         }
 
-        foreach (IPackageServer pc in _packageClients)
+        foreach (IRegistryClient pc in _packageClients)
         {
             try
             {
-                Firely.Fhir.Packages.Versions? versions = await pc.GetVersions(packageId);
+                List<SemVer> versions = await GetVersions(pc, packageId);
 
-                if (versions?.IsEmpty == false)
+                if (versions.Count > 0)
                 {
                     return true;
                 }
@@ -736,10 +809,17 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     {
         if (!_disposedValue)
         {
-            // dispose managed state (managed objects)
-            //if (disposing)
-            //{
-            //}
+            if (disposing)
+            {
+                foreach (IRegistryClient client in _packageClients)
+                {
+                    if (client is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+                }
+                _registryHttpClient.Dispose();
+            }
 
             // free unmanaged resources (unmanaged objects) and override finalizer
             // set large fields to null
