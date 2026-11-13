@@ -55,6 +55,8 @@ Full documentation lives in the [`docs/`](docs/) tree:
   - [Using OpenTelemetry](docs/user/opentelemetry.md)
   - [`$validate` operation](docs/user/operations/validate.md)
 - **Contributors** — architecture and internals: [docs/technical/](docs/technical/)
+  - [Release process](docs/technical/releasing.md) — published tagged releases,
+    package qualification, NuGet trusted publishing, and versioned containers.
 
 The sections below are a quick-start; deeper detail lives in `docs/`.
 

@@ -1,4 +1,5 @@
 * Work in Progress
+  * Changed: release only from published `v<version>` GitHub Releases, with exact-source CI, immutable tool qualification, NuGet trusted publishing, and versioned standard/minimal container images. Manual release runs are validation-only.
   * Fixed: type-level delete now requires search criteria.
   * Fixed: conditional update is gated on interaction (control-only requests are rejected).
   * Fixed: a control-only query on POST create is treated as a normal create.

@@ -49,6 +49,9 @@ docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest --r4 test
 Both `latest` and `minimal` images use .NET 11 on Ubuntu 26.04 and support
 Linux amd64 and arm64. The `minimal` tag uses the chiseled-extra runtime,
 which retains ICU and time-zone data but has no shell or package manager.
+Published releases also provide `<version>` and `<version>-minimal` image
+tags for selecting a specific release. Merges to `main` do not update
+`latest` or `minimal`; those aliases advance on published GitHub Releases.
 Existing Kubernetes deployments using `ghcr.io/fhir/fhir-candle:latest`
 receive the .NET 11 image on their next rollout; the port and arguments are
 unchanged.

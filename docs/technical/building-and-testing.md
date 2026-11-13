@@ -66,6 +66,10 @@ dotnet test --configuration Release --framework net11.0 --no-restore --verbosity
 
 The normal build restores dependencies; these test commands reuse that
 restore. No separate lint/format command or new runner is required.
+CI builds both targets before running tests with `--no-build` and
+`-p:TestTfmsInParallel=false`, avoiding a second build and concurrent
+framework test hosts. It also runs the PowerShell release-validator
+regressions in `.github/scripts/tests/Test-ReleaseScripts.ps1`.
 
 ## Test organization
 
@@ -110,6 +114,11 @@ The NuGet tool contains `net11.0` and `net10.0` payloads, each with its own
 published `wwwroot`. Startup prefers the selected payload's assets so that
 Blazor scripts and component assets are not merged across frameworks.
 Publishing uses `dotnet pack` without rewriting the resulting archive.
+Publication starts only from a published `v<version>` GitHub Release, after
+exact-source CI and qualification of one immutable tool package on all six
+OS/framework combinations. Manual release runs validate without publishing.
+See [Releasing](releasing.md) for trusted-publishing setup, changelog/tag
+preparation, candidate hashes, and retry rules.
 Both container workflows build the same Dockerfile for Linux amd64 and arm64, publishing
 `net11.0` with the .NET 11 SDK. The standard runtime is
 `mcr.microsoft.com/dotnet/aspnet:11.0`; the minimal workflow selects
@@ -118,10 +127,12 @@ Both container workflows build the same Dockerfile for Linux amd64 and arm64, pu
 Do not add shell commands to the shared runtime stage: chiseled images have
 no shell. The application creates its own per-user FHIR package cache.
 
-The Kubernetes manifests continue to consume `ghcr.io/fhir/fhir-candle:latest`
-with `imagePullPolicy: Always`. The existing deployment workflow restarts them
-after a successful standard-image publication; no cluster runtime installation
-or endpoint changes are needed.
+The standard image has `<version>` and `latest` tags; the minimal image has
+`<version>-minimal` and `minimal` tags. The Kubernetes manifests continue to
+consume `ghcr.io/fhir/fhir-candle:latest` with `imagePullPolicy: Always`.
+The deployment workflow restarts them after the complete published-release
+workflow succeeds, never after validation-only runs; no cluster runtime
+installation or endpoint changes are needed.
 
 ## See also
 

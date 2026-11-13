@@ -15,6 +15,8 @@ If you only want to run or call the server, see the [user docs](../user/).
   `FhirRequestContext` / `FhirResponseContext`, and multi-tenant hosting.
 - [Building and testing](building-and-testing.md) — build/test commands,
   multi-targeting, and test organization.
+- [Releasing](releasing.md) — tagged releases, immutable tool qualification,
+  NuGet trusted publishing, container tags, and deployment gates.
 - [Contributing notes](contributing-notes.md) — `.editorconfig` style,
   copyright header, namespace naming, and null-handling conventions.
 - [`$validate` implementation note](validate-implementation.md) — implementation

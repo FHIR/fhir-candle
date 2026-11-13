@@ -1,50 +1,91 @@
 name: Tests
-# Basics from https://learn.microsoft.com/en-us/dotnet/devops/dotnet-test-github-action
+
 on:
   push:
     branches: [ main ]
     paths:
-    - '**.cs'
-    - '**.csproj'
-    - '**.props'
-    - '**.projitems'
-    - '**.razor'
-    - 'src/fhir-candle.Tests/data/sdk6-compatibility/**'
-    - '.github/workflows/build-and-test.yml'
+    - 'src/**'
+    - 'fhirData/**'
+    - 'fhir-candle.sln'
+    - 'Dockerfile'
+    - '.dockerignore'
+    - 'changelog.md'
+    - '.github/scripts/**'
+    - '.github/workflows/**'
   pull_request:
     branches: [ main ]
     paths:
-    - '**.cs'
-    - '**.csproj'
-    - '**.props'
-    - '**.projitems'
-    - '**.razor'
-    - 'src/fhir-candle.Tests/data/sdk6-compatibility/**'
-    - '.github/workflows/build-and-test.yml'
+    - 'src/**'
+    - 'fhirData/**'
+    - 'fhir-candle.sln'
+    - 'Dockerfile'
+    - '.dockerignore'
+    - 'changelog.md'
+    - '.github/scripts/**'
+    - '.github/workflows/**'
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: Full source commit to build and test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  VSTEST_CONNECTION_TIMEOUT: '300'
 
 jobs:
   build-and-test:
-
-    name: build-and-test-${{matrix.os}}
+    name: build-and-test-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
+      if: ${{ inputs.commit_sha == '' }}
 
-    - uses: actions/setup-dotnet@v5
+    - uses: actions/checkout@v7
+      if: ${{ inputs.commit_sha != '' }}
+      with:
+        ref: ${{ inputs.commit_sha }}
+
+    - name: Verify exact source commit
+      if: ${{ inputs.commit_sha != '' }}
+      shell: pwsh
+      env:
+        EXPECTED_COMMIT: ${{ inputs.commit_sha }}
+      run: |
+        if ($env:EXPECTED_COMMIT -cnotmatch '^[0-9a-f]{40}\z')
+        {
+          throw 'Expected a full lowercase commit SHA.'
+        }
+        $actualCommit = (git rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0 -or $actualCommit -cne $env:EXPECTED_COMMIT)
+        {
+          throw "Checked out '$actualCommit', expected '$env:EXPECTED_COMMIT'."
+        }
+
+    - uses: actions/setup-dotnet@v6
       with:
         dotnet-version: |
             11.0.x
             10.0.x
 
+    - name: Test release validators
+      shell: pwsh
+      run: ./.github/scripts/tests/Test-ReleaseScripts.ps1
+
     - name: Install dependencies
       run: dotnet restore
-      
+
     - name: Build
       run: dotnet build --configuration Release --no-restore
-    
+
     - name: Test
-      run: dotnet test --configuration Release --no-restore --verbosity normal
+      run: dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false
