@@ -18,6 +18,8 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
 using System.Text.RegularExpressions;
+using PackageReference = Firely.Fhir.Packages.PackageReference;
+using PackageCatalogEntry = Firely.Fhir.Packages.PackageCatalogEntry;
 
 namespace fhir.candle.Services;
 

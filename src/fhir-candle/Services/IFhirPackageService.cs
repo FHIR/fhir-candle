@@ -8,6 +8,7 @@ using FhirCandle.Models;
 using Firely.Fhir.Packages;
 using Microsoft.Extensions.Hosting;
 using static fhir.candle.Services.FhirPackageService;
+using PackageReference = Firely.Fhir.Packages.PackageReference;
 
 namespace fhir.candle.Services;
 
