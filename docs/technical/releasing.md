@@ -85,8 +85,8 @@ frameworks, independently of earlier CI runs on `main`.
 6. Compare the candidate's source SHA and SHA-512 in the pack job summary
    with the intended release, review all six tool-consumer results, and
    approve `publish-nuget` in the protected environment.
-7. Confirm the exact version appears on NuGet and both versioned GHCR images
-   exist. Record the source SHA and package hash in the release notes.
+7. Require the NuGet push and both image-publication jobs to succeed.
+   Record the source SHA and package hash in the release notes.
 
 Runs for the same tag are serialized without cancelling an active run.
 NuGet publishes first; image publication waits for that protected job to
@@ -124,6 +124,8 @@ browser interaction or a substitute for the full source-test matrix.
 The NuGet publisher downloads and rechecks the same bytes, tag, ancestry,
 checkout, and still-published GitHub Release. **It never builds or packs.**
 There is no duplicate-skipping push that could hide a conflicting version.
+A successful NuGet push completes publication. Do not wait for NuGet indexing,
+poll for a listing, or download published content for verification.
 Candidate artifacts are retained for 90 days; archive them for longer-term
 evidence if needed.
 
@@ -154,9 +156,9 @@ existing release tag.
 If external environment, registry, or deployment configuration fails, correct
 the external problem and **re-run failed jobs** in the original run. Do not
 re-run all jobs to rebuild an already qualified NuGet candidate or dispatch
-another publishing run. If NuGet already accepted the version, stop and
-inspect it rather than treating a duplicate as success. There is no
-paired-package recovery mechanism.
+another publishing run. Do not rerun a successful NuGet push while waiting
+for indexing. A duplicate-version push failure remains an error, not a
+successful publication. There is no paired-package recovery mechanism.
 
 Keep `GINOC_NUGET` only while outstanding releases tagged with the old
 API-key workflow still need it, then revoke that key and delete the secret.
