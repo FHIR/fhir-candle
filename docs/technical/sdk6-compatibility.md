@@ -481,3 +481,237 @@ neither the default launch profile nor a successful compilation substitutes.
 Append actual records with OS/browser/version, tree identity, exact seed and
 configuration, route/actions, result and exceptions. Required missing evidence
 blocks final acceptance; it does not reduce the supported envelope.
+
+## Package supplier replacement evidence (2026-11-13)
+
+This additive record supersedes only the earlier package-supplier statement:
+the host now pins **fhir-pkg-lib 2026.1113.1240**, replacing
+`Firely.Fhir.Packages` **5.0.2**. It does not rewrite the historical SDK
+migration, dependency-refresh, platform, or browser evidence above. The
+Phase 2 adapter checkpoint is
+`b1c33bdb4f0a23c7d47d70eb23ac443124494d33`; Phase 3 tests/docs were verified
+over that checkpoint. **At the Phase 3 commit checkpoint**, final unfiltered
+verification had not yet run; subsequent verification is recorded in the
+slot's `plan.md`.
+
+### Published supplier and acceptance evidence
+
+The exact published NuGet archive and its source at nuspec commit
+**`9059ebb310d0c0ad8a7079f806d238bc9b25611c`** in
+`GinoCanessa/dotnet-fhir-packages` were inspected during qualification.
+The archive is 769,151 bytes, SHA256
+`A87E68BE7C80AF12CC8C14077338A88325F9D1E5FF3BFE0AA1BBA5B075534910`.
+It provides `lib/net10.0/FhirPkg.dll` and `lib/net11.0/FhirPkg.dll`.
+The MIT license attributes **Copyright (c) Gino Canessa. All rights reserved.**;
+the supplier notice was added to `THIRDPARTYNOTICES.md`, retaining the Firely
+SDK and unrelated notices.
+
+| Inspected public API | Candle use |
+|---|---|
+| `FhirPkg.Models.PackageReference.Parse` | Private translation to the legacy data identity; the native reference is not exposed. |
+| `RegistryClientFactory.CreateClientForEndpoint` / `RegistryEndpoint` | Explicit FHIR-NPM or NPM clients, one per configured endpoint in the existing order. |
+| `IRegistryClient.GetPackageListingAsync` / `DownloadAsync(ResolvedDirective)` | Listings projected with the retained SemanticVersioning policy; existing explicit archive URLs, not a new native resolver/dependency engine. |
+| `DiskPackageCache.ImportAsync(Stream, InstallCacheOptions, CancellationToken)` | Operation-local native import with `Unmodified = true`; concrete manifest identity discovery does not replace the requested legacy identity. |
+| `PackageRecord.DirectoryPath` / `GetPackageContentPath` | Locate the imported distribution for publication; installed lookup, raw manifest reads, and deletion remain Candle-owned. |
+
+The nuspec requires Microsoft.Extensions DI/logging abstractions, Options,
+and Http **11.0.0** for net10.0, and Http **11.0.0** for net11.0. Both published
+assets compile and bind through the existing adapters on the supported runtimes.
+Source inspection alone was not acceptance evidence: the fixed manifest's
+property-scoped author converter still projects object authors into the
+supplier's string-valued `Author` property. That projection must never be
+serialized back into the cache.
+
+**Failed-candidate history:** the exact **2026.1112.1330** importer rejected
+the unchanged object-valued author fixtures on both runtimes with
+`PackageInstallException` / unreadable manifest JSON and an inner conversion
+failure at `$.author`. `Unmodified` did not bypass validation. No manifest
+rewrite, validator bypass, local archive parser, or weakened fixture was used.
+
+**Fixed-candidate execution:** before resumed Phase 2 source edits, isolated
+reflection imports of the unchanged string/object-author archives passed
+**12/12 on each runtime**, .NET **11.0.0** and **10.0.15**. The subsequent
+Phase 2 focused integration gate passed **19/19 per TFM**, including all
+original R4/R4B/R5 rows, the seven-request CI cold/update sequence and
+four-request warm checkpoint with no additional download. Final Phase 2
+builds had zero warnings/errors. Exact raw manifest/resource bytes, local
+Newtonsoft author name/email/url and string/object origin, full distributions,
+empty directories, invalid-import/publication cleanup, and opt-in export passed.
+These executed results, not the release note, resolve the earlier author gate.
+
+### Identity, byte, path, disposal, and source-binding contract
+
+- Configuration, registry order/URLs, directive syntax and characterized
+  parser/latest/local-build quirks remain unchanged. Scope is bare and Name
+  unscoped; equality/hash ignore Scope and compare Name/Version case-sensitively.
+  CI keeps resolved download identities distinct from installed tags.
+- The physical content path remains
+  `Path.Combine(configuredRoot, Name + "#" + Version, "package")`, ignoring
+  Scope. An existing `packages` child does not change the selected root.
+  Directory existence, missing/corrupt manifest behavior, and Candle's raw
+  Newtonsoft manifest/version/date interpretation remain the lookup contract.
+- Native import uses a unique `.candle-package-import-*` temporary root on
+  the selected cache filesystem. Native cache/stream objects are disposed
+  before publication; native download results/streams and the introduced
+  registry transport have bounded ownership. Success/failure cleanup removes
+  only the operation's temporary root. No native default cache, root metadata,
+  journal, lock, second persistent backend, or operator cache conversion is
+  published.
+- Publication preserves distributed manifest/resource bytes and the complete
+  tree, including sibling files, examples outside `package`, and empty
+  directories. Parent metadata not replaced by distributed files and unrelated
+  identities survive. `Delete` removes only the requested content directory.
+  The manager still passes `package` to `LoadPackage`: the example flag controls
+  recursive examples within that directory, not loading arbitrary outside
+  siblings. CI still deletes old content before downloading; no transactional
+  update or automatic rollback is promised.
+- The six data-only contracts (`PackageReference`, `PackageCatalogEntry`,
+  `PackageListing`, `PackageRelease`, `Dist`, `Versions`) now live in
+  **`FhirCandle.Models`**, assembly **`FhirCandle.Common`**. Service/helper
+  consumers naming retired supplier CLR types must **rebind and recompile**;
+  there is no precompiled-consumer binary compatibility claim or impersonated
+  Firely namespace. Rollback requires rebinding/recompiling those consumers
+  again, plus separately restoring affected cache snapshots when needed.
+- SDK/model **6.8.0**, all `candleR4`/`candleR4B`/`candleR5` and
+  `coreR4`/`coreR4B`/`coreR5` aliases and `AddPackageAliases`, tenant routing,
+  operation/reflection gates, singleton forwarding, shared version settings,
+  DateTime-based version generation, and operator configuration remain intact.
+
+### Actual resolved graph changes
+
+Phase 2 compared fresh host/test graphs against the preserved failed-candidate
+graphs. The fixed pin's minimum supplier-reachable closure is a real net10.0
+major-line change, not “no retained graph drift.” All entries below resolve
+to exactly **11.0.0**, not a later patch.
+
+| Microsoft.Extensions package | Host net10.0 | Tests net10.0 |
+|---|---|---|
+| Configuration | Added | 10.0.15 → 11.0.0 |
+| Configuration.Abstractions | Added | 10.0.15 → 11.0.0 |
+| Configuration.Binder | Added | 10.0.15 → 11.0.0 |
+| DependencyInjection | Added | 10.0.12 → 11.0.0 |
+| DependencyInjection.Abstractions | Added | 10.0.15 → 11.0.0 |
+| Diagnostics | Added | 10.0.12 → 11.0.0 |
+| Diagnostics.Abstractions | Added | 10.0.15 → 11.0.0 |
+| Http | Added | 10.0.12 → 11.0.0 |
+| Logging | Added | 10.0.12 → 11.0.0 |
+| Logging.Abstractions | Added | 10.0.15 → 11.0.0 |
+| Options | Added | 10.0.15 → 11.0.0 |
+| Options.ConfigurationExtensions | Added | 10.0.12 → 11.0.0 |
+| Primitives | Added | 10.0.15 → 11.0.0 |
+
+Explicit package counts are host net10.0 **40 → 53**, host net11.0
+**38 → 38**, tests net10.0 **86 → 86**, and tests net11.0 **74 → 74**.
+The host net11.0 closure remains framework-pruned. Tests net11.0 upgrade
+only **Http** and **Diagnostics**, **10.0.12 → 11.0.0**; the other required
+explicit closure entries were already 11.0.0, with framework entries
+distinguished from packages. No unrelated version deltas or new pruning
+occurred against those snapshots.
+
+The initial replacement removed `Firely.Fhir.Packages` and `SharpZipLib`
+and introduced `fhir-pkg-lib`; both retired packages are absent from all four
+current host/test graphs. Newtonsoft.Json **13.0.4**, SemanticVersioning
+**3.0.0**, and models **6.8.0** remain. DiagnosticSource **11.0.0** is unchanged
+where explicitly resolved (net10.0); net11.0 framework pruning is not a new
+package upgrade. Pkcs remains **10.0.15** in host/test net10.0 and **11.0.0**
+in host net11.0; test net11.0 Pkcs remains framework-pruned. Phase 3's normal
+restore reconfirmed the four current counts, exact pin, retained versions,
+and retired-package absence. All four full resolved package-record sets are
+identical to the qualified Phase 2 snapshots; no unrelated dependency changed.
+
+### Phase 3 inventory and Windows command results
+
+`Sdk6PackageTests` now executes **22 cases**, plus the unchanged
+`FhirNpmPackageTests` manifest case and two `HostingCompatibilityTests`:
+**25 focused cases per TFM**. The two new theories each execute R4/R4B/R5:
+
+- `PackageVariantsExamplesAndSupplementsPreserveTenantLoading`: umbrella
+  substitution, existing-suffix replacement, listing/download fallback,
+  missing variant, version-specific manager preference, newest-last ordering,
+  named-tenant/same-version sibling isolation, false/true JSON/XML examples,
+  full-distribution retention, exact `name@version` then `name#version` then
+  name-only supplements, exact loaded directives/IDs/supplements and retrieved
+  authored resources.
+- `PopulatedCacheDeletionReinstallationAndRollbackPreserveNeighbors`:
+  independently seeded legacy raw-byte trees, full affected-tree snapshots,
+  replacement, targeted/idempotent deletion, bounded registry reinstall,
+  offline reopening and snapshot restoration, with same-name other-version
+  and scoped CI neighbors, parent metadata and empty directories retained.
+  This validates the legacy seam, not an original-supplier binary replay.
+
+Commands came from root `AGENTS.md` and the existing both-framework workflow,
+run from the repository root on Windows with the .NET 11 SDK:
+
+```powershell
+dotnet build --configuration Release --framework net11.0
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests|FullyQualifiedName~fhir.candle.Tests.FhirNpmPackageTests|FullyQualifiedName~fhir.candle.Tests.HostingCompatibilityTests"
+dotnet restore
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests|FullyQualifiedName~fhir.candle.Tests.FhirNpmPackageTests|FullyQualifiedName~fhir.candle.Tests.HostingCompatibilityTests"
+```
+
+| Gate | Actual result |
+|---|---|
+| Release/net11.0 build and focused tests, runtime 11.0.0 | Passed; 25/25, zero failures/skips, zero warnings/errors. |
+| Normal restore and unqualified Release build | Passed; both TFMs built with zero warnings/errors. |
+| Unqualified focused tests, sequential TFMs | net11.0/.NET 11.0.0: 25/25; net10.0/.NET 10.0.15: 25/25. Zero failures/skips/warnings/errors. |
+
+One initial focused run passed 22/25: the new sibling reread tried to capture
+an existing binding twice. Its test-only correction uses the existing Reuse
+mode; an intermediate build also caught a misnamed enum member. No production
+or fixture expectation changed; the corrected gates above pass.
+
+### Still-provisional rollback and release qualification
+
+Phase 2's explicit verifier-owned export contains **six ordinary/CI package
+trees, 27 files and 24 directories per TFM**, with identical bytes/directories
+between TFMs. The original delegate completed the original-supplier readback
+at **2026-11-13T20:03:22Z**, thread
+`thread:delegated-task:command%3Amcp%3A46ff7ead-68d6-4d35-b282-13bafd29e075%3Adelegate-task%3A5ed26c10-c461-42e3-9907-bc3344cff3cc`.
+Its host-prepared worktree
+`E:\ai\worktrees\fhir-candle\t3-548272b7-7ea32808d642469e` remained at the
+Phase 1 checkpoint **`561f2f97c01643efd32d62ce8d2d423903eb57b1`**;
+initial and final index and tracked diffs were empty.
+
+The exact commands ran from that worktree root:
+
+```powershell
+dotnet restore
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests.LegacyCacheIsReadableWithoutRegistries"
+```
+
+All three commands exited **0**, with zero warnings/errors. The readback
+passed **1/1 on net10.0/.NET 10.0.15** and **1/1 on net11.0/.NET 11.0.0**.
+It consumed replacement-written ordinary and tagged CI copies across
+R4/R4B/R5, with no registry acquisition or public CI lookup.
+
+Both-TFM host/test graphs and runtime dependency/type origins identified the
+original **Firely.Fhir.Packages 5.0.2**, assembly **5.0.2.0**; the replacement
+was absent. All four inspected DLLs matched the resolved original asset.
+SDK/models **6.8.0** and all `candleR4`/`candleR4B`/`candleR5` and
+`coreR4`/`coreR4B`/`coreR5` aliases were retained.
+
+The export and each verifier copy were unchanged by direct byte/directory
+comparison: **54 files, 21,400 bytes, 51 directories including the root,
+and six empty directories**. The canonical snapshot SHA256 was
+`C7C9702DA7675B6C3AD57F425081DCC023E7880EFBFF6475063E8FF26C2B420A`.
+Both GUID-named verifier copies were removed and the environment restored
+exactly in `finally`; the host-managed worktree was not shell-removed.
+Harness-only null-environment restoration and metadata-overload issues were
+corrected before the final result, not package failures.
+
+**This qualifies synthetic original-supplier cache-write readback on Windows
+only**, not external precompiled CLR/ABI compatibility, live/operator caches,
+or Linux/macOS. The new snapshot-restoration test alone does not establish
+original-supplier interoperability. Before rollout, independently back up
+affected package trees; source rollback alone cannot recover
+delete-before-download losses.
+
+**At the Phase 3 commit checkpoint**, the conductor's final unfiltered local
+and both-TFM suite gates had not yet run and were scheduled after the Phase 3
+commit. Subsequent verification is recorded in `scratch/1113-01/plan.md`.
+No Linux/macOS execution, live registry, browser/RI workflow, ambient operator
+cache migration, or operator qualification was performed here. Windows
+synthetic/offline tests are not evidence for those obligations; neither this
+section nor historical SDK success closes them.

@@ -59,7 +59,7 @@ public sealed class Sdk6PackageTests
         Assert.Equal(_versions, rows.Select(row => Assert.IsType<FhirReleases.FhirSequenceCodes>(row[1])));
         Assert.All(rows, row => Assert.False(string.IsNullOrEmpty(Assert.IsType<string>(row[0]))));
         Assert.Equal(3, rows.Select(row => row[0]).Distinct().Count());
-        _output.WriteLine("Package inventory: acquisition/repeat/fresh-cache/manager-first-load/corrupt/empty-cache; CI listing/GetPackage/InstallOrUpdate cold/warm/replacement/missing; six custom initial-data tenants, JSON+XML.");
+        _output.WriteLine("Package inventory: acquisition/repeat/fresh-cache/manager-first-load/corrupt/empty-cache; CI listing/GetPackage/InstallOrUpdate cold/warm/replacement/missing; six custom initial-data tenants, JSON+XML; R4/R4B/R5 variants/examples/supplement precedence and independently populated deletion/reinstall/rollback trees.");
     }
 
     /// <summary>The neutral reference retains the original supplier's data identity, not its parser.</summary>
@@ -958,6 +958,414 @@ public sealed class Sdk6PackageTests
         }
     }
 
+    /// <summary>Variant recursion, preference, examples, supplements, and ordering retain the existing named-store boundary.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task PackageVariantsExamplesAndSupplementsPreserveTenantLoading(string label, FhirReleases.FhirSequenceCodes version)
+    {
+        using LocalPackageFixture files = new();
+        _output.WriteLine($"{label}; variants/examples/supplements; owned root: {files.Root}");
+        FhirReleases.FhirSequenceCodes other = _versions[(_versions.ToList().IndexOf(version) + 1) % _versions.Length];
+        string suffix = LocalPackageFixture.VersionName(version);
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        List<LocalHttpFixture.ExpectedRequest> routes = [];
+
+        foreach (bool replaceSuffix in new[] { false, true })
+        {
+            string baseName = "example.test.variant." + suffix + (replaceSuffix ? ".replace" : ".umbrella");
+            string originalName = baseName + (replaceSuffix ? "." + LocalPackageFixture.VersionName(other) : string.Empty);
+            string desiredName = baseName + "." + suffix;
+            string originalManifest = AuthoredManifest(originalName, "1.0.0", other);
+            string desiredManifest = AuthoredManifest(desiredName, "1.0.0", version);
+            Dictionary<string, string> resources = new()
+            {
+                ["Patient-variant-patient.json"] = LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "patient.json"), "variant-patient"),
+                ["Observation-variant-observation.xml"] = LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "observation.xml"), "variant-observation"),
+            };
+            routes.Add(registry.Expect("GET", "/fhir/" + originalName + "/1.0.0",
+                new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream",
+                    LocalPackageFixture.Archive(originalManifest, new Dictionary<string, string>()))));
+            routes.Add(registry.Expect("GET", "/fhir/" + desiredName,
+                LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(desiredName, "invalid-version"))));
+            routes.Add(registry.Expect("GET", "/npm/" + desiredName,
+                LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(desiredName, "1.0.0"))));
+            routes.Add(registry.Expect("GET", "/fhir/" + desiredName + "/1.0.0", LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound)));
+            routes.Add(registry.Expect("GET", "/npm/" + desiredName + "/-/" + desiredName + "-1.0.0.tgz",
+                new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream", LocalPackageFixture.Archive(desiredManifest, resources))));
+            using FhirPackageService service = PackageService(files.Configuration(root + "/fhir") with { AdditionalNpmRegistryUrls = [root + "/npm"] });
+            service.Init();
+            List<PackageReference> installed = await service.InstallPackages([originalName + "#1.0.0"], [], [version]).WaitAsync(LocalHttpFixture.Deadline);
+            Assert.Equal(new[] { originalName + "@1.0.0", desiredName + "@1.0.0" }, installed.Select(reference => reference.Moniker));
+            Assert.Equal(new[] { other }, await service.InstalledPackageFhirVersions(installed[0]));
+            Assert.Equal(new[] { version }, await service.InstalledPackageFhirVersions(installed[1]));
+            string content = LegacyContentPath(files.CacheDirectory, installed[1]);
+            Assert.Equal(content, service.GetPackageContentDirectory(installed[1]));
+            Assert.Equal(Encoding.UTF8.GetBytes(desiredManifest), File.ReadAllBytes(Path.Combine(content, "package.json")));
+            foreach (KeyValuePair<string, string> resource in resources)
+            {
+                Assert.Equal(Encoding.UTF8.GetBytes(resource.Value), File.ReadAllBytes(Path.Combine(content, resource.Key)));
+            }
+            Assert.Empty(await service.InstallPackages([originalName + "@1.0.0", desiredName + "#1.0.0"], [], [version]));
+        }
+
+        string missingName = "example.test.variant." + suffix + ".missing";
+        string missingVariant = missingName + "." + suffix;
+        routes.Add(registry.Expect("GET", "/fhir/" + missingName + "/1.0.0",
+            new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream",
+                LocalPackageFixture.Archive(AuthoredManifest(missingName, "1.0.0", other), new Dictionary<string, string>()))));
+        routes.Add(registry.Expect("GET", "/fhir/" + missingVariant, LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound)));
+        routes.Add(registry.Expect("GET", "/npm/" + missingVariant,
+            LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(missingVariant))));
+        using (FhirPackageService service = PackageService(files.Configuration(root + "/fhir") with { AdditionalNpmRegistryUrls = [root + "/npm"] }))
+        {
+            service.Init();
+            PackageReference installed = Assert.Single(await service.InstallPackages([missingName + "#1.0.0"], [], [version]).WaitAsync(LocalHttpFixture.Deadline));
+            Assert.Equal(missingName + "@1.0.0", installed.Moniker);
+            Assert.Equal(new[] { other }, await service.InstalledPackageFhirVersions(installed));
+            Assert.False(await new DiskPackageCache(files.CacheDirectory).IsInstalled(new(missingVariant, "1.0.0")));
+        }
+        await AssertRoutes(registry, routes);
+
+        string missingTenant = "missing-" + suffix;
+        Directory.CreateDirectory(Path.Combine(files.SourceDirectory, missingTenant));
+        CandleConfig missingConfig = files.Configuration() with { PublishedPackages = [missingName + "#1.0.0"] };
+        using (FhirPackageService packages = PackageService(missingConfig))
+        {
+            FhirStoreManager manager = new(new() { [missingTenant] = Tenant(version, missingTenant) },
+                NullLogger<FhirStoreManager>.Instance, missingConfig, packages);
+            try
+            {
+                manager.Init();
+                IFhirStore store = ((IFhirStoreManager)manager)[missingTenant];
+                Assert.Empty(store.LoadedPackageDirectives);
+                Assert.Empty(store.LoadedPackageIds);
+                Assert.Equal(new[] { Path.Combine(files.SourceDirectory, missingTenant) }, store.LoadedSupplements);
+                Assert.Empty(store["Patient"].Keys);
+                Assert.Empty(store["Observation"].Keys);
+            }
+            finally
+            {
+                await StopAndDispose(manager);
+            }
+        }
+
+        string umbrellaName = "example.test.preference." + suffix;
+        PackageReference umbrella = new(umbrellaName, "1.0.0");
+        PackageReference preferred = new(umbrellaName + "." + suffix, "1.0.0");
+        string orderName = "example.test.order." + suffix;
+        PackageReference older = new(orderName, "1.0.0");
+        PackageReference newer = new(orderName, "2.0.0");
+        DiskPackageCache cache = new(files.CacheDirectory);
+        await cache.Install(umbrella, LocalPackageFixture.Archive(AuthoredManifest(umbrellaName, "1.0.0", _versions),
+            new Dictionary<string, string> { ["Patient-umbrella.json"] = AuthoredPatientJson("umbrella", "Umbrella", true) })).WaitAsync(LocalHttpFixture.Deadline);
+        Dictionary<string, byte[]> distribution = new(StringComparer.Ordinal)
+        {
+            ["package/package.json"] = Encoding.UTF8.GetBytes(AuthoredManifest(preferred.Name!, "1.0.0", version)),
+            ["package/Patient-preferred.json"] = Encoding.UTF8.GetBytes(LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "patient.json"), "preferred")),
+            ["package/Observation-preferred.xml"] = Encoding.UTF8.GetBytes(LocalPackageFixture.WithId(
+                CompatibilityReplay.LoadFixture(version, "observation.xml").Replace("Patient/wire-patient", "Patient/preferred", StringComparison.Ordinal), "preferred-observation")),
+            ["package/examples/Patient-example.json"] = Encoding.UTF8.GetBytes(AuthoredPatientJson("example", "Nested example", true)),
+            ["package/examples/Observation-example.xml"] = Encoding.UTF8.GetBytes(LocalPackageFixture.WithId(
+                CompatibilityReplay.LoadFixture(version, "observation.xml"), "example-observation")),
+            ["examples/Patient-outside.xml"] = Encoding.UTF8.GetBytes(AuthoredPatientXml("outside", "Distributed outside", false)),
+            ["siblings/authored.bin"] = [0, 128, 255],
+        };
+        await cache.Install(preferred, DistributedArchive(distribution)).WaitAsync(LocalHttpFixture.Deadline);
+        foreach ((PackageReference reference, string family, bool active) in new[]
+        {
+            (older, "Older", true), (newer, "Newest", false),
+        })
+        {
+            await cache.Install(reference, LocalPackageFixture.Archive(AuthoredManifest(reference.Name!, reference.Version!, version),
+                new Dictionary<string, string> { ["Patient-ordered.json"] = AuthoredPatientJson("ordered", family, active) })).WaitAsync(LocalHttpFixture.Deadline);
+        }
+        string preferredRoot = Path.GetDirectoryName(LegacyContentPath(files.CacheDirectory, preferred))!;
+        (Dictionary<string, byte[]> files, string[] directories) distributedBefore = Snapshot(preferredRoot);
+        Assert.Equal(distribution.Keys.Order(StringComparer.Ordinal), distributedBefore.files.Keys.Select(path => path.Replace('\\', '/')).Order(StringComparer.Ordinal));
+        foreach (KeyValuePair<string, byte[]> file in distribution)
+        {
+            Assert.Equal(file.Value, File.ReadAllBytes(Path.Combine(preferredRoot, file.Key)));
+        }
+        Assert.Contains("empty-distributed-directory", distributedBefore.directories);
+
+        // Each fresh manager has its own independently authored precedence candidates.
+        foreach (int precedence in new[] { 0, 1, 2 })
+        {
+            string source = files.CreateDirectory("precedence-" + precedence);
+            string[] supplementNames = [preferred.Moniker, preferred.Name + "#" + preferred.Version, preferred.Name!];
+            for (int candidate = precedence; candidate < supplementNames.Length; candidate++)
+            {
+                string directory = Path.Combine(source, supplementNames[candidate]);
+                Directory.CreateDirectory(directory);
+                File.WriteAllBytes(Path.Combine(directory, "Patient-supplement.json"), Encoding.UTF8.GetBytes(
+                    AuthoredPatientJson("supplement-" + candidate, "Supplement " + candidate, true)));
+                File.WriteAllBytes(Path.Combine(directory, "Observation-supplement.xml"), Encoding.UTF8.GetBytes(
+                    LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "observation.xml"), "supplement-observation-" + candidate)));
+            }
+            bool examples = precedence != 0;
+            Dictionary<string, TenantConfiguration> tenants = new(StringComparer.Ordinal);
+            foreach (FhirReleases.FhirSequenceCodes candidate in _versions)
+            {
+                string name = "variant-" + LocalPackageFixture.VersionName(candidate);
+                tenants.Add(name, Tenant(candidate, name));
+            }
+            string targetName = "variant-" + suffix;
+            string siblingName = targetName + "-sibling";
+            tenants.Add(siblingName, Tenant(version, siblingName));
+            foreach (string name in tenants.Keys)
+            {
+                Directory.CreateDirectory(Path.Combine(source, name));
+            }
+            File.WriteAllBytes(Path.Combine(source, targetName, "Patient-local.json"),
+                Encoding.UTF8.GetBytes(AuthoredPatientJson("tenant-local", "Named tenant only", true)));
+            CandleConfig config = files.Configuration() with
+            {
+                SourceDirectory = source,
+                PublishedPackages = [newer.Moniker, umbrella.Moniker, preferred.Moniker, older.Moniker],
+                LoadPackageExamples = examples,
+            };
+            using FhirPackageService packages = PackageService(config);
+            FhirStoreManager manager = new(tenants, NullLogger<FhirStoreManager>.Instance, config, packages);
+            try
+            {
+                manager.Init();
+                CompatibilityBindings bindings = new();
+                foreach (IFhirStore store in ((IFhirStoreManager)manager).Values)
+                {
+                    string tenant = store.Config.ControllerName;
+                    WireContractAssertions.BindBaseUrl(bindings, tenant, store.Config.BaseUrl);
+                    if (store.Config.FhirVersion != version)
+                    {
+                        Assert.Equal(new[] { umbrella.Moniker }, store.LoadedPackageDirectives);
+                        Assert.Equal(new[] { umbrellaName }, store.LoadedPackageIds);
+                        Assert.Equal(new[] { Path.Combine(source, tenant) }, store.LoadedSupplements);
+                        Assert.Equal(new[] { "umbrella" }, store["Patient"].Keys);
+                        Assert.Empty(store["Observation"].Keys);
+                        AssertAuthoredPatient(store, bindings, "umbrella", "Umbrella", true);
+                        continue;
+                    }
+                    Assert.Equal(new[] { preferred.Moniker, older.Moniker, newer.Moniker }, store.LoadedPackageDirectives);
+                    Assert.Equal(new[] { umbrellaName, preferred.Name!, "example.test.order", orderName }.Order(StringComparer.Ordinal),
+                        store.LoadedPackageIds.Order(StringComparer.Ordinal));
+                    Assert.Equal(new[] { Path.Combine(source, supplementNames[precedence]), Path.Combine(source, tenant) }.Order(StringComparer.Ordinal),
+                        store.LoadedSupplements.Order(StringComparer.Ordinal));
+                    List<string> patients = ["preferred", "ordered", "supplement-" + precedence];
+                    if (examples)
+                    {
+                        patients.Add("example");
+                    }
+                    if (tenant == targetName)
+                    {
+                        patients.Add("tenant-local");
+                        AssertAuthoredPatient(store, bindings, "tenant-local", "Named tenant only", true);
+                    }
+                    Assert.Equal(patients.Order(StringComparer.Ordinal), store["Patient"].Keys.Order(StringComparer.Ordinal));
+                    List<string> observations = ["preferred-observation", "supplement-observation-" + precedence];
+                    if (examples)
+                    {
+                        observations.Add("example-observation");
+                    }
+                    Assert.Equal(observations.Order(StringComparer.Ordinal), store["Observation"].Keys.Order(StringComparer.Ordinal));
+                    AssertLoadedResource(store, bindings, version, "Patient", "preferred", "patient");
+                    AssertLoadedResource(store, bindings, version, "Observation", "preferred-observation", "observation", "preferred");
+                    AssertLoadedResource(store, bindings, version, "Observation", "supplement-observation-" + precedence, "observation");
+                    AssertAuthoredPatient(store, bindings, "ordered", "Newest", false, resourceVersion: "2");
+                    AssertAuthoredPatient(store, bindings, "supplement-" + precedence, "Supplement " + precedence, true);
+                    if (examples)
+                    {
+                        AssertAuthoredPatient(store, bindings, "example", "Nested example", true);
+                        AssertLoadedResource(store, bindings, version, "Observation", "example-observation", "observation");
+                    }
+                    // Outside siblings are preserved, but the manager still loads from /package.
+                    Assert.False(store["Patient"].ContainsKey("outside"));
+                    Assert.False(store["Patient"].ContainsKey("umbrella"));
+                }
+                IFhirStore target = ((IFhirStoreManager)manager)[targetName];
+                IFhirStore sibling = ((IFhirStoreManager)manager)[siblingName];
+                Assert.True(target.PerformInteraction(new(target, "DELETE", "Patient/preferred"), out FhirResponseContext deleted, serializeReturn: true));
+                Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+                Assert.False(target["Patient"].ContainsKey("preferred"));
+                AssertLoadedResource(sibling, bindings, version, "Patient", "preferred", "patient", bindingMode: CompatibilityBindingMode.Reuse);
+                Assert.False(sibling["Patient"].ContainsKey("tenant-local"));
+                AssertSnapshot(distributedBefore, preferredRoot);
+            }
+            finally
+            {
+                await StopAndDispose(manager);
+            }
+        }
+    }
+
+    /// <summary>Raw independently seeded trees survive replacement, targeted deletion/reinstallation, and snapshot rollback.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task PopulatedCacheDeletionReinstallationAndRollbackPreserveNeighbors(string label, FhirReleases.FhirSequenceCodes version)
+    {
+        using LocalPackageFixture files = new();
+        _output.WriteLine($"{label}; populated legacy tree/deletion/reinstall/snapshot rollback; owned root: {files.Root}");
+        string name = "example.test.rollback." + LocalPackageFixture.VersionName(version);
+        PackageReference requested = new("legacy-scope", name, "1.0.0");
+        PackageReference sameNameNeighbor = new(name, "2.0.0");
+        PackageReference ciNeighbor = new(FhirCiClient.FhirCiScope, name + ".ci", "current$feature");
+        string originalManifest = AuthoredManifest(name, "1.0.0", version);
+        WritePinnedCache(files.CacheDirectory, requested, originalManifest, new Dictionary<string, string>
+        {
+            ["Patient-original.json"] = AuthoredPatientJson("original", "Before replacement", true),
+            ["Observation-original.xml"] = LocalPackageFixture.WithId(CompatibilityReplay.LoadFixture(version, "observation.xml"), "original-observation"),
+        });
+        WritePinnedCache(files.CacheDirectory, sameNameNeighbor, AuthoredManifest(name, "2.0.0", version), new Dictionary<string, string>
+        {
+            ["Patient-neighbor.xml"] = AuthoredPatientXml("neighbor", "Same name other version", false),
+        });
+        WritePinnedCache(files.CacheDirectory, ciNeighbor, CiManifest(version, ciNeighbor.Name!, replacement: true), new Dictionary<string, string>
+        {
+            ["Patient-ci.json"] = AuthoredPatientJson("ci-neighbor", "Tagged neighbor", true),
+        });
+        string affectedRoot = Path.Combine(files.CacheDirectory, name + "#1.0.0");
+        string content = Path.Combine(affectedRoot, "package");
+        Directory.CreateDirectory(Path.Combine(files.CacheDirectory, "packages", "empty-neighbor"));
+        Directory.CreateDirectory(Path.Combine(affectedRoot, "examples", "empty"));
+        Directory.CreateDirectory(Path.Combine(affectedRoot, "package", "old-empty"));
+        File.WriteAllBytes(Path.Combine(affectedRoot, "parent-metadata.bin"), [0, 255, 128, 10]);
+        File.WriteAllBytes(Path.Combine(affectedRoot, "examples", "Patient-example.xml"), Encoding.UTF8.GetBytes(AuthoredPatientXml("old-example", "Old outside example", true)));
+        File.WriteAllBytes(Path.Combine(LegacyContentPath(files.CacheDirectory, ciNeighbor), "authored.bin"), [1, 2, 0, 255]);
+        (Dictionary<string, byte[]> files, string[] directories) original = Snapshot(files.CacheDirectory);
+        string backup = files.CreateDirectory("affected-backup");
+        CopyExportTree(affectedRoot, backup);
+        AssertSnapshot(Snapshot(affectedRoot), backup);
+        DiskPackageCache cache = new(files.CacheDirectory);
+        using (FhirPackageService offline = PackageService(files.Configuration()))
+        {
+            offline.Init();
+            Assert.Equal(requested, Assert.Single(await offline.InstallPackages([name + "#1.0.0"], [], [version]).WaitAsync(LocalHttpFixture.Deadline)));
+            Assert.Equal(content, offline.GetPackageContentDirectory(requested));
+            Assert.Equal(content, cache.PackageContentFolder(new("different-scope", name, "1.0.0")));
+            Assert.Equal(new[] { version }, await offline.InstalledPackageFhirVersions(requested));
+            AssertSnapshot(original, files.CacheDirectory);
+        }
+
+        JsonObject replacementJson = JsonNode.Parse(AuthoredManifest(name, "1.0.0", version))!.AsObject();
+        replacementJson["description"] = "Replacement pinned raw bytes: café";
+        string replacementManifest = replacementJson.ToJsonString();
+        Assert.NotEqual(originalManifest, replacementManifest);
+        Dictionary<string, byte[]> distribution = new(StringComparer.Ordinal)
+        {
+            ["package/package.json"] = Encoding.UTF8.GetBytes(replacementManifest),
+            ["package/Patient-reinstalled.json"] = Encoding.UTF8.GetBytes(AuthoredPatientJson("reinstalled", "Replacement café", false)),
+            ["package/Observation-reinstalled.xml"] = Encoding.UTF8.GetBytes(LocalPackageFixture.WithId(
+                CompatibilityReplay.LoadFixture(version, "observation.xml"), "reinstalled-observation")),
+            ["examples/Patient-example.xml"] = Encoding.UTF8.GetBytes(AuthoredPatientXml("new-example", "New outside example", false)),
+            ["siblings/nested/authored.bin"] = [255, 0, 128, 3],
+        };
+        byte[] archive = DistributedArchive(distribution);
+        await cache.Install(requested, archive).WaitAsync(LocalHttpFixture.Deadline);
+        string affectedPrefix = name + "#1.0.0" + Path.DirectorySeparatorChar;
+        Dictionary<string, byte[]> expectedFiles = original.files.Where(file => !file.Key.StartsWith(affectedPrefix + "package" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .ToDictionary(file => file.Key, file => file.Value, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, byte[]> file in distribution)
+        {
+            expectedFiles[affectedPrefix + file.Key.Replace('/', Path.DirectorySeparatorChar)] = file.Value;
+        }
+        string[] expectedDirectories = original.directories.Where(path => path != affectedPrefix + "package" &&
+            !path.StartsWith(affectedPrefix + "package" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .Concat(new[] { "package", "empty-distributed-directory", "siblings", Path.Combine("siblings", "nested") }.Select(path => affectedPrefix + path))
+            .Order().ToArray();
+        (Dictionary<string, byte[]> files, string[] directories) replacement = (expectedFiles, expectedDirectories);
+        AssertSnapshot(replacement, files.CacheDirectory);
+        Assert.False(File.Exists(Path.Combine(content, "Patient-original.json")));
+        Assert.False(Directory.Exists(Path.Combine(content, "old-empty")));
+        AssertAuthor(Assert.IsType<PackageManifest>(await cache.ReadManifestEx(requested)), "Synthetic Package Author", "author@example.test", "https://example.test/sdk6");
+        await Assert.ThrowsAnyAsync<Exception>(() => cache.Install(requested, Encoding.UTF8.GetBytes("invalid gzip")).WaitAsync(LocalHttpFixture.Deadline));
+        AssertSnapshot(replacement, files.CacheDirectory);
+
+        using (FhirPackageService deletion = PackageService(files.Configuration()))
+        {
+            deletion.Init();
+            deletion.DeletePackage(name + "#1.0.0");
+            Assert.False(await cache.IsInstalled(requested));
+            Assert.Null(await cache.ReadManifestEx(requested));
+            Assert.Equal(content, deletion.GetPackageContentDirectory(requested));
+            Assert.Null(await deletion.InstalledPackageFhirVersions(requested));
+            (Dictionary<string, byte[]> files, string[] directories) deleted = (
+                expectedFiles.Where(file => !file.Key.StartsWith(affectedPrefix + "package" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    .ToDictionary(file => file.Key, file => file.Value, StringComparer.Ordinal),
+                expectedDirectories.Where(path => path != affectedPrefix + "package" &&
+                    !path.StartsWith(affectedPrefix + "package" + Path.DirectorySeparatorChar, StringComparison.Ordinal)).ToArray());
+            AssertSnapshot(deleted, files.CacheDirectory);
+            deletion.DeletePackage(requested.Moniker);
+            AssertSnapshot(deleted, files.CacheDirectory);
+        }
+        await using (LocalHttpFixture registry = await LocalHttpFixture.StartAsync())
+        {
+            LocalHttpFixture.ExpectedRequest download = registry.Expect("GET", "/" + name + "/1.0.0",
+                new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream", archive));
+            using FhirPackageService reinstall = PackageService(files.Configuration(registry.Address.AbsoluteUri.TrimEnd('/')));
+            reinstall.Init();
+            PackageReference installed = Assert.Single(await reinstall.InstallPackages([requested.Moniker], [], [version]).WaitAsync(LocalHttpFixture.Deadline));
+            Assert.Equal(requested, installed);
+            Assert.Equal(content, reinstall.GetPackageContentDirectory(installed));
+            AssertSnapshot(replacement, files.CacheDirectory);
+            await AssertRoutes(registry, [download]);
+        }
+        using (FhirPackageService reopened = PackageService(files.Configuration()))
+        {
+            reopened.Init();
+            Assert.Equal(requested, Assert.Single(await reopened.InstallPackages([name + "#1.0.0"], [], [version]).WaitAsync(LocalHttpFixture.Deadline)));
+            Assert.Equal(content, reopened.GetPackageContentDirectory(requested));
+            Assert.Equal(new[] { version }, await reopened.InstalledPackageFhirVersions(requested));
+            Assert.True(await cache.IsInstalled(sameNameNeighbor));
+            Assert.True(await cache.IsInstalled(ciNeighbor));
+            AssertSnapshot(replacement, files.CacheDirectory);
+        }
+
+        // A source revert cannot restore deleted content: restore only the independently backed-up identity.
+        Directory.Delete(affectedRoot, recursive: true);
+        CopyExportTree(backup, affectedRoot);
+        AssertSnapshot(original, files.CacheDirectory);
+        using (FhirPackageService rollback = PackageService(files.Configuration()))
+        {
+            rollback.Init();
+            Assert.Equal(requested, Assert.Single(await rollback.InstallPackages([requested.Moniker], [], [version]).WaitAsync(LocalHttpFixture.Deadline)));
+            Assert.Equal(content, rollback.GetPackageContentDirectory(requested));
+            Assert.Equal(originalManifest, File.ReadAllText(Path.Combine(content, "package.json")));
+            Assert.Equal(new[] { version }, await rollback.InstalledPackageFhirVersions(requested));
+            AssertSnapshot(original, files.CacheDirectory);
+        }
+        _output.WriteLine("Snapshot rollback validates the legacy seam, not original-supplier or precompiled-consumer interoperability.");
+    }
+
+    private static string AuthoredManifest(string name, string version, params FhirReleases.FhirSequenceCodes[] sequences)
+    {
+        JsonObject manifest = JsonNode.Parse(LocalPackageFixture.Manifest(sequences[0]))!.AsObject();
+        manifest["name"] = name;
+        manifest["version"] = version;
+        manifest["fhirVersions"] = new JsonArray(sequences.Select(sequence => (JsonNode?)JsonValue.Create(LocalPackageFixture.FhirVersion(sequence))).ToArray());
+        return manifest.ToJsonString();
+    }
+
+    private static string AuthoredPatientJson(string id, string family, bool active) =>
+        $$$"""{"resourceType":"Patient","id":"{{{id}}}","active":{{{(active ? "true" : "false")}}},"name":[{"family":"{{{family}}}"}]}""";
+
+    private static string AuthoredPatientXml(string id, string family, bool active) =>
+        $$$"""<Patient xmlns="http://hl7.org/fhir"><id value="{{{id}}}"/><active value="{{{(active ? "true" : "false")}}}"/><name><family value="{{{family}}}"/></name></Patient>""";
+
+    private static void AssertAuthoredPatient(IFhirStore store, CompatibilityBindings bindings, string id, string family, bool active, string resourceVersion = "1")
+    {
+        GeneratedResourceExpectation binding = new(store.Config.ControllerName + "/" + id, "Patient", resourceVersion, id);
+        foreach (CompatibilityFormat format in new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml })
+        {
+            FhirRequestContext request = new(store, "GET", "Patient/" + id) { DestinationFormat = WireContractAssertions.MediaType(format) };
+            Assert.True(store.PerformInteraction(request, out FhirResponseContext response, serializeReturn: true));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("Patient", response.ResourceType);
+            Assert.Equal(id, response.Id);
+            string expected = format == CompatibilityFormat.Json ? AuthoredPatientJson(id, family, active) : AuthoredPatientXml(id, family, active);
+            WireContractAssertions.Body(new ResourceBodyExpectation(expected, binding), response.SerializedResource, format, store.Config.BaseUrl, bindings);
+            binding = binding with { Mode = CompatibilityBindingMode.Reuse };
+        }
+    }
+
     private static (Dictionary<string, byte[]> files, string[] directories) Snapshot(string root) =>
         (Directory.GetFiles(root, "*", SearchOption.AllDirectories)
             .ToDictionary(path => Path.GetRelativePath(root, path), File.ReadAllBytes, StringComparer.Ordinal),
@@ -1264,9 +1672,10 @@ public sealed class Sdk6PackageTests
 
     private static void AssertLoadedResource(
         IFhirStore store, CompatibilityBindings bindings, FhirReleases.FhirSequenceCodes version,
-        string resourceType, string id, string fixtureName, string? patientId = null)
+        string resourceType, string id, string fixtureName, string? patientId = null,
+        CompatibilityBindingMode bindingMode = CompatibilityBindingMode.Capture)
     {
-        GeneratedResourceExpectation binding = new(store.Config.ControllerName + "/" + id, resourceType, "1", id);
+        GeneratedResourceExpectation binding = new(store.Config.ControllerName + "/" + id, resourceType, "1", id) { Mode = bindingMode };
         foreach (CompatibilityFormat format in new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml })
         {
             string suffix = format == CompatibilityFormat.Json ? ".json" : ".xml";
