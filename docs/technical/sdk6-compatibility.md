@@ -715,3 +715,210 @@ No Linux/macOS execution, live registry, browser/RI workflow, ambient operator
 cache migration, or operator qualification was performed here. Windows
 synthetic/offline tests are not evidence for those obligations; neither this
 section nor historical SDK success closes them.
+
+## R1 package remediation evidence (2026-11-14)
+
+This additive record updates the active host pin to **fhir-pkg-lib
+2026.1113.1815** and records the local H1 registry-listing and H2 cold-manifest
+remediation. The 1240 results above and the historical SDK migration remain
+history, not 1815 qualification. After the Phase 3 checkpoint
+`2b03c9266bd9ed6fb295312f700f47c6339ba33a`, the 1240 full suite passed
+**4,472/4,472 per TFM**, with zero warnings/errors/failures/skips. That suite
+was not rerun or relabeled as an 1815 result; R1 used the affected delta gates
+below. One R1 review preceded remediation; tests are not a second code review.
+
+### Exact supplier provenance versus downstream execution
+
+The published 1815 NuGet archive is **771,784 bytes**, SHA256
+`570378A1814291C8EE1D933DFFBABBA7CE47FA7A3619C5199D9DF7D53081AA7B`,
+with nuspec source commit
+`de9b68a943ab1f0ea67c27a6cf122c2d006058ec` in
+`GinoCanessa/dotnet-fhir-packages`. Published/runtime DLL hashes match:
+
+| Asset | SHA256 |
+|---|---|
+| `lib/net10.0/FhirPkg.dll` | `F976D3583BB6995B44D9443D85B40E274BCB1BBD43F375007CB1051E26965920` |
+| `lib/net11.0/FhirPkg.dll` | `9AF548BEC3A9E7CF36009FED43D1CE8EEFB193F2C31BAA7086D2B3CC12532226` |
+
+MIT attribution and the existing supplier notice are unchanged. Public parsing,
+leaf registry/download, cache construction, validating `ImportAsync`, and
+content-path APIs remain bound through the existing adapters. Supplier-owned
+repository/date property converters now participate in mandatory full-manifest
+identity validation: shorthand repository strings and compact numeric dates
+are accepted without removing validation or reserializing distributed bytes.
+Candle's raw publication and local Newtonsoft interpretation are unchanged.
+
+**Separate, previously executed supplier evidence:** published-binary probes
+passed 221 cases / 3,203 assertions per TFM, including 180 native metadata
+imports/reopens per TFM; matching-source unit/integration suites passed
+2,731 / 282 per TFM. Supplier CI included Windows/Linux/macOS qualification.
+These establish supplier capability, not Candle runtime, platform, loading,
+graph, or copied-cache acceptance. The downstream results below were measured
+independently with the actual original and candidate binaries.
+
+### H1: measured fallback, diagnostics, and limits
+
+The original **Firely.Fhir.Packages 5.0.2** clients continued after malformed
+listing JSON for **both FHIR-NPM and NPM** on both runtimes. The earlier
+malformed-FHIR test expected propagation and refused the next legitimate
+request; its **18 passed / 1 failed per TFM** result remains a failed
+prescription, not successful fallback qualification. An owning-plan correction
+repaired the finite scripts and archive helper before recovery attempt 2.
+Four original NPM observations per TFM established continuation before final
+strict assertions were pinned; final tests require continuation, not an
+accept-either result.
+
+`LatestRegistryTransportFailurePreservesFallback` has independent FHIR/NPM
+theory rows. Each protocol covers 404, 503, transport failure, actual timeout,
+and malformed JSON, before/after a usable or unusable winner: **40 scenarios
+per TFM** across both protocols, plus configuration controls. Tests use real
+clients, finite ordered handlers/loopback responses, exact listing/acquisition
+sequences, no unlisted/live request, retained winners, and the original generic
+latest-resolution failure when all versions are unusable. Explicit acquisition
+adds no metadata/dependency request. Original `HttpClient.Timeout` and native
+100-ms response-deadline controls are distinct; candidate tests directly
+observe `RegistryResponseTimeoutException` with an infinite HttpClient timeout,
+cancellation, and resource disposal.
+
+Production containment surrounds only the native **listing await**:
+
+| Listing result | Candidate behavior |
+|---|---|
+| 404/null | Empty versions, no outage warning. |
+| `HttpRequestException` | Empty versions; `http` warning with status, or `transport` warning without status. |
+| `RegistryResponseTimeoutException` | Empty versions and `deadline` warning. |
+| `System.Text.Json.JsonException`, endpoint `FhirNpm` or `Npm` | Empty versions and `listing-json` warning, preserving measured continuation. |
+
+Each contained non-404 failure emits one host warning with package identity,
+registry scheme/host/path, category and status where available. Captured
+message/structured-field assertions exclude URL credentials, user-info/query
+values, body sentinels, exception messages and exception objects. No broad
+catch, retry, new registry request, global logging or limit-policy change was
+introduced. Version projection, resource/manifest parsing, archive import,
+configuration, caller cancellation and unrelated exceptions remain outside
+the new containment.
+
+**Configuration distinction:** the original invalid-endpoint control fails in
+`InstallPackages` with `System.Exception` / generic latest-resolution failure
+and zero requests/acquisition. The candidate rejects it explicitly during
+`Init` with `ArgumentException`, also without acquisition. The exception
+type/lifecycle difference is disclosed, not asserted identical.
+**Arbitrary listing-error parity is uncharacterized**, including mid-body
+`IOException` / `HttpIOException`; the original's broader internal swallowing
+does not prove equivalence for unexecuted errors. This is not a blanket
+error-policy preservation or an approved observable incompatibility.
+
+### H2: cold shapes and independently matched raw bytes
+
+`ColdImportPreservesLegacyManifestShapes` executes **18 labeled rows per TFM**:
+R4/R4B/R5 × repository string (`github:example/repo`), object, or absent × date
+integer (`20240203123456`) or string (`"20240203123456"`). Integer-date fixtures
+have string authors; string-date fixtures have object authors. Unknown metadata
+and UTF-8 content remain authored bytes. A seekable BCL tar-input buffer fixes
+only the test harness; no payload, production extraction or acceptance
+assertion was weakened.
+
+Original 5.0.2 black-box cold acquisition/loading passed all rows. Candidate
+1815 passed separate public validating `ImportAsync(Unmodified=true)` controls
+and real Candle cold acquisition, legacy paths/identity, local author
+values/origin, local-time date interpretation, FHIR values, R4/R4B/R5 manager
+JSON/XML retrieval, unchanged neighbors and operation-local cleanup.
+All **36 candidate archive/manifest/Patient/Observation hash sets** exactly
+match the original per-TFM records. The following archive/manifest pairs apply
+identically to both suppliers on both TFMs:
+
+| FHIR | Repository | Date | Archive SHA256 | Manifest SHA256 |
+|---|---|---|---|---|
+| R4 | absent | integer | `72B55262F58BC2118510EB2DF0ECA3474856DBDDF245DC94547E3A39187C6C52` | `DE6D93E6959DCDA5BD45CFAD1B488121D88DE5B6AC4F723F0126585A62035A5C` |
+| R4 | absent | string | `8C1BD911EA5339DAFDB9CA3FFF1A43DFD3748A637BA9E4434CC9CC92EADCE4CE` | `E8F3531DFF153039010A3FE3E096F4941699B2A8F411ED08FB89603003347503` |
+| R4 | object | integer | `FE118B62C2F04C9F10CE1825C62B27A144B910CB3FF7A3316A9975B5E547FF60` | `4CB82482145D8A0B0CFF2568E86BCD2E1780ED0A37F536F19B634D623C73861D` |
+| R4 | object | string | `C97C004F0D7AACD906BAF97A23EEB471312D845F0FAF2C81085A51187978E999` | `34A74DA20D8ADC8BC76ECDB61D5CB654129C5404F0C9528FBE3DCED821E3AF7E` |
+| R4 | string | integer | `F0D518A97C455209F9153EBDD72AC93123DB82C205592399FB21CD403566BAE7` | `2BC0754264E7F8AE641A6AEF4F84D157DFCF28DE27E58966B92CA316A68950CA` |
+| R4 | string | string | `A4914F55F3F2E2D63C099B9E8CBEE59662D84459E126A2020F55BE10850F49C9` | `0396CD29D2E11828EE7839BCEBEC8F51F2A511B577380A86F310F9E85DE79C84` |
+| R4B | absent | integer | `79CD5F3D78E82BB1F58E34E73A65AA63100F68D95D15C95BEE8286895BA8A8C0` | `FF1008AAA75F63CC1B678FFE9995E5875A183DC650432B2344CE4BAD3E6F73E1` |
+| R4B | absent | string | `B859AC08BDA2F570535B9E0384332F0CFC9EDCB9EC32CD64CA16427BC24AC151` | `912ADAD413555B98882B056658D93980AC1474580175282834A51443F7355C6F` |
+| R4B | object | integer | `165A613CA8B1614A515F9A2428E8530D6A3EED8C7A1640C5F332A1FF3BD6C9D1` | `F5DA82A179FAFF9902CD6F8BC52762F9EBA371D6992115296154CC18BC1532E0` |
+| R4B | object | string | `AB1ED4BEE17CBC3BCEBF8690C424B2CDBC189225B7113E64686BA2E6A5CBDE2F` | `6F17FC3C3507622BFAB1746FBF3F2BC637FBF9BA6D5187EE81C839274E58BAA9` |
+| R4B | string | integer | `0B68B947020DF48E0FACC01C1A5E58C0BD60C85B924D693C533B5B548D9C3DD2` | `CBB7E6311E8DE9D7FF2F14CFB0E78432DAD6C83032CD43439731AAC4707FC9CE` |
+| R4B | string | string | `5557FE36FE4CB5E30F839F39A880FD6561A2E930DFCF1BB61CE45C3D9076D12E` | `E7FA6DA27941A4A98BF73F9374A73665B3FF2FC1FA7068D2EE08F07DED9134F2` |
+| R5 | absent | integer | `119F0285E315DC527BBC9478754524DA8F94DFCE98F3813E21ECBCE574C574E0` | `43D6EAEE86042A5F6DC0440521AB3766273681E884EB63442AE8BB5AB6FEEDA4` |
+| R5 | absent | string | `819D43DC1DB29EF6C542F6A542B8F719DB94B20B2AD6B32776B4C9E64D26FADB` | `7E02CF9C12E2B56602C482861AEF2D63E739B5433F9FB99C6B3519D4E5BA74F3` |
+| R5 | object | integer | `5EFFBE0609EF0E08EB78631B1C97BF5B950E4A1692E33217675DD0DC505D1C74` | `E53AF63DFD919CB243D0ED3B95E52B8EAD1CD746A7C784DC625B12FC4DBE3771` |
+| R5 | object | string | `ECC47C14EC31B048C59A4D7A051F05A7307B8CCAF3174C967FEFC16C9E00A694` | `4C8A9631DE17683AA924FFA0FFE4AF3CA9384B5253221C3E457259FAC815972B` |
+| R5 | string | integer | `EE255970CC86E4655FE1F01E7B21C7E24B12025AABA652F05A000BEF4E61D4D7` | `B0CA9C47AE6369E7E25ED5EBABC54A0034B6F3CFA942838A8216055DCD4A6B21` |
+| R5 | string | string | `4AC904EBCEF27975529FA554999833338CDD2BE8949FE0908E7FADD1C2A117AB` | `8153BFE674F4BF8F4DA4A4A1A3685B8408BB956D8BCE7E26C59983EF12ECC706` |
+
+Every row's Patient JSON SHA256 is
+`AAD7793B93A2C558308B6C7737B269F2249FBF5DAF3E067A61B1413BD492EA7A`;
+Observation XML SHA256 is
+`CECA55BE0117652F594CA58C6468509B097389225BB96F48D9AC10F29801800E`.
+
+### Actual Windows delta gates, graphs, and copied-cache readback
+
+Commands are the existing AGENTS/workflow build and sequential both-TFM
+VSTest commands shown above, with the named focused selectors; no new runner
+or full-suite escalation was needed. Runtimes were .NET **11.0.0** and
+**10.0.15**, with the .NET 11 SDK.
+
+| Gate | Actual result |
+|---|---|
+| Original 5.0.2 strict H1/H2, both TFMs | 20/20 per TFM: two protocol rows plus 18 cold rows; zero failures/skips/warnings/errors. |
+| Candidate local net11 build and five-filter H1/H2/directive/protocol/native-publication gate | Build passed; 23/23, zero failures/skips/warnings/errors. |
+| Candidate restore, both-TFM Release build, full affected package-class/manifest/hosting gate | Commands passed; 45/45 per TFM, zero failures/skips/warnings/errors, including existing CI/acquisition/loading/neighbor/cleanup controls. |
+| Fresh 1815 export and independent-copy original-supplier readback | Original restore/build/test exited 0; `LegacyCacheIsReadableWithoutRegistries` passed 1/1 on each TFM, zero warnings/errors/failures/skips. |
+
+An intermediate candidate export rerun had net10 **45 passed** and net11
+**44 passed / 1 failed** in the unchanged Phase 3 variant-loading timestamp
+assertion. The existing one-second freshness bound was diagnosed; no code,
+assertion or tolerance changed. A bounded rerun of that same affected gate
+with a fresh export passed 45/45 on each TFM. The failure remains recorded,
+not waived or hidden by the green result.
+
+Fresh complete host/test resolved package-record comparisons against 1240
+change **only fhir-pkg-lib 1240 → 1815**. Counts remain host **53/38** and
+tests **86/74**, net10/net11. There is no new package, pruning change or other
+dependency/version delta. The previously documented minimum
+Microsoft.Extensions **11.0.0** closure, models **6.8.0**, SDK aliases,
+Newtonsoft.Json **13.0.4**, SemanticVersioning **3.0.0** and crypto pins remain.
+Firely.Fhir.Packages/SharpZipLib remain absent from candidate graphs/outputs;
+the four candidate output FhirPkg DLLs match their published per-TFM assets.
+
+The fresh candidate export was copied before readback; it was not reseeded
+with original-supplier output. In the existing host-prepared Phase 1 checkout,
+original Firely **5.0.2**, assembly **5.0.2.0**, read ordinary explicit and tagged
+CI R4/R4B/R5 contents without registries/public CI lookup, seeding or deletion.
+Original graph counts were host **41/39**, tests **87/75**, net10/net11, with
+no FhirPkg, models 6.8.0/aliases retained. All four original supplier DLLs match
+SHA256 `85F0C6347FD2431C685C24586696BC164F2CEB2CB5268BFCD041C22FF8FD0166`.
+The original HEAD remained
+`561f2f97c01643efd32d62ce8d2d423903eb57b1`, tree/index
+`30b984cb7a3e2951f3e796cc517a6ed2ae30912e`, with clean tracked/untracked/index
+state and unchanged original test bytes. A harness-only graph-count audit
+initially included project references; counting package entries corrected it
+before the readback test, without rerunning restore/build or changing source.
+
+The export and copy each remained **54 files / 21,400 bytes / 51 directories
+including root / six empty directories**, canonical snapshot SHA256
+`FE8EB702E8EF1E3FADECABB83CFE5401F7574FA3969A9C76BFA4D0FC4B86C12D`.
+Final comparison matched every file hash and directory against the saved
+pre/post snapshots. Only those two explicitly named verifier-owned temporary
+roots were removed afterwards; durable evidence and the host worktree remain.
+Replay/export environment values were restored exactly. This is fresh 1815
+synthetic Windows copied-cache evidence, not the historical 1240 readback.
+
+### Standing findings and unqualified release boundaries
+
+**M1 deletion-before-publication, M2 unlisted-version filtering, and M3 native
+limits/ambient-setting drift remain standing Medium findings, not fixed or
+waived.** Disk staging/publication, local converters, default policy/factory
+bindings, CI predeletion and Common contracts were deliberately unchanged.
+Back up affected package trees before rollout; reverting code cannot restore
+deleted cache content. Existing validation/negative import controls still
+apply; no extractor/serializer bypass or consumer limit policy was added.
+
+H1/H2 local delta gates do not establish arbitrary-error parity or shipping
+approval. No Candle Linux/macOS, live registry, ambient/operator cache,
+browser/RI, or precompiled-consumer CLR/ABI qualification was executed.
+Supplier cross-platform results and historical SDK/full-suite passes cannot
+close those boundaries. Common-type consumers still require rebinding and
+recompilation; no additional review, push, PR or publishing action occurred.

@@ -72,7 +72,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="fhir-pkg-lib" Version="2026.1113.1240" />
+    <PackageReference Include="fhir-pkg-lib" Version="2026.1113.1815" />
     <PackageReference Include="SemanticVersioning" Version="3.0.0" />
     <PackageReference Include="ini-parser-netcore" Version="3.0.0" />
     <PackageReference Include="MailKit" Version="4.18.2" />

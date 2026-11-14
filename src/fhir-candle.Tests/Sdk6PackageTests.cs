@@ -8,6 +8,7 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using fhir.candle._ForPackages;
@@ -20,6 +21,7 @@ using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit.Abstractions;
 using DiskPackageCache = fhir.candle._ForPackages.DiskPackageCache;
@@ -283,6 +285,654 @@ public sealed class Sdk6PackageTests
         }
         await AssertRoutes(registry, routes);
     }
+
+    #region R1 portable H1 tests and transport helpers
+
+    /// <summary>Unavailable leaf registries do not discard a latest winner, in either configured order.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LatestRegistryTransportFailurePreservesFallback(bool npm)
+    {
+        foreach (R1ListingFailure failure in new[]
+        {
+            R1ListingFailure.NotFound, R1ListingFailure.HttpStatus,
+            R1ListingFailure.Transport, R1ListingFailure.Deadline, R1ListingFailure.Malformed,
+        })
+        {
+            foreach (bool failureFirst in new[] { true, false })
+            {
+                await AssertR1LatestScenario(npm, failure, failureFirst, usableWinner: true);
+                await AssertR1LatestScenario(npm, failure, failureFirst, usableWinner: false);
+            }
+        }
+        AssertR1InvalidRegistryConfiguration(npm);
+        await AssertR1NativeDeadline(npm);
+    }
+
+    private async Task AssertR1LatestScenario(
+        bool npm, R1ListingFailure failure, bool failureFirst, bool usableWinner)
+    {
+        using LocalPackageFixture files = new();
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string name = $"example.test.r1.{(npm ? "npm" : "fhir")}.{failure.ToString().ToLowerInvariant()}.{(failureFirst ? "before" : "after")}.{(usableWinner ? "winner" : "empty")}";
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        bool synthetic = failure is R1ListingFailure.Transport or R1ListingFailure.Deadline;
+        // These are never sent to a network transport: the finite handler owns both failure cases.
+        string failedRoot = synthetic
+            ? "https://credential-user:credential-password@registry.example.test/failed?query-secret=hidden"
+            : root + "/failed";
+        string winnerRoot = root + "/winner";
+        string[] endpoints = failureFirst ? [failedRoot, winnerRoot] : [winnerRoot, failedRoot];
+        List<LocalHttpFixture.ExpectedRequest> routes = [];
+        using R1RegistryHandler handler = new();
+        using HttpClient http = new(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        R1PackageLogger logger = new();
+        using FhirPackageService service = new(logger, files.Configuration());
+        service.Init();
+
+        foreach (string endpoint in endpoints)
+        {
+            bool failed = endpoint == failedRoot;
+            string uri = R1ListingUri(endpoint, name);
+            if (failed && synthetic)
+            {
+                handler.ExpectFailure(uri, failure);
+            }
+            else
+            {
+                LocalHttpFixture.RawResponse response = failed ? failure switch
+                {
+                    R1ListingFailure.NotFound => LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound),
+                    R1ListingFailure.HttpStatus => LocalHttpFixture.RawResponse.Text(
+                        HttpStatusCode.ServiceUnavailable, "text/plain", "response-body-secret"),
+                    R1ListingFailure.Malformed => LocalHttpFixture.RawResponse.Text(
+                        HttpStatusCode.OK, "application/json", "{malformed-body-secret"),
+                    _ => throw new InvalidOperationException("Unscripted listing failure."),
+                } : LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json",
+                    RegistryListing(name, usableWinner ? "1.0.0" : "invalid-version"));
+                routes.Add(registry.Expect("GET", new Uri(uri).AbsolutePath, response));
+                handler.ExpectLoopback(uri);
+            }
+        }
+        if (usableWinner)
+        {
+            foreach (string endpoint in endpoints)
+            {
+                string path = npm ? $"{name}/-/{name}-1.0.0.tgz" : $"{name}/1.0.0";
+                string uri = new Uri(endpoint.TrimEnd('/') + "/" + path).AbsoluteUri;
+                if (endpoint == failedRoot && synthetic)
+                {
+                    handler.ExpectResponse(uri, LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound));
+                }
+                else
+                {
+                    LocalHttpFixture.RawResponse response = endpoint == failedRoot
+                        ? LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound) : ArchiveResponse(name);
+                    routes.Add(registry.Expect("GET", new Uri(uri).AbsolutePath, response));
+                    handler.ExpectLoopback(uri);
+                }
+                if (endpoint == winnerRoot)
+                {
+                    break;
+                }
+            }
+        }
+
+        using (R1RegistryClients clients = new(service, http, endpoints, npm))
+        {
+            List<PackageReference>? installedPackages = null;
+            Exception? error = await Record.ExceptionAsync(async () =>
+            {
+                installedPackages = await service.InstallPackages([name], [], null).WaitAsync(LocalHttpFixture.Deadline);
+            });
+            if (!usableWinner)
+            {
+                Assert.Equal($"Failed to resolve latest version of {name} ({name})", Assert.IsType<Exception>(error).Message);
+                Assert.Null(installedPackages);
+                Assert.Empty(Directory.GetFileSystemEntries(files.CacheDirectory));
+            }
+            else
+            {
+                Assert.Null(error);
+                PackageReference installed = Assert.Single(Assert.IsType<List<PackageReference>>(installedPackages));
+                Assert.Equal(name, installed.Name);
+                Assert.Equal("1.0.0", installed.Version);
+                Assert.Null(installed.Scope);
+                Assert.Equal(name + "@1.0.0", installed.Moniker);
+                Assert.Equal(LegacyContentPath(files.CacheDirectory, installed), service.GetPackageContentDirectory(installed));
+                Assert.Equal(Encoding.UTF8.GetBytes(ProtocolManifest(name)),
+                    File.ReadAllBytes(Path.Combine(LegacyContentPath(files.CacheDirectory, installed), "package.json")));
+            }
+            AssertR1UnavailableWarnings(logger, name, failedRoot, failure);
+            handler.AssertComplete(failure == R1ListingFailure.Deadline ? 1 : 0);
+            await AssertRoutes(registry, routes);
+        }
+        // HttpClient owns the handler; explicit disposal lets the test observe the lifetime boundary.
+        http.Dispose();
+        Assert.True(handler.Disposed);
+        _output.WriteLine($"R1 latest / {(npm ? "NPM" : "FHIR")} / {failure} / failure {(failureFirst ? "before" : "after")} / usable winner={usableWinner}; strict fallback script complete.");
+    }
+
+    private enum R1ListingFailure { NotFound, HttpStatus, Transport, Deadline, Malformed }
+
+    private static string R1ListingUri(string root, string name) =>
+        new Uri(new Uri(root.TrimEnd('/') + "/").AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(name)).AbsoluteUri;
+
+    /// <summary>A finite ordered script; only explicitly enumerated loopback requests can reach sockets.</summary>
+    private sealed class R1RegistryHandler : DelegatingHandler
+    {
+        private readonly Queue<(string uri, R1ListingFailure? failure, LocalHttpFixture.RawResponse? response)> _remaining = new();
+        private readonly List<string> _expected = [];
+        private readonly List<string> _requests = [];
+        private readonly List<R1ResponseContent> _contents = [];
+        private readonly List<string> _unexpected = [];
+        private int _cancellations;
+
+        internal R1RegistryHandler() : base(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false }) { }
+
+        internal bool Disposed { get; private set; }
+
+        internal void ExpectLoopback(string uri)
+        {
+            Uri target = new(uri);
+            Assert.Equal("http", target.Scheme);
+            Assert.Equal("127.0.0.1", target.Host);
+            Add(uri, null, null);
+        }
+
+        internal void ExpectFailure(string uri, R1ListingFailure failure) => Add(uri, failure, null);
+
+        internal void ExpectResponse(string uri, LocalHttpFixture.RawResponse response) => Add(uri, null, response);
+
+        private void Add(string uri, R1ListingFailure? failure, LocalHttpFixture.RawResponse? response)
+        {
+            _expected.Add("GET " + uri);
+            _remaining.Enqueue((uri, failure, response));
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string actual = request.Method + " " + request.RequestUri!.AbsoluteUri;
+            _requests.Add(actual);
+            if (_remaining.Count == 0 || request.Method != HttpMethod.Get || _remaining.Peek().uri != request.RequestUri.AbsoluteUri)
+            {
+                _unexpected.Add(actual);
+                throw new InvalidOperationException("Unlisted R1 registry request; outbound I/O refused.");
+            }
+            (string uri, R1ListingFailure? failure, LocalHttpFixture.RawResponse? response) = _remaining.Dequeue();
+            if (failure == R1ListingFailure.Transport)
+            {
+                throw new HttpRequestException("exception-message-secret https://credential-user:credential-password@registry.example.test/failed?query-secret=hidden response-body-secret");
+            }
+            if (failure == R1ListingFailure.Deadline)
+            {
+                Assert.True(cancellationToken.CanBeCanceled);
+                try
+                {
+                    await Task.Delay(LocalHttpFixture.Deadline, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    _cancellations++;
+                    throw;
+                }
+                throw new InvalidOperationException("The scripted delay completed without registry cancellation.");
+            }
+            if (response is not null)
+            {
+                R1ResponseContent content = new(response.Body);
+                _contents.Add(content);
+                if (response.ContentType is not null)
+                {
+                    content.Headers.ContentType = new(response.ContentType);
+                }
+                return new HttpResponseMessage(response.Status) { RequestMessage = request, Content = content };
+            }
+            Assert.Equal("127.0.0.1", new Uri(uri).Host);
+            return await base.SendAsync(request, cancellationToken);
+        }
+
+        internal void AssertComplete(int cancellations)
+        {
+            Assert.Empty(_unexpected);
+            Assert.Equal(_expected, _requests);
+            Assert.Empty(_remaining);
+            Assert.Equal(cancellations, _cancellations);
+            Assert.All(_contents, content => Assert.True(content.Disposed));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class R1ResponseContent(byte[] bytes) : ByteArrayContent(bytes)
+    {
+        internal bool Disposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class R1PackageLogger : ILogger<FhirPackageService>
+    {
+        internal List<(LogLevel level, string message, Exception? exception, string fields)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            string fields = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? string.Join("|", values.Select(value => value.Key + "=" + value.Value)) : string.Empty;
+            Entries.Add((logLevel, formatter(state, exception), exception, fields));
+        }
+    }
+
+    #endregion
+
+    #region R1 replacement-only H1 binding and diagnostics
+
+    private sealed class R1RegistryClients : IDisposable
+    {
+        private readonly List<FhirPkg.Registry.IRegistryClient> _target;
+        private readonly FhirPkg.Registry.IRegistryClient[] _original;
+        private readonly List<FhirPkg.Registry.IRegistryClient> _owned = [];
+
+        internal R1RegistryClients(FhirPackageService service, HttpClient http, IEnumerable<string> endpoints, bool npm)
+        {
+            Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
+            FieldInfo field = typeof(FhirPackageService).GetField("_packageClients", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            _target = Assert.IsType<List<FhirPkg.Registry.IRegistryClient>>(field.GetValue(service));
+            _original = _target.ToArray();
+            try
+            {
+                foreach (string url in endpoints)
+                {
+                    FhirPkg.Registry.RegistryEndpoint endpoint = new()
+                    {
+                        Url = url,
+                        Type = npm ? FhirPkg.Models.RegistryType.Npm : FhirPkg.Models.RegistryType.FhirNpm,
+                    };
+                    _owned.Add(FhirPkg.Registry.RegistryClientFactory.CreateClientForEndpoint(endpoint,
+                        FhirPkg.Registry.RegistryHttpTransport.CreateRedirectControlled(http, TimeSpan.FromMilliseconds(100), 2),
+                        NullLoggerFactory.Instance, null));
+                }
+                _target.Clear();
+                _target.AddRange(_owned);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            _target.Clear();
+            _target.AddRange(_original);
+            foreach (FhirPkg.Registry.IRegistryClient client in _owned)
+            {
+                (client as IDisposable)?.Dispose();
+            }
+            _owned.Clear();
+        }
+    }
+
+    private void AssertR1InvalidRegistryConfiguration(bool npm)
+    {
+        using LocalPackageFixture files = new();
+        CandleConfig config = files.Configuration() with
+        {
+            AdditionalFhirRegistryUrls = npm ? [] : ["not-an-absolute-registry"],
+            AdditionalNpmRegistryUrls = npm ? ["not-an-absolute-registry"] : [],
+        };
+        R1PackageLogger logger = new();
+        using FhirPackageService service = new(logger, config);
+        ArgumentException error = Assert.Throws<ArgumentException>(service.Init);
+        _output.WriteLine($"R1-NATIVE-CONFIG|net{Environment.Version.Major}.0|protocol={(npm ? "NPM" : "FHIR")}|stage=Init|exception={error.GetType().FullName}; no acquisition attempted.");
+        Assert.DoesNotContain(logger.Entries, entry => entry.level == LogLevel.Warning);
+        Assert.Empty(Directory.GetFileSystemEntries(files.CacheDirectory));
+    }
+
+    private static async Task AssertR1NativeDeadline(bool npm)
+    {
+        using LocalPackageFixture files = new();
+        using FhirPackageService service = PackageService(files.Configuration());
+        service.Init();
+        const string Root = "https://registry.example.test/deadline";
+        using R1RegistryHandler handler = new();
+        handler.ExpectFailure(R1ListingUri(Root, "example.test.r1.deadline-control"), R1ListingFailure.Deadline);
+        using HttpClient http = new(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        using (R1RegistryClients clients = new(service, http, [Root], npm))
+        {
+            FieldInfo field = typeof(FhirPackageService).GetField("_packageClients", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            FhirPkg.Registry.IRegistryClient client = Assert.Single(
+                Assert.IsType<List<FhirPkg.Registry.IRegistryClient>>(field.GetValue(service)));
+            await Assert.ThrowsAsync<FhirPkg.Registry.RegistryResponseTimeoutException>(() =>
+                client.GetPackageListingAsync("example.test.r1.deadline-control").WaitAsync(LocalHttpFixture.Deadline));
+            handler.AssertComplete(1);
+        }
+        http.Dispose();
+        Assert.True(handler.Disposed);
+    }
+
+    private static void AssertR1UnavailableWarnings(R1PackageLogger logger, string name, string endpoint, R1ListingFailure failure)
+    {
+        (LogLevel level, string message, Exception? exception, string fields)[] warnings =
+            logger.Entries.Where(entry => entry.level == LogLevel.Warning).ToArray();
+        if (failure == R1ListingFailure.NotFound)
+        {
+            Assert.Empty(warnings);
+            return;
+        }
+        (LogLevel level, string message, Exception? exception, string fields) warning = Assert.Single(warnings);
+        Assert.Null(warning.exception);
+        Assert.Contains(name, warning.message, StringComparison.Ordinal);
+        Uri uri = new(endpoint);
+        Assert.Contains(uri.Host, warning.message, StringComparison.Ordinal);
+        Assert.Contains(uri.AbsolutePath, warning.message, StringComparison.Ordinal);
+        string category = failure switch
+        {
+            R1ListingFailure.HttpStatus => "http",
+            R1ListingFailure.Transport => "transport",
+            R1ListingFailure.Deadline => "deadline",
+            R1ListingFailure.Malformed => "listing-json",
+            _ => throw new InvalidOperationException("No warning category for this case."),
+        };
+        Assert.Contains(category, warning.message, StringComparison.OrdinalIgnoreCase);
+        if (failure == R1ListingFailure.HttpStatus)
+        {
+            Assert.Contains("503", warning.message, StringComparison.Ordinal);
+        }
+        foreach (string sentinel in new[]
+        {
+            "credential-user", "credential-password", "query-secret", "hidden",
+            "response-body-secret", "exception-message-secret", "malformed-body-secret",
+        })
+        {
+            Assert.DoesNotContain(sentinel, warning.message + warning.fields, StringComparison.Ordinal);
+        }
+    }
+
+    #endregion
+
+    #region R1 portable H2 cold acquisition and byte evidence
+
+    /// <summary>All six metadata forms execute actual cold acquisition independently for each supported FHIR version.</summary>
+    public static IEnumerable<object[]> ColdManifestCases =>
+        from version in _versions
+        from repository in new[] { "string", "object", "absent" }
+        from integerDate in new[] { true, false }
+        select new object[] { $"R1 cold / {version} / repository={repository} / date={(integerDate ? "integer" : "string")}",
+            version, repository, integerDate };
+
+    /// <summary>Legacy repository/date and both author shapes survive validating cold import and real tenant loading.</summary>
+    [Theory]
+    [MemberData(nameof(ColdManifestCases))]
+    public async Task ColdImportPreservesLegacyManifestShapes(
+        string label, FhirReleases.FhirSequenceCodes version, string repository, bool integerDate)
+    {
+        Assert.Equal(18, ColdManifestCases.Count());
+        using LocalPackageFixture files = new();
+        string name = $"example.test.r1.cold.{LocalPackageFixture.VersionName(version)}.repo-{repository}.date-{(integerDate ? "integer" : "string")}";
+        PackageReference reference = new(name, "1.0.0");
+        string manifest = R1ColdManifest(name, version, repository, integerDate);
+        Dictionary<string, string> resources = new(StringComparer.Ordinal)
+        {
+            ["Patient-cold-patient.json"] = R1ColdResource("Patient", CompatibilityFormat.Json),
+            ["Observation-cold-observation.xml"] = R1ColdResource("Observation", CompatibilityFormat.Xml),
+        };
+        Dictionary<string, byte[]> distributed = resources.ToDictionary(
+            resource => "package/" + resource.Key, resource => Encoding.UTF8.GetBytes(resource.Value), StringComparer.Ordinal);
+        distributed.Add("package/package.json", Encoding.UTF8.GetBytes(manifest));
+        byte[] archive = R1DeterministicArchive(manifest, resources);
+        Assert.Equal(archive, R1DeterministicArchive(manifest, resources));
+        string hashes = $"R1-SHA256|net{Environment.Version.Major}.0|{version}|repository={repository}|date={(integerDate ? "integer" : "string")}|author={(integerDate ? "string" : "object")}|name={name}" +
+            $"|archive={Convert.ToHexString(SHA256.HashData(archive))}" +
+            string.Concat(distributed.OrderBy(file => file.Key, StringComparer.Ordinal)
+                .Select(file => $"|{file.Key}={Convert.ToHexString(SHA256.HashData(file.Value))}"));
+        _output.WriteLine(hashes);
+        Console.WriteLine(hashes);
+
+        List<(string root, Dictionary<string, byte[]> files, string[] directories)> neighbors = [];
+        foreach (string identity in new[] { name + "#2.0.0", name + ".neighbor#1.0.0" })
+        {
+            string root = Path.Combine(files.CacheDirectory, identity);
+            Directory.CreateDirectory(Path.Combine(root, "package", "empty"));
+            File.WriteAllBytes(Path.Combine(root, "parent-metadata.bin"), [0, 255, 128, 10]);
+            File.WriteAllBytes(Path.Combine(root, "package", "package.json"),
+                Encoding.UTF8.GetBytes(ProtocolManifest(identity.Split('#')[0])));
+            File.WriteAllBytes(Path.Combine(root, "package", "Patient-neighbor.json"),
+                Encoding.UTF8.GetBytes("""{"resourceType":"Patient","id":"neighbor","active":false}"""));
+            (Dictionary<string, byte[]> bytes, string[] directories) = R1TreeSnapshot(root);
+            neighbors.Add((root, bytes, directories));
+        }
+        string requestedRoot = Path.Combine(files.CacheDirectory, name + "#1.0.0");
+        Assert.False(Directory.Exists(requestedRoot));
+
+        // Replacement-only control: omit this call and its helper from the original-supplier port.
+        await AssertR1NativeColdImport(files, reference, archive, distributed);
+
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        LocalHttpFixture.ExpectedRequest download = registry.Expect("GET", "/" + name + "/1.0.0",
+            new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream", archive));
+        using (FhirPackageService acquisition = PackageService(files.Configuration(registry.Address.AbsoluteUri.TrimEnd('/'))))
+        {
+            acquisition.Init();
+            PackageReference installed = Assert.Single(await acquisition.InstallPackages([reference.Moniker], [], [version])
+                .WaitAsync(LocalHttpFixture.Deadline));
+            Assert.Equal(reference, installed);
+            Assert.Null(installed.Scope);
+            Assert.Equal(LegacyContentPath(files.CacheDirectory, reference), acquisition.GetPackageContentDirectory(installed));
+            Assert.Equal(new[] { version }, await acquisition.InstalledPackageFhirVersions(installed));
+            PackageManifest parsed = Assert.IsType<PackageManifest>(await new DiskPackageCache(files.CacheDirectory).ReadManifestEx(installed));
+            Assert.Equal(name, parsed.Name);
+            Assert.Equal("1.0.0", parsed.Version);
+            Assert.Equal(new[] { LocalPackageFixture.FhirVersion(version) }, parsed.AnyFhirVersions);
+            AssertAuthor(parsed, "Synthetic Package Author", "author@example.test", "https://example.test/sdk6");
+            FieldInfo origin = typeof(fhir.candle._ForPackages.AuthorInfo).GetField("ParsedFromString", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Assert.Equal(integerDate, origin.GetValue(parsed.AuthorInformation));
+            DateTime local = new(2024, 2, 3, 12, 34, 56, DateTimeKind.Unspecified);
+            Assert.Equal(new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)), parsed.Date);
+            Assert.Equal("Conformance", parsed.Type);
+            Assert.Equal("MIT", parsed.License);
+            Assert.Equal("package", parsed.Directories!["lib"]);
+            Assert.Empty(parsed.Dependencies!);
+        }
+        await AssertRoutes(registry, [download]);
+        R1AssertDistributedBytes(requestedRoot, distributed);
+        AssertR1ColdPublicationTree(requestedRoot, distributed);
+        (Dictionary<string, byte[]> files, string[] directories) published = R1TreeSnapshot(requestedRoot);
+
+        CandleConfig config = files.Configuration() with { PublishedPackages = [reference.Moniker] };
+        using FhirPackageService packages = PackageService(config);
+        string tenant = "cold-" + LocalPackageFixture.VersionName(version);
+        FhirStoreManager manager = new(new Dictionary<string, TenantConfiguration> { [tenant] = Tenant(version, tenant) },
+            NullLogger<FhirStoreManager>.Instance, config, packages);
+        try
+        {
+            manager.Init();
+            IFhirStore store = ((IFhirStoreManager)manager)[tenant];
+            Assert.Equal(new[] { reference.Moniker }, store.LoadedPackageDirectives);
+            Assert.Equal(new[] { name }, store.LoadedPackageIds);
+            Assert.Equal(new[] { "cold-patient" }, store["Patient"].Keys);
+            Assert.Equal(new[] { "cold-observation" }, store["Observation"].Keys);
+            Assert.False(store["Patient"].ContainsKey("neighbor"));
+            CompatibilityBindings bindings = new();
+            WireContractAssertions.BindBaseUrl(bindings, tenant, store.Config.BaseUrl);
+            foreach (string resourceType in new[] { "Patient", "Observation" })
+            {
+                string id = resourceType == "Patient" ? "cold-patient" : "cold-observation";
+                GeneratedResourceExpectation binding = new(tenant + "/" + id, resourceType, "1", id);
+                foreach (CompatibilityFormat format in new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml })
+                {
+                    FhirRequestContext request = new(store, "GET", resourceType + "/" + id)
+                    {
+                        DestinationFormat = WireContractAssertions.MediaType(format),
+                    };
+                    Assert.True(store.PerformInteraction(request, out FhirResponseContext response, serializeReturn: true));
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    Assert.Equal(resourceType, response.ResourceType);
+                    Assert.Equal(id, response.Id);
+                    WireContractAssertions.Body(new ResourceBodyExpectation(R1ColdResource(resourceType, format), binding),
+                        response.SerializedResource, format, store.Config.BaseUrl, bindings);
+                    binding = binding with { Mode = CompatibilityBindingMode.Reuse };
+                }
+            }
+        }
+        finally
+        {
+            await StopAndDispose(manager);
+        }
+        R1AssertDistributedBytes(requestedRoot, distributed);
+        R1AssertTreeSnapshot(published, requestedRoot);
+        foreach ((string root, Dictionary<string, byte[]> bytes, string[] directories) in neighbors)
+        {
+            R1AssertTreeSnapshot((bytes, directories), root);
+        }
+        Assert.Empty(Directory.GetDirectories(files.CacheDirectory, ".candle-package-import-*"));
+        Assert.Equal(neighbors.Select(neighbor => Path.GetFileName(neighbor.root)).Append(name + "#1.0.0").Order(StringComparer.Ordinal),
+            Directory.GetFileSystemEntries(files.CacheDirectory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { "cache", "source" }, Directory.GetFileSystemEntries(files.Root).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.Single(registry.Requests);
+        _output.WriteLine($"{label}; cold acquisition + raw SHA256 + local author/date/FHIR + manager JSON/XML + neighbors/cleanup passed.");
+    }
+
+    private static string R1ColdManifest(string name, FhirReleases.FhirSequenceCodes version, string repository, bool integerDate)
+    {
+        string repositoryField = repository switch
+        {
+            "string" => "\"repository\":\"github:example/repo\",",
+            "object" => "\"repository\":{\"type\":\"git\",\"url\":\"https://example.test/repo.git\"},",
+            "absent" => string.Empty,
+            _ => throw new ArgumentOutOfRangeException(nameof(repository)),
+        };
+        string author = integerDate
+            ? "\"Synthetic Package Author <author@example.test> (https://example.test/sdk6)\""
+            : """{"name":"Synthetic Package Author","email":"author@example.test","url":"https://example.test/sdk6"}""";
+        string date = integerDate ? "20240203123456" : "\"20240203123456\"";
+        return $$$"""{"name":"{{{name}}}","version":"1.0.0","type":"Conformance","title":"Synthetic R1 cold manifest","description":"Independently authored metadata acceptance bytes; café.","fhirVersions":["{{{LocalPackageFixture.FhirVersion(version)}}}"],"dependencies":{},"license":"MIT","author":{{{author}}},"canonical":"https://example.test/sdk6/{{{LocalPackageFixture.VersionName(version)}}}","directories":{"lib":"package"},{{{repositoryField}}}"date":{{{date}}},"unknown-field":{"retained":"raw fixture","values":[1,true,"café"]}}""";
+    }
+
+    private static string R1ColdResource(string resourceType, CompatibilityFormat format) => (resourceType, format) switch
+    {
+        ("Patient", CompatibilityFormat.Json) => """{"resourceType":"Patient","id":"cold-patient","active":true,"name":[{"family":"Pinned café"}]}""",
+        ("Patient", CompatibilityFormat.Xml) => """<Patient xmlns="http://hl7.org/fhir"><id value="cold-patient"/><active value="true"/><name><family value="Pinned café"/></name></Patient>""",
+        ("Observation", CompatibilityFormat.Json) => """{"resourceType":"Observation","id":"cold-observation","status":"final","code":{"text":"Pinned cold metadata"},"subject":{"reference":"Patient/cold-patient"},"valueString":"café"}""",
+        ("Observation", CompatibilityFormat.Xml) => """<Observation xmlns="http://hl7.org/fhir"><id value="cold-observation"/><status value="final"/><code><text value="Pinned cold metadata"/></code><subject><reference value="Patient/cold-patient"/></subject><valueString value="café"/></Observation>""",
+        _ => throw new ArgumentOutOfRangeException(nameof(resourceType)),
+    };
+
+    private static byte[] R1DeterministicArchive(string manifest, IReadOnlyDictionary<string, string> resources)
+    {
+        // Reuse the fixture, but normalize its unpinned package/ directory mtime through BCL APIs.
+        // NoCompression avoids compressor-version drift between the two runtime/supplier baselines.
+        using MemoryStream authored = new(LocalPackageFixture.Archive(manifest, resources), writable: false);
+        using GZipStream input = new(authored, CompressionMode.Decompress);
+        using MemoryStream buffer = new();
+        input.CopyTo(buffer);
+        buffer.Position = 0;
+        using TarReader reader = new(buffer);
+        using MemoryStream output = new();
+        using (GZipStream gzip = new(output, CompressionLevel.NoCompression, leaveOpen: true))
+        using (TarWriter writer = new(gzip, TarEntryFormat.Ustar, leaveOpen: true))
+        {
+            while (reader.GetNextEntry() is TarEntry original)
+            {
+                UstarTarEntry entry = new(original.EntryType, original.Name)
+                {
+                    ModificationTime = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                    Uid = 0,
+                    Gid = 0,
+                    UserName = string.Empty,
+                    GroupName = string.Empty,
+                    Mode = original.EntryType == TarEntryType.Directory
+                        ? UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                        : UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                };
+                if (original.DataStream is not null)
+                {
+                    entry.DataStream = original.DataStream;
+                }
+                writer.WriteEntry(entry);
+            }
+        }
+        return output.ToArray();
+    }
+
+    private static (Dictionary<string, byte[]> files, string[] directories) R1TreeSnapshot(string root) =>
+        (Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(root, path), File.ReadAllBytes, StringComparer.Ordinal),
+        Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path)).Order(StringComparer.Ordinal).ToArray());
+
+    private static void R1AssertTreeSnapshot((Dictionary<string, byte[]> files, string[] directories) expected, string root)
+    {
+        (Dictionary<string, byte[]> files, string[] directories) actual = R1TreeSnapshot(root);
+        Assert.Equal(expected.directories, actual.directories);
+        Assert.Equal(expected.files.Keys.Order(StringComparer.Ordinal), actual.files.Keys.Order(StringComparer.Ordinal));
+        foreach (KeyValuePair<string, byte[]> file in expected.files)
+        {
+            Assert.Equal(file.Value, actual.files[file.Key]);
+        }
+    }
+
+    private static void R1AssertDistributedBytes(string root, IReadOnlyDictionary<string, byte[]> expected)
+    {
+        foreach (KeyValuePair<string, byte[]> file in expected)
+        {
+            byte[] actual = File.ReadAllBytes(Path.Combine(root, file.Key));
+            Assert.Equal(file.Value, actual);
+            Assert.Equal(Convert.ToHexString(SHA256.HashData(file.Value)), Convert.ToHexString(SHA256.HashData(actual)));
+        }
+    }
+
+    private static void AssertR1ColdPublicationTree(string root, IReadOnlyDictionary<string, byte[]> expected)
+    {
+        Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')).Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { "package" }, Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path)));
+    }
+
+    #endregion
+
+    #region R1 replacement-only H2 validating native control
+
+    private static async Task AssertR1NativeColdImport(
+        LocalPackageFixture files, PackageReference reference, byte[] archive, IReadOnlyDictionary<string, byte[]> expected)
+    {
+        string root = files.CreateDirectory("r1-native-import");
+        (Dictionary<string, byte[]> files, string[] directories) before = R1TreeSnapshot(files.CacheDirectory);
+        try
+        {
+            using FhirPkg.Cache.DiskPackageCache cache = new(root, NullLogger<FhirPkg.Cache.DiskPackageCache>.Instance);
+            using MemoryStream stream = new(archive, writable: false);
+            FhirPkg.Models.PackageRecord installed = await cache.ImportAsync(
+                stream, new FhirPkg.Cache.InstallCacheOptions { Unmodified = true }).WaitAsync(LocalHttpFixture.Deadline);
+            Assert.Equal(reference.Name, installed.Reference.Name);
+            Assert.Equal(reference.Version, installed.Reference.Version);
+            Assert.Equal(Path.Combine(installed.DirectoryPath, "package"), cache.GetPackageContentPath(installed.Reference));
+            R1AssertDistributedBytes(installed.DirectoryPath, expected);
+            AssertR1ColdPublicationTree(installed.DirectoryPath, expected);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        Assert.False(Directory.Exists(root));
+        R1AssertTreeSnapshot(before, files.CacheDirectory);
+    }
+
+    #endregion
 
     /// <summary>Direct configuration, disabled state, and local-build quirks use only owned roots and loopback acquisition.</summary>
     [Fact]

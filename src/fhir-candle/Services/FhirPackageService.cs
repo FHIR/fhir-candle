@@ -252,11 +252,35 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             native.Version == version ? native.Version : version);
     }
 
-    private static async Task<List<SemVer>> GetVersions(IRegistryClient client, string name)
+    private async Task<List<SemVer>> GetVersions(IRegistryClient client, string name)
     {
         // A legacy # in Name was a URI fragment, not an escaped package ID.
         string transportName = name.Split('#')[0];
-        FhirPkg.Models.PackageListing? listing = await client.GetPackageListingAsync(transportName);
+        FhirPkg.Models.PackageListing? listing;
+        try
+        {
+            listing = await client.GetPackageListingAsync(transportName);
+        }
+        catch (HttpRequestException exception)
+        {
+            if (exception.StatusCode != HttpStatusCode.NotFound)
+            {
+                LogRegistryListingFailure(client.Endpoint, name,
+                    exception.StatusCode.HasValue ? "http" : "transport", exception.StatusCode);
+            }
+            return [];
+        }
+        catch (RegistryResponseTimeoutException)
+        {
+            LogRegistryListingFailure(client.Endpoint, name, "deadline");
+            return [];
+        }
+        catch (System.Text.Json.JsonException) when (
+            client.Endpoint.Type is FhirPkg.Models.RegistryType.FhirNpm or FhirPkg.Models.RegistryType.Npm)
+        {
+            LogRegistryListingFailure(client.Endpoint, name, "listing-json");
+            return [];
+        }
         List<SemVer> versions = [];
         foreach (string value in listing?.Versions.Keys ?? Enumerable.Empty<string>())
         {
@@ -267,6 +291,14 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         }
         versions.Sort();
         return versions;
+    }
+
+    private void LogRegistryListingFailure(RegistryEndpoint endpoint, string name, string category, HttpStatusCode? statusCode = null)
+    {
+        string registry = new Uri(endpoint.Url).GetComponents(
+            UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
+        _logger.LogWarning("GetVersions <<< Registry listing unavailable for {Package} at {Registry}: {Category}, HTTP status {Status}.",
+            name, registry, category, (int?)statusCode);
     }
 
     /// <summary>Triggered when the application host is ready to start the service.</summary>
