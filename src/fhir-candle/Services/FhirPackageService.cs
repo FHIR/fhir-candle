@@ -18,6 +18,7 @@ using System.Collections.Concurrent;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using PackageReference = FhirCandle.Models.PackageReference;
 using PackageCatalogEntry = FhirCandle.Models.PackageCatalogEntry;
@@ -73,7 +74,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     private _ForPackages.DiskPackageCache? _cache = null;
 
     /// <summary>(Immutable) The package clients.</summary>
-    private readonly List<IRegistryClient> _packageClients = [];
+    private readonly List<Lazy<IRegistryClient?>> _packageClients = [];
 
     /// <summary>The HTTP transport owned by the introduced registry clients.</summary>
     private readonly HttpClient _registryHttpClient = new();
@@ -223,9 +224,22 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
     private void AddRegistry(string url, FhirPkg.Models.RegistryType type)
     {
-        RegistryEndpoint endpoint = new() { Url = url, Type = type };
-        _packageClients.Add(RegistryClientFactory.CreateClientForEndpoint(
-            endpoint, _registryHttpClient, NullLoggerFactory.Instance));
+        int ordinal = _packageClients.Count + 1;
+        _packageClients.Add(new Lazy<IRegistryClient?>(() =>
+        {
+            try
+            {
+                RegistryEndpoint endpoint = new() { Url = url, Type = type };
+                return RegistryClientFactory.CreateClientForEndpoint(
+                    endpoint, _registryHttpClient, NullLoggerFactory.Instance);
+            }
+            catch (ArgumentException)
+            {
+                _logger.LogWarning("Registry configuration unavailable for slot {Ordinal} ({Protocol}): configuration.",
+                    ordinal, type);
+                return null;
+            }
+        }));
     }
 
     private static PackageReference ParseReference(string directive)
@@ -275,6 +289,11 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             LogRegistryListingFailure(client.Endpoint, name, "deadline");
             return [];
         }
+        catch (HttpIOException exception) when (exception.HttpRequestError == HttpRequestError.ResponseEnded)
+        {
+            LogRegistryListingFailure(client.Endpoint, name, "response-body");
+            return [];
+        }
         catch (System.Text.Json.JsonException) when (
             client.Endpoint.Type is FhirPkg.Models.RegistryType.FhirNpm or FhirPkg.Models.RegistryType.Npm)
         {
@@ -282,9 +301,21 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return [];
         }
         List<SemVer> versions = [];
-        foreach (string value in listing?.Versions.Keys ?? Enumerable.Empty<string>())
+        foreach (KeyValuePair<string, FhirPkg.Models.PackageVersionInfo> entry in
+            listing?.Versions ?? Enumerable.Empty<KeyValuePair<string, FhirPkg.Models.PackageVersionInfo>>())
         {
-            if (SemVer.TryParse(value, out SemVer? version) && version is not null)
+            JsonElement marker = entry.Value.Unlisted;
+            if (marker.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                LogRegistryListingFailure(client.Endpoint, name, "listing-json");
+                return [];
+            }
+            if (marker.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)
+                && !(marker.ValueKind == JsonValueKind.String && marker.GetString() == string.Empty))
+            {
+                continue;
+            }
+            if (SemVer.TryParse(entry.Key, out SemVer? version) && version is not null)
             {
                 versions.Add(version);
             }
@@ -511,8 +542,12 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     {
         List<PackageReference> latestRecs = new();
 
-        foreach (IRegistryClient server in _packageClients)
+        foreach (Lazy<IRegistryClient?> registration in _packageClients)
         {
+            if (registration.Value is not IRegistryClient server)
+            {
+                continue;
+            }
             List<SemVer> versions = await GetVersions(server, name);
             if (versions.Count == 0)
             {
@@ -547,8 +582,12 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return true;
         }
 
-        foreach (IRegistryClient pc in _packageClients)
+        foreach (Lazy<IRegistryClient?> registration in _packageClients)
         {
+            if (registration.Value is not IRegistryClient pc)
+            {
+                continue;
+            }
             try
             {
                 // try to download this package
@@ -595,8 +634,12 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return false;
         }
 
-        foreach (IRegistryClient pc in _packageClients)
+        foreach (Lazy<IRegistryClient?> registration in _packageClients)
         {
+            if (registration.Value is not IRegistryClient pc)
+            {
+                continue;
+            }
             try
             {
                 List<SemVer> versions = await GetVersions(pc, packageId);
@@ -843,9 +886,9 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         {
             if (disposing)
             {
-                foreach (IRegistryClient client in _packageClients)
+                foreach (Lazy<IRegistryClient?> registration in _packageClients)
                 {
-                    if (client is IDisposable disposable)
+                    if (registration.IsValueCreated && registration.Value is IDisposable disposable)
                     {
                         disposable.Dispose();
                     }

@@ -922,3 +922,135 @@ browser/RI, or precompiled-consumer CLR/ABI qualification was executed.
 Supplier cross-platform results and historical SDK/full-suite passes cannot
 close those boundaries. Common-type consumers still require rebinding and
 recompilation; no additional review, push, PR or publishing action occurred.
+
+## R2 Phase 5 host compatibility corrections (2026-11-15)
+
+This additive record supersedes the R1 M2/configuration/body-error limitations
+only for the cases measured below. The exact supplier pin remains
+**fhir-pkg-lib 2026.1113.1815**. No dependency manifest, native policy, disk
+publication, CI algorithm, shared serializer or public contract was changed.
+Root `AGENTS.md` supplied the build/test commands.
+
+### Original 5.0.2 measurements and exact restoration
+
+Only the new portable black-box tests/helpers were temporarily inserted into
+the existing test file in the host-prepared checkout
+`E:\ai\worktrees\fhir-candle\t3-548272b7-7ea32808d642469e`.
+The original Firely aliases remained; no native references, replacement-warning
+assertions, production/project edits, restore/install, checkout lifecycle
+operation, staging or commit were used there. Tests exercised the original
+`FhirPackageService` and real manager, not a proxy implementation.
+
+Initial and final verification (including every `finally` restoration) found:
+
+- HEAD `561f2f97c01643efd32d62ce8d2d423903eb57b1`, tree/index
+  `30b984cb7a3e2951f3e796cc517a6ed2ae30912e`; clean tracked/untracked/index state.
+- Exact restored test bytes: **72,665**, SHA256
+  `7202F5DD399933FEB9492DFC4A22ACADAC3B2BE0282A1D0F9A94ECBA9154E380`.
+- Original supplier assembly **5.0.2.0**; all four host/test net10/net11 DLLs
+  retained SHA256
+  `85F0C6347FD2431C685C24586696BC164F2CEB2CB5268BFCD041C22FF8FD0166`.
+
+Bounded original tests passed **6/6 per TFM**: FHIR/NPM rows for markers,
+invalid-registry workflows and real truncated responses. A final marker-only
+strengthening passed **2/2 per TFM**, using a lower-version fallback so an
+incorrect partially retained listing cannot accidentally pass. Original
+commands, from that checkout, were:
+
+```powershell
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests.UnlistedRegistryVersionsPreserveBaselineSelection|FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests.UnusedInvalidRegistryDoesNotPreventOfflineStartup|FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests.TruncatedRegistryResponsePreservesBaselineFallback" --logger "console;verbosity=detailed"
+```
+
+The same command ran with `--framework net10.0`; final marker-only runs used
+`--filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests.UnlistedRegistryVersionsPreserveBaselineSelection"`
+on each TFM. All final original commands exited **0**, zero warnings/errors,
+failures or skipped tests.
+
+### Measured original/candidate behavior
+
+- **M2:** one native listing, projected entry by entry, preserves original
+  Newtonsoft string-marker eligibility: absent/null/empty-string eligible;
+  nonempty strings (including `"false"` and whitespace), booleans and numeric
+  scalars excluded. Object/array markers invalidate the **entire** listing;
+  candidate emits exactly one sanitized `listing-json` warning. Both protocols
+  cover 13 marker forms, prereleases/build metadata, all-unlisted variant
+  ineligibility, eligible variant discovery followed by explicit acquisition
+  of its hidden requested version, and metadata-free explicit acquisition.
+  Existing semantic and cross-registry string ordering tests still pass.
+- **M4:** listing-await containment adds only
+  `HttpIOException` with `HttpRequestError.ResponseEnded`, returning empty
+  versions and one sanitized `response-body` warning. Both protocols retain
+  fallback before/after usable/unusable winners, with finite typed failing
+  streams and actual Content-Length underflow: **8 scenarios per transport
+  form per TFM**. The TCP helper binds only ephemeral loopback, drains the
+  request header, verifies exact finite GET/path scripts, sends a valid JSON
+  prefix with larger declared length, then uses orderly `Shutdown(Send)`.
+  Direct response-stream controls prove `ResponseEnded`, not RST/JSON failure;
+  request, stream/handler and owned socket disposal checks pass. Separate
+  controls retain plain `IOException`, non-ResponseEnded `HttpIOException`
+  and cancellation propagation. Existing non-configuration acquisition
+  catches are unchanged.
+- **M6:** registrations are ordered `Lazy<IRegistryClient?>` values. Init
+  and Dispose do not construct unused clients. Only factory
+  `ArgumentException` is diagnosed/cached as null; all three consumers skip
+  that slot. One sanitized warning identifies ordinal/protocol, never the
+  malformed URL or exception/inner exception. Other construction failures
+  remain outside acquisition catches. Both protocols prove real manager
+  startup with no package lists, invalid-only generic required-use failure,
+  before/after-valid fallback across latest, explicit and variant-existence
+  workflows, one-warning reuse, credential-bearing malformed URL redaction
+  and no construction/warning/request on unused paths. The original R1
+  configuration control now asserts Init success then generic resolution
+  failure, matching the measured original lifecycle.
+- **L1:** both cold-manifest and variant-loading tests construct
+  `CompatibilityBindings` before `manager.Init()`. The FreshInstant oracle
+  and one-second tolerance are unchanged; no sleep or clock mutation.
+
+Two preliminary original runs each passed 4/6 per TFM because of test-helper
+errors: buffered HttpContent wrapped the typed body exception, then a server
+wait for the still-open client half caused a timeout. Direct stream reading
+and closing the owned server socket after FIN corrected those controls.
+Corresponding preliminary candidate runs passed 48/50; one earlier build
+caught a misplaced helper scope (zero warnings, one compiler error). These
+were local harness corrections, not waived service failures or relaxed
+assertions; all final gates below pass.
+
+### Final Windows verification and evidence
+
+```powershell
+dotnet build --configuration Release --framework net11.0
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests"
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests|FullyQualifiedName~fhir.candle.Tests.FhirNpmPackageTests|FullyQualifiedName~fhir.candle.Tests.HostingCompatibilityTests"
+```
+
+All commands exited **0**. Both builds had **zero warnings/errors**.
+The net11 package-class gate passed **50/50**; the sequential affected gate
+passed **53/53 on net11.0** and **53/53 on net10.0**, with zero failures/skips
+or compiler warnings/errors. Runtimes were .NET **11.0.0** and **10.0.15**.
+R4/R4B/R5 loading, CI, manifests, hosting and prior fallback scenarios remain
+covered. No separate restore or full-suite run was added.
+
+Durable session evidence root:
+`C:\Users\ginoc\.copilot\session-state\beafb647-9d7c-48f9-afa1-f06c709ca1a5\files\r2-host-fixes\`.
+`qualify_original.py` records exact commands and restores held bytes in
+`finally`; `qualified-original-{net11.0,net10.0}.log` and
+`final-markers-original-{net11.0,net10.0}.log` hold final original results.
+`original-initial.json`, `original-final.json`,
+`qualified-original-{initial,final}.json` and
+`final-markers-original-{initial,final}.json` preserve restoration evidence;
+the exact byte snapshots and ported slices are retained beside them.
+`candidate-{build-net11,sdk6-net11,build-both,affected-both}-final.log`
+contains the final prescribed commands/results. Earlier harness failure logs
+are retained separately.
+
+**Still outstanding:** M1 deletion-before-publication is explicitly excluded,
+not fixed or waived. M3 finite native archive limits/ambient-policy drift
+requires an approved behavior-preserving envelope; none was selected here.
+M5 null Versions/null version entries fail inside native provenance before
+Candle receives a listing and require supported supplier qualification.
+There is no broad NRE catch, shared serializer mutation, second JSON
+parser/request, local supplier implementation or supplier upgrade.
+Phase 6 remains a prerequisite gate, not implemented work. These Windows
+synthetic results do not establish Linux/macOS, live/operator, browser/RI,
+precompiled CLR/ABI or complete selected-request closure.

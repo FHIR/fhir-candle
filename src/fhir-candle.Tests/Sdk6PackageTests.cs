@@ -4,6 +4,7 @@
 // </copyright>
 
 using System.Net;
+using System.Net.Sockets;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Reflection;
@@ -286,6 +287,411 @@ public sealed class Sdk6PackageTests
         await AssertRoutes(registry, routes);
     }
 
+    #region R2 portable black-box tests and wire helper
+
+    /// <summary>Listing eligibility follows the original string conversion, not native latest policy.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnlistedRegistryVersionsPreserveBaselineSelection(bool npm)
+    {
+        string?[] markers = [null, "null", "\"\"", "\"true\"", "\"false\"", "\" \"", "true", "false", "0", "42", "1.5", "{}", "[]"];
+        for (int index = 0; index < markers.Length; index++)
+        {
+            using LocalPackageFixture files = new();
+            await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+            string root = registry.Address.AbsoluteUri.TrimEnd('/');
+            string name = "example.test.r2.marker" + index;
+            bool complex = markers[index] is "{}" or "[]";
+            string expected = index < 3 ? "10.0.0-beta.2+meta" : complex ? "0.9.0-beta.1+build" : "2.0.0";
+            List<LocalHttpFixture.ExpectedRequest> routes =
+            [
+                registry.Expect("GET", "/first/" + name, LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json",
+                    R2MarkedListing(name, ("1.0.0", null), ("2.0.0", null), ("10.0.0-beta.2+meta", markers[index]), ("invalid-version", null)))),
+            ];
+            if (complex)
+            {
+                routes.Add(registry.Expect("GET", "/second/" + name, LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json",
+                    RegistryListing(name, "0.9.0-beta.1+build"))));
+            }
+            routes.Add(registry.Expect("GET", "/first/" + R2ArchivePath(npm, name, expected), ArchiveResponse(name)));
+            R1PackageLogger logger = new();
+            using FhirPackageService service = new(logger, R2Configuration(files, npm,
+                complex ? [root + "/first", root + "/second"] : [root + "/first"]));
+            service.Init();
+            Assert.Equal(expected, Assert.Single(await service.InstallPackages([name], [], null).WaitAsync(LocalHttpFixture.Deadline)).Version);
+            AssertR2MarkerWarnings(logger, name, root + "/first", complex); // R2 candidate only
+            await AssertRoutes(registry, routes);
+            _output.WriteLine($"R2 marker / {(npm ? "NPM" : "FHIR")} / {markers[index] ?? "absent"} / selected={expected}");
+        }
+
+        foreach (bool allUnlisted in new[] { true, false })
+        {
+            using LocalPackageFixture files = new();
+            await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+            string root = registry.Address.AbsoluteUri.TrimEnd('/');
+            string name = "example.test.r2.eligibility";
+            string variant = name + ".r4";
+            PackageReference original = new(name, "1.0.0");
+            WritePinnedCache(files.CacheDirectory, original, ProtocolManifest(name), new Dictionary<string, string>());
+            string listing = R2MarkedListing(variant, ("1.0.0", "\"false\""), ("2.0.0", "false"), ("3.0.0", "0"));
+            if (!allUnlisted)
+            {
+                listing = R2MarkedListing(variant, ("1.0.0", "\"false\""), ("2.0.0", "null"));
+            }
+            List<LocalHttpFixture.ExpectedRequest> routes =
+            [
+                registry.Expect("GET", "/" + variant, LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", listing)),
+            ];
+            if (!allUnlisted)
+            {
+                string manifest = ProtocolManifest(variant).Replace("5.0.0", "4.0.1", StringComparison.Ordinal);
+                routes.Add(registry.Expect("GET", "/" + R2ArchivePath(npm, variant, "1.0.0"),
+                    new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream",
+                        LocalPackageFixture.Archive(manifest, new Dictionary<string, string>()))));
+            }
+            using FhirPackageService service = PackageService(R2Configuration(files, npm, [root]));
+            service.Init();
+            List<PackageReference> installed = await service.InstallPackages([original.Moniker], [], [FhirReleases.FhirSequenceCodes.R4])
+                .WaitAsync(LocalHttpFixture.Deadline);
+            Assert.Equal(allUnlisted ? new[] { name } : new[] { name, variant }, installed.Select(reference => reference.Name));
+            await AssertRoutes(registry, routes);
+            _output.WriteLine($"R2 variant eligibility / {(npm ? "NPM" : "FHIR")} / all unlisted={allUnlisted}; hidden requested version acquired only when listing eligible.");
+        }
+
+        using (LocalPackageFixture files = new())
+        {
+            await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+            const string Name = "example.test.r2.explicit-hidden";
+            LocalHttpFixture.ExpectedRequest route = registry.Expect("GET", "/" + R2ArchivePath(npm, Name, "1.0.0"), ArchiveResponse(Name));
+            using FhirPackageService service = PackageService(R2Configuration(files, npm, [registry.Address.AbsoluteUri]));
+            service.Init();
+            Assert.Equal("1.0.0", Assert.Single(await service.InstallPackages([Name + "#1.0.0"], [], null).WaitAsync(LocalHttpFixture.Deadline)).Version);
+            await AssertRoutes(registry, [route]);
+        }
+    }
+
+    /// <summary>Unused invalid registrations cannot break an offline manager or hide a later valid registry.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnusedInvalidRegistryDoesNotPreventOfflineStartup(bool npm)
+    {
+        const string Invalid = "http://config-user:config-password@[invalid-host]/?config-query=secret#config-fragment";
+        using (LocalPackageFixture files = new())
+        {
+            await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+            CandleConfig config = R2Configuration(files, npm, [Invalid, registry.Address.AbsoluteUri]);
+            R1PackageLogger logger = new();
+            using FhirPackageService service = new(logger, config);
+            FhirStoreManager manager = new(new Dictionary<string, TenantConfiguration>
+            {
+                ["offline"] = Tenant(FhirReleases.FhirSequenceCodes.R5, "offline"),
+            }, NullLogger<FhirStoreManager>.Instance, config, service);
+            try
+            {
+                manager.Init();
+                Assert.True(service.IsReady);
+                Assert.Single(((IFhirStoreManager)manager).Values);
+                Assert.Empty(await service.InstallPackages([], [], null).WaitAsync(LocalHttpFixture.Deadline));
+                Assert.Empty(registry.Requests);
+                Assert.DoesNotContain(logger.Entries, entry => entry.level == LogLevel.Warning);
+            }
+            finally
+            {
+                await StopAndDispose(manager);
+            }
+            ((IDisposable)service).Dispose();
+            Assert.DoesNotContain(logger.Entries, entry => entry.level == LogLevel.Warning);
+            Assert.Empty(registry.Requests);
+        }
+
+        foreach (string workflow in new[] { "latest", "explicit", "variant" })
+        {
+            foreach (string order in new[] { "only", "before", "after" })
+            {
+                using LocalPackageFixture files = new();
+                await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+                string root = registry.Address.AbsoluteUri.TrimEnd('/');
+                string[] endpoints = order == "only" ? [Invalid] : order == "before" ? [Invalid, root] : [root, Invalid];
+                string name = "example.test.r2.configuration." + workflow + "." + order;
+                string acquired = workflow == "variant" ? name + ".r4" : name;
+                if (workflow == "variant")
+                {
+                    WritePinnedCache(files.CacheDirectory, new PackageReference(name, "1.0.0"), ProtocolManifest(name), new Dictionary<string, string>());
+                }
+                List<LocalHttpFixture.ExpectedRequest> routes = [];
+                if (order != "only")
+                {
+                    if (workflow != "explicit")
+                    {
+                        routes.Add(registry.Expect("GET", "/" + acquired,
+                            LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(acquired, "1.0.0"))));
+                    }
+                    string manifest = ProtocolManifest(acquired);
+                    if (workflow == "variant")
+                    {
+                        manifest = manifest.Replace("5.0.0", "4.0.1", StringComparison.Ordinal);
+                    }
+                    routes.Add(registry.Expect("GET", "/" + R2ArchivePath(npm, acquired, "1.0.0"),
+                        new LocalHttpFixture.RawResponse(HttpStatusCode.OK, "application/octet-stream",
+                            LocalPackageFixture.Archive(manifest, new Dictionary<string, string>()))));
+                }
+                R1PackageLogger logger = new();
+                using FhirPackageService service = new(logger, R2Configuration(files, npm, endpoints));
+                service.Init();
+                Assert.DoesNotContain(logger.Entries, entry => entry.level == LogLevel.Warning);
+                string directive = workflow == "latest" ? name : name + "#1.0.0";
+                List<PackageReference>? installed = null;
+                Exception? error = await Record.ExceptionAsync(async () =>
+                    installed = await service.InstallPackages([directive], [], workflow == "variant" ? [FhirReleases.FhirSequenceCodes.R4] : null)
+                        .WaitAsync(LocalHttpFixture.Deadline));
+                if (order == "only" && workflow != "variant")
+                {
+                    Assert.Equal(workflow == "latest" ? $"Failed to resolve latest version of {name} ({name})"
+                        : $"Failed to install package {name}@1.0.0 as requested by {directive}", Assert.IsType<Exception>(error).Message);
+                    Assert.Null(error!.InnerException);
+                    Assert.Null(installed);
+                }
+                else
+                {
+                    Assert.Null(error);
+                    Assert.Equal(workflow == "variant" && order != "only" ? new[] { name, acquired } : new[] { name },
+                        Assert.IsType<List<PackageReference>>(installed).Select(reference => reference.Name));
+                }
+                if (workflow == "latest" && order == "only")
+                {
+                    const string Again = "example.test.r2.configuration.again";
+                    Exception again = await Assert.ThrowsAsync<Exception>(() => service.InstallPackages([Again], [], null).WaitAsync(LocalHttpFixture.Deadline));
+                    Assert.Equal($"Failed to resolve latest version of {Again} ({Again})", again.Message);
+                }
+                bool usedInvalid = order != "after" || workflow == "latest";
+                AssertR2ConfigurationWarnings(logger, npm, usedInvalid ? (order == "after" ? 2 : 1) : null); // R2 candidate only
+                if (routes.Count > 0)
+                {
+                    await AssertRoutes(registry, routes);
+                }
+                else
+                {
+                    Assert.Empty(registry.Requests);
+                }
+                ((IDisposable)service).Dispose();
+                AssertR2ConfigurationWarnings(logger, npm, usedInvalid ? (order == "after" ? 2 : 1) : null); // R2 candidate only
+                _output.WriteLine($"R2 invalid registry / {(npm ? "NPM" : "FHIR")} / {workflow} / {order}; generic failure or exact fallback, no exception leakage.");
+            }
+        }
+    }
+
+    /// <summary>Real FIN-terminated Content-Length underflow is a body-read failure, not malformed JSON or a reset.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TruncatedRegistryResponsePreservesBaselineFallback(bool npm)
+    {
+        await using (R2WireRegistry control = new([new("/control", Encoding.UTF8.GetBytes("{\"name\":\"control\",\"versions\":{"), true)]))
+        {
+            using HttpClient http = new(new SocketsHttpHandler { UseProxy = false });
+            using HttpResponseMessage response = await http.GetAsync(control.Root + "/control", HttpCompletionOption.ResponseHeadersRead)
+                .WaitAsync(LocalHttpFixture.Deadline);
+            using Stream body = await response.Content.ReadAsStreamAsync().WaitAsync(LocalHttpFixture.Deadline);
+            HttpIOException error = await Assert.ThrowsAsync<HttpIOException>(() => body.CopyToAsync(Stream.Null).WaitAsync(LocalHttpFixture.Deadline));
+            Assert.Equal(HttpRequestError.ResponseEnded, error.HttpRequestError);
+            await control.AssertComplete();
+        }
+        foreach (bool failureFirst in new[] { true, false })
+        {
+            foreach (bool usable in new[] { true, false })
+            {
+                using LocalPackageFixture files = new();
+                string name = $"example.test.r2.truncated.{failureFirst}.{usable}".ToLowerInvariant();
+                string[] paths = failureFirst ? ["/failed", "/winner"] : ["/winner", "/failed"];
+                List<R2WireResponse> script = [];
+                foreach (string path in paths)
+                {
+                    script.Add(new(path + "/" + name, Encoding.UTF8.GetBytes(path == "/failed"
+                        ? "{\"name\":\"" + name + "\",\"versions\":{"
+                        : RegistryListing(name, usable ? "1.0.0" : "invalid-version")), path == "/failed"));
+                }
+                if (usable)
+                {
+                    foreach (string path in paths)
+                    {
+                        script.Add(new(path + "/" + R2ArchivePath(npm, name, "1.0.0"),
+                            path == "/failed" ? [] : ArchiveResponse(name).Body, false,
+                            path == "/failed" ? 404 : 200, "application/octet-stream"));
+                        if (path == "/winner")
+                        {
+                            break;
+                        }
+                    }
+                }
+                await using R2WireRegistry registry = new(script);
+                R1PackageLogger logger = new();
+                using FhirPackageService service = new(logger, R2Configuration(files, npm, paths.Select(path => registry.Root + path).ToArray()));
+                service.Init();
+                if (usable)
+                {
+                    Assert.Equal("1.0.0", Assert.Single(await service.InstallPackages([name], [], null).WaitAsync(LocalHttpFixture.Deadline)).Version);
+                }
+                else
+                {
+                    Exception error = await Assert.ThrowsAsync<Exception>(() => service.InstallPackages([name], [], null).WaitAsync(LocalHttpFixture.Deadline));
+                    Assert.Equal($"Failed to resolve latest version of {name} ({name})", error.Message);
+                    Assert.Empty(Directory.GetFileSystemEntries(files.CacheDirectory));
+                }
+                AssertR1UnavailableWarnings(logger, name, registry.Root + "/failed", R1ListingFailure.ResponseEnded); // R2 candidate only
+                await registry.AssertComplete();
+                await registry.DisposeAsync();
+                Assert.True(registry.Disposed);
+                _output.WriteLine($"R2 real Content-Length underflow / {(npm ? "NPM" : "FHIR")} / failure first={failureFirst} / usable={usable}; exact script and owned socket disposal.");
+            }
+        }
+    }
+
+    private static CandleConfig R2Configuration(LocalPackageFixture files, bool npm, string[] endpoints) =>
+        files.Configuration() with { AdditionalFhirRegistryUrls = npm ? [] : endpoints, AdditionalNpmRegistryUrls = npm ? endpoints : [] };
+
+    private static string R2ArchivePath(bool npm, string name, string version) =>
+        npm ? $"{name}/-/{name}-{version}.tgz" : $"{name}/{version}";
+
+    private static string R2MarkedListing(string name, params (string version, string? marker)[] entries)
+    {
+        JsonObject listing = JsonNode.Parse(RegistryListing(name, entries.Select(entry => entry.version).ToArray()))!.AsObject();
+        foreach ((string version, string? marker) in entries)
+        {
+            if (marker is not null)
+            {
+                listing["versions"]![version]!["unlisted"] = JsonNode.Parse(marker);
+            }
+        }
+        return listing.ToJsonString();
+    }
+
+    private sealed record R2WireResponse(string Path, byte[] Body, bool Truncated, int Status = 200, string ContentType = "application/json");
+
+    private sealed class R2WireRegistry : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _lifetime = new(LocalHttpFixture.Deadline);
+        private readonly List<R2WireResponse> _script;
+        private readonly List<string> _requests = [];
+        private readonly Task _serve;
+        private int _closed;
+
+        internal R2WireRegistry(IEnumerable<R2WireResponse> script)
+        {
+            _script = script.ToList();
+            _listener.Start();
+            Root = "http://127.0.0.1:" + ((IPEndPoint)_listener.LocalEndpoint).Port;
+            _serve = Serve();
+        }
+
+        internal string Root { get; }
+        internal bool Disposed { get; private set; }
+
+        private async Task Serve()
+        {
+            foreach (R2WireResponse response in _script)
+            {
+                using TcpClient peer = await _listener.AcceptTcpClientAsync(_lifetime.Token);
+                try
+                {
+                    using NetworkStream stream = peer.GetStream();
+                    List<byte> head = [];
+                    byte[] octet = new byte[1];
+                    while (head.Count < 16384)
+                    {
+                        Assert.Equal(1, await stream.ReadAsync(octet, _lifetime.Token));
+                        head.Add(octet[0]);
+                        if (head.Count >= 4 && head.TakeLast(4).SequenceEqual(new byte[] { 13, 10, 13, 10 }))
+                        {
+                            break;
+                        }
+                    }
+                    string header = Encoding.ASCII.GetString(head.ToArray());
+                    Assert.EndsWith("\r\n\r\n", header, StringComparison.Ordinal);
+                    string request = header.Split("\r\n", StringSplitOptions.None)[0];
+                    _requests.Add(request);
+                    // Fail closed after draining the complete request head.
+                    Assert.Equal("GET " + response.Path + " HTTP/1.1", request);
+                    byte[] responseHead = Encoding.ASCII.GetBytes($"HTTP/1.1 {response.Status} Fixture\r\nContent-Type: {response.ContentType}\r\nContent-Length: {response.Body.Length + (response.Truncated ? 128 : 0)}\r\nConnection: close\r\n\r\n");
+                    await stream.WriteAsync(responseHead, _lifetime.Token);
+                    await stream.WriteAsync(response.Body, _lifetime.Token);
+                    await stream.FlushAsync(_lifetime.Token);
+                    peer.Client.Shutdown(SocketShutdown.Send);
+                }
+                finally
+                {
+                    _closed++;
+                }
+            }
+        }
+
+        internal async Task AssertComplete()
+        {
+            await _serve.WaitAsync(LocalHttpFixture.Deadline);
+            Assert.Equal(_script.Select(response => "GET " + response.Path + " HTTP/1.1"), _requests);
+            Assert.Equal(_script.Count, _closed);
+            Assert.False(_listener.Pending());
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Disposed)
+            {
+                return;
+            }
+            Disposed = true;
+            await _lifetime.CancelAsync();
+            _listener.Stop();
+            try
+            {
+                await _serve.WaitAsync(LocalHttpFixture.Deadline);
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                _lifetime.Dispose();
+            }
+        }
+    }
+
+    #endregion
+
+    private static void AssertR2MarkerWarnings(R1PackageLogger logger, string name, string endpoint, bool complex)
+    {
+        if (complex)
+        {
+            AssertR1UnavailableWarnings(logger, name, endpoint, R1ListingFailure.Malformed);
+        }
+        else
+        {
+            Assert.DoesNotContain(logger.Entries, entry => entry.level == LogLevel.Warning);
+        }
+    }
+
+    private static void AssertR2ConfigurationWarnings(R1PackageLogger logger, bool npm, int? ordinal)
+    {
+        (LogLevel level, string message, Exception? exception, string fields)[] warnings =
+            logger.Entries.Where(entry => entry.level == LogLevel.Warning).ToArray();
+        if (ordinal is null)
+        {
+            Assert.Empty(warnings);
+            return;
+        }
+        (LogLevel level, string message, Exception? exception, string fields) warning = Assert.Single(warnings);
+        Assert.Null(warning.exception);
+        Assert.Contains("configuration", warning.message, StringComparison.Ordinal);
+        Assert.Contains("Ordinal=" + ordinal, warning.fields, StringComparison.Ordinal);
+        Assert.Contains("Protocol=" + (npm ? "Npm" : "FhirNpm"), warning.fields, StringComparison.Ordinal);
+        foreach (string sentinel in new[] { "config-user", "config-password", "invalid-host", "config-query", "secret", "config-fragment", "not-an-absolute-registry", "ArgumentException", "UriFormatException" })
+        {
+            Assert.DoesNotContain(sentinel, warning.message + warning.fields, StringComparison.Ordinal);
+        }
+    }
+
     #region R1 portable H1 tests and transport helpers
 
     /// <summary>Unavailable leaf registries do not discard a latest winner, in either configured order.</summary>
@@ -297,7 +703,7 @@ public sealed class Sdk6PackageTests
         foreach (R1ListingFailure failure in new[]
         {
             R1ListingFailure.NotFound, R1ListingFailure.HttpStatus,
-            R1ListingFailure.Transport, R1ListingFailure.Deadline, R1ListingFailure.Malformed,
+            R1ListingFailure.Transport, R1ListingFailure.Deadline, R1ListingFailure.Malformed, R1ListingFailure.ResponseEnded,
         })
         {
             foreach (bool failureFirst in new[] { true, false })
@@ -306,7 +712,7 @@ public sealed class Sdk6PackageTests
                 await AssertR1LatestScenario(npm, failure, failureFirst, usableWinner: false);
             }
         }
-        AssertR1InvalidRegistryConfiguration(npm);
+        await AssertR1InvalidRegistryConfiguration(npm);
         await AssertR1NativeDeadline(npm);
     }
 
@@ -317,8 +723,8 @@ public sealed class Sdk6PackageTests
         await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
         string name = $"example.test.r1.{(npm ? "npm" : "fhir")}.{failure.ToString().ToLowerInvariant()}.{(failureFirst ? "before" : "after")}.{(usableWinner ? "winner" : "empty")}";
         string root = registry.Address.AbsoluteUri.TrimEnd('/');
-        bool synthetic = failure is R1ListingFailure.Transport or R1ListingFailure.Deadline;
-        // These are never sent to a network transport: the finite handler owns both failure cases.
+        bool synthetic = failure is R1ListingFailure.Transport or R1ListingFailure.Deadline or R1ListingFailure.ResponseEnded;
+        // These are never sent to a network transport: the finite handler owns these failure cases.
         string failedRoot = synthetic
             ? "https://credential-user:credential-password@registry.example.test/failed?query-secret=hidden"
             : root + "/failed";
@@ -414,7 +820,7 @@ public sealed class Sdk6PackageTests
         _output.WriteLine($"R1 latest / {(npm ? "NPM" : "FHIR")} / {failure} / failure {(failureFirst ? "before" : "after")} / usable winner={usableWinner}; strict fallback script complete.");
     }
 
-    private enum R1ListingFailure { NotFound, HttpStatus, Transport, Deadline, Malformed }
+    private enum R1ListingFailure { NotFound, HttpStatus, Transport, Deadline, Malformed, ResponseEnded, OtherIo, OtherHttpIo, Cancellation }
 
     private static string R1ListingUri(string root, string name) =>
         new Uri(new Uri(root.TrimEnd('/') + "/").AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(name)).AbsoluteUri;
@@ -426,6 +832,7 @@ public sealed class Sdk6PackageTests
         private readonly List<string> _expected = [];
         private readonly List<string> _requests = [];
         private readonly List<R1ResponseContent> _contents = [];
+        private readonly List<R2FailingBody> _streams = [];
         private readonly List<string> _unexpected = [];
         private int _cancellations;
 
@@ -479,6 +886,16 @@ public sealed class Sdk6PackageTests
                 }
                 throw new InvalidOperationException("The scripted delay completed without registry cancellation.");
             }
+            if (failure is R1ListingFailure.ResponseEnded or R1ListingFailure.OtherIo or R1ListingFailure.OtherHttpIo or R1ListingFailure.Cancellation)
+            {
+                R2FailingBody stream = new(failure.Value);
+                _streams.Add(stream);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StreamContent(stream),
+                };
+            }
             if (response is not null)
             {
                 R1ResponseContent content = new(response.Body);
@@ -500,6 +917,7 @@ public sealed class Sdk6PackageTests
             Assert.Empty(_remaining);
             Assert.Equal(cancellations, _cancellations);
             Assert.All(_contents, content => Assert.True(content.Disposed));
+            Assert.All(_streams, stream => Assert.True(stream.Disposed));
         }
 
         protected override void Dispose(bool disposing)
@@ -517,6 +935,72 @@ public sealed class Sdk6PackageTests
         {
             Disposed = true;
             base.Dispose(disposing);
+        }
+    }
+
+    private sealed class R2FailingBody(R1ListingFailure failure) : MemoryStream(Encoding.UTF8.GetBytes("{\"name\":\"response-body-secret\",\"versions\":{"))
+    {
+        internal bool Disposed { get; private set; }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Position < Length)
+            {
+                return base.ReadAsync(buffer, cancellationToken);
+            }
+            Exception error = failure switch
+            {
+                R1ListingFailure.ResponseEnded => new HttpIOException(HttpRequestError.ResponseEnded, "exception-message-secret"),
+                R1ListingFailure.OtherIo => new IOException("exception-message-secret"),
+                R1ListingFailure.OtherHttpIo => new HttpIOException(HttpRequestError.InvalidResponse, "exception-message-secret"),
+                R1ListingFailure.Cancellation => new OperationCanceledException("exception-message-secret"),
+                _ => throw new InvalidOperationException("Unscripted body failure."),
+            };
+            return ValueTask.FromException<int>(error);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>Body containment is not a general I/O or cancellation policy.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OtherListingBodyErrorsStillPropagate(bool npm)
+    {
+        foreach (R1ListingFailure failure in new[] { R1ListingFailure.OtherIo, R1ListingFailure.OtherHttpIo, R1ListingFailure.Cancellation })
+        {
+            using LocalPackageFixture files = new();
+            using FhirPackageService service = PackageService(files.Configuration());
+            service.Init();
+            const string Root = "https://registry.example.test/body-control";
+            const string Name = "example.test.r2.body-control";
+            using R1RegistryHandler handler = new();
+            handler.ExpectFailure(R1ListingUri(Root, Name), failure);
+            using HttpClient http = new(handler) { Timeout = Timeout.InfiniteTimeSpan };
+            using (R1RegistryClients clients = new(service, http, [Root], npm))
+            {
+                Exception? error = await Record.ExceptionAsync(() => service.InstallPackages([Name], [], null).WaitAsync(LocalHttpFixture.Deadline));
+                if (failure == R1ListingFailure.OtherIo)
+                {
+                    Assert.IsType<IOException>(error);
+                }
+                else if (failure == R1ListingFailure.OtherHttpIo)
+                {
+                    Assert.Equal(HttpRequestError.InvalidResponse, Assert.IsType<HttpIOException>(error).HttpRequestError);
+                }
+                else
+                {
+                    Assert.IsAssignableFrom<OperationCanceledException>(error);
+                }
+                handler.AssertComplete(0);
+            }
+            http.Dispose();
+            Assert.True(handler.Disposed);
         }
     }
 
@@ -541,15 +1025,15 @@ public sealed class Sdk6PackageTests
 
     private sealed class R1RegistryClients : IDisposable
     {
-        private readonly List<FhirPkg.Registry.IRegistryClient> _target;
-        private readonly FhirPkg.Registry.IRegistryClient[] _original;
+        private readonly List<Lazy<FhirPkg.Registry.IRegistryClient?>> _target;
+        private readonly Lazy<FhirPkg.Registry.IRegistryClient?>[] _original;
         private readonly List<FhirPkg.Registry.IRegistryClient> _owned = [];
 
         internal R1RegistryClients(FhirPackageService service, HttpClient http, IEnumerable<string> endpoints, bool npm)
         {
             Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
             FieldInfo field = typeof(FhirPackageService).GetField("_packageClients", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            _target = Assert.IsType<List<FhirPkg.Registry.IRegistryClient>>(field.GetValue(service));
+            _target = Assert.IsType<List<Lazy<FhirPkg.Registry.IRegistryClient?>>>(field.GetValue(service));
             _original = _target.ToArray();
             try
             {
@@ -565,7 +1049,7 @@ public sealed class Sdk6PackageTests
                         NullLoggerFactory.Instance, null));
                 }
                 _target.Clear();
-                _target.AddRange(_owned);
+                _target.AddRange(_owned.Select(client => new Lazy<FhirPkg.Registry.IRegistryClient?>(() => client)));
             }
             catch
             {
@@ -586,7 +1070,7 @@ public sealed class Sdk6PackageTests
         }
     }
 
-    private void AssertR1InvalidRegistryConfiguration(bool npm)
+    private async Task AssertR1InvalidRegistryConfiguration(bool npm)
     {
         using LocalPackageFixture files = new();
         CandleConfig config = files.Configuration() with
@@ -596,9 +1080,15 @@ public sealed class Sdk6PackageTests
         };
         R1PackageLogger logger = new();
         using FhirPackageService service = new(logger, config);
-        ArgumentException error = Assert.Throws<ArgumentException>(service.Init);
-        _output.WriteLine($"R1-NATIVE-CONFIG|net{Environment.Version.Major}.0|protocol={(npm ? "NPM" : "FHIR")}|stage=Init|exception={error.GetType().FullName}; no acquisition attempted.");
+        service.Init();
         Assert.DoesNotContain(logger.Entries, entry => entry.level == LogLevel.Warning);
+        const string Name = "example.test.r1.invalid";
+        Exception error = await Assert.ThrowsAsync<Exception>(() =>
+            service.InstallPackages([Name], [], null).WaitAsync(LocalHttpFixture.Deadline));
+        Assert.Equal($"Failed to resolve latest version of {Name} ({Name})", error.Message);
+        Assert.Null(error.InnerException);
+        AssertR2ConfigurationWarnings(logger, npm, 1);
+        _output.WriteLine($"R1-NATIVE-CONFIG|net{Environment.Version.Major}.0|protocol={(npm ? "NPM" : "FHIR")}|stage=InstallPackages|exception={error.GetType().FullName}; generic failure, no acquisition.");
         Assert.Empty(Directory.GetFileSystemEntries(files.CacheDirectory));
     }
 
@@ -615,7 +1105,7 @@ public sealed class Sdk6PackageTests
         {
             FieldInfo field = typeof(FhirPackageService).GetField("_packageClients", BindingFlags.Instance | BindingFlags.NonPublic)!;
             FhirPkg.Registry.IRegistryClient client = Assert.Single(
-                Assert.IsType<List<FhirPkg.Registry.IRegistryClient>>(field.GetValue(service)));
+                Assert.IsType<List<Lazy<FhirPkg.Registry.IRegistryClient?>>>(field.GetValue(service))).Value!;
             await Assert.ThrowsAsync<FhirPkg.Registry.RegistryResponseTimeoutException>(() =>
                 client.GetPackageListingAsync("example.test.r1.deadline-control").WaitAsync(LocalHttpFixture.Deadline));
             handler.AssertComplete(1);
@@ -645,6 +1135,7 @@ public sealed class Sdk6PackageTests
             R1ListingFailure.Transport => "transport",
             R1ListingFailure.Deadline => "deadline",
             R1ListingFailure.Malformed => "listing-json",
+            R1ListingFailure.ResponseEnded => "response-body",
             _ => throw new InvalidOperationException("No warning category for this case."),
         };
         Assert.Contains(category, warning.message, StringComparison.OrdinalIgnoreCase);
@@ -757,6 +1248,7 @@ public sealed class Sdk6PackageTests
         string tenant = "cold-" + LocalPackageFixture.VersionName(version);
         FhirStoreManager manager = new(new Dictionary<string, TenantConfiguration> { [tenant] = Tenant(version, tenant) },
             NullLogger<FhirStoreManager>.Instance, config, packages);
+        CompatibilityBindings bindings = new();
         try
         {
             manager.Init();
@@ -766,7 +1258,6 @@ public sealed class Sdk6PackageTests
             Assert.Equal(new[] { "cold-patient" }, store["Patient"].Keys);
             Assert.Equal(new[] { "cold-observation" }, store["Observation"].Keys);
             Assert.False(store["Patient"].ContainsKey("neighbor"));
-            CompatibilityBindings bindings = new();
             WireContractAssertions.BindBaseUrl(bindings, tenant, store.Config.BaseUrl);
             foreach (string resourceType in new[] { "Patient", "Observation" })
             {
@@ -1777,10 +2268,10 @@ public sealed class Sdk6PackageTests
             };
             using FhirPackageService packages = PackageService(config);
             FhirStoreManager manager = new(tenants, NullLogger<FhirStoreManager>.Instance, config, packages);
+            CompatibilityBindings bindings = new();
             try
             {
                 manager.Init();
-                CompatibilityBindings bindings = new();
                 foreach (IFhirStore store in ((IFhirStoreManager)manager).Values)
                 {
                     string tenant = store.Config.ControllerName;
