@@ -81,6 +81,38 @@ public class ConfigTests
             config.PackageMaxArchiveEntries, config.PackageMaxArchivePathLength, config.PackageMaxArchiveDepth }.ShouldBe(expected);
 
     [Fact]
+    public void TestParseCliDefaultsPreserveConstructorDistinctions()
+    {
+        CandleConfig constructorDefaults = new();
+
+        constructorDefaults.ListenPort.ShouldBe(5826);
+        constructorDefaults.SmtpPort.ShouldBe(465);
+        constructorDefaults.OpenTelemetryProtocol.ShouldBe("grpc");
+        constructorDefaults.SupportNotChanged.ShouldBeTrue();
+        constructorDefaults.RawSupportNotChanged.ShouldBeNull();
+
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) => 0);
+        ParseResult pr = rootCommand.Parse([], new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+
+        CandleConfig parsedDefaults = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+        pr.Errors.ShouldBeEmpty();
+        extConfig.AsEnumerable().ShouldBeEmpty();
+        parsedDefaults.ListenPort.ShouldBe(5826);
+        parsedDefaults.SmtpPort.ShouldBe(465);
+        parsedDefaults.OpenTelemetryProtocol.ShouldBe("grpc");
+        parsedDefaults.SupportNotChanged.ShouldBeFalse();
+        parsedDefaults.RawSupportNotChanged.ShouldBeNull();
+    }
+
+    [Fact]
     public void TestParseCliInt()
     {
         string[] args = ["--port", "8080"];
@@ -728,8 +760,74 @@ public class ConfigTests
     }
 
     [Theory]
+    [InlineData("--url", "-u")]
+    [InlineData("--open-browser", "-o")]
+    [InlineData("--max-resources", "-m")]
+    [InlineData("--disable-ui", "--headless")]
+    [InlineData("--load-package", "-p")]
+    [InlineData("--protect-source", "--protect-loaded-content")]
+    public void TestParseCliAliasesMatchPrimaryOptions(string primaryOption, string alias)
+    {
+        IConfiguration extConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Open_Browser"] = "true",
+                ["Disable_Ui"] = "true",
+                ["Protect_Source"] = "true",
+            })
+            .Build();
+
+        foreach (string option in new[] { primaryOption, alias })
+        {
+            string[] args = primaryOption switch
+            {
+                "--url" => [option, "http://alias.invalid/"],
+                "--max-resources" => [option, "1234"],
+                "--load-package" => [option, "a", option, "b", option, "a"],
+                _ => [option, "false"],
+            };
+            CliRootCommand rootCommand = new();
+            rootCommand.SetAction((ParseResult _) => 0);
+            ParseResult pr = rootCommand.Parse(args, new ParserConfiguration()
+            {
+                ResponseFileTokenReplacer = null,
+            });
+
+            CandleConfig config = new(rootCommand.CommandCliOptions, pr, extConfig);
+
+            pr.Errors.ShouldBeEmpty();
+            switch (primaryOption)
+            {
+                case "--url":
+                    config.PublicUrl.ShouldBe("http://alias.invalid/");
+                    break;
+                case "--open-browser":
+                    config.OpenBrowser.ShouldBeFalse();
+                    break;
+                case "--max-resources":
+                    config.MaxResourceCount.ShouldBe(1234);
+                    break;
+                case "--disable-ui":
+                    config.Headless.ShouldBeFalse();
+                    break;
+                case "--load-package":
+                    config.PublishedPackages.ShouldBe(new[] { "a", "b", "a" });
+                    break;
+                case "--protect-source":
+                    config.ProtectLoadedContent.ShouldBeFalse();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(primaryOption));
+            }
+        }
+    }
+
+    [Theory]
     [InlineData("--help")]
     [InlineData("-h")]
+    [InlineData("/h")]
+    [InlineData("-?")]
+    [InlineData("/?")]
     public async Task TestParseCliHelpDoesNotInvokeAction(string helpOption)
     {
         bool actionInvoked = false;
@@ -755,12 +853,103 @@ public class ConfigTests
         exitCode.ShouldBe(0);
         actionInvoked.ShouldBeFalse();
         error.ToString().ShouldBeEmpty();
-        output.ToString().ShouldContain("--port");
-        output.ToString().ShouldContain("--url");
-        output.ToString().ShouldContain("--additional-fhir-registry-urls");
-        output.ToString().ShouldContain("--r4");
-        output.ToString().ShouldContain("--r4b");
-        output.ToString().ShouldContain("--r5");
+
+        string[] expectedOptions =
+        [
+            "--url", "-u", "--port", "--open-browser", "-o", "--max-resources", "-m", "--disable-ui", "--headless",
+            "--fhir-package-cache", "--package-max-compressed-bytes", "--package-max-expanded-bytes",
+            "--package-max-entry-bytes", "--package-max-archive-entries", "--package-max-archive-path-length",
+            "--package-max-archive-depth", "--use-official-registries", "--additional-fhir-registry-urls",
+            "--additional-npm-registry-urls", "--load-package", "-p", "--ci-package", "--load-examples",
+            "--reference-implementation", "--enable-mcp", "--fhir-source", "--protect-source", "--protect-loaded-content",
+            "--r4", "--r4b", "--r5", "--r6", "--smart-required", "--smart-optional", "--detect-unchanged",
+            "--create-existing-id", "--create-as-update", "--strict", "--max-subscription-minutes",
+            "--zulip-email", "--zulip-key", "--zulip-url", "--smtp-host", "--smtp-port", "--smtp-user", "--smtp-password",
+            "--fhirpath-lab-url", "--otel-otlp-endpoint", "--otel-otlp-protocol", "--otel-otlp-traces-endpoint",
+            "--otel-otlp-metrics-endpoint", "--otel-otlp-logs-endpoint", "--version",
+        ];
+        // v2 indents labels by two spaces and separates descriptions with at least two more.
+        // Wrapped descriptions stay in the description column, even when they mention other options.
+        string[] optionLabelTokens = output.ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith("  -", StringComparison.Ordinal))
+            .Select(line => line[2..].Split("  ", 2, StringSplitOptions.None)[0])
+            .SelectMany(label => label.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
+            .ToArray();
+
+        foreach (string option in expectedOptions)
+        {
+            optionLabelTokens.ShouldContain(option);
+        }
+    }
+
+    [Fact]
+    public async Task TestParseCliVersionDoesNotInvokeAction()
+    {
+        bool actionInvoked = false;
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction((ParseResult _) =>
+        {
+            actionInvoked = true;
+        });
+        ParseResult pr = rootCommand.Parse(["--version"], new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+        using StringWriter output = new();
+        using StringWriter error = new();
+
+        int exitCode = await pr.InvokeAsync(new InvocationConfiguration()
+        {
+            Output = output,
+            Error = error,
+        });
+
+        pr.Errors.ShouldBeEmpty();
+        exitCode.ShouldBe(0);
+        actionInvoked.ShouldBeFalse();
+        error.ToString().ShouldBeEmpty();
+        output.ToString().ShouldNotBeNullOrWhiteSpace();
+        Assembly? entryAssembly = Assembly.GetEntryAssembly();
+        entryAssembly.ShouldNotBeNull();
+        AssemblyInformationalVersionAttribute? version = entryAssembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+        version.ShouldNotBeNull();
+        output.ToString().Trim().ShouldBe(version.InformationalVersion);
+    }
+
+    [Fact]
+    public async Task TestParseCliSuccessInvokesAsyncActionOnce()
+    {
+        int actionCount = 0;
+        ParseResult? receivedParseResult = null;
+        int? receivedPort = null;
+        CliRootCommand rootCommand = new();
+        rootCommand.SetAction(async (ParseResult pr) =>
+        {
+            actionCount++;
+            receivedParseResult = pr;
+            receivedPort = pr.GetValue(rootCommand.CommandCliOptions.ListenPort);
+            await Task.CompletedTask;
+        });
+        ParseResult pr = rootCommand.Parse(["--port", "8080"], new ParserConfiguration()
+        {
+            ResponseFileTokenReplacer = null,
+        });
+        using StringWriter output = new();
+        using StringWriter error = new();
+
+        int exitCode = await pr.InvokeAsync(new InvocationConfiguration()
+        {
+            Output = output,
+            Error = error,
+        });
+
+        pr.Errors.ShouldBeEmpty();
+        actionCount.ShouldBe(1);
+        receivedParseResult.ShouldBeSameAs(pr);
+        receivedPort.ShouldBe(8080);
+        exitCode.ShouldBe(0);
+        error.ToString().ShouldBeEmpty();
     }
 
     [Theory]
