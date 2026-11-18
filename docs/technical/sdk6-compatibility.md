@@ -1054,3 +1054,150 @@ parser/request, local supplier implementation or supplier upgrade.
 Phase 6 remains a prerequisite gate, not implemented work. These Windows
 synthetic results do not establish Linux/macOS, live/operator, browser/RI,
 precompiled CLR/ABI or complete selected-request closure.
+
+## R2 Phase 6 configurable limits and null-listing fallback (2026-11-17)
+
+The user's later explicit M3/M5 direction supersedes the earlier supplier-only
+blocker above: use the existing native finite defaults with Candle-owned
+configuration, and contain null-listing exceptions while trying remaining
+registries. **M3 and M5 are resolved within this selected scope.** Finite
+archive acceptance is an intentional, user-approved narrowing, not proof of
+unbounded parity with the original installer. The exact supplier remains
+**fhir-pkg-lib 2026.1113.1815**; dependency metadata, native archive/identity
+validation, HTTP buffering, cache publication and the CI algorithm are unchanged.
+
+### Policy and containment boundaries
+
+- Common contains six neutral numeric properties, XML documentation, required
+  numeric CLI values, external configuration keys and CLI-over-external-over-
+  default binding. The complete default/CLI/JSON/unprefixed-environment/
+  `Candle`-prefixed-environment matrix, validation rules and depth-33 example
+  are in [Loading initial data](../user/loading-data.md#package-import-limits).
+  The prefix concatenates directly with each key, without an extra underscore.
+- One disk-adapter mapping explicitly assigns **all six** native limits and
+  calls public `Validate()`. Enabled-cache Init validates/snapshots before
+  readiness or directory creation. Nonpositive values, entry > expanded and
+  checked sum/product overflow retain native `InvalidPolicy` /
+  `PolicyValidation`, leaving IsReady/IsConfigured false and the cache path
+  absent. Disabled-cache Init skips unused policy validation; non-numeric
+  values remain CLI/binder failures rather than policy errors.
+- The default public Candle disk constructor explicitly uses CandleConfig
+  defaults. Service cache imports and the real lazy registry factory share the
+  validated first-Init snapshot. All six `FHIRPKG_MAX_*` fields are ignored,
+  even when invalid; filesystem retries still use the existing defaults and
+  ambient `FHIRPKG_FS_*` policy. Later CandleConfig mutation cannot alter an
+  initialized service. Warm-cache reads are not imports. Factory limits govern
+  NPM publication preparation, **not download spooling**; there is no new HTTP
+  buffering or memory ceiling.
+- A typed six-limit-error-code catch before the existing published-acquisition
+  catch-all emits only the stable enum and matching Candle CLI option, then
+  preserves registry fallback. No exception object/message, archive path,
+  manifest/body or URL/query is logged by that warning. CI retains its explicit
+  propagated typed limit failure; other acquisition catches are not redesigned.
+- Only the native `GetPackageListingAsync` await gains protocol-qualified
+  `NullReferenceException` containment for FHIR/NPM, returning empty versions
+  with one sanitized `listing-structure` warning. **Any native NRE within that
+  await boundary is contained; the catch cannot prove which member was null.**
+  This disclosed tradeoff does not catch later host projection/import failures
+  or add general I/O/cancellation containment, a second parser/request, private
+  serializer hooks, stack/message inspection or a supplier implementation.
+
+### Measured Windows regressions
+
+`NullVersionListingPreservesFallback` executes both real native clients against
+null `versions` and null version entries. Direct native controls prove NREs
+reach the await. Both protocols cover before/after usable/unusable winners
+(16 service scenarios per TFM), exact ordered listing/acquisition scripts,
+retained earlier winners, unchanged generic all-unusable failure, no acquisition
+without a winner, disposed responses/handlers and a single warning without
+credential/query/body/exception sentinels. Existing unrelated I/O, typed
+non-ResponseEnded I/O and cancellation negative controls remain passing.
+
+All six configured boundaries use the **same policy** for an accepted archive
+at N and a rejected archive at N+1, with real validating imports:
+
+| Measure | Setting / accepted N | Rejected N+1 |
+|---|---:|---:|
+| Actual gzip compressed bytes | 265 | 266 |
+| Aggregate expanded file bytes | 643 | 644 |
+| Largest entry bytes | 512 | 513 |
+| Archive entries (including directories) | 4 | 5 |
+| Normalized/exact-spelling path characters | 58 | 59 |
+| Archive path components | 3 | 4 |
+
+The gzip neighbor is selected from a finite deterministic payload inventory
+using actual compressed length, never an estimate. The path fixture uses
+decomposed Unicode whose exact spelling is longer than its NFC canonical path.
+Directory entries count explicitly. Separate real archives establish default
+32-component acceptance, default 33 rejection and configured depth-33 success;
+the count includes `package` and filename. Raw manifest/payload bytes,
+neighbor preservation, no rejected identity, and operation-staging cleanup
+remain checked. Every limit also exercises real service acquisition with a
+rejected first registry, exact sanitized option warning and successful second
+registry. Real CI acquisition proves the service's configured import policy
+and propagated typed failure. Snapshot tests mutate all six config values
+after Init, before lazy NPM construction/import, and retain the original policy;
+a restrictive warm service still reads already installed content.
+
+`ConfigTests` checks six defaults, all six JSON keys and CLI precedence with
+byte values beyond Int32, required numeric arguments and binder errors.
+`AmbientNativePackageLimitsAreIgnored` starts **two child runners per TFM**:
+all six native fields set to restrictive valid `1`, then all six set to
+`not-a-number`. Only the child ProcessStartInfo environment is changed; no new
+test mutates the shared process environment. The child-only marker selects the
+assertion branch of the exact same test, preventing recursion/no-op success.
+Each child uses the built Release TFM project with `dotnet test --no-build
+--no-restore` and exact FullyQualifiedName. Inherited `VSTEST_*` connection state
+is removed only there; DOTNET runtime/host paths remain intact. Both pipes are
+drained concurrently, execution is bounded to 150 seconds, and failure cleanup
+can kill only the owned child PID/tree.
+
+Each child verifies delivered native environment values, native ambient-policy
+controls, both real Candle environment providers, the default public cache
+constructor and configured real lazy AddRegistry/NPM listing/download/import
+(no reflection-injected clients). Parent TRX assertions require **exactly one
+total/executed/passed test**, zero failed and the exact expected test name.
+Temporary archives/TRX files belong to fixtures and are cleaned up.
+
+### Executed verification and durable evidence
+
+Root `AGENTS.md` is the command source. All four final commands ran locally:
+
+```powershell
+dotnet build --configuration Release --framework net11.0
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests|FullyQualifiedName~fhir.candle.Tests.ConfigTests"
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6PackageTests|FullyQualifiedName~fhir.candle.Tests.ConfigTests|FullyQualifiedName~fhir.candle.Tests.FhirNpmPackageTests|FullyQualifiedName~fhir.candle.Tests.HostingCompatibilityTests"
+```
+
+Every command exited **0**, zero warnings/errors. The focused net11 gate
+passed **168/168**; the sequential affected gate passed **171/171 on net11.0**
+and **171/171 on net10.0**, zero failures/skips. R4/R4B/R5 loading, manifests,
+CI and singleton hosting controls are included. Runtimes remain .NET 11.0.0 /
+10.0.15. No standalone restore/install, original-checkout port or full suite
+was required. Fresh host/test graphs retain counts 53/38 and 86/74
+(net10/net11), exact1815 and no Firely.Fhir.Packages/SharpZipLib.
+
+Evidence root:
+`C:\Users\ginoc\.copilot\session-state\beafb647-9d7c-48f9-afa1-f06c709ca1a5\files\r2-final-m3-m5\`.
+`{build-net11,focused-net11,build-both,affected-both}-accepted.log` and matching
+`.result.json` files contain full final command output, exits, counts and tested
+source hashes; `accepted-gate-results.json` aggregates those results.
+`isolation-boundaries-both*.log` and matching result files record detailed
+bounded child/actual boundary evidence. `graph-inventory.json` and
+`final-file-hashes.json` retain dependency identities and final file hashes.
+
+An initial build exposed one new xUnit2031 assertion-style warning, corrected
+without suppression. The first focused run passed 162/168: six new fixture
+archives incorrectly used leading `./`, which native validation correctly
+rejects as traversal. The corrected decomposed-Unicode fixture passed 168/168;
+the boundary tests were then strengthened to distinct exact N/N+1 archives
+under one policy and all four final gates rerun successfully. Preliminary logs
+remain separate; no validation or assertion was weakened.
+
+**Still outside this result:** M1 disk deletion-before-publication remains
+explicitly excluded, unchanged and not waived. Historical broader listing-error
+qualification, Linux/macOS, live/operator caches and registries, browser/RI,
+and precompiled CLR/ABI limitations remain; these Windows synthetic tests do
+not establish those claims. The existing source-rebinding requirement and
+historical prefix/platform records above are preserved.

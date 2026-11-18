@@ -10,6 +10,7 @@ using FhirCandle.Configuration;
 using FhirCandle.Extensions;
 using FhirCandle.Models;
 using FhirPkg.Registry;
+using FhirPkg.Installation;
 using Microsoft.Extensions.Logging.Abstractions;
 using Hl7.Fhir.Specification;
 using Microsoft.Extensions.Logging;
@@ -72,6 +73,9 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
     /// <summary>(Immutable) The cache.</summary>
     private _ForPackages.DiskPackageCache? _cache = null;
+
+    /// <summary>The validated first-Init policy, shared by cache imports and lazy registry construction.</summary>
+    private FhirPkg.PackageInstallLimits? _installLimits;
 
     /// <summary>(Immutable) The package clients.</summary>
     private readonly List<Lazy<IRegistryClient?>> _packageClients = [];
@@ -171,6 +175,8 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             return;
         }
 
+        _installLimits = _ForPackages.DiskPackageCache.CreateInstallLimits(_config);
+
         if (_config.FhirCacheDirectory is null)
         {
             _config.FhirCacheDirectory = _ForPackages.DiskPackageCache.GetDefaultRoot();
@@ -194,7 +200,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             _cachePackageDirectory = _config.FhirCacheDirectory;
         }
 
-        _cache = new(_config.FhirCacheDirectory);
+        _cache = new(_config.FhirCacheDirectory, _installLimits);
 
         // check if we are using the official registries
         if (_config.UseOfficialRegistries == true)
@@ -231,7 +237,8 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             {
                 RegistryEndpoint endpoint = new() { Url = url, Type = type };
                 return RegistryClientFactory.CreateClientForEndpoint(
-                    endpoint, _registryHttpClient, NullLoggerFactory.Instance);
+                    endpoint, _registryHttpClient, NullLoggerFactory.Instance,
+                    timeProvider: null, new FhirPkg.FileSystemRetryOptions(), _installLimits!);
             }
             catch (ArgumentException)
             {
@@ -298,6 +305,12 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             client.Endpoint.Type is FhirPkg.Models.RegistryType.FhirNpm or FhirPkg.Models.RegistryType.Npm)
         {
             LogRegistryListingFailure(client.Endpoint, name, "listing-json");
+            return [];
+        }
+        catch (NullReferenceException) when (
+            client.Endpoint.Type is FhirPkg.Models.RegistryType.FhirNpm or FhirPkg.Models.RegistryType.Npm)
+        {
+            LogRegistryListingFailure(client.Endpoint, name, "listing-structure");
             return [];
         }
         List<SemVer> versions = [];
@@ -618,6 +631,11 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 // only need to install from first hit
                 return true;
             }
+            catch (PackageInstallException exception) when (LimitSetting(exception.ErrorCode) is not null)
+            {
+                _logger.LogWarning("Package import limit exceeded: {Code}; configure {Setting}.",
+                    exception.ErrorCode, LimitSetting(exception.ErrorCode));
+            }
             catch (Exception)
             {
                 // ignore
@@ -626,6 +644,17 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
         return false;
     }
+
+    private static string? LimitSetting(PackageInstallErrorCode code) => code switch
+    {
+        PackageInstallErrorCode.CompressedSizeLimitExceeded => "--package-max-compressed-bytes",
+        PackageInstallErrorCode.ExpandedSizeLimitExceeded => "--package-max-expanded-bytes",
+        PackageInstallErrorCode.EntrySizeLimitExceeded => "--package-max-entry-bytes",
+        PackageInstallErrorCode.ArchiveEntryCountLimitExceeded => "--package-max-archive-entries",
+        PackageInstallErrorCode.ArchivePathLengthLimitExceeded => "--package-max-archive-path-length",
+        PackageInstallErrorCode.ArchiveDepthLimitExceeded => "--package-max-archive-depth",
+        _ => null,
+    };
 
     private async Task<bool> PackageExists(string packageId)
     {

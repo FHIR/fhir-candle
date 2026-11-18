@@ -5,6 +5,7 @@
 
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Reflection;
@@ -12,6 +13,9 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Xml.Linq;
+using Microsoft.Extensions.Configuration;
+using FhirPkg.Installation;
 using fhir.candle._ForPackages;
 using fhir.candle.Services;
 using fhir.candle.Tests.Controllers;
@@ -288,6 +292,501 @@ public sealed class Sdk6PackageTests
     }
 
     #region R2 portable black-box tests and wire helper
+
+    /// <summary>Native null-listing failures remain visible but cannot erase another registry's winner.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NullVersionListingPreservesFallback(bool npm)
+    {
+        const string Failed = "https://credential-user:credential-password@registry.example.test/failed?query-secret=hidden";
+        const string Winner = "https://registry.example.test/winner";
+        foreach (bool nullVersions in new[] { true, false })
+        {
+            string broken = nullVersions
+                ? """{"name":"response-body-secret","versions":null}"""
+                : """{"name":"response-body-secret","versions":{"1.0.0":null}}""";
+            using (LocalPackageFixture files = new())
+            using (FhirPackageService service = PackageService(files.Configuration()))
+            using (R1RegistryHandler handler = new())
+            using (HttpClient http = new(handler) { Timeout = Timeout.InfiniteTimeSpan })
+            {
+                service.Init();
+                handler.ExpectResponse(R1ListingUri(Failed, "control"),
+                    LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", broken));
+                using R1RegistryClients clients = new(service, http, [Failed], npm);
+                FieldInfo field = typeof(FhirPackageService).GetField("_packageClients", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                FhirPkg.Registry.IRegistryClient native = Assert.Single(
+                    Assert.IsType<List<Lazy<FhirPkg.Registry.IRegistryClient?>>>(field.GetValue(service))).Value!;
+                await Assert.ThrowsAsync<NullReferenceException>(() =>
+                    native.GetPackageListingAsync("control").WaitAsync(LocalHttpFixture.Deadline));
+                handler.AssertComplete(0);
+            }
+            foreach (bool failureFirst in new[] { true, false })
+            {
+                foreach (bool usable in new[] { true, false })
+                {
+                    using LocalPackageFixture files = new();
+                    R1PackageLogger logger = new();
+                    using FhirPackageService service = new(logger, files.Configuration());
+                    service.Init();
+                    string name = $"example.test.r2.null.{nullVersions}.{failureFirst}.{usable}".ToLowerInvariant();
+                    string[] endpoints = failureFirst ? [Failed, Winner] : [Winner, Failed];
+                    using R1RegistryHandler handler = new();
+                    using HttpClient http = new(handler) { Timeout = Timeout.InfiniteTimeSpan };
+                    foreach (string endpoint in endpoints)
+                    {
+                        handler.ExpectResponse(R1ListingUri(endpoint, name), LocalHttpFixture.RawResponse.Text(
+                            HttpStatusCode.OK, "application/json", endpoint == Failed ? broken
+                                : RegistryListing(name, usable ? "1.0.0" : "invalid-version")));
+                    }
+                    if (usable)
+                    {
+                        foreach (string endpoint in endpoints)
+                        {
+                            handler.ExpectResponse(new Uri(endpoint.TrimEnd('/') + "/" + R2ArchivePath(npm, name, "1.0.0")).AbsoluteUri,
+                                endpoint == Failed ? LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound) : ArchiveResponse(name));
+                            if (endpoint == Winner)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    using (R1RegistryClients clients = new(service, http, endpoints, npm))
+                    {
+                        if (usable)
+                        {
+                            PackageReference installed = Assert.Single(await service.InstallPackages([name], [], null).WaitAsync(LocalHttpFixture.Deadline));
+                            Assert.Equal(new PackageReference(name, "1.0.0"), installed);
+                            Assert.Equal(Encoding.UTF8.GetBytes(ProtocolManifest(name)),
+                                File.ReadAllBytes(Path.Combine(LegacyContentPath(files.CacheDirectory, installed), "package.json")));
+                        }
+                        else
+                        {
+                            Exception error = await Assert.ThrowsAsync<Exception>(() =>
+                                service.InstallPackages([name], [], null).WaitAsync(LocalHttpFixture.Deadline));
+                            Assert.Equal($"Failed to resolve latest version of {name} ({name})", error.Message);
+                            Assert.Null(error.InnerException);
+                            Assert.Empty(Directory.GetFileSystemEntries(files.CacheDirectory));
+                        }
+                        AssertR1UnavailableWarnings(logger, name, Failed, R1ListingFailure.Structure);
+                        handler.AssertComplete(0);
+                    }
+                    http.Dispose();
+                    Assert.True(handler.Disposed);
+                    _output.WriteLine($"R2 null listing / {(npm ? "NPM" : "FHIR")} / versions null={nullVersions} / first={failureFirst} / usable={usable}; native NRE control, exact ordered script and sanitized listing-structure warning.");
+                }
+            }
+        }
+    }
+
+    /// <summary>Native policy rejection precedes readiness and all filesystem creation; disabled caches skip it.</summary>
+    [Fact]
+    public void InvalidPackagePolicyDoesNotPartiallyInitialize()
+    {
+        CandleConfig defaults = new();
+        List<CandleConfig> invalid = [];
+        foreach (long value in new long[] { 0, -1 })
+        {
+            invalid.AddRange([
+                defaults with { PackageMaxCompressedBytes = value }, defaults with { PackageMaxExpandedBytes = value },
+                defaults with { PackageMaxEntryBytes = value }, defaults with { PackageMaxArchiveEntries = (int)value },
+                defaults with { PackageMaxArchivePathLength = (int)value }, defaults with { PackageMaxArchiveDepth = (int)value }]);
+        }
+        invalid.Add(defaults with { PackageMaxEntryBytes = defaults.PackageMaxExpandedBytes + 1 });
+        invalid.Add(defaults with { PackageMaxCompressedBytes = long.MaxValue });
+        invalid.Add(defaults with { PackageMaxExpandedBytes = long.MaxValue - 1, PackageMaxCompressedBytes = 1,
+            PackageMaxEntryBytes = long.MaxValue / 2 + 1, PackageMaxArchiveEntries = 2 });
+        using LocalPackageFixture files = new();
+        foreach (CandleConfig policy in invalid)
+        {
+            string root = Path.Combine(files.Root, Guid.NewGuid().ToString("N"));
+            policy.FhirCacheDirectory = root;
+            using FhirPackageService service = PackageService(policy);
+            PackageInstallException error = Assert.Throws<PackageInstallException>(service.Init);
+            Assert.Equal(PackageInstallErrorCode.InvalidPolicy, error.ErrorCode);
+            Assert.Equal(PackageInstallStage.PolicyValidation, error.Stage);
+            Assert.False(service.IsReady);
+            Assert.False(service.IsConfigured);
+            Assert.False(Directory.Exists(root));
+            Assert.Throws<PackageInstallException>(service.Init);
+        }
+        using FhirPackageService disabled = PackageService(defaults with { FhirCacheDirectory = string.Empty, PackageMaxArchiveDepth = 0 });
+        disabled.Init();
+        Assert.False(disabled.IsReady);
+        Assert.False(disabled.IsConfigured);
+    }
+
+    /// <summary>Real imports calibrate all six boundaries without large payloads, preserving neighbors and cleanup.</summary>
+    [Theory]
+    [InlineData("compressed", PackageInstallErrorCode.CompressedSizeLimitExceeded, "--package-max-compressed-bytes")]
+    [InlineData("expanded", PackageInstallErrorCode.ExpandedSizeLimitExceeded, "--package-max-expanded-bytes")]
+    [InlineData("entry", PackageInstallErrorCode.EntrySizeLimitExceeded, "--package-max-entry-bytes")]
+    [InlineData("entries", PackageInstallErrorCode.ArchiveEntryCountLimitExceeded, "--package-max-archive-entries")]
+    [InlineData("path", PackageInstallErrorCode.ArchivePathLengthLimitExceeded, "--package-max-archive-path-length")]
+    [InlineData("depth", PackageInstallErrorCode.ArchiveDepthLimitExceeded, "--package-max-archive-depth")]
+    public async Task ConfiguredPackageLimitsEnforceExactBoundaries(string limit, PackageInstallErrorCode code, string option)
+    {
+        using LocalPackageFixture files = new();
+        const string Name = "example.test.r2.limits";
+        string manifest = ProtocolManifest(Name);
+        byte[] payload = Encoding.UTF8.GetBytes(new string('x', 512));
+        // Decomposed Unicode has a shorter NFC canonical path; the longer exact spelling still counts.
+        string path = "package/CaseSensitive/" + new string('a', 30) + "e\u0301.txt";
+        Assert.Equal(path.Length - 1, path.Normalize(NormalizationForm.FormC).Length);
+        byte[] archive = R2PolicyArchive(manifest, path, payload, emptyDirectory: true);
+        long boundary = limit switch
+        {
+            "compressed" => archive.LongLength,
+            "expanded" => Encoding.UTF8.GetByteCount(manifest) + payload.LongLength,
+            "entry" => payload.LongLength,
+            "entries" => 4, // package/, package.json, payload and empty directory
+            "path" => path.Length,
+            "depth" => 3, // package, CaseSensitive, filename
+            _ => throw new InvalidOperationException(),
+        };
+        CandleConfig accepted = R2LimitConfiguration(files.Configuration(), limit, boundary);
+        byte[] overArchive = limit switch
+        {
+            "compressed" => R2CompressedNeighbor(manifest, path, payload, archive.LongLength + 1),
+            "expanded" or "entry" => R2PolicyArchive(manifest, path, [.. payload, (byte)'x'], emptyDirectory: true),
+            "entries" => R2PolicyArchive(manifest, path, payload, emptyDirectory: true, extraDirectory: true),
+            "path" => R2PolicyArchive(manifest, path + "a", payload, emptyDirectory: true),
+            "depth" => R2PolicyArchive(manifest, path.Replace("CaseSensitive/", "CaseSensitive/n/", StringComparison.Ordinal),
+                payload, emptyDirectory: true),
+            _ => throw new InvalidOperationException(),
+        };
+        if (limit == "compressed")
+        {
+            Assert.Equal(boundary + 1, overArchive.LongLength);
+        }
+        PackageReference neighbor = new("example.test.neighbor", "1.0.0");
+        WritePinnedCache(files.CacheDirectory, neighbor, ProtocolManifest(neighbor.Name!), new Dictionary<string, string> { ["keep.txt"] = "neighbor-secret" });
+        byte[] neighborBytes = File.ReadAllBytes(Path.Combine(LegacyContentPath(files.CacheDirectory, neighbor), "keep.txt"));
+        DiskPackageCache cache = new(files.CacheDirectory, DiskPackageCache.CreateInstallLimits(accepted));
+        PackageReference installed = new(Name, "at-n");
+        await cache.Install(installed, archive).WaitAsync(LocalHttpFixture.Deadline);
+        Assert.Equal(Encoding.UTF8.GetBytes(manifest), File.ReadAllBytes(Path.Combine(cache.PackageContentFolder(installed), "package.json")));
+        Assert.Equal(payload, File.ReadAllBytes(Path.Combine(cache.PackageContentFolder(installed), "CaseSensitive", Path.GetFileName(path))));
+        Assert.True(Directory.Exists(Path.Combine(cache.PackageContentFolder(installed), "empty")));
+        PackageReference refused = new(Name, "over-n");
+        PackageInstallException failure = await Assert.ThrowsAsync<PackageInstallException>(() =>
+            cache.Install(refused, overArchive).WaitAsync(LocalHttpFixture.Deadline));
+        Assert.Equal(code, failure.ErrorCode);
+        Assert.False(Directory.Exists(Path.Combine(files.CacheDirectory, Name + "#over-n")));
+        Assert.Equal(neighborBytes, File.ReadAllBytes(Path.Combine(LegacyContentPath(files.CacheDirectory, neighbor), "keep.txt")));
+        Assert.Empty(Directory.GetDirectories(files.CacheDirectory, ".candle-package-import-*"));
+
+        // The real lazy factory and service cache use the same policy; a rejected first archive still falls through.
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        List<LocalHttpFixture.ExpectedRequest> routes =
+        [
+            registry.Expect("GET", "/first/" + Name + "/1.0.0", new(HttpStatusCode.OK, "application/octet-stream", overArchive)),
+            registry.Expect("GET", "/second/" + Name + "/1.0.0", new(HttpStatusCode.OK, "application/octet-stream", archive)),
+        ];
+        R1PackageLogger logger = new();
+        using FhirPackageService service = new(logger, accepted with { AdditionalFhirRegistryUrls = [root + "/first", root + "/second"] });
+        service.Init();
+        Assert.Single(await service.InstallPackages([Name + "#1.0.0"], [], null).WaitAsync(LocalHttpFixture.Deadline));
+        (LogLevel level, string message, Exception? exception, string fields) warning =
+            Assert.Single(logger.Entries, entry => entry.level == LogLevel.Warning);
+        Assert.Null(warning.exception);
+        Assert.Equal($"Package import limit exceeded: {code}; configure {option}.", warning.message);
+        foreach (string secret in new[] { "CaseSensitive", "neighbor-secret", Name, "package.json", "xxxxx", root })
+        {
+            Assert.DoesNotContain(secret, warning.message + warning.fields, StringComparison.Ordinal);
+        }
+        await AssertRoutes(registry, routes);
+        Assert.Empty(Directory.GetDirectories(files.CacheDirectory, ".candle-package-import-*"));
+        _output.WriteLine($"R2 {limit}: setting {boundary}, native accepts archive at {boundary}, rejects archive at {boundary + 1}; typed {code}, sanitized option warning and next-registry success.");
+    }
+
+    private static CandleConfig R2LimitConfiguration(CandleConfig config, string limit, long value) => limit switch
+    {
+        "compressed" => config with { PackageMaxCompressedBytes = value },
+        "expanded" => config with { PackageMaxExpandedBytes = value, PackageMaxEntryBytes = 600 },
+        "entry" => config with { PackageMaxEntryBytes = value },
+        "entries" => config with { PackageMaxArchiveEntries = (int)value },
+        "path" => config with { PackageMaxArchivePathLength = (int)value },
+        "depth" => config with { PackageMaxArchiveDepth = (int)value },
+        _ => throw new InvalidOperationException(),
+    };
+
+    private static byte[] R2CompressedNeighbor(string manifest, string path, byte[] payload, long length)
+    {
+        // Calibrate against actual gzip bytes, never estimated expanded size or random/incompressible input.
+        for (int value = 0; value < 256; value++)
+        {
+            byte[] candidate = payload.ToArray();
+            candidate[0] = (byte)value;
+            byte[] archive = R2PolicyArchive(manifest, path, candidate, emptyDirectory: true);
+            if (archive.LongLength == length)
+            {
+                return archive;
+            }
+        }
+        throw new InvalidOperationException("No exact compressed-byte neighbor in the bounded fixture inventory.");
+    }
+
+    private static byte[] R2PolicyArchive(string manifest, string path, byte[] payload, bool emptyDirectory = false, bool extraDirectory = false)
+    {
+        using MemoryStream output = new();
+        using (GZipStream gzip = new(output, CompressionLevel.SmallestSize, leaveOpen: true))
+        using (TarWriter tar = new(gzip, TarEntryFormat.Ustar, leaveOpen: true))
+        {
+            UstarTarEntry directory = new(TarEntryType.Directory, "package/") { ModificationTime = DateTimeOffset.UnixEpoch };
+            tar.WriteEntry(directory);
+            Write("package/package.json", Encoding.UTF8.GetBytes(manifest));
+            Write(path, payload);
+            if (emptyDirectory)
+            {
+                tar.WriteEntry(new UstarTarEntry(TarEntryType.Directory, "package/empty/") { ModificationTime = DateTimeOffset.UnixEpoch });
+            }
+            if (extraDirectory)
+            {
+                tar.WriteEntry(new UstarTarEntry(TarEntryType.Directory, "package/another/") { ModificationTime = DateTimeOffset.UnixEpoch });
+            }
+            void Write(string name, byte[] bytes)
+            {
+                using MemoryStream contents = new(bytes);
+                tar.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, name) { DataStream = contents, ModificationTime = DateTimeOffset.UnixEpoch });
+            }
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>Default depth counts package and filename, raised depth is snapshotted before lazy use, warm reads are not imports.</summary>
+    [Fact]
+    public async Task PackageDepthDefaultsAndInitializedSnapshot()
+    {
+        using LocalPackageFixture files = new();
+        const string Name = "example.test.r2.depth";
+        string manifest = ProtocolManifest(Name);
+        byte[] bytes = Encoding.UTF8.GetBytes("depth-payload");
+        string path32 = "package/" + string.Concat(Enumerable.Repeat("d/", 30)) + "x";
+        string path33 = "package/" + string.Concat(Enumerable.Repeat("d/", 31)) + "x";
+        byte[] accepted = R2PolicyArchive(manifest, path32, bytes);
+        byte[] deeper = R2PolicyArchive(manifest, path33, bytes);
+        DiskPackageCache defaults = new(files.CacheDirectory);
+        await defaults.Install(new(Name, "32"), accepted).WaitAsync(LocalHttpFixture.Deadline);
+        Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(files.CacheDirectory, Name + "#32", path32.Replace('/', Path.DirectorySeparatorChar))));
+        PackageInstallException error = await Assert.ThrowsAsync<PackageInstallException>(() =>
+            defaults.Install(new(Name, "33"), deeper).WaitAsync(LocalHttpFixture.Deadline));
+        Assert.Equal(PackageInstallErrorCode.ArchiveDepthLimitExceeded, error.ErrorCode);
+        Assert.False(Directory.Exists(Path.Combine(files.CacheDirectory, Name + "#33")));
+
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        CandleConfig config = R2Configuration(files, true, [registry.Address.AbsoluteUri]) with { PackageMaxArchiveDepth = 33 };
+        using FhirPackageService service = PackageService(config);
+        service.Init();
+        config.PackageMaxArchiveDepth = 1;
+        config.PackageMaxCompressedBytes = 1;
+        config.PackageMaxExpandedBytes = 1;
+        config.PackageMaxEntryBytes = 1;
+        config.PackageMaxArchiveEntries = 1;
+        config.PackageMaxArchivePathLength = 1;
+        service.Init();
+        LocalHttpFixture.ExpectedRequest route = registry.Expect("GET", "/" + R2ArchivePath(true, Name, "1.0.0"),
+            new(HttpStatusCode.OK, "application/octet-stream", deeper));
+        PackageReference installed = Assert.Single(await service.InstallPackages([Name + "#1.0.0"], [], null).WaitAsync(LocalHttpFixture.Deadline));
+        Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(files.CacheDirectory, Name + "#1.0.0", path33.Replace('/', Path.DirectorySeparatorChar))));
+        await AssertRoutes(registry, [route]);
+        using FhirPackageService warm = PackageService(files.Configuration() with { PackageMaxArchiveDepth = 1 });
+        warm.Init();
+        Assert.Equal(installed, Assert.Single(await warm.InstallPackages([Name + "#1.0.0"], [], null).WaitAsync(LocalHttpFixture.Deadline)));
+        Assert.Empty(Directory.GetDirectories(files.CacheDirectory, ".candle-package-import-*"));
+    }
+
+    /// <summary>CI uses the service's configured import policy and preserves its typed failure.</summary>
+    [Fact]
+    public async Task CiAcquisitionUsesConfiguredPackagePolicy()
+    {
+        using LocalPackageFixture files = new();
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        const string Name = "example.test.r2.ci-limits";
+        const string ArchivePath = "/ig/example/sdk6/branches/main/package.tgz";
+        string[] sequence = ["https://build.fhir.org/ig/qas.json", "https://build.fhir.org/branches/",
+            "https://build.fhir.org" + ArchivePath];
+        using LocalHttpFixture.MappedLoopbackHandler mapping = registry.MapCiRequests(sequence);
+        using HttpClient http = new(mapping) { Timeout = LocalHttpFixture.Deadline };
+        using FhirCiClient ci = new(client: http);
+        byte[] archive = R2PolicyArchive(ProtocolManifest(Name), "package/a/b", [42]);
+        List<LocalHttpFixture.ExpectedRequest> routes =
+        [
+            registry.Expect("GET", "/ig/qas.json", LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json",
+                QaListing(FhirReleases.FhirSequenceCodes.R5, Name, false))),
+            registry.Expect("GET", "/branches/", LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", "[]")),
+            registry.Expect("GET", ArchivePath, new(HttpStatusCode.OK, "application/octet-stream", archive)),
+        ];
+        using FhirPackageService service = PackageService(files.Configuration() with { PackageMaxArchiveDepth = 2 });
+        service.Init();
+        FieldInfo field = typeof(FhirPackageService).GetField("_ciClient", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        FhirCiClient original = Assert.IsType<FhirCiClient>(field.GetValue(service));
+        try
+        {
+            field.SetValue(service, ci);
+            PackageInstallException error = await Assert.ThrowsAsync<PackageInstallException>(() =>
+                service.InstallPackages([Name + "#current"], [], null).WaitAsync(LocalHttpFixture.Deadline));
+            Assert.Equal(PackageInstallErrorCode.ArchiveDepthLimitExceeded, error.ErrorCode);
+            Assert.Empty(Directory.GetFileSystemEntries(files.CacheDirectory));
+        }
+        finally
+        {
+            field.SetValue(service, original);
+        }
+        mapping.AssertComplete();
+        await AssertRoutes(registry, routes);
+    }
+
+    /// <summary>Two isolated runner children prove ambient native limits cannot affect the default cache or lazy NPM factory.</summary>
+    [Fact]
+    public async Task AmbientNativePackageLimitsAreIgnored()
+    {
+        const string Marker = "FHIR_CANDLE_PACKAGE_POLICY_CHILD";
+        string? child = Environment.GetEnvironmentVariable(Marker);
+        if (child is not null)
+        {
+            Assert.Contains(child, new[] { "restrictive", "invalid" });
+            string[] nativeKeys = R2NativeLimitKeys();
+            Assert.All(nativeKeys, key => Assert.Equal(child == "restrictive" ? "1" : "not-a-number", Environment.GetEnvironmentVariable(key)));
+            if (child == "restrictive")
+            {
+                FhirPkg.PackageInstallLimits ambient = FhirPkg.PackageInstallLimits.FromEnvironment();
+                Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1 }, new long[] { ambient.MaxCompressedBytes, ambient.MaxExpandedBytes,
+                    ambient.MaxEntryBytes, ambient.MaxArchiveEntries, ambient.MaxArchivePathLength, ambient.MaxArchiveDepth });
+            }
+            else
+            {
+                Assert.Equal(PackageInstallErrorCode.InvalidPolicy,
+                    Assert.Throws<PackageInstallException>(() => FhirPkg.PackageInstallLimits.FromEnvironment()).ErrorCode);
+            }
+            // Real environment providers, without modifying this testhost's environment.
+            CandleConfig prefixed = new ConfigurationBuilder().AddEnvironmentVariables("Candle").Build().Get<CandleConfig>()!;
+            CandleConfig unprefixed = new ConfigurationBuilder().AddEnvironmentVariables("Candle").AddEnvironmentVariables().Build().Get<CandleConfig>()!;
+            Assert.Equal(new long[] { 3000000000, 4000000000, 2500000000, 123, 456, 33 }, R2PolicyValues(prefixed));
+            Assert.Equal(new long[] { 3000000001, 4000000001, 2500000001, 124, 457, 34 }, R2PolicyValues(unprefixed));
+
+            using LocalPackageFixture files = new();
+            const string Name = "example.test.r2.ambient";
+            byte[] archive = R2PolicyArchive(ProtocolManifest(Name), "package/sub/payload.txt", Encoding.UTF8.GetBytes("ambient-independent"));
+            DiskPackageCache cache = new(files.CacheDirectory);
+            PackageReference direct = new(Name, "direct");
+            await cache.Install(direct, archive).WaitAsync(LocalHttpFixture.Deadline);
+            Assert.Equal(Encoding.UTF8.GetBytes("ambient-independent"),
+                File.ReadAllBytes(Path.Combine(cache.PackageContentFolder(direct), "sub", "payload.txt")));
+            await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+            List<LocalHttpFixture.ExpectedRequest> routes =
+            [
+                registry.Expect("GET", "/" + Name, LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(Name, "1.0.0"))),
+                registry.Expect("GET", "/" + R2ArchivePath(true, Name, "1.0.0"), new(HttpStatusCode.OK, "application/octet-stream", archive)),
+            ];
+            // No injected clients: Init registers AddRegistry's real Lazy<NpmRegistryClient>.
+            using FhirPackageService service = PackageService(R2Configuration(files, true, [registry.Address.AbsoluteUri]));
+            service.Init();
+            PackageReference installed = Assert.Single(await service.InstallPackages([Name], [], null).WaitAsync(LocalHttpFixture.Deadline));
+            Assert.Equal(new PackageReference(Name, "1.0.0"), installed);
+            Assert.Equal(Encoding.UTF8.GetBytes(ProtocolManifest(Name)),
+                File.ReadAllBytes(Path.Combine(service.GetPackageContentDirectory(installed)!, "package.json")));
+            Assert.Empty(Directory.GetDirectories(files.CacheDirectory, ".candle-package-import-*"));
+            await AssertRoutes(registry, routes);
+            _output.WriteLine($"R2 isolated child {child}: all six native fields delivered; default cache and real lazy NPM listing/download/import passed; both Candle environment prefixes bound.");
+            return;
+        }
+
+        using LocalPackageFixture parent = new();
+        DirectoryInfo? projectDirectory = new(Path.GetDirectoryName(typeof(Sdk6PackageTests).Assembly.Location)!);
+        Assert.Equal("Release", projectDirectory.Parent!.Name);
+        while (projectDirectory is not null && !File.Exists(Path.Combine(projectDirectory.FullName, "fhir-candle.Tests.csproj")))
+        {
+            projectDirectory = projectDirectory.Parent;
+        }
+        Assert.NotNull(projectDirectory);
+        string project = Path.Combine(projectDirectory.FullName, "fhir-candle.Tests.csproj");
+        string tfm = "net" + Environment.Version.Major + ".0";
+        foreach (string mode in new[] { "restrictive", "invalid" })
+        {
+            string results = parent.CreateDirectory(mode);
+            ProcessStartInfo start = new("dotnet")
+            {
+                WorkingDirectory = projectDirectory.Parent!.Parent!.FullName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            foreach (string argument in new[] { "test", project, "--configuration", "Release", "--framework", tfm,
+                "--no-build", "--no-restore", "--verbosity", "normal", "--filter",
+                "FullyQualifiedName=fhir.candle.Tests.Sdk6PackageTests.AmbientNativePackageLimitsAreIgnored",
+                "--logger", "trx;LogFileName=child.trx", "--results-directory", results })
+            {
+                start.ArgumentList.Add(argument);
+            }
+            // Only child runner connection state is removed; DOTNET host/runtime paths remain intact.
+            string[] connections = start.Environment.Keys.Where(key => key.StartsWith("VSTEST_", StringComparison.OrdinalIgnoreCase)).ToArray();
+            foreach (string key in connections)
+            {
+                start.Environment.Remove(key);
+            }
+            start.Environment[Marker] = mode;
+            foreach (string key in R2NativeLimitKeys())
+            {
+                start.Environment[key] = mode == "restrictive" ? "1" : "not-a-number";
+            }
+            string[] externalKeys = ["Package_Max_Compressed_Bytes", "Package_Max_Expanded_Bytes", "Package_Max_Entry_Bytes",
+                "Package_Max_Archive_Entries", "Package_Max_Archive_Path_Length", "Package_Max_Archive_Depth"];
+            long[] values = [3000000000, 4000000000, 2500000000, 123, 456, 33];
+            for (int index = 0; index < externalKeys.Length; index++)
+            {
+                start.Environment["Candle" + externalKeys[index]] = values[index].ToString(System.Globalization.CultureInfo.InvariantCulture);
+                start.Environment[externalKeys[index]] = (values[index] + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            using Process process = new() { StartInfo = start };
+            Assert.True(process.Start());
+            int ownedPid = process.Id;
+            Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(150));
+                string output = await stdout.WaitAsync(TimeSpan.FromSeconds(10));
+                string errors = await stderr.WaitAsync(TimeSpan.FromSeconds(10));
+                _output.WriteLine($"R2 ambient child PID={ownedPid}, TFM={tfm}, mode={mode}, removed VSTEST keys={connections.Length}, exit={process.ExitCode}\n{output}\n{errors}");
+                Assert.True(process.ExitCode == 0, output + Environment.NewLine + errors);
+                XDocument trx = XDocument.Load(Path.Combine(results, "child.trx"));
+                XNamespace ns = trx.Root!.Name.Namespace;
+                XElement counters = Assert.Single(trx.Descendants(ns + "Counters"));
+                Assert.Equal("1", counters.Attribute("total")!.Value);
+                Assert.Equal("1", counters.Attribute("executed")!.Value);
+                Assert.Equal("1", counters.Attribute("passed")!.Value);
+                Assert.Equal("0", counters.Attribute("failed")!.Value);
+                XElement result = Assert.Single(trx.Descendants(ns + "UnitTestResult"));
+                Assert.Equal("Passed", result.Attribute("outcome")!.Value);
+                Assert.Equal("fhir.candle.Tests.Sdk6PackageTests.AmbientNativePackageLimitsAreIgnored", result.Attribute("testName")!.Value);
+                _output.WriteLine(result.ToString());
+                _output.WriteLine($"R2 child TRX verified: {tfm}/{mode}, exactly 1 executed / 1 passed / 0 failed.");
+            }
+            finally
+            {
+                if (!process.HasExited)
+                {
+                    Assert.Equal(ownedPid, process.Id);
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+        Assert.Null(Environment.GetEnvironmentVariable(Marker));
+    }
+
+    private static string[] R2NativeLimitKeys() =>
+        ["FHIRPKG_MAX_COMPRESSED_BYTES", "FHIRPKG_MAX_EXPANDED_BYTES", "FHIRPKG_MAX_ENTRY_BYTES",
+            "FHIRPKG_MAX_ARCHIVE_ENTRIES", "FHIRPKG_MAX_ARCHIVE_PATH_LENGTH", "FHIRPKG_MAX_ARCHIVE_DEPTH"];
+
+    private static long[] R2PolicyValues(CandleConfig config) =>
+        [config.PackageMaxCompressedBytes, config.PackageMaxExpandedBytes, config.PackageMaxEntryBytes,
+            config.PackageMaxArchiveEntries, config.PackageMaxArchivePathLength, config.PackageMaxArchiveDepth];
 
     /// <summary>Listing eligibility follows the original string conversion, not native latest policy.</summary>
     [Theory]
@@ -820,7 +1319,7 @@ public sealed class Sdk6PackageTests
         _output.WriteLine($"R1 latest / {(npm ? "NPM" : "FHIR")} / {failure} / failure {(failureFirst ? "before" : "after")} / usable winner={usableWinner}; strict fallback script complete.");
     }
 
-    private enum R1ListingFailure { NotFound, HttpStatus, Transport, Deadline, Malformed, ResponseEnded, OtherIo, OtherHttpIo, Cancellation }
+    private enum R1ListingFailure { NotFound, HttpStatus, Transport, Deadline, Malformed, ResponseEnded, OtherIo, OtherHttpIo, Cancellation, Structure }
 
     private static string R1ListingUri(string root, string name) =>
         new Uri(new Uri(root.TrimEnd('/') + "/").AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(name)).AbsoluteUri;
@@ -1136,6 +1635,7 @@ public sealed class Sdk6PackageTests
             R1ListingFailure.Deadline => "deadline",
             R1ListingFailure.Malformed => "listing-json",
             R1ListingFailure.ResponseEnded => "response-body",
+            R1ListingFailure.Structure => "listing-structure",
             _ => throw new InvalidOperationException("No warning category for this case."),
         };
         Assert.Contains(category, warning.message, StringComparison.OrdinalIgnoreCase);

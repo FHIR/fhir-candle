@@ -24,6 +24,62 @@ namespace fhir.candle.Tests;
 
 public class ConfigTests
 {
+    /// <summary>All package limits retain numeric width, external keys, and CLI precedence.</summary>
+    [Fact]
+    public void PackageLimitsBindDefaultsJsonAndCli()
+    {
+        CliRootCommand command = new();
+        IConfiguration empty = new ConfigurationBuilder().Build();
+        CandleConfig defaults = new(command.CommandCliOptions, command.Parse([]), empty);
+        AssertLimits(new CandleConfig(), [104857600, 1073741824, 134217728, 50000, 1024, 32]);
+        AssertLimits(defaults, [104857600, 1073741824, 134217728, 50000, 1024, 32]);
+        using MemoryStream json = new(System.Text.Encoding.UTF8.GetBytes("""
+            {
+              "Package_Max_Compressed_Bytes": 3000000000,
+              "Package_Max_Expanded_Bytes": 4000000000,
+              "Package_Max_Entry_Bytes": 2500000000,
+              "Package_Max_Archive_Entries": 123,
+              "Package_Max_Archive_Path_Length": 456,
+              "Package_Max_Archive_Depth": 33
+            }
+            """));
+        IConfiguration external = new ConfigurationBuilder().AddJsonStream(json).Build();
+        AssertLimits(external.Get<CandleConfig>()!, [3000000000, 4000000000, 2500000000, 123, 456, 33]);
+        AssertLimits(new(command.CommandCliOptions, command.Parse([]), external),
+            [3000000000, 4000000000, 2500000000, 123, 456, 33]);
+        ParseResult parsed = command.Parse([
+            "--package-max-compressed-bytes", "3000000001", "--package-max-expanded-bytes", "4000000001",
+            "--package-max-entry-bytes", "2500000001", "--package-max-archive-entries", "124",
+            "--package-max-archive-path-length", "457", "--package-max-archive-depth", "34"]);
+        parsed.Errors.ShouldBeEmpty();
+        AssertLimits(new(command.CommandCliOptions, parsed, external),
+            [3000000001, 4000000001, 2500000001, 124, 457, 34]);
+    }
+
+    /// <summary>Each numeric option requires exactly one parseable value; binder errors are not policy errors.</summary>
+    [Theory]
+    [InlineData("--package-max-compressed-bytes", "Package_Max_Compressed_Bytes")]
+    [InlineData("--package-max-expanded-bytes", "Package_Max_Expanded_Bytes")]
+    [InlineData("--package-max-entry-bytes", "Package_Max_Entry_Bytes")]
+    [InlineData("--package-max-archive-entries", "Package_Max_Archive_Entries")]
+    [InlineData("--package-max-archive-path-length", "Package_Max_Archive_Path_Length")]
+    [InlineData("--package-max-archive-depth", "Package_Max_Archive_Depth")]
+    public void PackageLimitsRequireNumericValue(string option, string key)
+    {
+        CliRootCommand command = new();
+        command.Parse([option]).Errors.ShouldNotBeEmpty();
+        command.Parse([option, "not-a-number"]).Errors.ShouldNotBeEmpty();
+        command.Parse([option, "1", "2"]).Errors.ShouldNotBeEmpty();
+        command.Parse([option, "1"]).Errors.ShouldBeEmpty();
+        IConfiguration external = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "not-a-number" }).Build();
+        Should.Throw<InvalidOperationException>(() => external.Get<CandleConfig>());
+    }
+
+    private static void AssertLimits(CandleConfig config, long[] expected) =>
+        new long[] { config.PackageMaxCompressedBytes, config.PackageMaxExpandedBytes, config.PackageMaxEntryBytes,
+            config.PackageMaxArchiveEntries, config.PackageMaxArchivePathLength, config.PackageMaxArchiveDepth }.ShouldBe(expected);
+
     [Fact]
     public void TestParseCliInt()
     {

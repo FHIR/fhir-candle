@@ -61,6 +61,48 @@ public record class CliOptions
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    /// <summary>Gets the compressed package byte limit option.</summary>
+    public Option<long?> PackageMaxCompressedBytes { get; } = new("--package-max-compressed-bytes")
+    {
+        Description = "Maximum compressed package bytes (default 104857600).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the expanded package byte limit option.</summary>
+    public Option<long?> PackageMaxExpandedBytes { get; } = new("--package-max-expanded-bytes")
+    {
+        Description = "Maximum aggregate expanded package bytes (default 1073741824).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the individual archive entry byte limit option.</summary>
+    public Option<long?> PackageMaxEntryBytes { get; } = new("--package-max-entry-bytes")
+    {
+        Description = "Maximum expanded bytes per archive entry (default 134217728).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the archive entry count limit option.</summary>
+    public Option<int?> PackageMaxArchiveEntries { get; } = new("--package-max-archive-entries")
+    {
+        Description = "Maximum archive entries, including directories (default 50000).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the normalized archive path length limit option.</summary>
+    public Option<int?> PackageMaxArchivePathLength { get; } = new("--package-max-archive-path-length")
+    {
+        Description = "Maximum normalized archive path characters (default 1024).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the normalized archive depth limit option.</summary>
+    public Option<int?> PackageMaxArchiveDepth { get; } = new("--package-max-archive-depth")
+    {
+        Description = "Maximum archive path components, including filename (default 32).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
     public Option<bool?> UseOfficialRegistries { get; } = new("--use-official-registries")
     {
         Description = "Use official FHIR registries to resolve packages.",
@@ -313,6 +355,30 @@ public record class CandleConfig
     [ConfigurationKeyName("Fhir_Package_Cache")]
     public string? FhirCacheDirectory { get; set; } = null;
 
+    /// <summary>Gets or sets the maximum compressed package size in bytes (100 MiB by default).</summary>
+    [ConfigurationKeyName("Package_Max_Compressed_Bytes")]
+    public long PackageMaxCompressedBytes { get; set; } = 104857600;
+
+    /// <summary>Gets or sets the maximum aggregate expanded package bytes (1 GiB by default).</summary>
+    [ConfigurationKeyName("Package_Max_Expanded_Bytes")]
+    public long PackageMaxExpandedBytes { get; set; } = 1073741824;
+
+    /// <summary>Gets or sets the maximum expanded bytes per archive entry (128 MiB by default).</summary>
+    [ConfigurationKeyName("Package_Max_Entry_Bytes")]
+    public long PackageMaxEntryBytes { get; set; } = 134217728;
+
+    /// <summary>Gets or sets the maximum archive entry count, including directories (50000 by default).</summary>
+    [ConfigurationKeyName("Package_Max_Archive_Entries")]
+    public int PackageMaxArchiveEntries { get; set; } = 50000;
+
+    /// <summary>Gets or sets the maximum normalized archive path length in characters (1024 by default).</summary>
+    [ConfigurationKeyName("Package_Max_Archive_Path_Length")]
+    public int PackageMaxArchivePathLength { get; set; } = 1024;
+
+    /// <summary>Gets or sets the maximum normalized archive path components, including filename (32 by default).</summary>
+    [ConfigurationKeyName("Package_Max_Archive_Depth")]
+    public int PackageMaxArchiveDepth { get; set; } = 32;
+
     [ConfigurationKeyName("Use_Official_Registries")]
     public bool UseOfficialRegistries { get; set; } = true;
 
@@ -518,6 +584,13 @@ public record class CandleConfig
         }
 
         FhirCacheDirectory = dir;
+
+        PackageMaxCompressedBytes = pr.GetValue(opt.PackageMaxCompressedBytes) ?? envConfig?.PackageMaxCompressedBytes ?? 104857600;
+        PackageMaxExpandedBytes = pr.GetValue(opt.PackageMaxExpandedBytes) ?? envConfig?.PackageMaxExpandedBytes ?? 1073741824;
+        PackageMaxEntryBytes = pr.GetValue(opt.PackageMaxEntryBytes) ?? envConfig?.PackageMaxEntryBytes ?? 134217728;
+        PackageMaxArchiveEntries = pr.GetValue(opt.PackageMaxArchiveEntries) ?? envConfig?.PackageMaxArchiveEntries ?? 50000;
+        PackageMaxArchivePathLength = pr.GetValue(opt.PackageMaxArchivePathLength) ?? envConfig?.PackageMaxArchivePathLength ?? 1024;
+        PackageMaxArchiveDepth = pr.GetValue(opt.PackageMaxArchiveDepth) ?? envConfig?.PackageMaxArchiveDepth ?? 32;
 
         UseOfficialRegistries = pr.GetValue(opt.UseOfficialRegistries) ?? envConfig?.UseOfficialRegistries ?? true;
         AdditionalFhirRegistryUrls = pr.GetValue(opt.AdditionalFhirRegistryUrls) ?? envConfig?.AdditionalFhirRegistryUrls ?? [];
@@ -921,6 +994,12 @@ public class CliRootCommand : RootCommand
         Add(_cliOptions.Headless);
 
         Add(_cliOptions.FhirCacheDirectory);
+        Add(_cliOptions.PackageMaxCompressedBytes);
+        Add(_cliOptions.PackageMaxExpandedBytes);
+        Add(_cliOptions.PackageMaxEntryBytes);
+        Add(_cliOptions.PackageMaxArchiveEntries);
+        Add(_cliOptions.PackageMaxArchivePathLength);
+        Add(_cliOptions.PackageMaxArchiveDepth);
 
         Add(_cliOptions.UseOfficialRegistries);
         Add(_cliOptions.AdditionalFhirRegistryUrls);

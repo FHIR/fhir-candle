@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using FhirCandle.Configuration;
 using FhirCandle.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Newtonsoft.Json;
@@ -10,9 +11,31 @@ namespace fhir.candle._ForPackages;
 
 public class DiskPackageCache
 {
-    public DiskPackageCache(string? rootDirectory = null)
+    private readonly FhirPkg.PackageInstallLimits _limits;
+
+    public DiskPackageCache(string? rootDirectory = null) : this(rootDirectory, CreateInstallLimits(new CandleConfig()))
+    {
+    }
+
+    internal DiskPackageCache(string? rootDirectory, FhirPkg.PackageInstallLimits limits)
     {
         Root = rootDirectory ?? GetDefaultRoot();
+        _limits = limits;
+    }
+
+    internal static FhirPkg.PackageInstallLimits CreateInstallLimits(CandleConfig config)
+    {
+        FhirPkg.PackageInstallLimits limits = new()
+        {
+            MaxCompressedBytes = config.PackageMaxCompressedBytes,
+            MaxExpandedBytes = config.PackageMaxExpandedBytes,
+            MaxEntryBytes = config.PackageMaxEntryBytes,
+            MaxArchiveEntries = config.PackageMaxArchiveEntries,
+            MaxArchivePathLength = config.PackageMaxArchivePathLength,
+            MaxArchiveDepth = config.PackageMaxArchiveDepth,
+        };
+        limits.Validate();
+        return limits;
     }
 
     /// <summary>The legacy operator-selected cache root.</summary>
@@ -57,7 +80,8 @@ public class DiskPackageCache
         {
             string distributedRoot;
             using (FhirPkg.Cache.DiskPackageCache nativeCache = new(
-                operationRoot, NullLogger<FhirPkg.Cache.DiskPackageCache>.Instance))
+                operationRoot, NullLogger<FhirPkg.Cache.DiskPackageCache>.Instance,
+                timeProvider: null, new FhirPkg.FileSystemRetryOptions(), _limits))
             using (MemoryStream stream = new(data, writable: false))
             {
                 FhirPkg.Models.PackageRecord installed = await nativeCache.ImportAsync(
