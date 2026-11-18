@@ -476,6 +476,75 @@ public class NotificationManager : INotificationManager
         }
     }
 
+    /// <summary>Builds the email notification and its attachment.</summary>
+    /// <param name="store">The store.</param>
+    /// <param name="e">Subscription event information.</param>
+    /// <param name="from">The sender display name.</param>
+    /// <param name="destination">The normalized destination.</param>
+    /// <param name="attachmentStream">The caller-owned serialized notification stream.</param>
+    /// <returns>The MIME message.</returns>
+    private MimeMessage BuildEmailMimeMessage(IFhirStore store, SubscriptionSendEventArgs e, string from, string destination, Stream attachmentStream)
+    {
+        long eventLo = e.NotificationEvents.Any() ? e.NotificationEvents.Min(ne => ne.EventNumber) : 0;
+        long eventHi = e.NotificationEvents.Any() ? e.NotificationEvents.Max(ne => ne.EventNumber) : 0;
+
+        ParseEmailMime(e.Subscription.ContentType, out string messageMime, out string attachmentMime);
+
+        string shortMime = attachmentMime.EndsWith("json", StringComparison.Ordinal)
+            ? "json"
+            : "xml";
+
+        MimeMessage message = new();
+        message.From.Add(new MailboxAddress(from, _smtpUser));
+        message.To.Add(new MailboxAddress(destination, destination));
+
+        BodyBuilder bodyBuilder = new();
+        if (messageMime.Equals("text/html", StringComparison.Ordinal))
+        {
+            bodyBuilder.HtmlBody = BuildEmailMessage(store, e);
+        }
+        else
+        {
+            bodyBuilder.TextBody = BuildEmailMessage(store, e);
+        }
+
+        // no events included
+        if (eventHi == 0)
+        {
+            message.Subject = $"Subscription {e.Subscription.Id} {e.NotificationType}";
+
+            bodyBuilder.Attachments.Add(
+                $"notifications-{e.NotificationType}.{shortMime}",
+                attachmentStream,
+                ContentType.Parse(attachmentMime));
+        }
+
+        // one event included
+        else if (eventLo == eventHi)
+        {
+            message.Subject = $"Subscription {e.Subscription.Id} Event {eventLo}";
+
+            bodyBuilder.Attachments.Add(
+                $"notification-{eventLo}.{shortMime}",
+                attachmentStream,
+                ContentType.Parse(attachmentMime));
+        }
+
+        // multiple events included
+        else
+        {
+            message.Subject = $"Subscription {e.Subscription.Id} Events {eventLo}-{eventHi}";
+
+            bodyBuilder.Attachments.Add(
+                $"notifications-{eventLo}-{eventHi}.{shortMime}",
+                attachmentStream,
+                ContentType.Parse(attachmentMime));
+        }
+
+        message.Body = bodyBuilder.ToMessageBody();
+        return message;
+    }
+
     /// <summary>Attempt to send a notification via Email.</summary>
     /// <param name="store">   The store.</param>
     /// <param name="e">       Subscription event information.</param>
@@ -515,63 +584,7 @@ public class NotificationManager : INotificationManager
         {
             using (MemoryStream ms = new MemoryStream((byte[])System.Text.Encoding.UTF8.GetBytes(contents)))
             {
-                long eventLo = e.NotificationEvents.Any() ? e.NotificationEvents.Min(ne => ne.EventNumber) : 0;
-                long eventHi = e.NotificationEvents.Any() ? e.NotificationEvents.Max(ne => ne.EventNumber) : 0;
-
-                ParseEmailMime(e.Subscription.ContentType, out string messageMime, out string attachmentMime);
-
-                string shortMime = attachmentMime.EndsWith("json", StringComparison.Ordinal)
-                    ? "json"
-                    : "xml";
-
-                MimeMessage message = new();
-                message.From.Add(new MailboxAddress(from, _smtpUser));
-                message.To.Add(new MailboxAddress(destination, destination));
-
-                BodyBuilder bodyBuilder = new();
-                if (messageMime.Equals("text/html", StringComparison.Ordinal))
-                {
-                    bodyBuilder.HtmlBody = BuildEmailMessage(store, e);
-                }
-                else
-                {
-                    bodyBuilder.TextBody = BuildEmailMessage(store, e);
-                }
-
-                // no events included
-                if (eventHi == 0)
-                {
-                    message.Subject = $"Subscription {e.Subscription.Id} {e.NotificationType}";
-
-                    bodyBuilder.Attachments.Add(
-                        $"notifications-{e.NotificationType}.{shortMime}",
-                        ms,
-                        ContentType.Parse(attachmentMime));
-                }
-
-                // one event included
-                else if (eventLo == eventHi)
-                {
-                    message.Subject = $"Subscription {e.Subscription.Id} Event {eventLo}";
-
-                    bodyBuilder.Attachments.Add(
-                        $"notification-{eventLo}.{shortMime}",
-                        ms,
-                        ContentType.Parse(attachmentMime));
-                }
-
-                // multiple events included
-                else
-                {
-                    message.Subject = $"Subscription {e.Subscription.Id} Events {eventLo}-{eventHi}";
-
-                    bodyBuilder.Attachments.Add(
-                        $"notifications-{eventLo}-{eventHi}.{shortMime}",
-                        ms,
-                        ContentType.Parse(attachmentMime));
-                }
-
-                message.Body = bodyBuilder.ToMessageBody();
+                MimeMessage message = BuildEmailMimeMessage(store, e, from, destination, ms);
 
                 using (SmtpClient client = new())
                 {
