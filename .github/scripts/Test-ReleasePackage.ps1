@@ -69,8 +69,14 @@ try
             "$prefix/fhir-candle.deps.json",
             "$prefix/fhir-candle.runtimeconfig.json",
             "$prefix/DotnetToolSettings.xml",
+            "$prefix/wwwroot/js/candle-theme.js",
+            "$prefix/wwwroot/css/candle-theme.css",
+            "$prefix/wwwroot/css/app.css",
+            "$prefix/wwwroot/fhir-candle.styles.css",
+            "$prefix/wwwroot/_content/Microsoft.FluentUI.AspNetCore.Components/css/default-fuib.css",
+            "$prefix/wwwroot/_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css",
+            "$prefix/wwwroot/_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.lib.module.js",
             "$prefix/wwwroot/_framework/blazor.web.js",
-            "$prefix/wwwroot/_content/Microsoft.FluentUI.AspNetCore.Components/js/loading-theme.js",
             "$prefix/wwwroot/_content/BlazorMonaco/jsInterop.js"
         ))
         {

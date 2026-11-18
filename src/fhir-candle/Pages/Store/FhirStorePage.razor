@@ -9,7 +9,7 @@
 <PageTitle>FHIR Candle</PageTitle>
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.H4">FHIR Resources: @StoreName</FluentLabel>
+    <FluentText Size="TextSize.Size700">FHIR Resources: @StoreName</FluentText>
 
     <FluentSwitch Label="Hide Empty Resources" @bind-Value="HideEmptyResources"></FluentSwitch>
 
@@ -28,7 +28,7 @@
         </PropertyColumn>
  *@
         <TemplateColumn Title="Resource Name" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(ResourceNameFilter)" Tooltip="true"  IsDefaultSortColumn="true">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-list?store={StoreName}&type={context.ResourceName}")">@context.ResourceName</FluentAnchor>
+            <FluentLink Href="@($"/store/resource-list?store={StoreName}&type={context.ResourceName}")">@context.ResourceName</FluentLink>
         </TemplateColumn>
 
         <PropertyColumn Title="Instance Count" Property="@(ri => ri.Count)" Sortable="true" Tooltip="true">

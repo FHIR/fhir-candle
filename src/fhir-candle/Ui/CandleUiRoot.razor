@@ -1,0 +1,181 @@
+@* Copyright (c) Microsoft Corporation. Licensed under the MIT License. *@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.Extensions.Logging
+@namespace fhir.candle.Ui
+@implements IAsyncDisposable
+@inject CandleThemeState ThemeState
+@inject IThemeService ThemeService
+@inject IJSRuntime JS
+@inject ILogger<CandleUiRoot> Logger
+
+<div class="candle-ui-root" data-candle-theme="@(_ready ? (ThemeState.IsDarkMode ? "dark" : "light") : null)"
+     style="@NeutralStyle" @ref="_element">
+    <div class="candle-messages-top" aria-label="Application feedback">
+        <FluentMessageBarProvider Section="MESSAGES_TOP" />
+    </div>
+    @ChildContent
+    <FluentProviders />
+</div>
+
+@code {
+    /// <summary>Gets or sets the routed application content.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private readonly SemaphoreSlim _synchronization = new(1, 1);
+    private ElementReference _element;
+    private DotNetObjectReference<CandleUiRoot>? _callback;
+    private BrowserSnapshot? _browser;
+    private bool _ready;
+    private bool _disposed;
+    private long _persistedRevision;
+
+    private string? NeutralStyle => ThemeState.Preference.NeutralColor is string neutral
+        ? $"--candle-neutral-preference: {neutral};" : null;
+
+    /// <inheritdoc />
+    protected override void OnInitialized() => ThemeState.Changed += ThemeChanged;
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _disposed)
+        {
+            return;
+        }
+
+        await _synchronization.WaitAsync();
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _callback = DotNetObjectReference.Create(this);
+            _browser = await JS.InvokeAsync<BrowserSnapshot>("candleTheme.connect", _callback);
+            if (_disposed)
+            {
+                return;
+            }
+
+            ThemeState.Hydrate(_browser.Json, _browser.IsSystemDark);
+            _ready = true;
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping theme initialization because the Blazor circuit disconnected.");
+        }
+        finally
+        {
+            _synchronization.Release();
+        }
+        await SynchronizeAsync();
+    }
+
+    /// <summary>Receives system appearance changes from this root's browser listener.</summary>
+    /// <param name="isDark">The current system preference.</param>
+    [JSInvokable]
+    public Task SystemChanged(bool isDark) => InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            ThemeState.SystemChanged(isDark);
+        }
+    });
+
+    private async void ThemeChanged(object? sender, CandleThemeChangedEventArgs args)
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (!_disposed)
+                {
+                    StateHasChanged();
+                    await SynchronizeAsync();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            await DispatchExceptionAsync(ex);
+        }
+    }
+
+    private async Task SynchronizeAsync()
+    {
+        await _synchronization.WaitAsync();
+        try
+        {
+            if (!_ready || _disposed || _browser is null)
+            {
+                return;
+            }
+
+            // Read the latest state inside the gate: an older hydration/write cannot win a toggle.
+            ThemePreference preference = ThemeState.Preference;
+            long revision = ThemeState.Revision;
+            bool isDark = ThemeState.IsDarkMode;
+            await ThemeService.SetThemeToElementAsync(_element, new ThemeSettings(
+                Color: preference.PrimaryColor,
+                Mode: isDark ? Microsoft.FluentUI.AspNetCore.Components.ThemeMode.Dark
+                    : Microsoft.FluentUI.AspNetCore.Components.ThemeMode.Light,
+                IsExact: true));
+            if (_disposed)
+            {
+                return;
+            }
+
+            await JS.InvokeVoidAsync("candleTheme.apply", _browser.Id, isDark);
+            if (revision > _persistedRevision)
+            {
+                await JS.InvokeVoidAsync("candleTheme.persist", _browser.Id, preference.ToJson(), revision);
+                _persistedRevision = revision;
+            }
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping theme synchronization because the Blazor circuit disconnected.");
+        }
+        finally
+        {
+            _synchronization.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        ThemeState.Changed -= ThemeChanged;
+        await _synchronization.WaitAsync();
+        try
+        {
+            if (_browser is not null)
+            {
+                await JS.InvokeVoidAsync("candleTheme.disconnect", _browser.Id);
+            }
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping theme listener cleanup because the Blazor circuit disconnected.");
+        }
+        finally
+        {
+            _callback?.Dispose();
+            _synchronization.Release();
+        }
+    }
+
+    /// <summary>The adapter's read-only hydration result.</summary>
+    public sealed class BrowserSnapshot
+    {
+        /// <summary>Gets or sets the listener identity.</summary>
+        public int Id { get; set; }
+        /// <summary>Gets or sets the complete legacy preference.</summary>
+        public string? Json { get; set; }
+        /// <summary>Gets or sets the system appearance snapshot.</summary>
+        public bool IsSystemDark { get; set; }
+    }
+}

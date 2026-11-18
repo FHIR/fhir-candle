@@ -9,7 +9,7 @@
 @inject ISmartAuthManager AuthManager
 @inject IJSRuntime JS
 @inject IDialogService DialogService
-@inject IMessageService MessageService
+@inject INotificationService NotificationService
 @inject IHttpContextAccessor HttpContextAccessor
 @* @inject ProtectedLocalStorage BrowserStore *@
 
@@ -19,12 +19,12 @@
 <PageTitle>HTI-2 Proposed Requirements Testing for US Core Subscriptions</PageTitle>
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8" HorizontalAlignment="HorizontalAlignment.Stretch">
-    <FluentLabel Typo="Typography.H6">HTI-2 Proposed Requirements Testing for US Core Subscriptions</FluentLabel>
+    <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">HTI-2 Proposed Requirements Testing for US Core Subscriptions</FluentLabel>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         This page provides access to testing features for the proposed HTI-2 requirements for US Core Subscriptions.
         The proposed specification this page builds on can be found on
-        <FluentAnchor Appearance="Appearance.Hypertext" Href="https://github.com/argonautproject/us-core-patient-data-feed/blob/main/spec.md" Target="_blank">GitHub</FluentAnchor>.
+        <FluentLink Href="https://github.com/argonautproject/us-core-patient-data-feed/blob/main/spec.md" Target="LinkTarget.Blank">GitHub</FluentLink>.
         <br />
     </FluentLabel>
 

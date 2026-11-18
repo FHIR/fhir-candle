@@ -7,7 +7,7 @@
 @inject NavigationManager NavigationManager
 @inject IFhirStoreManager StoreManager
 @inject ISmartAuthManager AuthManager
-@inject IMessageService MessageService
+@inject INotificationService NotificationService
 
 @implements IDisposable
 
@@ -17,32 +17,32 @@
 
     @if ((SmartClient is null) || (SmartClient.ClientId is null) || (ClientKey is null))
     {
-        <FluentProgress></FluentProgress>
+        <FluentProgressBar />
     }
     else
     {
-        <FluentLabel Typo="Typography.H4">SMART Client Details</FluentLabel>
+        <FluentText Size="TextSize.Size700">SMART Client Details</FluentText>
 
         <FluentTabs Orientation="Orientation.Horizontal" @bind-ActiveTabId="@KeyEntryMode">
-            <FluentTab Label="JWKS JSON" Id="jwks" Icon="@(new Icons.Regular.Size20.Braces())">
-                <FluentTextField @bind-Value="SmartClient.ClientName" Label="Client Name" Required="true"/>
-                <FluentTextField @bind-Value="SmartClient.ClientId" Label="Client ID" ReadOnly="true"/>
-                <FluentTextArea @bind-Value="JsonJwks" Label="JSON Web Key Set (JWKS)" Rows="20"/>
+            <FluentTab Header="JWKS JSON" Id="jwks" IconStart="@(new Icons.Regular.Size20.Braces())">
+                <FluentTextInput @bind-Value="SmartClient.ClientName" Label="Client Name" Required="true"/>
+                <FluentTextInput @bind-Value="SmartClient.ClientId" Label="Client ID" ReadOnly="true"/>
+                <FluentTextArea @bind-Value="JsonJwks" Label="JSON Web Key Set (JWKS)" Height="28rem"/>
             </FluentTab>
 
-            <FluentTab Label="JWKS URI" Id="uri" Icon="@(new Icons.Regular.Size20.ArrowDownload())">
-                <FluentTextField @bind-Value="SmartClient.ClientName" Label="Client Name" Required="true"/>
-                <FluentTextField @bind-Value="SmartClient.ClientId" Label="Client ID" ReadOnly="true"/>
-                <FluentTextField @bind-Value="SmartClient.Registration!.JwksUri" Label="JSON Web Key Set (JWKS) URI"/>
+            <FluentTab Header="JWKS URI" Id="uri" IconStart="@(new Icons.Regular.Size20.ArrowDownload())">
+                <FluentTextInput @bind-Value="SmartClient.ClientName" Label="Client Name" Required="true"/>
+                <FluentTextInput @bind-Value="SmartClient.ClientId" Label="Client ID" ReadOnly="true"/>
+                <FluentTextInput @bind-Value="SmartClient.Registration!.JwksUri" Label="JSON Web Key Set (JWKS) URI"/>
             </FluentTab>
 
-            <FluentTab Label="Manual Entry" Id="manual" Icon="@(new Icons.Regular.Size20.TextField())">
-                <FluentTextField @bind-Value="SmartClient.ClientName" Label="Client Name" Required="true"/>
-                <FluentTextField @bind-Value="SmartClient.ClientId" Label="Client ID" ReadOnly="true"/>
+            <FluentTab Header="Manual Entry" Id="manual" IconStart="@(new Icons.Regular.Size20.TextField())">
+                <FluentTextInput @bind-Value="SmartClient.ClientName" Label="Client Name" Required="true"/>
+                <FluentTextInput @bind-Value="SmartClient.ClientId" Label="Client ID" ReadOnly="true"/>
 
-                <FluentTextField @bind-Value="ClientKey.KeyId" Label="Key ID (kid)" Required="true"/>
+                <FluentTextInput @bind-Value="ClientKey.KeyId" Label="Key ID (kid)" Required="true"/>
 
-                <FluentSelect @bind-Value="ClientKey.Use" Label="Key Use (use)" TOption="string">
+                <FluentSelect @bind-Value="ClientKey.Use" Label="Key Use (use)" TOption="string" TValue="string">
                     <FluentOption Value="@("sig")">Signature</FluentOption>
                     <FluentOption Disabled="true" Value="@("enc")">Encryption</FluentOption>
                 </FluentSelect>
@@ -64,35 +64,35 @@
                 </MudToggleGroup>
                 *@
 
-                <FluentSelect @bind-Value="ClientKey.Kty" Label="Key Cryptographic Family (kty)" SelectedOptionChanged="@((e) => ClientKey.Alg = ((e ?? string.Empty).Equals("RSA", StringComparison.Ordinal)) ? "RS384" : "ES384")" TOption="string">
+                <FluentSelect Value="@ClientKey.Kty" ValueChanged="KeyFamilyChanged" Label="Key Cryptographic Family (kty)" TOption="string" TValue="string">
                     <FluentOption Value="@("RSA")">RSA</FluentOption>
                     <FluentOption Value="@("EC")">Elliptic Curve (EC)</FluentOption>
                 </FluentSelect>
 
-                <FluentSelect @bind-Value="ClientKey.Alg" Label="Key Algorithm (alg)" TOption="string">
+                <FluentSelect @bind-Value="ClientKey.Alg" Label="Key Algorithm (alg)" TOption="string" TValue="string">
                     <FluentOption Disabled="@(!ClientKey.Kty!.Equals("RSA"))" Value="@("RS384")">RS384</FluentOption>
                     <FluentOption Disabled="@(!ClientKey.Kty!.Equals("EC"))" Value="@("ES384")">ES384</FluentOption>
                 </FluentSelect>
 
                 @if (ClientKey.Alg?.Equals("RS384", StringComparison.Ordinal) ?? false)
                 {
-                    <FluentTextField @bind-Value="ClientKey.N" Label="RSA Modulus (n) - Base64 URL Encoded" Required="true"/>
-                    <FluentTextField @bind-Value="ClientKey.E" Label="RSA Exponent (e) - Base64 URL Encoded" Required="true"/>
+                    <FluentTextInput @bind-Value="ClientKey.N" Label="RSA Modulus (n) - Base64 URL Encoded" Required="true"/>
+                    <FluentTextInput @bind-Value="ClientKey.E" Label="RSA Exponent (e) - Base64 URL Encoded" Required="true"/>
                 }
 
                 @if (ClientKey.Alg?.Equals("ES384", StringComparison.Ordinal) ?? false)
                 {
-                    <FluentTextField @bind-Value="ClientKey.Crv" Label="ECDSA Curve (crv)" ReadOnly="true"/>
-                    <FluentTextField @bind-Value="ClientKey.X" Label="ECDSA X-Coordinate (x) - Base64 URL Encoded"/>
-                    <FluentTextField @bind-Value="ClientKey.Y" Label="ECDSA Y-Coordinate (y) - Base64 URL Encoded"/>
+                    <FluentTextInput @bind-Value="ClientKey.Crv" Label="ECDSA Curve (crv)" ReadOnly="true"/>
+                    <FluentTextInput @bind-Value="ClientKey.X" Label="ECDSA X-Coordinate (x) - Base64 URL Encoded"/>
+                    <FluentTextInput @bind-Value="ClientKey.Y" Label="ECDSA Y-Coordinate (y) - Base64 URL Encoded"/>
                 }
             </FluentTab>
 
         </FluentTabs>
 
         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-            <FluentButton Appearance="Appearance.Accent" OnClick="@HandleSaveClick">Save</FluentButton>
-            <FluentAnchor Appearance="Appearance.Accent" Href="/smart/clients">Cancel</FluentAnchor>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@HandleSaveClick">Save</FluentButton>
+            <FluentAnchorButton Appearance="ButtonAppearance.Primary" Href="/smart/clients">Cancel</FluentAnchorButton>
             @* TODO: Allow deleting a client
             @if (!string.IsNullOrEmpty(ClientId))
             {
@@ -195,12 +195,20 @@
         NavTracker?.NotifyNav(_navPages);
     }
 
+    private void KeyFamilyChanged(string? family)
+    {
+        ClientKey!.Kty = family;
+        ClientKey.Alg = string.Equals(family, "RSA", StringComparison.Ordinal) ? "RS384" : "ES384";
+    }
+
     private void ShowError(string message)
     {
-        _ = MessageService.ShowMessageBarAsync(
-            message,
-            MessageIntent.Error,
-            "MESSAGES_TOP");
+        _ = NotificationService.ShowMessageBarAsync(new MessageBarOptions()
+        {
+            Message = message,
+            Intent = MessageBarIntent.Error,
+            Section = "MESSAGES_TOP",
+        });
     }
 
     /// <summary>Handles the cancel click described by e.</summary>

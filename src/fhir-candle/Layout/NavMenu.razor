@@ -2,35 +2,31 @@
 
 @namespace fhir.candle.Layout
 
-@implements IDialogContentComponent<string>
+@inherits FluentDialogInstance
 
 @inject IFhirStoreManager StoreManager
 @inject ISmartAuthManager AuthManager
 
-<FluentDialogBody>
-    <FluentNavMenu Id="main-menu" Width="250" Collapsible="false" Title="FHIR Candle">
-        <FluentNavLink Icon="@(new Icons.Regular.Size24.Home())" Href="/" Tooltip="Home">Home</FluentNavLink>
+    <FluentNav Id="main-menu" Width="250px" UseSingleExpanded="false">
+        <FluentNavItem IconRest="@(new Icons.Regular.Size24.Home())" Href="/" Tooltip="Home">Home</FluentNavItem>
 
         @if (AuthManager.IsEnabled)
         {
-            <FluentNavLink Icon="@(new Icons.Regular.Size24.DesktopSignal())" Href="/smart/clients">SMART Clients</FluentNavLink>
+            <FluentNavItem IconRest="@(new Icons.Regular.Size24.DesktopSignal())" Href="/smart/clients">SMART Clients</FluentNavItem>
         }
 
         @foreach (string key in StoreManager.Keys.OrderBy(s => s))
         {
-            <FluentNavGroup Title="@(key)" Tooltip="@(key)" Icon="@(new Icons.Regular.Size24.CubeMultiple())" Expanded="true">
-                <FluentNavLink Icon="@(new Icons.Regular.Size24.Fire())" Href="@($"/store?store={key}")" Tooltip="FHIR Contents">FHIR Contents</FluentNavLink>
-                <FluentNavLink Icon="@(new Icons.Regular.Size20.ArrowExport())" Href="@($"/subscriptions/local?store={key}")" Tooltip="Local Subscriptions">Local Subscriptions</FluentNavLink>
-                <FluentNavLink Icon="@(new Icons.Regular.Size20.CloudArrowDown())" Href="@($"/subscriptions/notifications-received?store={key}")" Tooltip="Received Notifications">Received Notifications</FluentNavLink>
-            </FluentNavGroup>
+            <FluentNavCategory Title="@(key)" Tooltip="@(key)" IconRest="@(new Icons.Regular.Size24.CubeMultiple())" Expanded="true">
+                <FluentNavItem IconRest="@(new Icons.Regular.Size24.Fire())" Href="@($"/store?store={key}")" Tooltip="FHIR Contents">FHIR Contents</FluentNavItem>
+                <FluentNavItem IconRest="@(new Icons.Regular.Size20.ArrowExport())" Href="@($"/subscriptions/local?store={key}")" Tooltip="Local Subscriptions">Local Subscriptions</FluentNavItem>
+                <FluentNavItem IconRest="@(new Icons.Regular.Size20.CloudArrowDown())" Href="@($"/subscriptions/notifications-received?store={key}")" Tooltip="Received Notifications">Received Notifications</FluentNavItem>
+            </FluentNavCategory>
         }
-    </FluentNavMenu>
-</FluentDialogBody>
-<FluentDialogFooter>
+    </FluentNav>
     <FluentLabel>@GetType().Assembly.GetName().Version?.ToString()</FluentLabel>
-</FluentDialogFooter>
 
 @code {
-    [Parameter]
-    public string Content { get; set; } = default!;
+    /// <inheritdoc />
+    protected override Task OnActionClickedAsync(bool primary) => Task.CompletedTask;
 }

@@ -52,6 +52,34 @@ try
         throw "Tool did not install the requested '$Framework' payload."
     }
 
+    $assetManifest = @(
+        @{ Path = '/js/candle-theme.js'; MediaTypes = @('text/javascript', 'application/javascript') },
+        @{ Path = '/css/candle-theme.css'; MediaTypes = @('text/css') },
+        @{ Path = '/css/app.css'; MediaTypes = @('text/css') },
+        @{ Path = '/fhir-candle.styles.css'; MediaTypes = @('text/css') },
+        @{ Path = '/_content/Microsoft.FluentUI.AspNetCore.Components/css/default-fuib.css'; MediaTypes = @('text/css') },
+        @{ Path = '/_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css'; MediaTypes = @('text/css') },
+        @{ Path = '/_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.lib.module.js'; MediaTypes = @('text/javascript', 'application/javascript') },
+        @{ Path = '/_framework/blazor.web.js'; MediaTypes = @('text/javascript', 'application/javascript') },
+        @{ Path = '/_content/BlazorMonaco/jsInterop.js'; MediaTypes = @('text/javascript', 'application/javascript') }
+    )
+    # Bind HTTP identities to the exact candidate's per-framework archive entries.
+    # Include default-fuib.css explicitly: the initializer fetches it dynamically.
+    $archive = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $CandidateDirectory $packageName))
+    try
+    {
+        foreach ($asset in $assetManifest)
+        {
+            $entryName = "tools/$Framework/any/wwwroot$($asset.Path)"
+            $entry = $archive.GetEntry($entryName)
+            if (!$entry) { throw "Candidate package is missing '$entryName'." }
+            $stream = $entry.Open()
+            try { $asset.Sha512 = (Get-FileHash -InputStream $stream -Algorithm SHA512).Hash }
+            finally { $stream.Dispose() }
+        }
+    }
+    finally { $archive.Dispose() }
+
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = $listener.LocalEndpoint.Port
@@ -157,20 +185,51 @@ try
         finally { $response.Dispose() }
     }
     $client.DefaultRequestHeaders.Accept.Clear()
-    foreach ($asset in @(
-        '/', '/_framework/blazor.web.js',
-        '/_content/Microsoft.FluentUI.AspNetCore.Components/js/loading-theme.js',
-        '/_content/BlazorMonaco/jsInterop.js'
-    ))
+    $response = $client.GetAsync("$baseUrl/").GetAwaiter().GetResult()
+    try
     {
-        $response = $client.GetAsync("$baseUrl$asset").GetAwaiter().GetResult()
+        $response.EnsureSuccessStatusCode() | Out-Null
+        $contentType = $response.Content.Headers.ContentType
+        $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if (!$contentType -or $contentType.MediaType -ine 'text/html' -or [string]::IsNullOrWhiteSpace($body))
+        {
+            throw 'Installed tool did not serve the expected UI document.'
+        }
+        foreach ($marker in @(
+            'js/candle-theme.js', 'css/candle-theme.css', 'css/app.css',
+            'fhir-candle.styles.css', '_framework/blazor.web.js', '_content/BlazorMonaco/jsInterop.js'
+        ))
+        {
+            if (!$body.Contains($marker)) { throw "UI document is missing '$marker'." }
+        }
+        if ($body -imatch 'loading-theme\.js|<loading-theme\b')
+        {
+            throw 'UI document still references the retired theme loader.'
+        }
+    }
+    finally { $response.Dispose() }
+    foreach ($asset in $assetManifest)
+    {
+        $response = $client.GetAsync("$baseUrl$($asset.Path)").GetAwaiter().GetResult()
         try
         {
             $response.EnsureSuccessStatusCode() | Out-Null
-            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-            if ([string]::IsNullOrEmpty($body) -or ($asset -ceq '/' -and !$body.Contains('_framework/blazor.web.js')))
+            $contentType = $response.Content.Headers.ContentType
+            if (!$contentType -or $asset.MediaTypes -inotcontains $contentType.MediaType)
             {
-                throw "Installed tool did not serve the expected UI asset '$asset'."
+                throw "Incorrect content type for UI asset '$($asset.Path)': '$contentType'."
+            }
+            $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+            $body = [System.Text.Encoding]::UTF8.GetString($bytes)
+            if ([string]::IsNullOrWhiteSpace($body) -or
+                $body -imatch '^\s*(?:\uFEFF\s*)?(?:<!doctype\s+html\b|<html\b)')
+            {
+                throw "Installed tool served an empty or HTML fallback UI asset '$($asset.Path)'."
+            }
+            $actualHash = [Convert]::ToHexString([System.Security.Cryptography.SHA512]::HashData($bytes))
+            if ($actualHash -cne $asset.Sha512)
+            {
+                throw "UI asset '$($asset.Path)' does not match the candidate's '$Framework' asset manifest."
             }
         }
         finally { $response.Dispose() }

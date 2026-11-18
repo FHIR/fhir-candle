@@ -7,7 +7,7 @@
 @inject ISmartAuthManager AuthManager
 @inject IJSRuntime JS
 @inject IDialogService DialogService
-@inject IMessageService MessageService
+@inject INotificationService NotificationService
 @inject IHttpContextAccessor HttpContextAccessor
 
 @implements IDisposable
@@ -57,15 +57,15 @@
         <FluentWizardStep Label="Configure Subscription" Summary="Set details for the subscription" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         In this step, we are configuration the subscription options.
                     </FluentLabel>
 
-                    <FluentLabel Typo="Typography.H6">
+                    <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">
                         The following options are fixed for this walkthrough and are displayed only for reference:
                     </FluentLabel>
                     <FluentStack Orientation="Orientation.Vertical" VerticalGap="8" class="indented">
-                        <FluentSelect Label="Channel Type" @bind-Value="subscription.ChannelCode" TOption="string" >
+                        <FluentSelect Label="Channel Type" @bind-Value="subscription.ChannelCode" TOption="string" TValue="string">
                             <FluentOption Disabled="true" Value="@("email")">Email</FluentOption>
                             <FluentOption Disabled="true" Value="@("message")">FHIR Message</FluentOption>
                             <FluentOption Value="@("rest-hook")">REST Hook (http/s POST)</FluentOption>
@@ -73,31 +73,31 @@
                             <FluentOption Disabled="true" Value="@("zulip")">Zulip</FluentOption>
                         </FluentSelect>
 
-                        <FluentTextField Value="subscription.Endpoint" Label="Endpoint" ReadOnly="true"/>
-                        <FluentNumberField @bind-Value="subscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" ReadOnly="true"/>
-                        <FluentTextField @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true"/>
+                        <FluentTextInput Value="@subscription.Endpoint" Label="Endpoint" ReadOnly="true"/>
+                        <FluentNumberInput @bind-Value="subscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" ReadOnly="true"/>
+                        <FluentTextInput @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true"/>
                     </FluentStack>
 
                     <br/>
 
-                    <FluentLabel Typo="Typography.H6">
+                    <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">
                         The following options are configurable in this walkthrough:
                     </FluentLabel>
                     <FluentStack Orientation="Orientation.Vertical" VerticalGap="8" class="indented">
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             MIME Type to use for notifications:
                         </FluentLabel>
 
-                        <FluentSelect Label="Content Type" @bind-Value="subscription.ContentType" TOption="string">
+                        <FluentSelect Label="Content Type" @bind-Value="subscription.ContentType" TOption="string" TValue="string">
                             <FluentOption Value="@("application/fhir+json")">FHIR JSON</FluentOption>
                             <FluentOption Value="@("application/fhir+xml")">FHIR XML</FluentOption>
                         </FluentSelect>
 
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             Amount of data to include in notifications:
                         </FluentLabel>
 
-                        <FluentSelect Label="Content Level" @bind-Value="subscription.ContentLevel" TOption="string">
+                        <FluentSelect Label="Content Level" @bind-Value="subscription.ContentLevel" TOption="string" TValue="string">
                             <FluentOption Value="@("empty")">Empty</FluentOption>
                             <FluentOption Value="@("id-only")">IDs Only</FluentOption>
                             <FluentOption Value="@("full-resource")">Full Resources</FluentOption>
@@ -111,13 +111,13 @@
         <FluentWizardStep Label="Select Filters" Summary="Set criteria for triggering" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         The final piece of configuration for a subscription are filter values.
                         In this tour, we will be using <code>Patient/example</code> as a 
                         patient filter for our topic.  Note that allowed filters are defined
                         by each topic.
                     </FluentLabel>
-                    <FluentTextField Label="Subscription Filter" @bind-Value="@bindFilter" ReadOnly="true"/>
+                    <FluentTextInput Label="Subscription Filter" @bind-Value="@bindFilter" ReadOnly="true"/>
                 </FluentStack>
             </ChildContent>
         </FluentWizardStep>
@@ -125,22 +125,22 @@
         <FluentWizardStep Label="Request Subscription" Summary="Create the resource on the server" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         With our configuration complete, we are ready to create our
                         resource and request it on the server.
                     </FluentLabel>
 
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => PostSubscription())">
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => PostSubscription())">
                         POST Subscription
                     </FluentButton>
 
 
                     @if (!string.IsNullOrEmpty(subscriptionLocation))
                     {
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             Now that our subscription is created, is can be viewed
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Subscription&id={subscription.Id}")"
-                                        >here</FluentAnchor>,
+                            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Subscription&id={subscription.Id}")"
+                                        >here</FluentLink>,
                             or requested (in FHIR) at
                             <code class="copy-click">@subscriptionLocation</code>.
                         </FluentLabel>
@@ -154,15 +154,15 @@
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                     @if (string.IsNullOrEmpty(handshakeBundleId))
                     {
-                        <FluentLabel Typo="Typography.Body">Waiting for handshake.</FluentLabel>
-                        <FluentProgress></FluentProgress>
+                        <FluentLabel>Waiting for handshake.</FluentLabel>
+                        <FluentProgressBar />
                     }
                     else
                     {
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             Handshake received! The notification bundle can be viewed
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={handshakeBundleId}")"
-                                        >here</FluentAnchor>,
+                            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={handshakeBundleId}")"
+                                        >here</FluentLink>,
                             or requested (in FHIR) at
                             <code class="copy-click">@($"{_store.Config.BaseUrl}/Bundle/{handshakeBundleId}")</code>.
                         </FluentLabel>
@@ -174,24 +174,24 @@
         <FluentWizardStep Label="Trigger Notification" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         The topic we are using is set to trigger when an <code>Encounter</code> is set to the
                         status of <code>@encounterStatus</code>.  This can be true either when the encounter
                         resource is created, or it could be updated from another state.
                     </FluentLabel>
 
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         Since we specified the filter that encounters need to have a <code>patient</code>
                         that matches <code>Patient/example</code>, we need to also set the <code>subject</code>
                         reference to that patient.
                     </FluentLabel>
 
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         For simplicity during this walkthrough, we will create an encounter with all the 
                         values needed to trigger a notification.
                     </FluentLabel>
 
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => PostEncounter())">
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => PostEncounter())">
                         POST Encounter
                     </FluentButton>
 
@@ -199,10 +199,10 @@
                         (postedEncounters.Last() is string encounterId) &&
                         (!string.IsNullOrEmpty(encounterId)))
                     {
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             Encounter posted! The resource can be viewed
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Encounter&id={encounterId}")"
-                                        >here</FluentAnchor>,
+                            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Encounter&id={encounterId}")"
+                                        >here</FluentLink>,
                             or requested (in FHIR) at
                             <code class="copy-click">@_store.Config.BaseUrl/Encounter/@encounterId</code>.
                         </FluentLabel>
@@ -216,25 +216,25 @@
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                     @if (!postedEncounters.Any())
                     {
-                        <FluentLabel Typo="Typography.Body">Waiting for notifications...</FluentLabel>
-                        <FluentProgress></FluentProgress>
+                        <FluentLabel>Waiting for notifications...</FluentLabel>
+                        <FluentProgressBar />
                     }
                     else
                     {
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             This subscription has triggered @postedEncounters.Count notifications.
                         </FluentLabel>
 
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             Details about sent notifications for this subscription can be found
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/subscriptions/notification-local-viewer?store={StoreName}&id={subscription.Id}")"
-                                        >here</FluentAnchor>.
+                            <FluentLink Href="@($"/subscriptions/notification-local-viewer?store={StoreName}&id={subscription.Id}")"
+                                        >here</FluentLink>.
                         </FluentLabel>
 
-                        <FluentLabel Typo="Typography.Body">
+                        <FluentLabel>
                             Details about received notifications for this subscription can be found
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/subscriptions/notification-received-viewer?store={StoreName}&ref={subscriptionLocation}")"
-                                        >here</FluentAnchor>.
+                            <FluentLink Href="@($"/subscriptions/notification-received-viewer?store={StoreName}&ref={subscriptionLocation}")"
+                                        >here</FluentLink>.
                         </FluentLabel>
                     }
                 </FluentStack>
@@ -244,18 +244,18 @@
         <FluentWizardStep Label="Clean Up" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         That completes this tour.  If you have any questions, comments, or suggestions
                         for this software, please let us know.  A link to the GitHub repository for this
                         project can be found on the top right corner of the screen.
                     </FluentLabel>
 
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         Please click the button below to remove the resources created during this session.
                         Thank you!
                     </FluentLabel>
 
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => CleanUp())">
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => CleanUp())">
                         Done!
                     </FluentButton>
                 </FluentStack>
@@ -389,10 +389,12 @@
 
         if (!_store.TryGetSubscription(subscription, out object? s))
         {
-            _ = MessageService.ShowMessageBarAsync(
-                "Failed to build subscription object.", 
-                MessageIntent.Error, 
-                "MESSAGES_TOP");
+            _ = NotificationService.ShowMessageBarAsync(new MessageBarOptions()
+            {
+                Message = "Failed to build subscription object.",
+                Intent = MessageBarIntent.Error,
+                Section = "MESSAGES_TOP",
+            });
             postingResource = false;
             return;
         }
@@ -401,10 +403,12 @@
 
         if (!_store.InstanceCreate(ctx, out FhirResponseContext response))
         {
-            _ = MessageService.ShowMessageBarAsync(
-                "Failed to create Subscription!\n" + response.SerializedOutcome, 
-                MessageIntent.Error, 
-                "MESSAGES_TOP");
+            _ = NotificationService.ShowMessageBarAsync(new MessageBarOptions()
+            {
+                Message = "Failed to create Subscription!\n" + response.SerializedOutcome,
+                Intent = MessageBarIntent.Error,
+                Section = "MESSAGES_TOP",
+            });
             postingResource = false;
             return;
         }
@@ -432,10 +436,12 @@
 
         if (!_store.InstanceCreate(ctx, out FhirResponseContext response))
         {
-            _ = MessageService.ShowMessageBarAsync(
-                "Failed to create Encounter!\n" + response.SerializedOutcome, 
-                MessageIntent.Error, 
-                "MESSAGES_TOP");
+            _ = NotificationService.ShowMessageBarAsync(new MessageBarOptions()
+            {
+                Message = "Failed to create Encounter!\n" + response.SerializedOutcome,
+                Intent = MessageBarIntent.Error,
+                Section = "MESSAGES_TOP",
+            });
             postingResource = false;
             return;
         }

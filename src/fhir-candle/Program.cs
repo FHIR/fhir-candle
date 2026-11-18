@@ -302,6 +302,7 @@ public static partial class Program
                 //});
                 //builder.Services.AddServerSideBlazor();
                 builder.Services.AddFluentUIComponents();
+                builder.Services.AddScoped<Ui.CandleThemeState>();
 
                 // set our default UI page
                 //Pages.Index.Mode = config.UiMode;

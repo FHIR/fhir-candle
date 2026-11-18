@@ -11,7 +11,7 @@
 
 @if (!_notifications?.Any() ?? false)
 {
-    <FluentLabel Typo="Typography.Body">No events received for this Subscription.</FluentLabel>
+    <FluentLabel>No events received for this Subscription.</FluentLabel>
 }
 else
 {
@@ -21,29 +21,29 @@ else
             <FluentGridItem Style="min-width: var(--field-container-min-width);">
                 <FluentCard>
                     <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                        <FluentTextField Label="Subscription" ReadOnly="true" Value="@status.SubscriptionReference"/>
-                        <FluentTextField Label="Topic" ReadOnly="true" Value="@status.SubscriptionTopicCanonical"/>
-                        <FluentTextField Label="Local Bundle" ReadOnly="true" Value="@("Bundle/" + status.BundleId)"/>
-                        <FluentTextField Label="Received" ReadOnly="true" Value="@status.ProcessedDateTime.ToString("o")"/>
-                        <FluentTextField Label="Type" ReadOnly="true" Value="@status.NotificationType?.ToString()"/>
+                        <FluentTextInput Label="Subscription" ReadOnly="true" Value="@status.SubscriptionReference"/>
+                        <FluentTextInput Label="Topic" ReadOnly="true" Value="@status.SubscriptionTopicCanonical"/>
+                        <FluentTextInput Label="Local Bundle" ReadOnly="true" Value="@("Bundle/" + status.BundleId)"/>
+                        <FluentTextInput Label="Received" ReadOnly="true" Value="@status.ProcessedDateTime.ToString("o")"/>
+                        <FluentTextInput Label="Type" ReadOnly="true" Value="@status.NotificationType?.ToString()"/>
 
-                        <FluentLabel Typo="Typography.Body">Bundle</FluentLabel>
-                        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={status.BundleId}")">Bundle/@status.BundleId</FluentAnchor>
+                        <FluentLabel>Bundle</FluentLabel>
+                        <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={status.BundleId}")">Bundle/@status.BundleId</FluentLink>
 
                         @if (status.NotificationEvents.Any())
                         {
                             @foreach (ParsedSubscriptionStatus.ParsedNotificationEvent ne in status.NotificationEvents)
                             {
-                                <FluentNumberField Label="Event Number" ReadOnly="true" Value="@ne.EventNumber"/>
-                                <FluentTextField Label="Timestamp" ReadOnly="true" Value="@ne.Timestamp?.ToLocalTime().ToString("O")"/>
-                                <FluentTextField Label="Focus Reference" ReadOnly="true" Value="@ne.FocusReference"/>
-                                <FluentTextField Label="Additional Context" ReadOnly="true" Value="@string.Join(", ", ne.AdditionalContextReferences ?? Array.Empty<string>())"/>
+                                <FluentNumberInput Label="Event Number" ReadOnly="true" Value="@ne.EventNumber"/>
+                                <FluentTextInput Label="Timestamp" ReadOnly="true" Value="@ne.Timestamp?.ToLocalTime().ToString("O")"/>
+                                <FluentTextInput Label="Focus Reference" ReadOnly="true" Value="@ne.FocusReference"/>
+                                <FluentTextInput Label="Additional Context" ReadOnly="true" Value="@string.Join(", ", ne.AdditionalContextReferences ?? Array.Empty<string>())"/>
                             }
                         }
 
                         @if (status.Errors.Any())
                         {
-                            <FluentTextField Label="Error" ReadOnly="true" Value="@status.Errors.First()"/>
+                            <FluentTextInput Label="Error" ReadOnly="true" Value="@status.Errors.First()"/>
                         }
                     </FluentStack>
                 </FluentCard>

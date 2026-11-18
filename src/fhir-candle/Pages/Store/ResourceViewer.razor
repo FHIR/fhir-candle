@@ -22,7 +22,7 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
     <FluentGrid Spacing="8" Justify="JustifyContent.SpaceEvenly" style="width: 90%;">
         <FluentGridItem Style="min-width: var(--field-container-min-width);">
-            <FluentSelect @bind-Value="ResourceFormatCode" TOption="string" >
+            <FluentSelect @bind-Value="ResourceFormatCode" TOption="string" TValue="string">
                 <FluentOption Value="@("json")">JSON</FluentOption>
                 <FluentOption Value="@("xml")">XML</FluentOption>
             </FluentSelect>

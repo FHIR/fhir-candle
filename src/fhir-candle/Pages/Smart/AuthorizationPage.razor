@@ -14,12 +14,12 @@
 
 @if (string.IsNullOrEmpty(ErrorMessage))
 {
-    <FluentLabel Typo="Typography.H4">SMART Authorization</FluentLabel>
-    <FluentLabel Typo="Typography.Body">Please select allowed scopes:</FluentLabel>
+    <FluentText Size="TextSize.Size700">SMART Authorization</FluentText>
+    <FluentLabel>Please select allowed scopes:</FluentLabel>
 
-    <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
-        <FluentButton BackgroundColor="var(--success)" OnClick="@(() => ApproveAuth())">Approve Selected Scopes</FluentButton>
-        <FluentButton BackgroundColor="var(--error)" OnClick="@(() => DenyAuth())">Cancel</FluentButton>
+    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
+        <FluentButton BackgroundColor="var(--candle-success)" OnClick="@(() => ApproveAuth())">Approve Selected Scopes</FluentButton>
+        <FluentButton BackgroundColor="var(--candle-error)" OnClick="@(() => DenyAuth())">Cancel</FluentButton>
     </FluentStack>
 
     <FluentCheckbox Label="@($"All Scopes")"
@@ -27,7 +27,7 @@
                 ShowIndeterminate="false"
                 @bind-CheckState="AllScopesSelected" />
 
-    <FluentDataGrid Items="@_items" GridTemplateColumns="1fr 2fr" RowClass="@(s => _selected.Contains(s.Scope) ? "highlighted-row" : null!)" OnRowFocus="HandleRowFocus" TGridItem=ScopeInfo>
+    <FluentDataGrid Items="@_items" GridTemplateColumns="1fr 2fr" RowClass="@(s => _selected.Contains(s.Scope) ? "highlighted-row" : null!)" OnRowClick="HandleRowFocus" TGridItem=ScopeInfo>
         <PropertyColumn Title="Scope" Property="@(t => t.Scope)" Sortable="true" Tooltip="true">
         </PropertyColumn>
 
@@ -37,9 +37,9 @@
 }
 else
 {
-    <FluentLabel Typo="Typography.H4">SMART Authorization</FluentLabel>
-    <FluentLabel Typo="Typography.Body">Error</FluentLabel>
-    <FluentLabel Typo="Typography.Body">@ErrorMessage</FluentLabel>
+    <FluentText Size="TextSize.Size700">SMART Authorization</FluentText>
+    <FluentLabel>Error</FluentLabel>
+    <FluentLabel>@ErrorMessage</FluentLabel>
 }
 
 </FluentStack>

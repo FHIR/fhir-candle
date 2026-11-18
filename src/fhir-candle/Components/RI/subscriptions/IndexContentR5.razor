@@ -3,22 +3,22 @@
 @implements IIndexContent
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         As a reference implementation for @ContentFor, this endpoint contains some immutable records for testing:
     </FluentLabel>
 
     <ul>
         <li>
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Patient&id=example")">
+            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Patient&id=example")">
                 Patient/example
-            </FluentAnchor>:
+            </FluentLink>:
             An example patient, loaded from the FHIR examples.
         </li>
 
         <li>
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=SubscriptionTopic&id=encounter-complete")">
+            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=SubscriptionTopic&id=encounter-complete")">
                 SubscriptionTopic/encounter-complete
-            </FluentAnchor>:
+            </FluentLink>:
             An example <code>SubscriptionTopic</code>.
             The topic triggers when an encounter is either created with a <code>status</code> of <code>complete</code>
             or updated from any other status to <code>complete</code>.

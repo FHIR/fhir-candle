@@ -14,10 +14,10 @@
         case "StructureDefinition":
         case "Questionnaire":
         case "Library":
-            <FluentAnchor
-                Appearance="Appearance.Accent"
+            <FluentAnchorButton
+                Appearance="ButtonAppearance.Primary"
                 Href="@($"{FhirPathLabUrl}/SubscriptionTopic?id={BaseUrl}/{ResourceType}/{Id}")" 
-                Target="_blank">Edit in FHIRPath Lab</FluentAnchor>
+                Target="LinkTarget.Blank">Edit in FHIRPath Lab</FluentAnchorButton>
             break;
     }
 

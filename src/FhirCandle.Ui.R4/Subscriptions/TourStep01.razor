@@ -1,24 +1,24 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         In FHIR @Store.Config.FhirVersion, topics are discovered by looking at the server
         <code>CapabilityStatement</code> for the
-        <FluentAnchor Appearance="Appearance.Hypertext" Href="http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition-capabilitystatement-subscriptiontopic-canonical.html"
-                 >SubscriptionTopic Canonical Extension</FluentAnchor>.
+        <FluentLink Href="http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition-capabilitystatement-subscriptiontopic-canonical.html"
+                 >SubscriptionTopic Canonical Extension</FluentLink>.
     </FluentLabel>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         For this walkthrough, we will be using the included <code>encounter-complete</code>
         topic that has a canonical URL of <code class="copy-click">http://example.org/FHIR/SubscriptionTopic/encounter-complete</code>.
         The current metadata for this server can be viewed
-        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=CapabilityStatement&id=metadata")"
-                 >here</FluentAnchor>,
+        <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=CapabilityStatement&id=metadata")"
+                 >here</FluentLink>,
         or requested (in FHIR) at
         <code class="copy-click">@Store.Config.BaseUrl/metadata</code>.
     </FluentLabel>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         Note that in FHIR R4, there is not an official required format for representing <code>SubscriptionTopic</code>
         resources.  Since topics are canonical resources, the expectation is that they will be defined
         by authors (e.g., in Implementation Guides) and communicated out-of-band.  For example, for
@@ -26,17 +26,17 @@
         canonical URL and the understanding of what that topic represents.
     </FluentLabel>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         With that said, one possible way of representing topics in FHIR R4 is to use the model provided
         in FHIR R5, ported using FHIR cross-version support.  This implementation supports topics defined via
         that mechanism.  Our included <code>encounter-complete</code> topic is thus available on this server
-        at <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Basic&id=encounter-complete")"
-                    >Basic/encounter-complete</FluentAnchor>
+        at <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Basic&id=encounter-complete")"
+                    >Basic/encounter-complete</FluentLink>
         or in FHIR at
         <code class="copy-click">@Store.Config.BaseUrl/Basic/encounter-complete</code>.
     </FluentLabel>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentLabel>
         Click next to select the <code>encounter-complete</code> topic.
     </FluentLabel>
 </FluentStack>

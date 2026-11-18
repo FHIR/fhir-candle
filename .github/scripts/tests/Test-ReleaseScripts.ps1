@@ -133,6 +133,17 @@ try
     $candidate = Join-Path $root 'candidate'
     New-Item -ItemType Directory -Path $candidate | Out-Null
     $packagePath = Join-Path $candidate "fhir-candle.$version.nupkg"
+    $uiAssets = @(
+        'js/candle-theme.js',
+        'css/candle-theme.css',
+        'css/app.css',
+        'fhir-candle.styles.css',
+        '_content/Microsoft.FluentUI.AspNetCore.Components/css/default-fuib.css',
+        '_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css',
+        '_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.lib.module.js',
+        '_framework/blazor.web.js',
+        '_content/BlazorMonaco/jsInterop.js'
+    )
     $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Create)
     try
     {
@@ -150,9 +161,10 @@ try
             $entries["$prefix/fhir-candle.deps.json"] = '{}'
             $entries["$prefix/fhir-candle.runtimeconfig.json"] = "{`"runtimeOptions`":{`"tfm`":`"$framework`"}}"
             $entries["$prefix/DotnetToolSettings.xml"] = '<DotNetCliTool><Commands><Command Name="fhir-candle" EntryPoint="fhir-candle.dll" Runner="dotnet" /></Commands></DotNetCliTool>'
-            $entries["$prefix/wwwroot/_framework/blazor.web.js"] = 'fixture'
-            $entries["$prefix/wwwroot/_content/Microsoft.FluentUI.AspNetCore.Components/js/loading-theme.js"] = 'fixture'
-            $entries["$prefix/wwwroot/_content/BlazorMonaco/jsInterop.js"] = 'fixture'
+            foreach ($asset in $uiAssets)
+            {
+                $entries["$prefix/wwwroot/$asset"] = if ($asset.EndsWith('.css')) { '/* Release fixture */ .fixture { display: block; }' } else { '// Release fixture' }
+            }
         }
         foreach ($name in $entries.Keys)
         {
@@ -162,10 +174,23 @@ try
         }
     }
     finally { $archive.Dispose() }
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
+    try
+    {
+        foreach ($framework in @('net11.0', 'net10.0'))
+        {
+            if ($archive.GetEntry("tools/$framework/any/wwwroot/_content/Microsoft.FluentUI.AspNetCore.Components/js/loading-theme.js"))
+            {
+                throw "The '$framework' fixture must not depend on the retired theme loader."
+            }
+            $testState.Passed++
+        }
+    }
+    finally { $archive.Dispose() }
     $expectedHash = (Get-FileHash $packagePath -Algorithm SHA512).Hash.ToLowerInvariant()
     if ((& $packageValidator -CandidateDirectory $candidate -Version $version -Commit $commit -ExpectedSha512 $expectedHash) -cne $expectedHash)
     {
-        throw 'Valid package did not return its exact hash.'
+        throw 'Valid package without the retired theme loader did not return its exact hash.'
     }
     $testState.Passed++
     Assert-Fails { & $packageValidator -CandidateDirectory $candidate -Version $version -Commit ('b' * 40) } 'repository provenance'
@@ -175,6 +200,21 @@ try
     Copy-Item -LiteralPath $packagePath -Destination (Join-Path $candidate 'unexpected.nupkg')
     Assert-Fails { & $packageValidator -CandidateDirectory $candidate -Version $version -Commit $commit } 'exactly one package'
     Remove-Item -LiteralPath (Join-Path $candidate 'unexpected.nupkg')
+    foreach ($framework in @('net11.0', 'net10.0'))
+    {
+        foreach ($asset in $uiAssets)
+        {
+            $missingEntry = "tools/$framework/any/wwwroot/$asset"
+            try
+            {
+                $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Update)
+                try { $archive.GetEntry($missingEntry).Delete() }
+                finally { $archive.Dispose() }
+                Assert-Fails { & $packageValidator -CandidateDirectory $candidate -Version $version -Commit $commit } "Package is missing '$missingEntry'."
+            }
+            finally { Copy-Item -LiteralPath $backup -Destination $packagePath }
+        }
+    }
     $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Update)
     try { $archive.GetEntry('tools/net10.0/any/wwwroot/_framework/blazor.web.js').Delete() }
     finally { $archive.Dispose() }

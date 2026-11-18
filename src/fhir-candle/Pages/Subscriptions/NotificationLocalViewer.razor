@@ -15,16 +15,16 @@
         <FluentGridItem Style="min-width: var(--field-container-min-width);">
             <FluentCard>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentTextField Label="Subscription" ReadOnly="true" Value="@("Subscription/" + subEvent.SubscriptionId)"/>
-                    <FluentTextField Label="Topic" ReadOnly="true" Value="@subEvent.TopicUrl"/>
-                    <FluentNumberField Label="Event Number" ReadOnly="true" Value="@subEvent.EventNumber"/>
-                    <FluentTextField Label="Received" ReadOnly="true" Value="@subEvent.Timestamp.ToLocalTime().ToString("o")"/>
-                    <FluentTextField Label="Status At Generation" ReadOnly="true" Value="@subEvent.StatusAtGeneration"/>
+                    <FluentTextInput Label="Subscription" ReadOnly="true" Value="@("Subscription/" + subEvent.SubscriptionId)"/>
+                    <FluentTextInput Label="Topic" ReadOnly="true" Value="@subEvent.TopicUrl"/>
+                    <FluentNumberInput Label="Event Number" ReadOnly="true" Value="@subEvent.EventNumber"/>
+                    <FluentTextInput Label="Received" ReadOnly="true" Value="@subEvent.Timestamp.ToLocalTime().ToString("o")"/>
+                    <FluentTextInput Label="Status At Generation" ReadOnly="true" Value="@subEvent.StatusAtGeneration"/>
 
                     @if (_store.TryGetResourceInfo(subEvent.Focus, out string rn, out string id))
                     {
-                        <FluentLabel Typo="Typography.Body">Focus</FluentLabel>
-                        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type={rn}&id={id}")">@rn/@id</FluentAnchor>
+                        <FluentLabel>Focus</FluentLabel>
+                        <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type={rn}&id={id}")">@rn/@id</FluentLink>
                     }
 
                     @if (subEvent.AdditionalContext?.Any() ?? false)
@@ -33,8 +33,8 @@
                         {
                             @if (_store.TryGetResourceInfo(ac, out string acN, out string acId))
                             {
-                                <FluentLabel Typo="Typography.Body">Additional Context</FluentLabel>
-                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type={acN}&id={acId}")" >@acN/@acId</FluentAnchor>
+                                <FluentLabel>Additional Context</FluentLabel>
+                                <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type={acN}&id={acId}")">@acN/@acId</FluentLink>
                             }
                         }
                     }

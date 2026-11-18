@@ -10,11 +10,11 @@
 <PageTitle>SMART Login</PageTitle>
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.H4">SMART Login</FluentLabel>
-    <FluentLabel Typo="Typography.Body">Please login to the FHIR store: @StoreName.</FluentLabel>
+    <FluentText Size="TextSize.Size700">SMART Login</FluentText>
+    <FluentLabel>Please login to the FHIR store: @StoreName.</FluentLabel>
 
     <FluentTabs Orientation="Orientation.Horizontal">
-        <FluentTab Label="Patient Login">
+        <FluentTab Header="Patient Login">
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                 <FhirCandle.Ui.Common.Components.ResourcePicker
                     Store="@_store"
@@ -24,16 +24,16 @@
                     @bind-SelectedIds="SelectedPatientIds"
                     />
 
-                <FluentTextField Label="User (Patient)" Value="@(string.Join(", ", SelectedPatientIds))" ReadOnly="true" />
+                <FluentTextInput Label="User (Patient)" Value="@(string.Join(", ", SelectedPatientIds))" ReadOnly="true" />
 
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                    <FluentButton Appearance="Appearance.Accent" Disabled="@(!SelectedPatientIds.Any())" OnClick="@(() => ProcessLoginPatient())">Login</FluentButton>
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => CancelLogin())">Cancel</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(!SelectedPatientIds.Any())" OnClick="@(() => ProcessLoginPatient())">Login</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => CancelLogin())">Cancel</FluentButton>
                 </FluentStack>
             </FluentStack>
         </FluentTab>
 
-        <FluentTab Label="Practitioner Login">
+        <FluentTab Header="Practitioner Login">
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                 <FhirCandle.Ui.Common.Components.ResourcePicker
                     Store="@_store"
@@ -43,7 +43,7 @@
                     @bind-SelectedIds="SelectedPractitionerIds"
                     />
 
-                <FluentLabel Typo="Typography.Body">If you want a patient context, please select a patient below:</FluentLabel>
+                <FluentLabel>If you want a patient context, please select a patient below:</FluentLabel>
 
                 <FhirCandle.Ui.Common.Components.ResourcePicker
                     Store="@_store"
@@ -53,19 +53,19 @@
                     @bind-SelectedIds="SelectedPatientIds"
                     />
 
-                <FluentTextField Label="User (Practitioner)" Value="@(string.Join(", ", SelectedPractitionerIds))" ReadOnly="true" />
-                <FluentTextField Label="Patient" Value="@(string.Join(", ", SelectedPatientIds))" ReadOnly="true" />
+                <FluentTextInput Label="User (Practitioner)" Value="@(string.Join(", ", SelectedPractitionerIds))" ReadOnly="true" />
+                <FluentTextInput Label="Patient" Value="@(string.Join(", ", SelectedPatientIds))" ReadOnly="true" />
 
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                    <FluentButton Appearance="Appearance.Accent" Disabled="@(!SelectedPractitionerIds.Any())" OnClick="@(() => ProcessLoginPractitioner())">Login</FluentButton>
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => CancelLogin())">Cancel</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(!SelectedPractitionerIds.Any())" OnClick="@(() => ProcessLoginPractitioner())">Login</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => CancelLogin())">Cancel</FluentButton>
                 </FluentStack>
             </FluentStack>
         </FluentTab>
 
-        <FluentTab Label="Administrator Login">
+        <FluentTab Header="Administrator Login">
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                <FluentLabel Typo="Typography.Body">If you want a patient context, please select a patient below:</FluentLabel>
+                <FluentLabel>If you want a patient context, please select a patient below:</FluentLabel>
                 <FhirCandle.Ui.Common.Components.ResourcePicker
                     Store="@_store"
                     ResourceStore="@_patientStore"
@@ -74,12 +74,12 @@
                     @bind-SelectedIds="SelectedPatientIds"
                     />
 
-                <FluentTextField Label="User (Admin)" Value="@("administrator")" ReadOnly="true" />
-                <FluentTextField Label="Patient" Value="@(string.Join(", ", SelectedPatientIds))" ReadOnly="true" />
+                <FluentTextInput Label="User (Admin)" Value="@("administrator")" ReadOnly="true" />
+                <FluentTextInput Label="Patient" Value="@(string.Join(", ", SelectedPatientIds))" ReadOnly="true" />
 
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="4">
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => ProcessLoginAdministrator())">Login</FluentButton>
-                    <FluentButton Appearance="Appearance.Accent" OnClick="@(() => CancelLogin())">Cancel</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => ProcessLoginAdministrator())">Login</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => CancelLogin())">Cancel</FluentButton>
                 </FluentStack>
             </FluentStack>
         </FluentTab>
