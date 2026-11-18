@@ -7,28 +7,38 @@ using System.Collections.Concurrent;
 using System.CommandLine;
 using System.Diagnostics;
 using System.Net;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using fhir.candle.Services;
 using fhir.candle.Tests.Controllers;
 using fhir.candle.Tests.Extensions;
+using fhir.candle.Ui;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Storage;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.AspNetCore.Components.RenderTree;
+using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Xunit.Abstractions;
 
 namespace fhir.candle.Tests;
 
-/// <summary>Exercises the production singleton registrations and cancellation-driven host lifetime.</summary>
+/// <summary>Exercises production services, UI delivery, and cancellation-driven host lifetime.</summary>
 [Collection(CompatibilityHostCollection.Name)]
 public sealed class HostingCompatibilityTests
 {
@@ -110,6 +120,90 @@ public sealed class HostingCompatibilityTests
         Assert.False(Directory.Exists(root));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => notifications.StartAsync(CancellationToken.None));
     }
+
+    /// <summary>The real UI host prerenders all tenants and serves its selected local asset graph.</summary>
+    [Fact]
+    public async Task ProductionUiServesRoutesAndRequiredAssets()
+    {
+        await using ProductionHost host = new(_output);
+        await host.StartAsync();
+        await using (AsyncServiceScope first = host.Services.CreateAsyncScope())
+        await using (AsyncServiceScope second = host.Services.CreateAsyncScope())
+        {
+            CandleThemeState state = first.ServiceProvider.GetRequiredService<CandleThemeState>();
+            CandleThemeState other = second.ServiceProvider.GetRequiredService<CandleThemeState>();
+            Assert.Same(state, first.ServiceProvider.GetRequiredService<CandleThemeState>());
+            Assert.NotSame(state, other);
+            state.Toggle();
+            Assert.Equal(1, state.Revision);
+            Assert.Equal(0, other.Revision);
+            Assert.False(other.IsDarkMode);
+            foreach (IServiceProvider scope in new[] { first.ServiceProvider, second.ServiceProvider })
+            {
+                AssertVendorService<IDialogService>(scope);
+                AssertVendorService<INotificationService>(scope);
+                AssertVendorService<IThemeService>(scope);
+            }
+        }
+
+        new RouteComposition().AssertAssemblies();
+        AssertForwarding(host.Services);
+        await host.AssertUiAsync();
+        host.AssertStartedOnce();
+        await host.StopAsync();
+        string root = host.Root;
+        await host.DisposeAsync();
+        Assert.False(Directory.Exists(root));
+
+        static void AssertVendorService<TService>(IServiceProvider scope) where TService : class
+        {
+            TService service = scope.GetRequiredService<TService>();
+            Assert.Equal(typeof(FluentProviders).Assembly, service.GetType().Assembly);
+        }
+    }
+
+    // Inspect compiled Router parameters, not source text or inferred version coverage from /store.
+    // Framework render-tree access is confined to this unmounted composition probe.
+#pragma warning disable BL0006
+    private sealed class RouteComposition : fhir.candle.Components.Routes
+    {
+        internal void AssertAssemblies()
+        {
+            using RenderTreeBuilder root = new();
+            BuildRenderTree(root);
+            RenderTreeFrame[] frames = Frames(root);
+            Assert.Equal(typeof(CandleUiRoot),
+                Assert.Single(frames, frame => frame.FrameType == RenderTreeFrameType.Component).ComponentType);
+            RenderFragment content = Assert.IsType<RenderFragment>(Attribute(frames, nameof(CandleUiRoot.ChildContent)));
+            using RenderTreeBuilder routed = new();
+            content(routed);
+            frames = Frames(routed);
+            Assert.Equal(typeof(Router),
+                Assert.Single(frames, frame => frame.FrameType == RenderTreeFrameType.Component).ComponentType);
+            Assert.Same(typeof(Program).Assembly, Attribute(frames, nameof(Router.AppAssembly)));
+            Assembly[] expected =
+            [
+                typeof(FhirCandle.Ui.R4.Subscriptions.TourUtils).Assembly,
+                typeof(FhirCandle.Ui.R4B.Subscriptions.TourUtils).Assembly,
+                typeof(FhirCandle.Ui.R5.Subscriptions.TourUtils).Assembly,
+            ];
+            Assembly[] additional = Assert.IsAssignableFrom<IEnumerable<Assembly>>(
+                Attribute(frames, nameof(Router.AdditionalAssemblies))).ToArray();
+            Assert.Equal(expected, additional);
+            Assert.All(additional, assembly =>
+                Assert.Contains(assembly.ExportedTypes, type => typeof(IComponent).IsAssignableFrom(type)));
+            Assert.IsType<RenderFragment<RouteData>>(Attribute(frames, nameof(Router.Found)));
+            Assert.IsType<RenderFragment>(Attribute(frames, "NotFound"));
+        }
+
+        private static RenderTreeFrame[] Frames(RenderTreeBuilder builder) =>
+            builder.GetFrames().Array.Take(builder.GetFrames().Count).ToArray();
+
+        private static object? Attribute(RenderTreeFrame[] frames, string name) =>
+            Assert.Single(frames, frame => frame.FrameType == RenderTreeFrameType.Attribute &&
+                frame.AttributeName == name).AttributeValue;
+    }
+#pragma warning restore BL0006
 
     private static IHostedService[] AssertForwarding(IServiceProvider services)
     {
@@ -209,16 +303,7 @@ public sealed class HostingCompatibilityTests
 
         internal async Task AssertMetadataAsync()
         {
-            IServer server = Services.GetRequiredService<IServer>();
-            IServerAddressesFeature addresses = server.Features.Get<IServerAddressesFeature>()
-                ?? throw new InvalidOperationException("Kestrel did not publish its address.");
-            Uri address = new(Assert.Single(addresses.Addresses));
-            Assert.Equal(IPAddress.Loopback.ToString(), address.Host);
-            using HttpClient client = new(new HttpClientHandler { UseProxy = false })
-            {
-                BaseAddress = address,
-                Timeout = _deadline,
-            };
+            using HttpClient client = CreateClient();
             client.DefaultRequestHeaders.Accept.ParseAdd("application/fhir+json");
             foreach ((string tenant, string version) in new[]
             {
@@ -234,6 +319,308 @@ public sealed class HostingCompatibilityTests
                     metadata.RootElement.GetProperty("url").GetString());
                 _output.WriteLine($"{tenant}/metadata: 200; FHIR {version}");
             }
+        }
+
+        internal async Task AssertUiAsync()
+        {
+            const string FluentContent = "/_content/Microsoft.FluentUI.AspNetCore.Components/";
+            const string FluentBundle = FluentContent + "Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css";
+            const string FluentModule = FluentContent + "Microsoft.FluentUI.AspNetCore.Components.lib.module.js";
+            const string MonacoContent = "/_content/BlazorMonaco/";
+            using CancellationTokenSource requests = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+            requests.CancelAfter(_deadline);
+            CancellationToken token = requests.Token;
+            using HttpClient client = CreateClient();
+            IWebHostEnvironment environment = Services.GetRequiredService<IWebHostEnvironment>();
+            Assert.Equal(typeof(Program).Assembly.GetName().Name, environment.ApplicationName);
+            _output.WriteLine($"RunServer web root: {environment.WebRootPath}; provider: " +
+                environment.WebRootFileProvider.GetType().FullName);
+            Dictionary<string, string> bodies = new(StringComparer.Ordinal);
+            Queue<(Uri Address, int Depth)> pending = new();
+            HashSet<Uri> scheduled = [];
+            Uri documentBase = new(client.BaseAddress!, "/");
+            string[] styles = ["/fhir-candle.styles.css", "/css/candle-theme.css", "/css/app.css", "/css/monaco.css"];
+            string[] scripts =
+            [
+                "/js/candle-theme.js", MonacoContent + "jsInterop.js",
+                MonacoContent + "lib/monaco-editor/min/vs/loader.js",
+                MonacoContent + "lib/monaco-editor/min/vs/editor/editor.main.js", "/_framework/blazor.web.js",
+            ];
+            foreach (string route in new[]
+            {
+                "/", "/store?store=hosting-r4", "/store?store=hosting-r4b", "/store?store=hosting-r5",
+            })
+            {
+                using HttpResponseMessage response = await client.GetAsync(route, token);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+                string document = await response.Content.ReadAsStringAsync(token);
+                AssertUiDocument(document);
+                Assert.Equal("/", HtmlAttribute(Assert.Single(Matches(document, @"<base\b[^>]*>")).Value, "href"));
+                string[] deliveredStyles = Matches(document, @"<link\b[^>]*>")
+                    .Where(tag => HtmlAttribute(tag.Value, "rel") == "stylesheet")
+                    .Select(tag => HtmlAttribute(tag.Value, "href")).ToArray();
+                string[] deliveredScripts = Matches(document, @"<script\b[^>]*>")
+                    .Select(tag => HtmlAttribute(tag.Value, "src")).Where(src => !string.IsNullOrEmpty(src)).ToArray();
+                Assert.Equal(styles, deliveredStyles.Select(path => new Uri(documentBase, path).AbsolutePath));
+                Assert.Equal(scripts, deliveredScripts.Select(path => new Uri(documentBase, path).AbsolutePath));
+                foreach (string reference in deliveredStyles.Concat(deliveredScripts))
+                {
+                    Enqueue(documentBase, reference, 0);
+                }
+
+                string application = SingleDiv(document, "candle-ui-root");
+                if (route == "/")
+                {
+                    Assert.Contains("Uploading real patient data is strictly prohibited.", application);
+                    foreach ((string tenant, string release) in new[]
+                    {
+                        ("hosting-r4", "R4"), ("hosting-r4b", "R4B"), ("hosting-r5", "R5"),
+                    })
+                    {
+                        Assert.Contains($"FHIR {release} endpoint at", application);
+                        Assert.Contains($"http://127.0.0.1/fhir/{tenant}", application);
+                        Assert.Contains($"/store?store={tenant}", application);
+                    }
+                }
+                else
+                {
+                    string tenant = route.Split('=')[1];
+                    Assert.Contains("FHIR Resources: " + tenant, application);
+                    Assert.Contains("Hide Empty Resources", application);
+                    Assert.Contains($"href=\"/store?store={tenant}\"", application);
+                }
+                _output.WriteLine($"{route}: 200; prerendered application and provider outlets.");
+            }
+
+            string manifestPath = "/" + environment.ApplicationName + ".modules.json";
+            Enqueue(documentBase, manifestPath, 0);
+            // FluentUIStyles fetches this dynamically; neither CSS @imports nor the manifest lists it.
+            Enqueue(documentBase, FluentContent + "css/default-fuib.css", 0);
+            // These active grid/drawer/tooltip controls import modules only after interactivity.
+            // Read their released assembly references instead of guessing URLs from component names.
+            Dictionary<string, string> componentModules = new(StringComparer.Ordinal);
+            foreach ((Type component, string identity) in new (Type, string)[]
+            {
+                (typeof(FluentDataGrid<>), "DataGrid.Initialize"),
+                (typeof(FluentGrid), "Grid.FluentGridInitialize"),
+                (typeof(FluentNav), "Nav.Initialize"),
+                (typeof(FluentTooltip), "Tooltip.FluentTooltipInitialize"),
+            })
+            {
+                FieldInfo reference = Assert.IsAssignableFrom<FieldInfo>(
+                    component.GetField("JAVASCRIPT_FILE", BindingFlags.NonPublic | BindingFlags.Static));
+                string path = Assert.IsType<string>(reference.GetRawConstantValue());
+                Assert.Contains(FluentContent + "Components/", path);
+                componentModules.Add(new Uri(documentBase, path).AbsolutePath, identity);
+                Enqueue(documentBase, path, 0);
+            }
+
+            while (pending.TryDequeue(out (Uri Address, int Depth) asset))
+            {
+                token.ThrowIfCancellationRequested();
+                string path = asset.Address.AbsolutePath;
+                string extension = Path.GetExtension(path);
+                Assert.True(styles.Contains(path) || scripts.Contains(path) || path == manifestPath ||
+                    (path.StartsWith(FluentContent, StringComparison.Ordinal) && extension is ".css" or ".js"),
+                    $"Asset traversal escaped the required local graph: {asset.Address}");
+                using HttpResponseMessage response = await client.GetAsync(asset.Address, token);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                string? mediaType = response.Content.Headers.ContentType?.MediaType;
+                Assert.True(extension switch
+                {
+                    ".css" => mediaType == "text/css",
+                    ".js" => mediaType is "text/javascript" or "application/javascript",
+                    ".json" => mediaType == "application/json",
+                    _ => false,
+                }, $"{path}: unexpected content type '{mediaType}'.");
+                byte[] bytes = await response.Content.ReadAsByteArrayAsync(token);
+                string body = Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+                Assert.False(string.IsNullOrWhiteSpace(body), path);
+                Assert.False(Matches(body, @"^(?:<!doctype\s+html\b|<html\b)").Any(), $"{path}: HTML fallback.");
+                IFileInfo selected = environment.WebRootFileProvider.GetFileInfo(Uri.UnescapeDataString(path).TrimStart('/'));
+                Assert.True(selected.Exists && !selected.IsDirectory, $"{path}: absent from RunServer's file provider.");
+                await using (Stream stream = selected.CreateReadStream())
+                {
+                    Assert.Equal(await SHA256.HashDataAsync(stream, token), SHA256.HashData(bytes));
+                }
+                bodies.Add(path, body);
+                _output.WriteLine($"{path}: 200; {mediaType}; {bytes.Length} bytes; selected-file SHA-256 matches.");
+
+                if (extension == ".css")
+                {
+                    string css = Regex.Replace(body, @"/\*.*?\*/", string.Empty, RegexOptions.Singleline, _deadline);
+                    foreach (Match import in Matches(css, @"@import\s+(?:url\(\s*)?[""']?(?<url>[^""'\s);]+)"))
+                    {
+                        Enqueue(asset.Address, import.Groups["url"].Value, asset.Depth + 1);
+                    }
+                }
+                else if (path == manifestPath)
+                {
+                    using JsonDocument manifest = JsonDocument.Parse(body);
+                    Assert.Equal(JsonValueKind.Array, manifest.RootElement.ValueKind);
+                    string[] modules = manifest.RootElement.EnumerateArray()
+                        .Select(module => Assert.IsType<string>(module.GetString())).ToArray();
+                    Assert.Single(modules, module => new Uri(documentBase, module).AbsolutePath == FluentModule);
+                    foreach (string module in modules)
+                    {
+                        // The initializer manifest is document-base-relative, not relative to /_framework.
+                        Enqueue(documentBase, module, asset.Depth + 1);
+                    }
+                }
+                else if (path.StartsWith(FluentContent, StringComparison.Ordinal) && extension == ".js")
+                {
+                    foreach (Match import in Matches(body,
+                        @"\b(?:import|export)\s+(?:[^;""']*?\s+from\s*)?[""'](?<url>[^""']+)[""']|\bimport\s*\(\s*[""'](?<url>[^""']+)[""']"))
+                    {
+                        Enqueue(asset.Address, import.Groups["url"].Value, asset.Depth + 1);
+                    }
+                }
+            }
+
+            Dictionary<string, string[]> identities = new(StringComparer.Ordinal)
+            {
+                ["/js/candle-theme.js"] = ["window.candleTheme", "localStorage.getItem(\"theme\")", "SystemChanged"],
+                ["/css/candle-theme.css"] = [".candle-ui-root", ".candle-messages-top", "--colorNeutralBackground1"],
+                ["/css/app.css"] = ["--candle-foreground", ".candle-header"],
+                ["/css/monaco.css"] = [".monaco-editor-container"],
+                ["/fhir-candle.styles.css"] = ["@import", FluentBundle.TrimStart('/')],
+                [FluentBundle] = [".fluent-data-grid", ".fluent-message-bar-provider"],
+                [FluentModule] = ["beforeWebStart", "afterWebStarted", "setBrandThemeToElementFromSettings"],
+                [FluentContent + "css/default-fuib.css"] = ["Microsoft Fluent UI Blazor library - Required styles"],
+                ["/_framework/blazor.web.js"] = ["Blazor", "beforeWebStart"],
+                [MonacoContent + "jsInterop.js"] = ["window.blazorMonaco"],
+                [MonacoContent + "lib/monaco-editor/min/vs/loader.js"] = ["AMDLoader"],
+                [MonacoContent + "lib/monaco-editor/min/vs/editor/editor.main.js"] = ["vs/editor/editor.main"],
+            };
+            foreach ((string path, string[] markers) in identities)
+            {
+                Assert.True(bodies.ContainsKey(path), $"Required asset not reached: {path}");
+                string body = bodies[path];
+                Assert.All(markers, marker => Assert.Contains(marker, body));
+            }
+            Assert.Single(bodies.Where(asset => asset.Key.EndsWith(".css", StringComparison.Ordinal))
+                .SelectMany(asset => Matches(asset.Value, @"@import\s+[^;]+;")),
+                import => import.Value.Contains(FluentBundle.TrimStart('/'), StringComparison.Ordinal));
+            Assert.DoesNotContain("reboot.css", bodies["/css/app.css"]);
+            Assert.Contains("default-fuib.css", bodies[FluentModule]);
+            foreach ((string path, string identity) in componentModules)
+            {
+                Assert.True(bodies.ContainsKey(path), $"Required component module not reached: {path}");
+                Assert.Contains(identity, bodies[path]);
+            }
+            Assert.All(bodies.Where(asset => asset.Key.EndsWith(".razor.js", StringComparison.Ordinal)),
+                asset => Assert.Contains("export var Microsoft;", asset.Value));
+
+            void Enqueue(Uri parent, string reference, int depth)
+            {
+                Uri resolved = new(parent, WebUtility.HtmlDecode(reference));
+                if (resolved.Scheme != documentBase.Scheme || resolved.Authority != documentBase.Authority)
+                {
+                    return; // No external styles, CDNs, source maps, or unrelated endpoints are crawled.
+                }
+                Uri canonical = new UriBuilder(resolved) { Fragment = string.Empty, Query = string.Empty }.Uri;
+                if (!scheduled.Add(canonical))
+                {
+                    return;
+                }
+                Assert.InRange(depth, 0, 6);
+                Assert.InRange(scheduled.Count, 1, 32);
+                pending.Enqueue((canonical, depth));
+            }
+        }
+
+        private static void AssertUiDocument(string document)
+        {
+            Assert.Contains("<!DOCTYPE html>", document, StringComparison.OrdinalIgnoreCase);
+            Assert.False(Matches(document, @"loading-theme\.js|<loading-theme\b|<fluent-design-theme\b").Any());
+            string application = SingleDiv(document, "candle-ui-root");
+            string providers = SingleDiv(application, "fluent-providers");
+            SingleDiv(document, "fluent-providers");
+            foreach (string outlet in new[] { "fluent-dialog-provider", "fluent-toast-provider", "fluent-tooltip-provider" })
+            {
+                SingleDiv(providers, outlet);
+                SingleDiv(document, outlet);
+            }
+            string feedback = SingleDiv(application, "candle-messages-top");
+            SingleDiv(document, "candle-messages-top");
+            Assert.Contains("Application feedback", feedback);
+            SingleDiv(feedback, "fluent-message-bar-provider");
+            SingleDiv(document, "fluent-message-bar-provider");
+            Assert.True(application.IndexOf(feedback, StringComparison.Ordinal) <
+                application.IndexOf("candle-header", StringComparison.Ordinal));
+            Assert.Contains("Light/Dark Mode", application);
+            Assert.Contains("blazor-error-ui", application);
+            Assert.Contains("<svg", application);
+
+            // HeadOutlet and Routes retain separate prerendered InteractiveServer boundaries.
+            Match[] boundaries = Matches(document, @"<!--Blazor:(?<json>.*?)-->").ToArray();
+            JsonElement[] markers = boundaries.Select(marker =>
+            {
+                using JsonDocument json = JsonDocument.Parse(marker.Groups["json"].Value);
+                return json.RootElement.Clone();
+            }).ToArray();
+            int[] starts = Enumerable.Range(0, markers.Length)
+                .Where(index => markers[index].TryGetProperty("type", out _)).ToArray();
+            Assert.Equal(2, starts.Length);
+            int headEnd = document.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+            int applicationStart = document.IndexOf(application, StringComparison.Ordinal);
+            Assert.InRange(boundaries[starts[0]].Index, 0, headEnd);
+            Assert.InRange(boundaries[starts[1]].Index, headEnd, applicationStart);
+            Assert.All(starts, index =>
+            {
+                JsonElement marker = markers[index];
+                Assert.Equal("server", marker.GetProperty("type").GetString());
+                string id = Assert.IsType<string>(marker.GetProperty("prerenderId").GetString());
+                Assert.False(string.IsNullOrEmpty(id));
+                int end = Assert.Single(Enumerable.Range(0, markers.Length), candidate =>
+                    !markers[candidate].TryGetProperty("type", out _) &&
+                    markers[candidate].GetProperty("prerenderId").GetString() == id);
+                Assert.True(boundaries[index].Index < boundaries[end].Index);
+                if (index == starts[1])
+                {
+                    Assert.True(boundaries[end].Index >= applicationStart + application.Length);
+                }
+            });
+        }
+
+        private static string SingleDiv(string document, string cssClass)
+        {
+            Match[] tags = Matches(document, @"</?div\b[^>]*>").ToArray();
+            Match start = Assert.Single(tags, tag => !tag.Value.StartsWith("</", StringComparison.Ordinal) &&
+                HtmlAttribute(tag.Value, "class").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(cssClass));
+            int depth = 0;
+            foreach (Match tag in tags.Where(tag => tag.Index >= start.Index))
+            {
+                depth += tag.Value.StartsWith("</", StringComparison.Ordinal) ? -1 : 1;
+                if (depth == 0)
+                {
+                    return document.Substring(start.Index, tag.Index + tag.Length - start.Index);
+                }
+            }
+            throw new InvalidOperationException($"Unclosed {cssClass} div in prerendered document.");
+        }
+
+        private static IEnumerable<Match> Matches(string input, string pattern) =>
+            Regex.Matches(input, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, _deadline).Cast<Match>();
+
+        private static string HtmlAttribute(string tag, string name) =>
+            WebUtility.HtmlDecode(Regex.Match(tag, $@"\b{name}\s*=\s*(?:""(?<value>[^""]*)""|'(?<value>[^']*)')",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, _deadline).Groups["value"].Value);
+
+        private HttpClient CreateClient()
+        {
+            IServer server = Services.GetRequiredService<IServer>();
+            IServerAddressesFeature addresses = server.Features.Get<IServerAddressesFeature>()
+                ?? throw new InvalidOperationException("Kestrel did not publish its address.");
+            Uri address = new(Assert.Single(addresses.Addresses));
+            Assert.Equal(IPAddress.Loopback.ToString(), address.Host);
+            return new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
+            {
+                BaseAddress = address,
+                Timeout = _deadline,
+                MaxResponseContentBufferSize = 16 * 1024 * 1024,
+            };
         }
 
         internal async Task StopAsync()
