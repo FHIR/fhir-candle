@@ -423,48 +423,250 @@ public sealed class SubscriptionNotificationLifecycleTests
 
     [Theory]
     [MemberData(nameof(Versions))]
-    public async Task ZulipRechecksEveryStreamAndPrivateRecipient(FhirReleases.FhirSequenceCodes version)
+    public async Task ZulipOrdinaryFailureContinuesEligibleRecipients(FhirReleases.FhirSequenceCodes version)
     {
-        foreach (string mode in new[] { "stream", "private", "positive" })
+        foreach (bool failPrivate in new[] { false, true })
         {
             using NotificationFixture fixture = new(version, false);
+            fixture.Zulip(requested: true);
             ParsedSubscription subscription = fixture.Store.Subscription;
-            subscription.ChannelCode = "zulip";
-            subscription.Parameters = new()
-            {
-                ["site"] = ["https://zulip.unit.test"],
-                ["email"] = ["bot@unit.test"],
-                ["key"] = ["synthetic-local-only"],
-                ["streamId"] = mode == "private" ? [] : ["1", "2"],
-                ["userId"] = ["3", "4"],
-            };
+            long revision = subscription.Revision;
             NotificationManager manager = (NotificationManager)fixture.Service;
-            TaskCompletionSource<(bool success, string? details, ulong messageId)> held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<(bool success, string? details, ulong messageId)>[] results = Enumerable.Range(1, 4)
+                .Select(_ => new TaskCompletionSource<(bool success, string? details, ulong messageId)>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+            TaskCompletionSource[] reached = Enumerable.Range(1, 4)
+                .Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
             List<int> starts = [];
             Task<(bool success, string? details, ulong messageId)> Start(int id)
             {
                 starts.Add(id);
-                return mode != "positive" && starts.Count == 1
-                    ? held.Task : Task.FromResult((true, (string?)null, 1UL));
+                reached[id - 1].SetResult();
+                return results[id - 1].Task;
             }
             manager.ZulipStream = (_, _, id) => Start(id);
             manager.ZulipPrivate = (_, _, id) => Start(id);
-            Task<Outcome> delivery = fixture.Notify(fixture.Store.Args());
+            Task<Outcome> delivery = fixture.Notify(fixture.Store.Args(ParsedSubscription.NotificationTypeCodes.Handshake));
+            long expectedCommunication = 0;
+            List<string> errors = [];
             try
             {
-                if (mode != "positive")
+                for (int id = 1; id <= 4; id++)
                 {
-                    Assert.Single(starts);
-                    fixture.Revoke("off");
+                    await reached[id - 1].Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    Assert.Equal(Enumerable.Range(1, id), starts);
+                    Assert.False(delivery.IsCompleted);
+                    Assert.Equal(expectedCommunication, subscription.LastCommunicationTicks);
+                    Assert.Equal(errors, subscription.NotificationErrors);
+                    if (expectedCommunication == 0)
+                    {
+                        Assert.Empty(subscription.SerializedEvents);
+                    }
+                    fixture.Store.Clock.Advance(TimeSpan.FromSeconds(1));
+                    string? error = id == 1 ? "stream denied" : id == 3 && failPrivate ? "private denied" : null;
+                    if (error is null)
+                    {
+                        expectedCommunication = fixture.Store.Clock.GetUtcNow().UtcTicks;
+                    }
+                    else
+                    {
+                        errors.Add(error);
+                    }
+                    results[id - 1].SetResult((error is null, error, error is null ? (ulong)id : 0));
                 }
             }
             finally
             {
-                held.TrySetResult((true, null, 1));
+                foreach (TaskCompletionSource<(bool success, string? details, ulong messageId)> result in results)
+                {
+                    result.TrySetResult((true, null, 1));
+                }
+                await delivery.WaitAsync(TimeSpan.FromSeconds(10));
             }
-            Outcome outcome = await delivery.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.Equal(mode == "positive" ? new[] { 1, 2, 3, 4 } : mode == "private" ? [3] : [1], starts);
-            Assert.Equal(mode == "positive" ? OutcomeKind.Delivered : OutcomeKind.Suppressed, outcome.Kind);
+            Outcome outcome = await delivery;
+            Assert.Equal(new[] { 1, 2, 3, 4 }, starts);
+            Assert.Equal(OutcomeKind.Failed, outcome.Kind);
+            Assert.False(outcome.Succeeded);
+            Assert.Equal(failPrivate ? "stream denied" + Environment.NewLine + "private denied" : "stream denied", outcome.Error);
+            Assert.Null(outcome.SerializedContent);
+            Assert.Equal(errors, subscription.NotificationErrors);
+            Assert.Single(subscription.SerializedEvents);
+            Assert.Equal(expectedCommunication, subscription.LastCommunicationTicks);
+            Assert.Equal(revision, subscription.Revision);
+            fixture.Store.AssertViews("requested");
+            Assert.Empty(fixture.Log.Failures);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task CurrentRevisionZulipFailuresRemainFailures(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (bool queued in new[] { false, true })
+        {
+            using NotificationFixture fixture = new(version, false);
+            fixture.Zulip(requested: true);
+            ParsedSubscription subscription = fixture.Store.Subscription;
+            long revision = subscription.Revision;
+            long priorCommunication = LifecycleTestStore.Now.AddMinutes(-1).UtcTicks;
+            subscription.LastCommunicationTicks = priorCommunication;
+            NotificationManager manager = (NotificationManager)fixture.Service;
+            string[] errors = ["stream denied", "second stream denied", "private denied", "second private denied"];
+            TaskCompletionSource<(bool success, string? details, ulong messageId)>[] results = Enumerable.Range(1, 4)
+                .Select(_ => new TaskCompletionSource<(bool success, string? details, ulong messageId)>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+            TaskCompletionSource[] reached = Enumerable.Range(1, 4)
+                .Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+            List<int> starts = [];
+            Task<(bool success, string? details, ulong messageId)> Start(int id)
+            {
+                starts.Add(id);
+                reached[id - 1].SetResult();
+                return results[id - 1].Task;
+            }
+            manager.ZulipStream = (_, _, id) => Start(id);
+            manager.ZulipPrivate = (_, _, id) => Start(id);
+            Task<Outcome>? direct = null;
+            Task delivery;
+            if (queued)
+            {
+                fixture.Start();
+                Assert.Equal(1, fixture.QueuedCount);
+                delivery = fixture.DrainOneAsync();
+            }
+            else
+            {
+                direct = fixture.Notify(fixture.Store.Args(ParsedSubscription.NotificationTypeCodes.Handshake));
+                delivery = direct;
+            }
+            try
+            {
+                for (int id = 1; id <= 4; id++)
+                {
+                    await reached[id - 1].Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    Assert.Equal(Enumerable.Range(1, id), starts);
+                    Assert.False(delivery.IsCompleted);
+                    Assert.Equal(errors.Take(id - 1), subscription.NotificationErrors);
+                    Assert.Empty(subscription.SerializedEvents);
+                    Assert.Equal(priorCommunication, subscription.LastCommunicationTicks);
+                    Assert.Empty(fixture.Log.Failures);
+                    results[id - 1].SetResult((false, errors[id - 1], 0));
+                }
+            }
+            finally
+            {
+                for (int index = 0; index < results.Length; index++)
+                {
+                    results[index].TrySetResult((false, errors[index], 0));
+                }
+                await delivery.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            if (direct is not null)
+            {
+                Outcome outcome = await direct;
+                Assert.Equal(OutcomeKind.Failed, outcome.Kind);
+                Assert.False(outcome.Succeeded);
+                Assert.Equal(string.Join(Environment.NewLine, errors), outcome.Error);
+                Assert.Null(outcome.SerializedContent);
+            }
+            Assert.Equal(new[] { 1, 2, 3, 4 }, starts);
+            Assert.Equal(errors, subscription.NotificationErrors);
+            Assert.Empty(subscription.SerializedEvents);
+            Assert.Equal(priorCommunication, subscription.LastCommunicationTicks);
+            Assert.Equal(revision, subscription.Revision);
+            fixture.Store.AssertViews("requested");
+            if (queued)
+            {
+                Assert.Equal((LogLevel.Warning, $"Notification delivery failed for Subscription/{LifecycleTestStore.Id}"),
+                    Assert.Single(fixture.Log.Entries, entry => entry.Level >= LogLevel.Warning));
+                Assert.Single(fixture.Log.Failures);
+                Assert.Equal(0, fixture.QueuedCount);
+            }
+            else
+            {
+                Assert.Empty(fixture.Log.Failures);
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task ZulipRechecksEveryStreamAndPrivateRecipient(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string mode in new[] { "stream", "private", "positive" })
+        {
+            foreach (string change in mode == "positive" ? new[] { "none" } : ["off", "expire", "cancel", "failed-off", "failed-expire", "failed-cancel"])
+            {
+                using NotificationFixture fixture = new(version, false);
+                fixture.Zulip();
+                ParsedSubscription subscription = fixture.Store.Subscription;
+                if (mode == "private")
+                {
+                    subscription.Parameters["streamId"] = [];
+                }
+                NotificationManager manager = (NotificationManager)fixture.Service;
+                TaskCompletionSource<(bool success, string? details, ulong messageId)> held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                List<int> starts = [];
+                Task<(bool success, string? details, ulong messageId)> Start(int id)
+                {
+                    starts.Add(id);
+                    return mode != "positive" && starts.Count == 1
+                        ? held.Task : Task.FromResult((true, (string?)null, 1UL));
+                }
+                manager.ZulipStream = (_, _, id) => Start(id);
+                manager.ZulipPrivate = (_, _, id) => Start(id);
+                using CancellationTokenSource cancellation = new();
+                bool canceled = change.EndsWith("cancel", StringComparison.Ordinal);
+                bool failed = change.StartsWith("failed-", StringComparison.Ordinal);
+                Task<Outcome> delivery = fixture.Notify(fixture.Store.Args(), cancellation.Token);
+                try
+                {
+                    if (mode != "positive")
+                    {
+                        Assert.Single(starts);
+                        if (canceled)
+                        {
+                            cancellation.Cancel();
+                        }
+                        else
+                        {
+                            fixture.Revoke(change.Replace("failed-", string.Empty, StringComparison.Ordinal));
+                        }
+                        Assert.False(delivery.IsCompleted);
+                    }
+                }
+                finally
+                {
+                    if (canceled)
+                    {
+                        cancellation.Cancel();
+                    }
+                    held.TrySetResult((!failed, failed ? "recipient denied" : null, failed ? 0UL : 1UL));
+                    if (canceled)
+                    {
+                        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => delivery.WaitAsync(TimeSpan.FromSeconds(10)));
+                    }
+                    else
+                    {
+                        await delivery.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                }
+                Assert.Equal(mode == "positive" ? new[] { 1, 2, 3, 4 } : mode == "private" ? [3] : [1], starts);
+                if (!canceled)
+                {
+                    Assert.Equal(mode == "positive" ? OutcomeKind.Delivered : OutcomeKind.Suppressed, (await delivery).Kind);
+                }
+                bool delivered = mode == "positive" || (canceled && !failed);
+                Assert.Equal(delivered ? fixture.Store.Clock.GetUtcNow().UtcTicks : 0, subscription.LastCommunicationTicks);
+                Assert.Equal(canceled && failed ? new[] { "recipient denied" } : [], subscription.NotificationErrors);
+                if (delivered)
+                {
+                    Assert.Single(subscription.SerializedEvents);
+                }
+                else
+                {
+                    Assert.Empty(subscription.SerializedEvents);
+                }
+                Assert.Empty(fixture.Log.Failures);
+            }
         }
     }
 
@@ -653,10 +855,27 @@ public sealed class SubscriptionNotificationLifecycleTests
             Store.Subscription.ChannelCode = "email";
             Store.Subscription.Endpoint = "recipient@unit.test";
         }
-        internal Task<Outcome> Notify(SubscriptionSendEventArgs args)
+        internal void Zulip(bool requested = false)
+        {
+            if (requested)
+            {
+                Store.PutSubscription("requested");
+            }
+            ParsedSubscription subscription = Store.Subscription;
+            subscription.ChannelCode = "zulip";
+            subscription.Parameters = new()
+            {
+                ["site"] = ["https://zulip.unit.test"],
+                ["email"] = ["bot@unit.test"],
+                ["key"] = ["synthetic-local-only"],
+                ["streamId"] = ["1", "2"],
+                ["userId"] = ["3", "4"],
+            };
+        }
+        internal Task<Outcome> Notify(SubscriptionSendEventArgs args, CancellationToken cancellationToken = default)
         {
             MethodInfo method = Service.GetType().GetMethod("TryNotify", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            return (Task<Outcome>)method.Invoke(Service, _restOnly ? [Store.Store, args] : [Store.Store, args, CancellationToken.None])!;
+            return (Task<Outcome>)method.Invoke(Service, _restOnly ? [Store.Store, args] : [Store.Store, args, cancellationToken])!;
         }
         internal void Scan() => Invoke("CheckAndSendHeartbeats", [null]);
         internal void RunQueueTimer() => Invoke("CheckNotificationQ", [null]);
@@ -734,13 +953,16 @@ public sealed class SubscriptionNotificationLifecycleTests
     private sealed class RecordingLog : ILogger<NotificationManager>, ILogger<RestOnlyNotificationManager>
     {
         internal ConcurrentQueue<string> Failures { get; } = new();
+        internal ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
+            string message = formatter(state, exception);
+            Entries.Enqueue((logLevel, message));
             if (logLevel >= LogLevel.Warning)
             {
-                Failures.Enqueue(formatter(state, exception));
+                Failures.Enqueue(message);
             }
         }
     }

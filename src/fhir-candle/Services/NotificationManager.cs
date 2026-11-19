@@ -357,6 +357,7 @@ public class NotificationManager : INotificationManager
 
             string messageText = BuildZulipMessage(store, e, contents);
             Outcome outcome = new(OutcomeKind.SetupComplete);
+            List<Outcome> failures = [];
 
             if (e.Subscription.Parameters.ContainsKey("streamId"))
             {
@@ -371,9 +372,13 @@ public class NotificationManager : INotificationManager
                     // This existing Zulip API has no cancellation overload. Keep awaiting any started send.
                     outcome = await DispatchAsync(store, e,
                         () => ZulipOutcomeAsync(ZulipStream(client, messageText, id), contents)).ConfigureAwait(false);
-                    if (!outcome.Succeeded)
+                    if (outcome.Kind == OutcomeKind.Suppressed)
                     {
                         return outcome;
+                    }
+                    if (outcome.Kind == OutcomeKind.Failed)
+                    {
+                        failures.Add(outcome);
                     }
                 }
             }
@@ -390,14 +395,21 @@ public class NotificationManager : INotificationManager
                     cancellationToken.ThrowIfCancellationRequested();
                     outcome = await DispatchAsync(store, e,
                         () => ZulipOutcomeAsync(ZulipPrivate(client, messageText, id), contents)).ConfigureAwait(false);
-                    if (!outcome.Succeeded)
+                    if (outcome.Kind == OutcomeKind.Suppressed)
                     {
                         return outcome;
+                    }
+                    if (outcome.Kind == OutcomeKind.Failed)
+                    {
+                        failures.Add(outcome);
                     }
                 }
             }
 
-            return outcome;
+            // Each recipient has already committed its own revision-fenced bookkeeping.
+            return failures.Count == 0 ? outcome : new(OutcomeKind.Failed,
+                Error: string.Join(Environment.NewLine, failures.Select(failure => failure.Error)
+                    .Where(error => !string.IsNullOrEmpty(error)).Distinct(StringComparer.Ordinal)));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
