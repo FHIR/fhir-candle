@@ -12,6 +12,46 @@ the ones specified. To load only an R4 endpoint at `fhir`, the arguments would
 include `--r4 fhir`. You can specify multiple tenants for the same version; for
 example, `--r5 fhir --r5 also-fhir` will create two endpoints.
 
+## SMART backend scopes
+
+For testing and development, a registered backend client can exchange a fresh
+signed JWT assertion with `POST /_smart/<tenant>/token`. Send
+`application/x-www-form-urlencoded` fields `grant_type=client_credentials`,
+`client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`,
+`client_assertion=<signed-assertion>`, and `scope=system/Patient.rs`.
+After a successful exchange, use the actual returned `access_token` as
+`Authorization: Bearer <access_token>` on requests to `/fhir/<tenant>/...`.
+Do not use the assertion itself as the FHIR bearer token.
+
+On a SMART-required tenant, that limited token allows `GET
+/fhir/<tenant>/Patient/<id>` and `GET /fhir/<tenant>/Patient`, including matching
+Patient resources in search results. Observation read/search requests remain
+denied. Creating, updating, or deleting either Patient or Observation resources
+is also denied: for example, `POST /fhir/<tenant>/Patient`, `PUT
+/fhir/<tenant>/Patient/<id>`, and `DELETE /fhir/<tenant>/Patient/<id>` return the
+existing direct-request `401 Unauthorized` response. These statuses describe
+direct requests; Bundle entry responses follow the separate contract below.
+
+Use one `scope` form field with space-delimited tokens, such as
+`system/Patient.r system/Observation.s`. This grants Patient read and Observation
+search, not Patient search or Observation read. Supported actions include v1
+`read` (read/search) and `write` (create/update/delete), action `*` (all five),
+and unordered v2 action letters `c`, `r`, `u`, `d`, `s`. A lone `r` does not
+include search. Resource wildcard `*` applies those actions across resource
+types, for example `system/*.rs`.
+
+System scopes supply non-patient resource/action permissions, not a human-user
+identity or patient launch context. Neither limited backend scopes nor wildcard
+grants such as `system/*.*` install the intentional built-in administrator's
+special `*.*` permission sentinel. Interactive user/patient consent and tenant
+SMART policy remain separate.
+
+Effective grants live only in the existing in-memory authorization state.
+Perform a fresh exchange for newly corrected grants; previously issued state is
+not rebuilt from scope text on each request. This is development-server
+behavior, not a production-security guarantee, durable authorization storage,
+or new granular-filter enforcement.
+
 ## Bundle authorization
 
 Each executable batch or transaction entry is checked against its own resource

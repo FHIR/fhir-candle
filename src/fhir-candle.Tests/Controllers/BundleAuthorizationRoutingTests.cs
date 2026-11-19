@@ -127,6 +127,268 @@ public class BundleAuthorizationRoutingTests
         AssertUnchanged(store, before, watch);
     }
 
+    /// <summary>Backend normalization retains exact grants and ordinary interaction boundaries for each supported syntax.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BackendAssertionScopesNormalizeWithoutBroadeningPermissions(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version);
+        IFhirStore store = host.Store;
+        Seed(store);
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys();
+        string clientId = RegisterAssertionClient(host.AuthManager, publicKey);
+        (string Scope, string[] Grants, string PatientActions, string ObservationActions)[] cases =
+        [
+            ("system/Patient.rs", ["Patient.r", "Patient.s"], "rs", string.Empty),
+            ("system/Patient.sr", ["Patient.r", "Patient.s"], "rs", string.Empty),
+            ("system/Patient.read", ["Patient.r", "Patient.s"], "rs", string.Empty),
+            ("system/Patient.write", ["Patient.c", "Patient.u", "Patient.d"], "cud", string.Empty),
+            ("system/Patient.*", ["Patient.c", "Patient.r", "Patient.u", "Patient.d", "Patient.s"], "cruds", string.Empty),
+            ("system/Patient.cruds", ["Patient.c", "Patient.r", "Patient.u", "Patient.d", "Patient.s"], "cruds", string.Empty),
+            ("system/Patient.sdcur", ["Patient.c", "Patient.r", "Patient.u", "Patient.d", "Patient.s"], "cruds", string.Empty),
+            ("system/Patient.c", ["Patient.c"], "c", string.Empty),
+            ("system/Patient.r", ["Patient.r"], "r", string.Empty),
+            ("system/Patient.u", ["Patient.u"], "u", string.Empty),
+            ("system/Patient.d", ["Patient.d"], "d", string.Empty),
+            ("system/Patient.s", ["Patient.s"], "s", string.Empty),
+            ("system/*.read", ["*.r", "*.s"], "rs", "rs"),
+            ("system/*.rs", ["*.r", "*.s"], "rs", "rs"),
+            ("system/*.write", ["*.c", "*.u", "*.d"], "cud", "cud"),
+            ("system/*.*", ["*.c", "*.r", "*.u", "*.d", "*.s"], "cruds", "cruds"),
+            ("system/Patient.r system/Observation.s", ["Patient.r", "Observation.s"], "r", "s"),
+            ("openid profile", [], string.Empty, string.Empty),
+        ];
+        Assert.Equal(18, cases.Length);
+        HashSet<string> issuedKeys = new(StringComparer.Ordinal);
+        HashSet<string> issuedTokens = new(StringComparer.Ordinal);
+        foreach ((string scope, string[] grants, string patientActions, string observationActions) in cases)
+        {
+            (string token, AuthorizationInfo authorization) = await ExchangeAssertion(host, clientId, privateKey, scope);
+            Assert.True(issuedKeys.Add(authorization.Key));
+            Assert.True(issuedTokens.Add(token));
+            AssertBackendIdentity(authorization);
+            AssertEffectiveScopes(authorization, grants, []);
+            AssertOrdinaryPermissions(host, authorization, patientActions, observationActions);
+            if (scope == "openid profile")
+            {
+                foreach (string url in new[] { "Patient/seed", "Patient" })
+                {
+                    using HttpResponseMessage denied = await SendAsync(host, store, "GET", url, token);
+                    Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+                    AssertUnchanged(store, before, watch);
+                }
+            }
+
+            AssertUnchanged(store, before, watch);
+        }
+    }
+
+    /// <summary>A single form scope value keeps grants on their requested resources through real read and search requests.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BackendAssertionSpaceDelimitedScopesPreserveResourceActionBoundaries(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version);
+        IFhirStore store = host.Store;
+        Seed(store);
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys();
+        string clientId = RegisterAssertionClient(host.AuthManager, publicKey);
+        (string token, AuthorizationInfo authorization) = await ExchangeAssertion(
+            host, clientId, privateKey, "system/Patient.r system/Observation.s");
+        AssertBackendIdentity(authorization);
+        AssertEffectiveScopes(authorization, ["Patient.r", "Observation.s"], []);
+        AssertOrdinaryPermissions(host, authorization, "r", "s");
+
+        await AssertSeededRead(host, store, "Patient", token);
+        AssertUnchanged(store, before, watch);
+        await AssertSeededSearch(host, store, "Observation", token);
+        AssertUnchanged(store, before, watch);
+        foreach (string url in new[] { "Patient", "Observation/seed" })
+        {
+            using HttpResponseMessage denied = await SendAsync(host, store, "GET", url, token);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            AssertUnchanged(store, before, watch);
+        }
+    }
+
+    /// <summary>Backend exchanges retain user and patient contexts without inventing a launch patient.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BackendAssertionPreservesUserAndPatientScopeContexts(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys();
+        string clientId = RegisterAssertionClient(host.AuthManager, publicKey);
+        const string Scope = "user/Patient.r patient/Observation.s system/Patient.s";
+        (_, AuthorizationInfo authorization) = await ExchangeAssertion(host, clientId, privateKey, Scope);
+        AssertBackendIdentity(authorization);
+        Assert.Equal(Scope, authorization.RequestParameters.Scope);
+        Assert.Equal(
+            Scope.Split(' ').OrderBy(s => s, StringComparer.Ordinal),
+            authorization.Scopes.Keys.OrderBy(s => s, StringComparer.Ordinal));
+        Assert.All(authorization.Scopes.Values, approved => Assert.True(approved));
+        AssertEffectiveScopes(authorization, ["Patient.r", "Patient.s"], ["Observation.s"]);
+        // These are request-level decisions, not assertions about patient-compartment search contents.
+        AssertOrdinaryPermissions(host, authorization, "rs", "s");
+    }
+
+    /// <summary>Interactive consent still controls user/patient grants and does not opt into system scopes.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task AuthorizationCodePermissionsRemainContextAndConsentBound(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version);
+        IFhirStore store = host.Store;
+        Seed(store);
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        const string Scope = "launch/patient user/Patient.rs patient/Observation.rs user/Patient.write patient/Observation.write";
+        (AuthorizationInfo authorization, AuthorizationInfo.SmartResponse response) = ExchangeAuthorizationCode(
+            host, Scope, "Patient/seed", "user/Patient.write", "patient/Observation.write");
+        Assert.Equal(Scope, authorization.RequestParameters.Scope);
+        Assert.Equal("Patient/seed", authorization.LaunchPatient);
+        Assert.Equal("Patient/seed", response.PatientId);
+        Assert.True(authorization.Scopes["user/Patient.rs"]);
+        Assert.True(authorization.Scopes["patient/Observation.rs"]);
+        Assert.False(authorization.Scopes["user/Patient.write"]);
+        Assert.False(authorization.Scopes["patient/Observation.write"]);
+        Assert.Equal(
+            new[] { "launch/patient", "patient/Observation.rs", "user/Patient.rs" },
+            response.Scopes.Split(' ').OrderBy(s => s, StringComparer.Ordinal));
+        AssertEffectiveScopes(authorization, ["Patient.r", "Patient.s"], ["Observation.r", "Observation.s"]);
+        AssertOrdinaryPermissions(host, authorization, "rs", "rs");
+        AssertUnchanged(store, before, watch);
+
+        (AuthorizationInfo systemOnly, AuthorizationInfo.SmartResponse systemResponse) = ExchangeAuthorizationCode(
+            host, "system/Patient.rs", string.Empty);
+        Assert.NotEqual(authorization.Key, systemOnly.Key);
+        Assert.Equal("system/Patient.rs", systemResponse.Scopes);
+        Assert.True(systemOnly.Scopes["system/Patient.rs"]);
+        Assert.Empty(systemOnly.LaunchPatient);
+        AssertEffectiveScopes(systemOnly, [], []);
+        AssertOrdinaryPermissions(host, systemOnly, string.Empty, string.Empty);
+        foreach (string url in new[] { "Patient/seed", "Patient" })
+        {
+            using HttpResponseMessage denied = await SendAsync(host, store, "GET", url, systemResponse.AccessToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            AssertUnchanged(store, before, watch);
+        }
+    }
+
+    /// <summary>The same exchanged bearer token cannot resolve or read a distinct required tenant.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BackendAssertionTokenRemainsTenantBound(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version, includePeerRequired: true);
+        IFhirStore store = host.Store;
+        IFhirStore peer = host.PeerRequiredStore;
+        Assert.NotSame(store, peer);
+        Assert.NotEqual(store.Config.ControllerName, peer.Config.ControllerName);
+        Assert.NotEqual(store.Config.BaseUrl, peer.Config.BaseUrl);
+        Assert.True(store.Config.SmartRequired);
+        Assert.True(peer.Config.SmartRequired);
+        Seed(store);
+        Seed(peer);
+        MutationWatch watch = new(store);
+        MutationWatch peerWatch = new(peer);
+        string[] before = Fingerprint(store);
+        string[] peerBefore = Fingerprint(peer);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys();
+        string clientId = RegisterAssertionClient(host.AuthManager, publicKey);
+        (string token, AuthorizationInfo authorization) = await ExchangeAssertion(host, clientId, privateKey, "system/Patient.rs");
+        AssertBackendIdentity(authorization);
+        AssertEffectiveScopes(authorization, ["Patient.r", "Patient.s"], []);
+        await AssertSeededRead(host, store, "Patient", token);
+        AssertUnchanged(store, before, watch);
+        AssertUnchanged(peer, peerBefore, peerWatch);
+
+        Assert.False(host.AuthManager.TryGetAuthorization(peer.Config.ControllerName, "Bearer " + token, out _));
+        using HttpResponseMessage denied = await SendAsync(host, peer, "GET", "Patient/seed", token);
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        AssertUnchanged(store, before, watch);
+        AssertUnchanged(peer, peerBefore, peerWatch);
+    }
+
+    /// <summary>Limited backend grants leave the initialized administrator and anonymous tenant policy intact.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BackendAssertionPermissionsDoNotReplaceAdministrativeOrTenantPolicy(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version, includeOptional: true, includeDisabled: true);
+        IFhirStore store = host.Store;
+        IFhirStore optional = host.OptionalStore;
+        IFhirStore disabled = host.DisabledStore;
+        Assert.True(store.Config.SmartRequired);
+        Assert.False(store.Config.SmartAllowed);
+        Assert.False(optional.Config.SmartRequired);
+        Assert.True(optional.Config.SmartAllowed);
+        Assert.False(disabled.Config.SmartRequired);
+        Assert.False(disabled.Config.SmartAllowed);
+        foreach (IFhirStore tenantStore in new[] { store, optional, disabled })
+        {
+            Seed(tenantStore);
+            // Materialize the store's lazy CapabilityStatement during setup, before observing read-only controls.
+            using HttpResponseMessage initialized = await SendAsync(host, tenantStore, "GET", "metadata", null);
+            Assert.Equal(HttpStatusCode.OK, initialized.StatusCode);
+        }
+        (IFhirStore Store, string[] Before, MutationWatch Watch)[] snapshots =
+        [
+            (store, Fingerprint(store), new(store)),
+            (optional, Fingerprint(optional), new(optional)),
+            (disabled, Fingerprint(disabled), new(disabled)),
+        ];
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys();
+        string clientId = RegisterAssertionClient(host.AuthManager, publicKey);
+        (string token, AuthorizationInfo authorization) = await ExchangeAssertion(host, clientId, privateKey, "system/Patient.rs");
+        AssertBackendIdentity(authorization);
+        AssertEffectiveScopes(authorization, ["Patient.r", "Patient.s"], []);
+        foreach (string url in new[] { "Observation/seed", "Observation" })
+        {
+            using HttpResponseMessage denied = await SendAsync(host, store, "GET", url, token);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+
+        Assert.True(host.AuthManager.TryGetAuthorization(store.Config.ControllerName, Guid.Empty.ToString(), out AuthorizationInfo administrator));
+        Assert.Equal(Guid.Empty.ToString(), administrator.Key);
+        Assert.Equal("administrator", administrator.UserId);
+        AssertEffectiveScopes(administrator, ["*.*"], []);
+        AuthorizationInfo.SmartResponse adminResponse = Assert.IsType<AuthorizationInfo.SmartResponse>(administrator.Response);
+        Assert.False(string.IsNullOrEmpty(adminResponse.AccessToken));
+        Assert.True(host.AuthManager.TryGetAuthorization(
+            store.Config.ControllerName, "Bearer " + adminResponse.AccessToken, out AuthorizationInfo resolvedAdmin));
+        Assert.Same(administrator, resolvedAdmin);
+        await AssertSeededRead(host, store, "Observation", adminResponse.AccessToken);
+        await AssertSeededSearch(host, store, "Observation", adminResponse.AccessToken);
+        foreach ((IFhirStore tenantStore, string[] before, MutationWatch watch) in snapshots)
+        {
+            AssertUnchanged(tenantStore, before, watch);
+            if (tenantStore.Config.SmartRequired)
+            {
+                using HttpResponseMessage denied = await SendAsync(host, tenantStore, "GET", "Patient/seed", null);
+                Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            }
+            else
+            {
+                await AssertSeededRead(host, tenantStore, "Patient", null);
+            }
+            AssertUnchanged(tenantStore, before, watch);
+
+            using HttpResponseMessage capabilities = await SendAsync(host, tenantStore, "GET", "metadata", null);
+            Assert.Equal(HttpStatusCode.OK, capabilities.StatusCode);
+            Assert.Equal(JsonFormat, capabilities.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("CapabilityStatement",
+                JsonNode.Parse(await capabilities.Content.ReadAsStringAsync())!["resourceType"]!.GetValue<string>());
+            AssertUnchanged(tenantStore, before, watch);
+        }
+        Assert.Equal(Guid.Empty.ToString(), administrator.Key);
+        AssertEffectiveScopes(administrator, ["*.*"], []);
+    }
+
     /// <summary>The same effective permissions allow a direct read but reject direct and bundled writes.</summary>
     [Theory]
     [MemberData(nameof(RestrictedWriteCases))]
@@ -378,6 +640,112 @@ public class BundleAuthorizationRoutingTests
         return (token, authorization);
     }
 
+    private static (AuthorizationInfo Authorization, AuthorizationInfo.SmartResponse Response) ExchangeAuthorizationCode(
+        TestHost host, string scope, string launchPatient, params string[] declinedScopes)
+    {
+        TenantConfiguration tenant = host.Store.Config;
+        string clientId = "interactive-" + Guid.NewGuid().ToString();
+        Assert.True(host.AuthManager.RequestAuth(
+            tenant.ControllerName, "127.0.0.1", "code", clientId, "http://localhost/dev/null", string.Empty,
+            scope, string.Empty, tenant.BaseUrl, string.Empty, string.Empty, out string redirect, out string key));
+        Assert.EndsWith("key=" + key, redirect);
+        Assert.True(Guid.TryParse(key, out Guid parsed));
+        Assert.NotEqual(Guid.Empty, parsed);
+        Assert.True(host.AuthManager.TryGetAuthorization(tenant.ControllerName, key, out AuthorizationInfo authorization));
+        Assert.Equal(tenant.ControllerName, authorization.Tenant);
+        Assert.Equal(clientId, authorization.RequestParameters.ClientId);
+        Assert.Equal(tenant.BaseUrl, authorization.RequestParameters.Audience);
+        Assert.Equal(scope, authorization.RequestParameters.Scope);
+        AssertEffectiveScopes(authorization, [], []);
+        authorization.UserId = "consenting-test-user";
+        authorization.LaunchPatient = launchPatient;
+        foreach (string requested in authorization.Scopes.Keys)
+        {
+            authorization.Scopes[requested] = !declinedScopes.Contains(requested, StringComparer.Ordinal);
+        }
+        Assert.True(host.AuthManager.TryUpdateAuth(tenant.ControllerName, key, authorization));
+        Assert.True(host.AuthManager.TryCreateSmartResponse(
+            tenant.ControllerName, authorization.AuthCode, clientId, string.Empty, string.Empty,
+            out AuthorizationInfo.SmartResponse response));
+        Assert.Equal("bearer", response.TokenType);
+        Assert.Equal(clientId, response.ClientId);
+        Assert.False(string.IsNullOrEmpty(response.AccessToken));
+        Assert.True(host.AuthManager.TryGetAuthorization(
+            tenant.ControllerName, "Bearer " + response.AccessToken, out AuthorizationInfo resolved));
+        Assert.Same(authorization, resolved);
+        Assert.Same(response, resolved.Response);
+        Assert.DoesNotContain("*.*", resolved.UserScopes);
+        Assert.DoesNotContain("*.*", resolved.PatientScopes);
+        foreach (string declined in declinedScopes)
+        {
+            Assert.False(resolved.Scopes[declined]);
+            Assert.DoesNotContain(declined, response.Scopes.Split(' '));
+        }
+        return (resolved, response);
+    }
+
+    private static void AssertBackendIdentity(AuthorizationInfo authorization)
+    {
+        Assert.False(string.IsNullOrEmpty(authorization.Key));
+        Assert.True(Guid.TryParse(authorization.Key, out Guid key));
+        Assert.NotEqual(Guid.Empty, key);
+        Assert.Empty(authorization.UserId);
+        Assert.Empty(authorization.LaunchPatient);
+        Assert.DoesNotContain("*.*", authorization.UserScopes);
+        Assert.DoesNotContain("*.*", authorization.PatientScopes);
+    }
+
+    private static void AssertEffectiveScopes(AuthorizationInfo authorization, string[] userScopes, string[] patientScopes)
+    {
+        Assert.Equal(
+            userScopes.OrderBy(s => s, StringComparer.Ordinal),
+            authorization.UserScopes.OrderBy(s => s, StringComparer.Ordinal));
+        Assert.Equal(
+            patientScopes.OrderBy(s => s, StringComparer.Ordinal),
+            authorization.PatientScopes.OrderBy(s => s, StringComparer.Ordinal));
+    }
+
+    private static void AssertOrdinaryPermissions(
+        TestHost host, AuthorizationInfo authorization, string patientActions, string observationActions)
+    {
+        foreach ((string resource, string actions) in new[] { ("Patient", patientActions), ("Observation", observationActions) })
+        {
+            foreach ((string method, string suffix, char action) in new[]
+            {
+                ("POST", string.Empty, 'c'), ("GET", "/seed", 'r'), ("PUT", "/seed", 'u'),
+                ("DELETE", "/seed", 'd'), ("GET", string.Empty, 's'),
+            })
+            {
+                bool allowed = host.AuthManager.IsAuthorized(Context(host.Store, method, resource + suffix, authorization));
+                Assert.True(actions.Contains(action) == allowed,
+                    $"{authorization.RequestParameters.Scope}: {method} {resource + suffix} expected {actions.Contains(action)}, got {allowed}");
+            }
+        }
+    }
+
+    private static async Task AssertSeededRead(TestHost host, IFhirStore store, string resource, string? token)
+    {
+        using HttpResponseMessage response = await SendAsync(host, store, "GET", resource + "/seed", token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(JsonFormat, response.Content.Headers.ContentType?.MediaType);
+        Assert.True(JsonNode.DeepEquals(
+            JsonNode.Parse(Serialize(store, store[resource]["seed"])),
+            JsonNode.Parse(await response.Content.ReadAsStringAsync())));
+    }
+
+    private static async Task AssertSeededSearch(TestHost host, IFhirStore store, string resource, string? token)
+    {
+        using HttpResponseMessage response = await SendAsync(host, store, "GET", resource, token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(JsonFormat, response.Content.Headers.ContentType?.MediaType);
+        JsonObject bundle = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        Assert.Equal("Bundle", bundle["resourceType"]!.GetValue<string>());
+        Assert.Equal("searchset", bundle["type"]!.GetValue<string>());
+        JsonObject match = Assert.Single(bundle["entry"]!.AsArray())!.AsObject();
+        Assert.Equal("match", match["search"]!["mode"]!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Serialize(store, store[resource]["seed"])), match["resource"]));
+    }
+
     private static AuthorizationInfo InstallAuthorization(TestHost host, params string[] scopes)
     {
         string token = Guid.NewGuid().ToString();
@@ -617,9 +985,17 @@ public class BundleAuthorizationRoutingTests
 
         public IFhirStore OptionalStore => Factory.Services.GetRequiredService<IFhirStoreManager>()[Store.Config.ControllerName + "-optional"];
 
+        public IFhirStore PeerRequiredStore => Factory.Services.GetRequiredService<IFhirStoreManager>()[Store.Config.ControllerName + "-peer"];
+
+        public IFhirStore DisabledStore => Factory.Services.GetRequiredService<IFhirStoreManager>()[Store.Config.ControllerName + "-disabled"];
+
         public ISmartAuthManager AuthManager { get; }
 
-        public TestHost(FhirReleases.FhirSequenceCodes version, bool includeOptional = false)
+        public TestHost(
+            FhirReleases.FhirSequenceCodes version,
+            bool includeOptional = false,
+            bool includePeerRequired = false,
+            bool includeDisabled = false)
         {
             DirectoryInfo root = new(AppContext.BaseDirectory);
             while (!File.Exists(Path.Combine(root.FullName, "fhir-candle.sln")))
@@ -633,6 +1009,14 @@ public class BundleAuthorizationRoutingTests
             if (includeOptional)
             {
                 tenants.Add(Tenant(name + "-optional", version, required: false));
+            }
+            if (includePeerRequired)
+            {
+                tenants.Add(Tenant(name + "-peer", version, required: true));
+            }
+            if (includeDisabled)
+            {
+                tenants.Add(Tenant(name + "-disabled", version, required: false, allowed: false));
             }
 
             // The unchanged factory uses GetTempPath. This non-parallel collection keeps
@@ -680,7 +1064,8 @@ public class BundleAuthorizationRoutingTests
             }
         }
 
-        private static TenantConfiguration Tenant(string name, FhirReleases.FhirSequenceCodes version, bool required) => new()
+        private static TenantConfiguration Tenant(
+            string name, FhirReleases.FhirSequenceCodes version, bool required, bool? allowed = null) => new()
         {
             FhirVersion = version,
             ControllerName = name,
@@ -688,7 +1073,7 @@ public class BundleAuthorizationRoutingTests
             AllowExistingId = true,
             AllowCreateAsUpdate = true,
             SmartRequired = required,
-            SmartAllowed = !required,
+            SmartAllowed = allowed ?? !required,
         };
     }
 }
