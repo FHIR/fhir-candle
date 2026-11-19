@@ -7,8 +7,11 @@ extern alias candleR4;
 extern alias candleR4B;
 extern alias candleR5;
 
+using System.Collections;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -17,11 +20,20 @@ using fhir.candle.Tests.Models;
 using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
+using Xunit.Abstractions;
 
 namespace fhir.candle.Tests;
 
 public partial class Sdk6ContractTests
 {
+    private readonly ITestOutputHelper _subscriptionOutput;
+
+    /// <summary>Captures owned-child timing, TRX identity, and per-row subscription evidence.</summary>
+    public Sdk6ContractTests(ITestOutputHelper output)
+    {
+        _subscriptionOutput = output;
+    }
+
     private const string SubscriptionEvidence =
         "R4TestSubscriptions/R4BTestSubscriptions/R5TestSubscriptions ParseTopic/ParseSubscription/ParseHandshake/" +
         "TestSubEncounterNoFilters; FhirStoreTestsR5.SubscriptionTriggeredCreate/SubscriptionTriggeredUpdateFhirpath/" +
@@ -107,6 +119,63 @@ public partial class Sdk6ContractTests
     /// <summary>Both legacy fallback modes are checked independently at each conversion entry point.</summary>
     public static IEnumerable<object[]> SubscriptionEventsLegacyCases =>
         OperationRows("events-legacy", ["query-event", "event-notification"]);
+
+    private static IEnumerable<object[]> SubscriptionEventsExtremeCases =>
+        SubscriptionEventsMethodRows("events-extreme",
+            ["empty-wide", "two-wide", "huge-no-match", "absent-max", "minimum-since", "minimum-until",
+             "requested-upper", "retained-above-high-water", "retained-max-singleton", "retained-max-pair"]);
+
+    private static IEnumerable<object[]> SubscriptionEventsConcurrentCases =>
+        OperationRows("events-concurrent",
+            ["register-default", "register-max-get", "register-max-post", "clear",
+             "serialize-register", "bundle-register", "reversed", "no-match"]);
+
+    /// <summary>Potentially unbounded interval regressions run only in this fact's owned deadline-bounded child.</summary>
+    [Fact]
+    public async Task SubscriptionEventsExtremeBoundsAreIsolated()
+    {
+        if (IsSubscriptionEventsChild(nameof(SubscriptionEventsExtremeBoundsAreIsolated)))
+        {
+            int executed = 0;
+            foreach (object[] row in SubscriptionEventsExtremeCases)
+            {
+                await RunSubscriptionEventsExtremeCase(row);
+                executed++;
+            }
+            Assert.Equal(240, executed);
+            _subscriptionOutput.WriteLine($"H2 extreme inventory executed={executed}; all 240 expected rows passed.");
+            return;
+        }
+
+        await RunSubscriptionEventsChild(nameof(SubscriptionEventsExtremeBoundsAreIsolated));
+    }
+
+    /// <summary>Controlled history overlap and independent wrapper ownership run in a separate owned child.</summary>
+    [Fact]
+    public async Task SubscriptionEventsConcurrentSelectionIsIsolated()
+    {
+        if (IsSubscriptionEventsChild(nameof(SubscriptionEventsConcurrentSelectionIsIsolated)))
+        {
+            int executed = 0;
+            foreach (object[] row in SubscriptionEventsConcurrentCases)
+            {
+                if ((string)row[4] is "reversed" or "no-match")
+                {
+                    await RunSubscriptionEventsEmptyOverlap(row);
+                }
+                else
+                {
+                    await RunSubscriptionEventsConversionOverlap(row);
+                }
+                executed++;
+            }
+            Assert.Equal(96, executed);
+            _subscriptionOutput.WriteLine($"H2 concurrency inventory executed={executed}; 72 gated conversions and 24 four-pair rendezvous rows passed.");
+            return;
+        }
+
+        await RunSubscriptionEventsChild(nameof(SubscriptionEventsConcurrentSelectionIsIsolated));
+    }
 
     /// <summary>Retained replay is inclusive and ascending regardless of history insertion order.</summary>
     [Theory]
@@ -338,7 +407,7 @@ public partial class Sdk6ContractTests
         Assert.Empty(subscription.NotificationErrors);
     }
 
-    /// <summary>Pin ordinary H2 inventories independently; isolated extreme/concurrency cases belong to the next phase.</summary>
+    /// <summary>Pin ordinary and isolated H2 inventories independently of child dispatch and runner discovery.</summary>
     [Fact]
     public void SubscriptionEventsTheoryDataIsNonEmptyAndBounded()
     {
@@ -355,6 +424,14 @@ public partial class Sdk6ContractTests
         AssertSubscriptionEventsMatrix(SubscriptionEventsNegativeCases,
             ["negative-since", "negative-until", "both-negative", "negative-reversed", "negative-upper-reversed"], methods: true);
         AssertSubscriptionEventsMatrix(SubscriptionEventsLegacyCases, ["query-event", "event-notification"], methods: false);
+        Assert.Equal(240, SubscriptionEventsExtremeCases.Count());
+        Assert.Equal(96, SubscriptionEventsConcurrentCases.Count());
+        AssertSubscriptionEventsMatrix(SubscriptionEventsExtremeCases,
+            ["empty-wide", "two-wide", "huge-no-match", "absent-max", "minimum-since", "minimum-until",
+             "requested-upper", "retained-above-high-water", "retained-max-singleton", "retained-max-pair"], methods: true);
+        AssertSubscriptionEventsMatrix(SubscriptionEventsConcurrentCases,
+            ["register-default", "register-max-get", "register-max-post", "clear",
+             "serialize-register", "bundle-register", "reversed", "no-match"], methods: false);
     }
 
     /// <summary>Real resource writes drive native topic conversion, filters, and current/previous FHIRPath contexts.</summary>
@@ -558,6 +635,532 @@ public partial class Sdk6ContractTests
     }
 
     private sealed record NotificationEventContract(long Number, string FocusIdentity, DateTimeOffset Timestamp);
+
+    private static DirectoryInfo SubscriptionEventsProjectDirectory()
+    {
+        DirectoryInfo? directory = new(Path.GetDirectoryName(typeof(Sdk6ContractTests).Assembly.Location)!);
+        Assert.Equal("Release", directory.Parent!.Name);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "fhir-candle.Tests.csproj")))
+        {
+            directory = directory.Parent;
+        }
+        Assert.NotNull(directory);
+        Assert.True(File.Exists(Path.Combine(directory.Parent!.Parent!.FullName, "AGENTS.md")));
+        return directory;
+    }
+
+    private static string SubscriptionEventsChildMarker(string fact) => "FHIR_CANDLE_H2_CHILD_" + fact;
+
+    private static bool IsSubscriptionEventsChild(string fact)
+    {
+        string? marker = Environment.GetEnvironmentVariable(SubscriptionEventsChildMarker(fact));
+        if (marker is null)
+        {
+            return false;
+        }
+
+        Assert.Equal("fhir.candle.Tests.Sdk6ContractTests." + fact, marker);
+        string root = Path.Combine(SubscriptionEventsProjectDirectory().Parent!.Parent!.FullName, "scratch") + Path.DirectorySeparatorChar;
+        foreach (string key in new[] { "TEMP", "TMP", "TMPDIR" })
+        {
+            string path = Path.GetFullPath(Environment.GetEnvironmentVariable(key)!);
+            Assert.StartsWith(root, path, StringComparison.OrdinalIgnoreCase);
+            Assert.True(Directory.Exists(path));
+        }
+        Assert.StartsWith(root, Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase);
+        return true;
+    }
+
+    private async Task RunSubscriptionEventsChild(string fact)
+    {
+        DirectoryInfo projectDirectory = SubscriptionEventsProjectDirectory();
+        string root = projectDirectory.Parent!.Parent!.FullName;
+        string ownedDirectory = Path.Combine(root, "scratch", "1119-03", "evidence", "h2-child-" + Guid.NewGuid().ToString("N"));
+        string results = Path.Combine(ownedDirectory, "results");
+        string temporary = Path.Combine(ownedDirectory, "tmp");
+        Directory.CreateDirectory(results);
+        Directory.CreateDirectory(temporary);
+        string tfm = "net" + Environment.Version.Major + ".0";
+        string identity = "fhir.candle.Tests.Sdk6ContractTests." + fact;
+        string marker = SubscriptionEventsChildMarker(fact);
+        string? parentTemp = Environment.GetEnvironmentVariable("TEMP");
+        string? parentTmp = Environment.GetEnvironmentVariable("TMP");
+        string? parentTmpDir = Environment.GetEnvironmentVariable("TMPDIR");
+        Dictionary<string, string?> parentConnections = Environment.GetEnvironmentVariables().Keys.Cast<string>()
+            .Where(key => key.StartsWith("VSTEST_", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.OrdinalIgnoreCase);
+        ProcessStartInfo start = new("dotnet")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (string argument in new[] { "test", Path.Combine(projectDirectory.FullName, "fhir-candle.Tests.csproj"),
+            "--configuration", "Release", "--framework", tfm, "--no-build", "--no-restore", "--verbosity", "normal",
+            "--filter", "FullyQualifiedName=" + identity, "--logger", "trx;LogFileName=child.trx", "--results-directory", results })
+        {
+            start.ArgumentList.Add(argument);
+        }
+        string[] connections = start.Environment.Keys.Where(key => key.StartsWith("VSTEST_", StringComparison.OrdinalIgnoreCase)).ToArray();
+        foreach (string key in connections)
+        {
+            start.Environment.Remove(key);
+        }
+        start.Environment[marker] = identity;
+        start.Environment["TEMP"] = temporary;
+        start.Environment["TMP"] = temporary;
+        start.Environment["TMPDIR"] = temporary;
+
+        using Process process = new() { StartInfo = start };
+        Stopwatch elapsed = Stopwatch.StartNew();
+        bool started = false;
+        bool outputRecorded = false;
+        bool trxRecorded = false;
+        Task<string>? stdout = null;
+        Task<string>? stderr = null;
+        int ownedPid = 0;
+        try
+        {
+            Assert.True(process.Start());
+            started = true;
+            ownedPid = process.Id;
+            stdout = process.StandardOutput.ReadToEndAsync();
+            stderr = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(150));
+            string output = await stdout.WaitAsync(TimeSpan.FromSeconds(10));
+            string errors = await stderr.WaitAsync(TimeSpan.FromSeconds(10));
+            _subscriptionOutput.WriteLine($"H2 parent fact={fact}, TFM={tfm}, child PID={ownedPid}, elapsed={elapsed.Elapsed.TotalSeconds:F3}s, exit={process.ExitCode}, removed child VSTEST keys={connections.Length}\n{output}\n{errors}");
+            outputRecorded = true;
+            // Preserve useful row/failure output in the parent's result before deleting the owned TRX.
+            string trxPath = Path.Combine(results, "child.trx");
+            Assert.True(File.Exists(trxPath), "Owned child did not produce its one-test TRX.");
+            XDocument trx = XDocument.Load(trxPath);
+            XNamespace ns = trx.Root!.Name.Namespace;
+            foreach (XElement resultOutput in trx.Descendants(ns + "UnitTestResult"))
+            {
+                _subscriptionOutput.WriteLine(resultOutput.ToString());
+            }
+            trxRecorded = true;
+            Assert.True(process.ExitCode == 0, output + Environment.NewLine + errors);
+            XElement counters = Assert.Single(trx.Descendants(ns + "Counters"));
+            Assert.Equal("1", counters.Attribute("total")!.Value);
+            Assert.Equal("1", counters.Attribute("executed")!.Value);
+            Assert.Equal("1", counters.Attribute("passed")!.Value);
+            Assert.Equal("0", counters.Attribute("failed")!.Value);
+            XElement result = Assert.Single(trx.Descendants(ns + "UnitTestResult"));
+            Assert.Equal(identity, result.Attribute("testName")!.Value);
+            Assert.Equal("Passed", result.Attribute("outcome")!.Value);
+            XElement definition = Assert.Single(trx.Descendants(ns + "TestMethod"));
+            Assert.Equal("fhir.candle.Tests.Sdk6ContractTests", definition.Attribute("className")!.Value);
+            Assert.Equal(fact, definition.Attribute("name")!.Value);
+            _subscriptionOutput.WriteLine($"H2 child TRX verified: {tfm}/{fact}, PID={ownedPid}, elapsed={elapsed.Elapsed.TotalSeconds:F3}s, exactly 1 intended executed / 1 passed / 0 failed.");
+        }
+        finally
+        {
+            try
+            {
+                if (started)
+                {
+                    if (!process.HasExited)
+                    {
+                        _subscriptionOutput.WriteLine($"H2 owned child cleanup: PID={ownedPid}, TFM={tfm}, elapsed={elapsed.Elapsed.TotalSeconds:F3}s; killing/reaping owned tree only.");
+                        Assert.Equal(ownedPid, process.Id);
+                        process.Kill(entireProcessTree: true);
+                    }
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                    if (stdout is not null && stderr is not null)
+                    {
+                        await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(10));
+                        if (!outputRecorded)
+                        {
+                            _subscriptionOutput.WriteLine($"H2 child failure evidence: fact={fact}, PID={ownedPid}, TFM={tfm}, elapsed={elapsed.Elapsed.TotalSeconds:F3}s\n{await stdout}\n{await stderr}");
+                        }
+                    }
+                    string trxPath = Path.Combine(results, "child.trx");
+                    if (!trxRecorded && File.Exists(trxPath))
+                    {
+                        _subscriptionOutput.WriteLine(File.ReadAllText(trxPath));
+                    }
+                }
+            }
+            finally
+            {
+                Directory.Delete(ownedDirectory, recursive: true);
+                Assert.Null(Environment.GetEnvironmentVariable(marker));
+                Assert.Equal(parentTemp, Environment.GetEnvironmentVariable("TEMP"));
+                Assert.Equal(parentTmp, Environment.GetEnvironmentVariable("TMP"));
+                Assert.Equal(parentTmpDir, Environment.GetEnvironmentVariable("TMPDIR"));
+                foreach (KeyValuePair<string, string?> connection in parentConnections)
+                {
+                    Assert.Equal(connection.Value, Environment.GetEnvironmentVariable(connection.Key));
+                }
+            }
+        }
+    }
+
+    private async Task RunSubscriptionEventsExtremeCase(object[] row)
+    {
+        string label = (string)row[0];
+        FhirReleases.FhirSequenceCodes version = (FhirReleases.FhirSequenceCodes)row[1];
+        CompatibilityTransport transport = (CompatibilityTransport)row[2];
+        CompatibilityFormat format = (CompatibilityFormat)row[3];
+        string kind = (string)row[4];
+        string method = (string)row[5];
+        CompatibilityTenant tenant = Tenant(version, $"extreme-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        int generated = kind == "empty-wide" ? 0 : kind.StartsWith("retained-max-", StringComparison.Ordinal) ? 1 : 2;
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, generated);
+        long since = 0;
+        long until = long.MaxValue;
+        long total = generated;
+        NotificationEventContract[] expected = events;
+        bool negative = false;
+        switch (kind)
+        {
+            case "empty-wide":
+            case "two-wide":
+                break;
+            case "huge-no-match":
+                since = 4000000000000000000;
+                expected = [];
+                break;
+            case "absent-max":
+                since = long.MaxValue;
+                expected = [];
+                break;
+            case "minimum-since":
+                since = long.MinValue;
+                negative = true;
+                break;
+            case "minimum-until":
+                until = long.MinValue;
+                negative = true;
+                break;
+            case "requested-upper":
+                until = 1;
+                expected = [events[0]];
+                break;
+            case "retained-above-high-water":
+                ReverseSubscriptionHistory(subscription);
+                subscription.RegisterEvent(subscription.GeneratedEvents[2] with { EventNumber = 3 });
+                Assert.Equal(2, subscription.CurrentEventCount);
+                break;
+            case "retained-max-singleton":
+            case "retained-max-pair":
+                FieldInfo? counter = typeof(ParsedSubscription).GetField("_currentEventCount", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.True(counter is not null, "H2 retained maximum proof requires the existing ParsedSubscription._currentEventCount field.");
+                lock (subscription.GeneratedEvents)
+                {
+                    SubscriptionEvent original = subscription.GeneratedEvents[1];
+                    counter.SetValue(subscription, long.MaxValue);
+                    subscription.RegisterEvent(original with { EventNumber = long.MaxValue });
+                }
+                // This fresh fixture is never incremented after seeding the maximum.
+                since = kind == "retained-max-singleton" ? long.MaxValue : long.MaxValue - 1;
+                total = long.MaxValue;
+                expected = [events[0] with { Number = long.MaxValue }];
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(row));
+        }
+
+        CompatibilityResponse response = await replay.SendAsync(SubscriptionEventsRequest(graph, method, since, until, "full-resource"));
+        if (negative)
+        {
+            AssertOperationOutcome(replay, tenant, format, kind, response, HttpStatusCode.BadRequest,
+                success: false, resourceIsOutcome: true, [new("error", "exception", "Event number bounds must be nonnegative.")]);
+        }
+        else
+        {
+            AssertSubscriptionEventsResponse(replay, graph, kind, response, "full-resource", expected, total);
+        }
+        Assert.Equal(total, subscription.CurrentEventCount);
+        Assert.InRange(subscription.GeneratedEvents.Count, 0, 3);
+        Assert.Equal(generated, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+        _subscriptionOutput.WriteLine($"H2 extreme {label}: bounds=[{since.ToString(CultureInfo.InvariantCulture)},{until.ToString(CultureInfo.InvariantCulture)}], status={(negative ? 400 : 200)}, selected=[{string.Join(",", negative ? Array.Empty<long>() : expected.Select(e => e.Number))}], total={total.ToString(CultureInfo.InvariantCulture)}, retained={subscription.GeneratedEvents.Count}.");
+    }
+
+    private sealed class SubscriptionContextGate : IEnumerable<object>, IDisposable
+    {
+        private readonly object[] _context;
+        private readonly object _monitor;
+        private int _entered;
+
+        internal SubscriptionContextGate(object[] context, object monitor)
+        {
+            Assert.InRange(context.Length, 1, 3);
+            _context = context;
+            _monitor = monitor;
+        }
+
+        internal ManualResetEventSlim Reached { get; } = new();
+        internal ManualResetEventSlim Release { get; } = new();
+
+        public IEnumerator<object> GetEnumerator()
+        {
+            if (Interlocked.Exchange(ref _entered, 1) == 0)
+            {
+                // This executes on the real converter thread, not the coordinating test thread.
+                Assert.True(Monitor.IsEntered(_monitor), "The conversion entry point must own the fixed history monitor.");
+                Reached.Set();
+                Assert.True(Release.Wait(TimeSpan.FromSeconds(10)), "Timed out releasing real AdditionalContext conversion.");
+            }
+            foreach (object resource in _context)
+            {
+                yield return resource;
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public void Dispose()
+        {
+            Release.Set();
+            Reached.Dispose();
+            Release.Dispose();
+        }
+    }
+
+    private async Task RunSubscriptionEventsConversionOverlap(object[] row)
+    {
+        string label = (string)row[0];
+        FhirReleases.FhirSequenceCodes version = (FhirReleases.FhirSequenceCodes)row[1];
+        CompatibilityTransport transport = (CompatibilityTransport)row[2];
+        CompatibilityFormat format = (CompatibilityFormat)row[3];
+        string kind = (string)row[4];
+        CompatibilityTenant tenant = Tenant(version, $"overlap-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, 2);
+        SubscriptionEvent original = subscription.GeneratedEvents[1];
+        SubscriptionEvent producerTemplate = subscription.GeneratedEvents[2];
+        object[] context = Assert.IsAssignableFrom<IEnumerable<object>>(original.AdditionalContext).ToArray();
+        using SubscriptionContextGate gate = new(context, subscription.GeneratedEvents);
+        subscription.RegisterEvent(original with { AdditionalContext = gate });
+        using ManualResetEventSlim attempted = new();
+        using CancellationTokenSource stop = new();
+        bool clear = kind == "clear";
+        string method = kind == "register-max-post" ? "POST" : "GET";
+        CompatibilityRequest request = kind is "register-max-get" or "register-max-post"
+            ? SubscriptionEventsRequest(graph, method, 0, long.MaxValue, "full-resource")
+            : new(tenant.Name, "GET", $"Subscription/{SubscriptionId}/$events?content=full-resource") { Format = format };
+        CompatibilityResponse? response = null;
+        int ordering = 0;
+        int attemptOrder = 0;
+        int releaseOrder = 0;
+        int completionOrder = 0;
+        long reserved = 0;
+        Task? mutation = null;
+        Task<string> conversion = Task.Run(async () =>
+        {
+            // These wrapper calls are deliberately outside $events and any test-held monitor.
+            if (kind == "serialize-register")
+            {
+                return capture.Store.SerializeSubscriptionEvents(SubscriptionId, Array.Empty<long>(), "query-event",
+                    false, WireContractAssertions.MediaType(format), "full-resource");
+            }
+            if (kind == "bundle-register")
+            {
+                Hl7.Fhir.Model.Bundle bundle = Assert.IsType<Hl7.Fhir.Model.Bundle>(
+                    ConcreteSubscriptionEventsBundle(capture.Store, "query-event"));
+                return SerializeSubscriptionEventsBundle(version, format, bundle);
+            }
+            response = await replay.SendAsync(request);
+            return ExchangeResource(response);
+        });
+        try
+        {
+            Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)), label + ": conversion did not reach real context.");
+            Assert.Equal(2, subscription.CurrentEventCount);
+            mutation = Task.Run(() =>
+            {
+                try
+                {
+                    stop.Token.ThrowIfCancellationRequested();
+                    if (!clear)
+                    {
+                        reserved = subscription.IncrementEventCount();
+                        Assert.Equal(3, reserved);
+                    }
+                    bool acquired = Monitor.TryEnter(subscription.GeneratedEvents, TimeSpan.Zero);
+                    if (acquired)
+                    {
+                        Monitor.Exit(subscription.GeneratedEvents);
+                    }
+                    Assert.False(acquired, label + ": mutation worker must contend with real conversion.");
+                    attemptOrder = Interlocked.Increment(ref ordering);
+                    attempted.Set();
+                    if (clear)
+                    {
+                        subscription.ClearEvents();
+                    }
+                    else
+                    {
+                        // Register directly: SubscriptionCapture.Sent is intentionally not a concurrent list.
+                        subscription.RegisterEvent(producerTemplate with { EventNumber = reserved });
+                    }
+                    Interlocked.Exchange(ref completionOrder, Interlocked.Increment(ref ordering));
+                }
+                finally
+                {
+                    attempted.Set();
+                }
+            });
+            Assert.True(attempted.Wait(TimeSpan.FromSeconds(10)), label + ": mutation was not attempted.");
+            Assert.True(Volatile.Read(ref attemptOrder) > 0, label + ": contended acquisition failed.");
+            Assert.Equal(0, Volatile.Read(ref completionOrder));
+            Assert.False(mutation.IsCompleted);
+            Assert.Equal(clear ? 2 : 3, subscription.CurrentEventCount);
+            releaseOrder = Interlocked.Increment(ref ordering);
+            gate.Release.Set();
+            await Task.WhenAll(conversion, mutation).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(attemptOrder < releaseOrder && releaseOrder < completionOrder,
+                $"{label}: attempt={attemptOrder}, release={releaseOrder}, completion={completionOrder}.");
+            // All native status builders run before the context gate, hence before the producer reserves 3.
+            // The initial total is 2 even though CurrentEventCount may already be 3 during conversion.
+            if (response is not null)
+            {
+                AssertSubscriptionEventsResponse(replay, graph, kind + "-initial", response, "full-resource", events, 2);
+            }
+            else
+            {
+                AssertSubscriptionBundle(replay, graph, kind + "-initial", await conversion,
+                    "query-event", "full-resource", events, 2);
+            }
+            NotificationEventContract[] subsequent = clear ? []
+                : [events[0], events[1], events[1] with { Number = 3 }];
+            await AssertSubscriptionEventsReplay(replay, graph, kind + "-after", "GET", 0, long.MaxValue,
+                "full-resource", subsequent, clear ? 2 : 3);
+            Assert.Equal(clear ? 0 : 3, subscription.GeneratedEvents.Count);
+            Assert.Equal(clear ? 2 : 3, subscription.CurrentEventCount);
+            Assert.Equal(2, capture.Sent.Count);
+            Assert.Empty(subscription.NotificationErrors);
+            _subscriptionOutput.WriteLine($"H2 conversion {label}: method={method}, monitor-owned=True, contended=True, initial-selected=[1,2], initial-total=2, reserved={reserved}, attempt/release/completion={attemptOrder}/{releaseOrder}/{completionOrder}, after-selected=[{string.Join(",", subsequent.Select(e => e.Number))}], after-total={subscription.CurrentEventCount}.");
+        }
+        finally
+        {
+            stop.Cancel();
+            gate.Release.Set();
+            attempted.Set();
+            // Release before observing every worker, including when a gate/assertion failed.
+            await Task.WhenAll(mutation is null ? [conversion] : new Task[] { conversion, mutation })
+                .WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    private async Task RunSubscriptionEventsEmptyOverlap(object[] row)
+    {
+        const int Iterations = 4;
+        string label = (string)row[0];
+        FhirReleases.FhirSequenceCodes version = (FhirReleases.FhirSequenceCodes)row[1];
+        CompatibilityTransport transport = (CompatibilityTransport)row[2];
+        CompatibilityFormat format = (CompatibilityFormat)row[3];
+        string kind = (string)row[4];
+        CompatibilityTenant tenant = Tenant(version, $"empty-overlap-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        await GenerateSubscriptionReplayEvents(replay, graph, capture, 1);
+        SubscriptionEvent template = subscription.GeneratedEvents[1];
+        long since = kind == "reversed" ? 2 : 100;
+        long until = kind == "reversed" ? 1 : long.MaxValue;
+        long[] starts = new long[Iterations];
+        long[] ends = new long[Iterations];
+        long[] registrations = new long[Iterations];
+        int completedRegistrations = 0;
+        int completedReplays = 0;
+        using CancellationTokenSource stop = new();
+        for (int iteration = 0; iteration < Iterations; iteration++)
+        {
+            int index = iteration;
+            using ManualResetEventSlim producerReady = new();
+            using ManualResetEventSlim replayReady = new();
+            using ManualResetEventSlim start = new();
+            using ManualResetEventSlim replayStarted = new();
+            string method = index % 2 == 0 ? "GET" : "POST";
+            Task producer = Task.Run(() =>
+            {
+                stop.Token.ThrowIfCancellationRequested();
+                long number = subscription.IncrementEventCount();
+                Assert.Equal(index + 2, number);
+                producerReady.Set();
+                Assert.True(start.Wait(TimeSpan.FromSeconds(10), stop.Token));
+                // Make completed registration (not just reservation) strictly later than replay start.
+                Assert.True(replayStarted.Wait(TimeSpan.FromSeconds(10), stop.Token));
+                subscription.RegisterEvent(template with { EventNumber = number });
+                registrations[index] = Stopwatch.GetTimestamp();
+                Interlocked.Increment(ref completedRegistrations);
+            });
+            Task<CompatibilityResponse> consumer = Task.Run(async () =>
+            {
+                replayReady.Set();
+                Assert.True(start.Wait(TimeSpan.FromSeconds(10), stop.Token));
+                starts[index] = Stopwatch.GetTimestamp();
+                replayStarted.Set();
+                CompatibilityResponse result = await replay.SendAsync(SubscriptionEventsRequest(graph, method, since, until, "full-resource"));
+                ends[index] = Stopwatch.GetTimestamp();
+                Interlocked.Increment(ref completedReplays);
+                return result;
+            });
+            try
+            {
+                Assert.True(producerReady.Wait(TimeSpan.FromSeconds(10)), label + ": producer readiness.");
+                Assert.True(replayReady.Wait(TimeSpan.FromSeconds(10)), label + ": replay readiness.");
+                // Both workers exist and are ready before either is released or awaited.
+                start.Set();
+                await Task.WhenAll(producer, consumer).WaitAsync(TimeSpan.FromSeconds(10));
+                AssertSubscriptionEventsResponse(replay, graph, kind + "-" + index, await consumer,
+                    "full-resource", [], index + 2);
+                Assert.Equal(index + 1, completedRegistrations);
+                Assert.Equal(index + 1, completedReplays);
+                Assert.True(starts[index] < registrations[index]);
+                Assert.True(starts[index] <= ends[index]);
+                Assert.InRange(subscription.GeneratedEvents.Count, 1, 3);
+                // Keep retained history tiny without changing the reserved counter or notification capture.
+                subscription.ClearEvents();
+                subscription.RegisterEvent(template with { EventNumber = index + 2 });
+                _subscriptionOutput.WriteLine($"H2 empty {label}: pair={index}, method={method}, selected=[], total={index + 2}, replay-start={starts[index]}, registration-completed={registrations[index]}, replay-completed={ends[index]}.");
+            }
+            finally
+            {
+                // No next pair starts until this pair is joined, even on a failed readiness/assertion.
+                start.Set();
+                replayStarted.Set();
+                try
+                {
+                    await Task.WhenAll(producer, consumer).WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch
+                {
+                    stop.Cancel();
+                    throw;
+                }
+            }
+        }
+        Assert.Equal(Iterations, completedRegistrations);
+        Assert.Equal(Iterations, completedReplays);
+        int inside = registrations.Count(timestamp => starts[0] < timestamp && timestamp < ends[^1]);
+        Assert.InRange(inside, 1, Iterations);
+        Assert.Equal(5, subscription.CurrentEventCount);
+        Assert.Single(capture.Sent);
+        Assert.Empty(subscription.NotificationErrors);
+        _subscriptionOutput.WriteLine($"H2 empty window {label}: joined-pairs={Iterations}, completed-registrations={completedRegistrations}, strictly-inside-replay-window={inside}, GET=2, complete-POST=2, final-total=5.");
+    }
 
     private static IEnumerable<object[]> SubscriptionEventsMethodRows(string group, string[] kinds)
     {
