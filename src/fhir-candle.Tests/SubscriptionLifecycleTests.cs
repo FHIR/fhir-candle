@@ -612,9 +612,207 @@ public sealed class SubscriptionLifecycleTests
         ManualTimeProvider.CapturedCallback callback = Assert.Single(fixture.Clock.CaptureDueCallbacks());
         fixture.PutSubscription();
         long replacementDeadline = fixture.Subscription.ExpirationTicks;
+        int changes = fixture.SubscriptionTimerChanges;
         callback.Invoke();
+        Assert.Equal(1, fixture.SubscriptionTimerChanges - changes);
         Assert.Equal(LifecycleTestStore.Now.AddMinutes(2).UtcTicks, replacementDeadline);
         Assert.Equal("active", fixture.Subscription.CurrentStatus);
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ExpirationBatchRearmsOnce(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (int batchSize in new[] { 4, 16 })
+        {
+            foreach (string entry in new[] { "timer", "current", "status" })
+            {
+                using LifecycleTestStore fixture = new(version, maximum: 0);
+                fixture.Seed(subscription: false);
+                DateTimeOffset deadline = LifecycleTestStore.Now.AddMinutes(1);
+                for (int i = 0; i < batchSize; i++)
+                {
+                    PutSubscription(fixture, "due-" + i, i % 2 == 0 ? "active" : "requested", deadline);
+                }
+                PutSubscription(fixture, "retained-off", "off", deadline);
+                PutSubscription(fixture, "later", "active", deadline.AddMinutes(2));
+                PutSubscription(fixture, "unlimited", "active", null);
+                Dictionary<string, ParsedSubscription> retained = fixture.Store.CurrentSubscriptions.ToDictionary(subscription => subscription.Id);
+                Dictionary<string, long> revisions = retained.ToDictionary(pair => pair.Key, pair => pair.Value.Revision);
+                long lastRevision = revisions.Values.Max();
+                List<SubscriptionChangedEventArgs> publications = [];
+                fixture.Store.OnSubscriptionsChanged += (_, args) =>
+                {
+                    fixture.AssertOutsideLocks();
+                    Assert.All(retained.Values, subscription => Assert.False(Monitor.IsEntered(subscription.GeneratedEvents)));
+                    Assert.All(retained.Where(pair => pair.Key.StartsWith("due-", StringComparison.Ordinal)),
+                        pair => Assert.Equal("off", pair.Value.CurrentStatus));
+                    publications.Add(args);
+                };
+                int changes = fixture.SubscriptionTimerChanges;
+                fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+                switch (entry)
+                {
+                    case "timer":
+                        Assert.Single(fixture.Clock.CaptureDueCallbacks()).Invoke();
+                        break;
+                    case "current":
+                        Assert.Equal(batchSize + 3, fixture.Store.CurrentSubscriptions.Count());
+                        break;
+                    case "status":
+                        Assert.Equal(batchSize + 3, fixture.Entries(fixture.Get("Subscription/$status")));
+                        break;
+                }
+
+                // In the timer branch these assertions precede every normalizing read.
+                Assert.Equal(1, fixture.SubscriptionTimerChanges - changes);
+                Assert.Equal(batchSize, publications.Count);
+                Assert.Equal(Enumerable.Range(1, batchSize).Select(offset => lastRevision + offset),
+                    publications.Select(publication => publication.Revision).OrderBy(revision => revision));
+                foreach ((string id, ParsedSubscription subscription) in retained)
+                {
+                    if (id.StartsWith("due-", StringComparison.Ordinal))
+                    {
+                        Assert.Equal("off", subscription.CurrentStatus);
+                        Assert.Equal(deadline.UtcTicks, subscription.ExpirationTicks);
+                        Assert.True(subscription.Revision > revisions[id]);
+                        SubscriptionChangedEventArgs publication = Assert.Single(publications,
+                            publication => publication.ChangedSubscription?.Id == id);
+                        Assert.Same(subscription, publication.ChangedSubscription);
+                        Assert.Equal(subscription.Revision, publication.Revision);
+                        Assert.Null(publication.RemovedSubscriptionId);
+                        Assert.False(publication.SendHandshake);
+                        Assert.Null(fixture.ExecutableRevision(subscription));
+                    }
+                    else
+                    {
+                        Assert.Equal(id == "retained-off" ? "off" : "active", subscription.CurrentStatus);
+                        Assert.Equal(revisions[id], subscription.Revision);
+                        Assert.Equal(id == "unlimited" ? SubscriptionLifecyclePolicy.UnlimitedExpirationTicks :
+                            (id == "later" ? deadline.AddMinutes(2) : deadline).UtcTicks, subscription.ExpirationTicks);
+                        Assert.Equal(id == "retained-off" ? (long?)null : subscription.Revision, fixture.ExecutableRevision(subscription));
+                    }
+                }
+                Assert.Equal(deadline.AddMinutes(2), fixture.Clock.NextDueTime);
+                changes = fixture.SubscriptionTimerChanges;
+                Assert.Equal(batchSize + 3, fixture.Store.CurrentSubscriptions.Count());
+                Assert.Equal(batchSize + 3, fixture.Entries(fixture.Get("Subscription/$status")));
+                Assert.Equal(0, fixture.SubscriptionTimerChanges - changes);
+                Assert.Equal(batchSize, publications.Count);
+            }
+        }
+
+        foreach (bool reprocess in new[] { false, true })
+        {
+            using LifecycleTestStore fixture = new(version, maximum: 1);
+            fixture.Seed();
+            ParsedSubscription subscription = fixture.Subscription;
+            long revision = subscription.Revision;
+            int changes = fixture.SubscriptionTimerChanges;
+            fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+            if (reprocess)
+            {
+                Assert.True(fixture.Reprocess(subscription));
+            }
+            else
+            {
+                Assert.Equal("off", fixture.Get("Subscription/" + LifecycleTestStore.Id)["status"]!.GetValue<string>());
+            }
+            Assert.Equal("off", subscription.CurrentStatus);
+            Assert.Equal(revision + 1, subscription.Revision);
+            Assert.Equal(1, fixture.SubscriptionTimerChanges - changes);
+            Assert.Null(fixture.Clock.NextDueTime);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ExpirationTimerSelectsEarliestOfSeveralSubscriptions(FhirReleases.FhirSequenceCodes version)
+    {
+        DateTimeOffset earlier = LifecycleTestStore.Now.AddMinutes(1);
+        DateTimeOffset later = LifecycleTestStore.Now.AddMinutes(3);
+        foreach (bool earlierFirst in new[] { false, true })
+        {
+            using LifecycleTestStore fixture = new(version, maximum: 0);
+            fixture.Seed(subscription: false);
+            (string Id, DateTimeOffset? End)[] subscriptions = earlierFirst
+                ? [(LifecycleTestStore.Id, earlier), ("unlimited", null), ("later", later)]
+                : [("later", later), ("unlimited", null), (LifecycleTestStore.Id, earlier)];
+            foreach ((string id, DateTimeOffset? end) in subscriptions)
+            {
+                PutSubscription(fixture, id, "active", end);
+            }
+            Dictionary<string, ParsedSubscription> retained = fixture.Store.CurrentSubscriptions.ToDictionary(subscription => subscription.Id);
+            Dictionary<string, long> revisions = retained.ToDictionary(pair => pair.Key, pair => pair.Value.Revision);
+            Assert.Equal(earlier, fixture.Clock.NextDueTime);
+            int changes = fixture.SubscriptionTimerChanges;
+            fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.Single(fixture.Clock.CaptureDueCallbacks()).Invoke();
+            Assert.Equal("off", retained[LifecycleTestStore.Id].CurrentStatus);
+            Assert.True(retained[LifecycleTestStore.Id].Revision > revisions[LifecycleTestStore.Id]);
+            Assert.Equal("active", retained["later"].CurrentStatus);
+            Assert.Equal(revisions["later"], retained["later"].Revision);
+            Assert.Equal("active", retained["unlimited"].CurrentStatus);
+            Assert.Equal(revisions["unlimited"], retained["unlimited"].Revision);
+            Assert.Equal(1, fixture.SubscriptionTimerChanges - changes);
+            Assert.Equal(later, fixture.Clock.NextDueTime);
+            long expiredRevision = retained[LifecycleTestStore.Id].Revision;
+            changes = fixture.SubscriptionTimerChanges;
+            fixture.Clock.Advance(TimeSpan.FromMinutes(2));
+            Assert.Single(fixture.Clock.CaptureDueCallbacks()).Invoke();
+            Assert.Equal("off", retained["later"].CurrentStatus);
+            Assert.True(retained["later"].Revision > revisions["later"]);
+            Assert.Equal(expiredRevision, retained[LifecycleTestStore.Id].Revision);
+            Assert.Equal("active", retained["unlimited"].CurrentStatus);
+            Assert.Equal(SubscriptionLifecyclePolicy.UnlimitedExpirationTicks, retained["unlimited"].ExpirationTicks);
+            Assert.Equal(revisions["unlimited"], retained["unlimited"].Revision);
+            Assert.Equal(retained["unlimited"].Revision, fixture.ExecutableRevision(retained["unlimited"]));
+            Assert.Equal(1, fixture.SubscriptionTimerChanges - changes);
+            Assert.Null(fixture.Clock.NextDueTime);
+        }
+
+        using LifecycleTestStore competing = new(version, maximum: 0);
+        competing.Seed(subscription: false);
+        PutSubscription(competing, LifecycleTestStore.Id, "active", earlier);
+        PutSubscription(competing, "later", "active", later);
+        PutSubscription(competing, "unlimited", "active", null);
+        Dictionary<string, ParsedSubscription> remaining = competing.Store.CurrentSubscriptions.ToDictionary(subscription => subscription.Id);
+        int before = competing.SubscriptionTimerChanges;
+        competing.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "off");
+        Assert.Equal(1, competing.SubscriptionTimerChanges - before);
+        Assert.Equal(later, competing.Clock.NextDueTime);
+        before = competing.SubscriptionTimerChanges;
+        competing.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "active");
+        Assert.Equal(1, competing.SubscriptionTimerChanges - before);
+        Assert.Equal(earlier, competing.Clock.NextDueTime);
+        foreach (DateTimeOffset replacementEnd in new[] { earlier.AddMinutes(1), earlier })
+        {
+            before = competing.SubscriptionTimerChanges;
+            PutSubscription(competing, LifecycleTestStore.Id, "active", replacementEnd);
+            Assert.Equal(1, competing.SubscriptionTimerChanges - before);
+            Assert.Equal(replacementEnd, competing.Clock.NextDueTime);
+        }
+        before = competing.SubscriptionTimerChanges;
+        competing.Delete();
+        Assert.Equal(1, competing.SubscriptionTimerChanges - before);
+        Assert.Equal(later, competing.Clock.NextDueTime);
+        competing.Clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Empty(competing.Clock.CaptureDueCallbacks());
+        Assert.Equal("active", remaining["later"].CurrentStatus);
+        before = competing.SubscriptionTimerChanges;
+        competing.Clock.Advance(TimeSpan.FromMinutes(2));
+        Assert.Single(competing.Clock.CaptureDueCallbacks()).Invoke();
+        Assert.Equal("off", remaining["later"].CurrentStatus);
+        Assert.Equal("active", remaining["unlimited"].CurrentStatus);
+        Assert.Equal(1, competing.SubscriptionTimerChanges - before);
+        Assert.Null(competing.Clock.NextDueTime);
+    }
+
+    private static void PutSubscription(LifecycleTestStore fixture, string id, string status, DateTimeOffset? end)
+    {
+        JsonObject resource = fixture.SubscriptionJson(status, end?.ToString("O"));
+        resource["id"] = id;
+        fixture.Put(resource);
     }
 
     [Theory]
@@ -761,6 +959,14 @@ internal sealed class LifecycleTestStore : IDisposable
     internal FhirReleases.FhirSequenceCodes Version { get; }
     internal Task DisposalStarted { get; }
     internal Action<DateTimeOffset>? ClockRead { set => _observedClock.OnRead = value; }
+    internal int SubscriptionTimerChanges
+    {
+        get
+        {
+            Assert.Equal(1, _observedClock.TimersCreated);
+            return _observedClock.AcceptedChanges;
+        }
+    }
     internal List<SubscriptionSendEventArgs> Sent { get; } = [];
     internal ParsedSubscription Subscription => Assert.Single(Store.CurrentSubscriptions);
 
@@ -1057,31 +1263,47 @@ internal sealed class LifecycleTestStore : IDisposable
         Assert.Same(history, prior.GeneratedEvents);
     }
 
-    // Observe the existing manual clock's reads/disposal without changing phase-1 infrastructure.
+    // Observe the existing manual clock's reads/changes/disposal without changing phase-1 infrastructure.
     private sealed class ObservedClock(ManualTimeProvider clock) : TimeProvider
     {
+        private int _timersCreated;
+        private int _acceptedChanges;
         internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Action<DateTimeOffset>? OnRead { get; set; }
+        internal int TimersCreated => Volatile.Read(ref _timersCreated);
+        internal int AcceptedChanges => Volatile.Read(ref _acceptedChanges);
         public override DateTimeOffset GetUtcNow()
         {
             DateTimeOffset now = clock.GetUtcNow();
             OnRead?.Invoke(now);
             return now;
         }
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
-            new ObservedTimer(clock.CreateTimer(callback, state, dueTime, period), Started);
-
-        private sealed class ObservedTimer(ITimer timer, TaskCompletionSource started) : ITimer
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            public bool Change(TimeSpan dueTime, TimeSpan period) => timer.Change(dueTime, period);
+            ITimer timer = clock.CreateTimer(callback, state, dueTime, period);
+            Interlocked.Increment(ref _timersCreated);
+            return new ObservedTimer(timer, this);
+        }
+
+        private sealed class ObservedTimer(ITimer timer, ObservedClock owner) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                bool accepted = timer.Change(dueTime, period);
+                if (accepted)
+                {
+                    Interlocked.Increment(ref owner._acceptedChanges);
+                }
+                return accepted;
+            }
             public void Dispose()
             {
-                started.TrySetResult();
+                owner.Started.TrySetResult();
                 timer.Dispose();
             }
             public ValueTask DisposeAsync()
             {
-                started.TrySetResult();
+                owner.Started.TrySetResult();
                 return timer.DisposeAsync();
             }
         }

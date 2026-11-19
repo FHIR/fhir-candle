@@ -114,7 +114,7 @@ public partial class VersionedFhirStore
         // Reprocessing an installed descriptor is not a replacement or a renewal.
         if (ReferenceEquals(prior, subscription) && resource is null)
         {
-            NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes);
+            NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, deferTimerRearm: true);
             RemoveSubscriptionBindingsLocked(subscription);
             bool executable = InstallSubscriptionBindingsLocked(subscription);
             RearmSubscriptionTimerLocked();
@@ -147,7 +147,8 @@ public partial class VersionedFhirStore
     }
 
     private bool ChangeSubscriptionStatusLocked(
-        ParsedSubscription subscription, string status, List<SubscriptionChangedEventArgs> changes)
+        ParsedSubscription subscription, string status, List<SubscriptionChangedEventArgs> changes,
+        bool deferTimerRearm = false)
     {
         if (_lifecycleStopped || !_subscriptionConverter.IsValidStatus(status))
         {
@@ -170,26 +171,33 @@ public partial class VersionedFhirStore
         SetStoredSubscriptionStatusLocked(subscription.Id, status);
         InstallSubscriptionBindingsLocked(subscription);
         changes.Add(SubscriptionChangeLocked(subscription));
-        RearmSubscriptionTimerLocked();
+        if (!deferTimerRearm)
+        {
+            RearmSubscriptionTimerLocked();
+        }
         return true;
     }
 
-    private void NormalizeSubscriptionLocked(
-        ParsedSubscription subscription, DateTimeOffset now, List<SubscriptionChangedEventArgs> changes)
+    private bool NormalizeSubscriptionLocked(
+        ParsedSubscription subscription, DateTimeOffset now, List<SubscriptionChangedEventArgs> changes,
+        bool deferTimerRearm = false)
     {
-        if (!_lifecycleStopped && (subscription.CurrentStatus is "active" or "requested") &&
-            SubscriptionLifecyclePolicy.IsExpired(subscription.ExpirationTicks, now))
-        {
-            ChangeSubscriptionStatusLocked(subscription, "off", changes);
-        }
+        return !_lifecycleStopped && (subscription.CurrentStatus is "active" or "requested") &&
+            SubscriptionLifecyclePolicy.IsExpired(subscription.ExpirationTicks, now) &&
+            ChangeSubscriptionStatusLocked(subscription, "off", changes, deferTimerRearm);
     }
 
-    private void NormalizeSubscriptionsLocked(List<SubscriptionChangedEventArgs> changes)
+    private void NormalizeSubscriptionsLocked(List<SubscriptionChangedEventArgs> changes, bool deferTimerRearm = false)
     {
         DateTimeOffset now = _clock.GetUtcNow();
+        bool changed = false;
         foreach (ParsedSubscription subscription in _subscriptions.Values)
         {
-            NormalizeSubscriptionLocked(subscription, now, changes);
+            changed |= NormalizeSubscriptionLocked(subscription, now, changes, deferTimerRearm: true);
+        }
+        if (changed && !deferTimerRearm)
+        {
+            RearmSubscriptionTimerLocked();
         }
     }
 
@@ -520,7 +528,7 @@ public partial class VersionedFhirStore
             {
                 return;
             }
-            NormalizeSubscriptionsLocked(changes);
+            NormalizeSubscriptionsLocked(changes, deferTimerRearm: true);
             RearmSubscriptionTimerLocked();
         }
         PublishSubscriptionChanges(changes);
