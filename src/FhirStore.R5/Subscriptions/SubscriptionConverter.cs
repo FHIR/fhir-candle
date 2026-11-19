@@ -339,6 +339,9 @@ public class SubscriptionConverter
     /// <param name="notificationType">Type of the notification.</param>
     /// <param name="baseUrl">         URL of the base.</param>
     /// <param name="contentLevel">    (Optional) The content level.</param>
+    /// <param name="allowEmptySelectionFallback">
+    /// (Optional) Whether an empty selection uses the legacy all-events or last-event default.
+    /// </param>
     /// <returns>A Bundle?</returns>
     public Bundle? BundleForSubscriptionEvents(
         ParsedSubscription subscription,
@@ -346,7 +349,8 @@ public class SubscriptionConverter
         string notificationType,
         string baseUrl,
         /// <summary>The content level.</summary>
-        string contentLevel = "")
+        string contentLevel = "",
+        bool allowEmptySelectionFallback = true)
     {
         if (string.IsNullOrEmpty(contentLevel))
         {
@@ -379,7 +383,7 @@ public class SubscriptionConverter
         bool isFullResource = contentLevel.Equals("full-resource", StringComparison.Ordinal);
 
         // determine behavior of no event numbers
-        if (!eventNumbers.Any())
+        if (allowEmptySelectionFallback && !eventNumbers.Any())
         {
             // query-event should send all
             if (notificationType.Equals("query-event"))

@@ -3304,6 +3304,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="subscriptionId">  The subscription id of the subscription the events belong to.</param>
     /// <param name="eventNumbers">    One or more event numbers to include.</param>
     /// <param name="notificationType">Type of notification (e.g., 'notification-event')</param>
+    /// <param name="pretty">          If the output should be 'pretty' formatted.</param>
     /// <param name="contentType">     Override for the content type specified in the subscription.</param>
     /// <param name="contentLevel">    Override for the content level specified in the subscription.</param>
     /// <returns></returns>
@@ -3315,14 +3316,18 @@ public partial class VersionedFhirStore : IFhirStore
         string contentType = "",
         string contentLevel = "")
     {
-        if (_subscriptions.ContainsKey(subscriptionId))
+        if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
         {
-            Bundle? bundle = _subscriptionConverter.BundleForSubscriptionEvents(
-                _subscriptions[subscriptionId],
-                eventNumbers,
-                notificationType,
-                _config.BaseUrl,
-                contentLevel);
+            Bundle? bundle;
+            lock (subscription.GeneratedEvents)
+            {
+                bundle = _subscriptionConverter.BundleForSubscriptionEvents(
+                    subscription,
+                    eventNumbers,
+                    notificationType,
+                    _config.BaseUrl,
+                    contentLevel);
+            }
 
             if (bundle is null)
             {
@@ -3331,7 +3336,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             string serialized = SerializationUtils.SerializeFhir(
                 bundle,
-                string.IsNullOrEmpty(contentType) ? _subscriptions[subscriptionId].ContentType : contentType,
+                string.IsNullOrEmpty(contentType) ? subscription.ContentType : contentType,
                 pretty,
                 string.Empty);
 
@@ -3392,23 +3397,29 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="notificationType">Type of notification (e.g., 'notification-event')</param>
     /// <param name="contentLevel">    (Optional) Override for the content level specified in the
     ///  subscription.</param>
+    /// <param name="allowEmptySelectionFallback">
+    /// (Optional) Whether an empty selection uses the legacy all-events or last-event default.
+    /// </param>
     /// <returns>A Bundle?</returns>
     public Bundle? BundleForSubscriptionEvents(
         string subscriptionId,
         IEnumerable<long> eventNumbers,
         string notificationType,
-        string contentLevel = "")
+        string contentLevel = "",
+        bool allowEmptySelectionFallback = true)
     {
         if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
         {
-            Bundle? bundle = _subscriptionConverter.BundleForSubscriptionEvents(
-                subscription,
-                eventNumbers,
-                notificationType,
-                _config.BaseUrl,
-                contentLevel);
-
-            return bundle;
+            lock (subscription.GeneratedEvents)
+            {
+                return _subscriptionConverter.BundleForSubscriptionEvents(
+                    subscription,
+                    eventNumbers,
+                    notificationType,
+                    _config.BaseUrl,
+                    contentLevel,
+                    allowEmptySelectionFallback);
+            }
         }
 
         return null;

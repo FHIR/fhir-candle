@@ -12,7 +12,7 @@ namespace FhirCandle.Models;
 public class ParsedSubscription
 {
     private long _currentEventCount = 0;
-    private Dictionary<long, SubscriptionEvent> _generatedEvents = new();
+    private readonly Dictionary<long, SubscriptionEvent> _generatedEvents = new();
     private Dictionary<long, string> _serializedEvents = new();
     private List<string> _notificationErrors = new();
 
@@ -119,8 +119,8 @@ public class ParsedSubscription
     /// <summary>Gets or sets the expiration ticks.</summary>
     public required long ExpirationTicks { get; set; }
 
-    /// <summary>Gets or sets the number of current events.</summary>
-    public long CurrentEventCount => _currentEventCount;
+    /// <summary>Gets the number of current events.</summary>
+    public long CurrentEventCount => Interlocked.Read(ref _currentEventCount);
 
     /// <summary>Increment event count.</summary>
     /// <returns>A long.</returns>
@@ -129,7 +129,10 @@ public class ParsedSubscription
         return Interlocked.Increment(ref _currentEventCount);
     }
 
-    /// <summary>Gets or sets the generated events.</summary>
+    /// <summary>
+    /// Gets the live generated events. Participating history readers and writers lock this fixed
+    /// dictionary object for the complete history access, including notification bundle construction.
+    /// </summary>
     public Dictionary<long, SubscriptionEvent> GeneratedEvents => _generatedEvents;
 
     /// <summary>Gets the serialized events.</summary>
@@ -139,13 +142,16 @@ public class ParsedSubscription
     /// <param name="subscriptionEvent">The subscription event.</param>
     public void RegisterEvent(SubscriptionEvent subscriptionEvent)
     {
-        if (_generatedEvents.ContainsKey(subscriptionEvent.EventNumber))
+        lock (_generatedEvents)
         {
-            _generatedEvents[subscriptionEvent.EventNumber] = subscriptionEvent;
-            return;
-        }
+            if (_generatedEvents.ContainsKey(subscriptionEvent.EventNumber))
+            {
+                _generatedEvents[subscriptionEvent.EventNumber] = subscriptionEvent;
+                return;
+            }
 
-        _generatedEvents.Add(subscriptionEvent.EventNumber, subscriptionEvent);
+            _generatedEvents.Add(subscriptionEvent.EventNumber, subscriptionEvent);
+        }
     }
 
     /// <summary>Registers the serialized send.</summary>
@@ -167,7 +173,10 @@ public class ParsedSubscription
     /// <summary>Clears the events.</summary>
     public void ClearEvents()
     {
-        _generatedEvents.Clear();
+        lock (_generatedEvents)
+        {
+            _generatedEvents.Clear();
+        }
     }
 
     /// <summary>Gets or sets the notification errors.</summary>

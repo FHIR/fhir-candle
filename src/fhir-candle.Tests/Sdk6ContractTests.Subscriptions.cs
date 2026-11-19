@@ -3,6 +3,10 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+extern alias candleR4;
+extern alias candleR4B;
+extern alias candleR5;
+
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
@@ -79,6 +83,278 @@ public partial class Sdk6ContractTests
                 }
             }
         }
+    }
+
+    /// <summary>Ordinary replay covers each content level and both complete request forms.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsReplayCases =>
+        SubscriptionEventsMethodRows("events-replay", ["empty", "id-only", "full-resource"]);
+
+    /// <summary>Every literal empty selection must retain only its native status entry.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsEmptyCases =>
+        SubscriptionEventsMethodRows("events-empty", ["empty", "cleared", "no-match", "gap", "reversed"]);
+
+    /// <summary>Missing or malformed bounds use GET; the body-precedence row always supplies all parameters.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsDefaultCases =>
+        OperationRows("events-defaults",
+            ["omitted-both", "omitted-since", "omitted-until", "malformed-both", "malformed-since", "malformed-until",
+             "alias-camel", "alias-lowercase", "alias-dashed", "default-content", "body-precedence", "unknown"]);
+
+    /// <summary>Ordinary negative bounds, including reversed combinations, run without extreme endpoints.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsNegativeCases =>
+        SubscriptionEventsMethodRows("events-negative",
+            ["negative-since", "negative-until", "both-negative", "negative-reversed", "negative-upper-reversed"]);
+
+    /// <summary>Both legacy fallback modes are checked independently at each conversion entry point.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsLegacyCases =>
+        OperationRows("events-legacy", ["query-event", "event-notification"]);
+
+    /// <summary>Retained replay is inclusive and ascending regardless of history insertion order.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsReplayCases))]
+    public async Task SubscriptionEventsReplayPreservesInclusiveBoundsAndContent(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string contentLevel,
+        string method)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"events-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, 2);
+        ReverseSubscriptionHistory(subscription);
+
+        await AssertSubscriptionEventsReplay(replay, graph, "inclusive", method, 1, 2, contentLevel, events, 2);
+        await AssertSubscriptionEventsReplay(replay, graph, "singleton", method, 2, 2, contentLevel, [events[1]], 2);
+        await AssertSubscriptionEventsReplay(replay, graph, "requested-upper", method, 0, 1, contentLevel, [events[0]], 2);
+
+        // A retained key above the reserved counter must not escape the captured high-water bound.
+        subscription.RegisterEvent(subscription.GeneratedEvents[2] with { EventNumber = 3 });
+        Assert.Equal(2, subscription.CurrentEventCount);
+        Assert.Equal(3, subscription.GeneratedEvents.Count);
+        await AssertSubscriptionEventsReplay(replay, graph, "captured-upper", method, 1, 4, contentLevel, events, 2);
+        Assert.Equal(2, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>Empty, cleared, sparse, and reversed history selections cannot invoke legacy fallback.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsEmptyCases))]
+    public async Task SubscriptionEventsEmptyRangesStayStatusOnly(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string kind,
+        string method)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"events-empty-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        int total = kind == "empty" ? 0 : kind == "gap" ? 3 : 2;
+        await GenerateSubscriptionReplayEvents(replay, graph, capture, total);
+        long since = 0;
+        long until = 4;
+        switch (kind)
+        {
+            case "empty":
+                Assert.Empty(subscription.GeneratedEvents);
+                break;
+            case "cleared":
+                subscription.ClearEvents();
+                Assert.Empty(subscription.GeneratedEvents);
+                break;
+            case "no-match":
+                since = 3;
+                break;
+            case "gap":
+                lock (subscription.GeneratedEvents)
+                {
+                    Assert.True(subscription.GeneratedEvents.Remove(2));
+                }
+                Assert.Equal(new long[] { 1, 3 }, subscription.GeneratedEvents.Keys);
+                since = 2;
+                until = 2;
+                break;
+            case "reversed":
+                since = 2;
+                until = 1;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+        Assert.Equal(total, subscription.CurrentEventCount);
+        await AssertSubscriptionEventsReplay(replay, graph, kind, method, since, until, "full-resource", [], total);
+        Assert.Equal(total, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>GET fallback, all six bound aliases, content defaults, and complete POST precedence stay compatible.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsDefaultCases))]
+    public async Task SubscriptionEventsDefaultsAliasesAndBodyPrecedenceRemainStable(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string kind)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"events-default-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, 2);
+        string query = kind switch
+        {
+            "omitted-both" => "content=id-only",
+            "omitted-since" => "eventsUntilNumber=1&content=id-only",
+            "omitted-until" => "eventsSinceNumber=2&content=id-only",
+            "malformed-both" => "eventsSinceNumber=not-a-number&eventsUntilNumber=not-a-number&content=id-only",
+            "malformed-since" => "eventsSinceNumber=not-a-number&eventsUntilNumber=1&content=id-only",
+            "malformed-until" => "eventsSinceNumber=2&eventsUntilNumber=not-a-number&content=id-only",
+            "alias-camel" => "eventsSinceNumber=2&eventsUntilNumber=2&content=id-only",
+            "alias-lowercase" => "eventssincenumber=2&eventsuntilnumber=2&content=id-only",
+            "alias-dashed" => "events-since-number=2&events-until-number=2&content=id-only",
+            "default-content" => "eventsSinceNumber=2&eventsUntilNumber=2",
+            "body-precedence" => "eventsSinceNumber=1&eventsUntilNumber=1&content=empty",
+            "unknown" => "eventsSinceNumber=1&eventsUntilNumber=2&content=full-resource",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        string id = kind == "unknown" ? "unknown-subscription" : SubscriptionId;
+        CompatibilityResponse response = await replay.SendAsync(new(tenant.Name,
+            kind == "body-precedence" ? "POST" : "GET", $"Subscription/{id}/$events?{query}")
+        {
+            Format = format,
+            Content = kind == "body-precedence" ? SubscriptionEventsParameters(graph, 2, 2, "id-only") : null,
+        });
+        if (kind == "unknown")
+        {
+            AssertExchangeFailureResponse(replay.Bindings, tenant, format, kind, response, HttpStatusCode.NotFound,
+                "not-found", "Instance Subscription/unknown-subscription does not exist on this server.", checkMediaType: true);
+        }
+        else
+        {
+            NotificationEventContract[] expected = kind switch
+            {
+                "omitted-both" or "malformed-both" => events,
+                "omitted-since" or "malformed-since" => [events[0]],
+                _ => [events[1]],
+            };
+            AssertSubscriptionEventsResponse(replay, graph, kind, response,
+                kind == "default-content" ? "full-resource" : "id-only", expected, 2);
+        }
+        Assert.Equal(2, subscription.CurrentEventCount);
+        Assert.Equal(2, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>Parsed negatives take precedence over empty or reversed interval handling.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsNegativeCases))]
+    public async Task SubscriptionEventsNegativeBoundsReturnBadRequest(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string kind,
+        string method)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"events-negative-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        await GenerateSubscriptionReplayEvents(replay, graph, capture, 2);
+        (long since, long until) = kind switch
+        {
+            "negative-since" => (-1, 2),
+            "negative-until" => (0, -1),
+            "both-negative" => (-2, -1),
+            "negative-reversed" => (-1, -2),
+            "negative-upper-reversed" => (2, -1),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        CompatibilityResponse response = await replay.SendAsync(SubscriptionEventsRequest(graph, method, since, until, "full-resource"));
+        AssertOperationOutcome(replay, tenant, format, kind, response, HttpStatusCode.BadRequest,
+            success: false, resourceIsOutcome: true, [new("error", "exception", "Event number bounds must be nonnegative.")]);
+        Assert.Equal(2, subscription.CurrentEventCount);
+        Assert.Equal(2, subscription.GeneratedEvents.Count);
+        Assert.Equal(2, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>Concrete bundle dispatch and legacy serialization establish fallback behavior independently of $events.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsLegacyCases))]
+    public async Task SubscriptionEventsLegacyEmptySelectionFallbackRemainsAvailable(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string notificationType)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"events-legacy-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, 2);
+        ReverseSubscriptionHistory(subscription);
+        // Legacy non-query fallback means the last retained key, not the greatest number.
+        NotificationEventContract[] expected = notificationType == "query-event" ? [events[1], events[0]] : [events[0]];
+        string serialized = capture.Store.SerializeSubscriptionEvents(
+            SubscriptionId, Array.Empty<long>(), notificationType, false,
+            WireContractAssertions.MediaType(format), "full-resource");
+        AssertSubscriptionBundle(replay, graph, "legacy-serialization", serialized, notificationType, "full-resource", expected, 2);
+
+        // Neither the operation's lock nor the serialization entry point may stand in for this wrapper.
+        Hl7.Fhir.Model.Bundle legacy = Assert.IsType<Hl7.Fhir.Model.Bundle>(
+            ConcreteSubscriptionEventsBundle(capture.Store, notificationType));
+        AssertSubscriptionBundle(replay, graph, "legacy-concrete", SerializeSubscriptionEventsBundle(version, format, legacy),
+            notificationType, "full-resource", expected, 2);
+        Hl7.Fhir.Model.Bundle empty = Assert.IsType<Hl7.Fhir.Model.Bundle>(
+            ConcreteSubscriptionEventsBundle(capture.Store, notificationType, allowEmptySelectionFallback: false));
+        AssertSubscriptionBundle(replay, graph, "literal-empty", SerializeSubscriptionEventsBundle(version, format, empty),
+            notificationType, "full-resource", [], 2);
+        Assert.Null(ConcreteSubscriptionEventsBundle(capture.Store, notificationType, subscriptionId: "unknown-subscription"));
+        Assert.Equal(2, subscription.CurrentEventCount);
+        Assert.Equal(2, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>Pin ordinary H2 inventories independently; isolated extreme/concurrency cases belong to the next phase.</summary>
+    [Fact]
+    public void SubscriptionEventsTheoryDataIsNonEmptyAndBounded()
+    {
+        Assert.Equal(72, SubscriptionEventsReplayCases.Count());
+        Assert.Equal(120, SubscriptionEventsEmptyCases.Count());
+        Assert.Equal(144, SubscriptionEventsDefaultCases.Count());
+        Assert.Equal(120, SubscriptionEventsNegativeCases.Count());
+        Assert.Equal(24, SubscriptionEventsLegacyCases.Count());
+        AssertSubscriptionEventsMatrix(SubscriptionEventsReplayCases, ["empty", "id-only", "full-resource"], methods: true);
+        AssertSubscriptionEventsMatrix(SubscriptionEventsEmptyCases, ["empty", "cleared", "no-match", "gap", "reversed"], methods: true);
+        AssertSubscriptionEventsMatrix(SubscriptionEventsDefaultCases,
+            ["omitted-both", "omitted-since", "omitted-until", "malformed-both", "malformed-since", "malformed-until",
+             "alias-camel", "alias-lowercase", "alias-dashed", "default-content", "body-precedence", "unknown"], methods: false);
+        AssertSubscriptionEventsMatrix(SubscriptionEventsNegativeCases,
+            ["negative-since", "negative-until", "both-negative", "negative-reversed", "negative-upper-reversed"], methods: true);
+        AssertSubscriptionEventsMatrix(SubscriptionEventsLegacyCases, ["query-event", "event-notification"], methods: false);
     }
 
     /// <summary>Real resource writes drive native topic conversion, filters, and current/previous FHIRPath contexts.</summary>
@@ -282,6 +558,163 @@ public partial class Sdk6ContractTests
     }
 
     private sealed record NotificationEventContract(long Number, string FocusIdentity, DateTimeOffset Timestamp);
+
+    private static IEnumerable<object[]> SubscriptionEventsMethodRows(string group, string[] kinds)
+    {
+        foreach (object[] row in OperationRows(group, kinds))
+        {
+            foreach (string method in new[] { "GET", "POST" })
+            {
+                yield return [$"{row[0]} / {method}", row[1], row[2], row[3], row[4], method];
+            }
+        }
+    }
+
+    private static void AssertSubscriptionEventsMatrix(IEnumerable<object[]> matrix, string[] kinds, bool methods)
+    {
+        object[][] rows = matrix.ToArray();
+        Assert.NotEmpty(rows);
+        Assert.Equal(rows.Length, rows.Select(row => (string)row[0]).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(new[] { FhirReleases.FhirSequenceCodes.R4, FhirReleases.FhirSequenceCodes.R4B, FhirReleases.FhirSequenceCodes.R5 },
+            rows.Select(row => (FhirReleases.FhirSequenceCodes)row[1]).Distinct().OrderBy(version => version));
+        Assert.Equal(new[] { CompatibilityTransport.Http, CompatibilityTransport.Direct },
+            rows.Select(row => (CompatibilityTransport)row[2]).Distinct().OrderBy(transport => transport));
+        Assert.Equal(new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml },
+            rows.Select(row => (CompatibilityFormat)row[3]).Distinct().OrderBy(format => format));
+        Assert.Equal(kinds.OrderBy(kind => kind, StringComparer.Ordinal),
+            rows.Select(row => (string)row[4]).Distinct().OrderBy(kind => kind, StringComparer.Ordinal));
+        foreach (FhirReleases.FhirSequenceCodes version in new[]
+            { FhirReleases.FhirSequenceCodes.R4, FhirReleases.FhirSequenceCodes.R4B, FhirReleases.FhirSequenceCodes.R5 })
+        {
+            foreach (CompatibilityTransport transport in new[] { CompatibilityTransport.Http, CompatibilityTransport.Direct })
+            {
+                foreach (CompatibilityFormat format in new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml })
+                {
+                    foreach (string kind in kinds)
+                    {
+                        object[][] selected = rows.Where(row => (FhirReleases.FhirSequenceCodes)row[1] == version &&
+                            (CompatibilityTransport)row[2] == transport && (CompatibilityFormat)row[3] == format &&
+                            (string)row[4] == kind).ToArray();
+                        Assert.Equal(methods ? 2 : 1, selected.Length);
+                        if (methods)
+                        {
+                            Assert.Equal(new[] { "GET", "POST" }, selected.Select(row => (string)row[5]).OrderBy(method => method, StringComparer.Ordinal));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static async Task<NotificationEventContract[]> GenerateSubscriptionReplayEvents(
+        CompatibilityReplay replay, SubscriptionGraph graph, SubscriptionCapture capture, int count)
+    {
+        Assert.InRange(count, 0, 3);
+        List<NotificationEventContract> events = [];
+        for (int number = 1; number <= count; number++)
+        {
+            string encounter = WithWireId(OperationWithoutId(SubscriptionEncounter(graph.Tenant.Version, graph.Format, complete: true),
+                graph.Format), graph.Format, "replay-event-" + number.ToString(CultureInfo.InvariantCulture));
+            string identity = await WriteSubscriptionResource(replay, graph, encounter);
+            SubscriptionEvent actual = AssertCapturedSubscriptionEvent(capture, graph, number, identity, replay.Bindings.StartedAt);
+            events.Add(new(number, identity, actual.Timestamp));
+        }
+        Assert.Equal(count, capture.Sent.Count);
+        ParsedSubscription subscription = Assert.Single(capture.Store.CurrentSubscriptions);
+        Assert.Equal(count, subscription.CurrentEventCount);
+        Assert.Equal(count, subscription.GeneratedEvents.Count);
+        Assert.Empty(subscription.NotificationErrors);
+        return events.ToArray();
+    }
+
+    private static void ReverseSubscriptionHistory(ParsedSubscription subscription)
+    {
+        lock (subscription.GeneratedEvents)
+        {
+            SubscriptionEvent first = subscription.GeneratedEvents[1];
+            SubscriptionEvent second = subscription.GeneratedEvents[2];
+            subscription.ClearEvents();
+            subscription.RegisterEvent(second);
+            subscription.RegisterEvent(first);
+            Assert.Equal(new long[] { 2, 1 }, subscription.GeneratedEvents.Keys);
+        }
+    }
+
+    private static string SubscriptionEventsParameters(SubscriptionGraph graph, long since, long until, string contentLevel)
+    {
+        string integerChoice = graph.Tenant.Version == FhirReleases.FhirSequenceCodes.R5 ? "valueInteger64" : "valueString";
+        string lower = since.ToString(CultureInfo.InvariantCulture);
+        string upper = until.ToString(CultureInfo.InvariantCulture);
+        return graph.Format == CompatibilityFormat.Json
+            ? $$$"""{"resourceType":"Parameters","parameter":[{"name":"eventsSinceNumber","{{{integerChoice}}}":"{{{lower}}}"},{"name":"eventsUntilNumber","{{{integerChoice}}}":"{{{upper}}}"},{"name":"content","valueCode":"{{{contentLevel}}}"}]}"""
+            : $"""<Parameters xmlns="http://hl7.org/fhir"><parameter><name value="eventsSinceNumber"/><{integerChoice} value="{lower}"/></parameter><parameter><name value="eventsUntilNumber"/><{integerChoice} value="{upper}"/></parameter><parameter><name value="content"/><valueCode value="{contentLevel}"/></parameter></Parameters>""";
+    }
+
+    private static CompatibilityRequest SubscriptionEventsRequest(
+        SubscriptionGraph graph, string method, long since, long until, string contentLevel)
+    {
+        string path = $"Subscription/{SubscriptionId}/$events";
+        if (method == "GET")
+        {
+            path += $"?eventsSinceNumber={since.ToString(CultureInfo.InvariantCulture)}&eventsUntilNumber={until.ToString(CultureInfo.InvariantCulture)}&content={contentLevel}";
+        }
+        return new(graph.Tenant.Name, method, path)
+        {
+            Format = graph.Format,
+            Content = method == "POST" ? SubscriptionEventsParameters(graph, since, until, contentLevel) : null,
+        };
+    }
+
+    private static async Task AssertSubscriptionEventsReplay(
+        CompatibilityReplay replay, SubscriptionGraph graph, string name, string method, long since, long until,
+        string contentLevel, IReadOnlyList<NotificationEventContract> events, long total)
+    {
+        CompatibilityResponse response = await replay.SendAsync(SubscriptionEventsRequest(graph, method, since, until, contentLevel));
+        AssertSubscriptionEventsResponse(replay, graph, name, response, contentLevel, events, total);
+    }
+
+    private static void AssertSubscriptionEventsResponse(
+        CompatibilityReplay replay, SubscriptionGraph graph, string name, CompatibilityResponse response,
+        string contentLevel, IReadOnlyList<NotificationEventContract> events, long total)
+    {
+        string bundle = ExchangeResource(response);
+        AssertExchangeContainer(replay, graph.Tenant, graph.Format, name, response, "Bundle",
+            ExchangePrimitive(bundle, graph.Format, "id"),
+            new OutcomeBodyExpectation(name + "-outcome", [new("information", "success", $"Events for subscription {SubscriptionId}.")]));
+        AssertSubscriptionBundle(replay, graph, name, bundle, "query-event", contentLevel, events, total);
+    }
+
+    private static Hl7.Fhir.Model.Bundle? ConcreteSubscriptionEventsBundle(
+        IFhirStore store, string notificationType, bool? allowEmptySelectionFallback = null, string subscriptionId = SubscriptionId) =>
+        store switch
+        {
+            candleR4::FhirCandle.Storage.VersionedFhirStore r4 => allowEmptySelectionFallback.HasValue
+                ? r4.BundleForSubscriptionEvents(subscriptionId, Array.Empty<long>(), notificationType, "full-resource",
+                    allowEmptySelectionFallback: allowEmptySelectionFallback.Value)
+                : r4.BundleForSubscriptionEvents(subscriptionId, Array.Empty<long>(), notificationType, "full-resource"),
+            candleR4B::FhirCandle.Storage.VersionedFhirStore r4b => allowEmptySelectionFallback.HasValue
+                ? r4b.BundleForSubscriptionEvents(subscriptionId, Array.Empty<long>(), notificationType, "full-resource",
+                    allowEmptySelectionFallback: allowEmptySelectionFallback.Value)
+                : r4b.BundleForSubscriptionEvents(subscriptionId, Array.Empty<long>(), notificationType, "full-resource"),
+            candleR5::FhirCandle.Storage.VersionedFhirStore r5 => allowEmptySelectionFallback.HasValue
+                ? r5.BundleForSubscriptionEvents(subscriptionId, Array.Empty<long>(), notificationType, "full-resource",
+                    allowEmptySelectionFallback: allowEmptySelectionFallback.Value)
+                : r5.BundleForSubscriptionEvents(subscriptionId, Array.Empty<long>(), notificationType, "full-resource"),
+            _ => throw new ArgumentOutOfRangeException(nameof(store)),
+        };
+
+    private static string SerializeSubscriptionEventsBundle(
+        FhirReleases.FhirSequenceCodes version, CompatibilityFormat format, Hl7.Fhir.Model.Bundle bundle) =>
+        version switch
+        {
+            FhirReleases.FhirSequenceCodes.R4 => candleR4::FhirCandle.Serialization.SerializationUtils.SerializeFhir(
+                bundle, WireContractAssertions.MediaType(format), false),
+            FhirReleases.FhirSequenceCodes.R4B => candleR4B::FhirCandle.Serialization.SerializationUtils.SerializeFhir(
+                bundle, WireContractAssertions.MediaType(format), false),
+            FhirReleases.FhirSequenceCodes.R5 => candleR5::FhirCandle.Serialization.SerializationUtils.SerializeFhir(
+                bundle, WireContractAssertions.MediaType(format), false),
+            _ => throw new ArgumentOutOfRangeException(nameof(version)),
+        };
 
     private sealed class SubscriptionCapture : IDisposable
     {
