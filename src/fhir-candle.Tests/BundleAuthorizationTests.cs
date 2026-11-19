@@ -238,7 +238,7 @@ public class BundleAuthorizationTests
             AssertSuccessResource(createdFirst, 201, firstId, "1");
             AssertSuccessResource(ResponseEntry(response, 3), 200, firstId, "1");
             Assert.Equal($"Patient/{firstId}", Stored(store, "Observation", ResourceId(ResponseEntry(response, 2)))["subject"]!["reference"]!.GetValue<string>());
-            Assert.Equal($"Patient/{firstId}?_tag={firstId}", ToJson(store, model)["entry"]![0]!["request"]!["url"]!.GetValue<string>());
+            Assert.Equal($"Patient/{firstId}?_tag=first", ToJson(store, model)["entry"]![0]!["request"]!["url"]!.GetValue<string>());
             Assert.Equal("First", Stored(store, "Patient", firstId)["name"]![0]!["family"]!.GetValue<string>());
 
             if (repeatedOriginal)
@@ -330,7 +330,1108 @@ public class BundleAuthorizationTests
         }
     }
 
-    private static IFhirStore CreateStore(FhirReleases.FhirSequenceCodes version)
+    /// <summary>Denied mutations preserve complete privileged state through both bundle entry points.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void EntryPermissionsAreEnforced(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string kind in new[] { "batch", "transaction" })
+        {
+            foreach (string method in new[] { "DELETE", "POST", "PUT" })
+            {
+                foreach (bool objectInput in new[] { false, true })
+                {
+                    using IFhirStore store = CreateStore(version);
+                    SeedPatient(store, "seed", "Original");
+                    MutationWatch watch = new(store);
+                    string[] before = Fingerprint(store);
+                    JsonObject entry = Entry("denied", method, method == "POST" ? "Patient" : "Patient/seed",
+                        method == "DELETE" ? null : Patient(method == "POST" ? "client" : "seed", "Changed"));
+                    JsonObject request = Bundle(kind, entry);
+                    AuthorizationInfo authorization = Authorize(store, "Patient.r");
+                    JsonObject response = objectInput
+                        ? SendObjectBundle(store, ToModel(version, request), authorization)
+                        : SendBundle(store, request, authorization);
+                    AssertOwnDenial(ResponseEntry(response, 0), method,
+                        method == "POST" ? "Patient" : "Patient/seed");
+                    AssertUnchanged(store, before, watch);
+                }
+            }
+        }
+
+        // Approvals/refusals belong to a request, never to the reused payload or store.
+        using IFhirStore reusedStore = CreateStore(version);
+        object reused = ToModel(version, Bundle("transaction", Entry("reuse", "POST", "Patient", Patient("client"))));
+        AssertOwnDenial(ResponseEntry(SendObjectBundle(reusedStore, reused, Authorize(reusedStore, "Patient.r")), 0), "POST", "Patient");
+        JsonObject permitted = ResponseEntry(SendObjectBundle(reusedStore, reused, Authorize(reusedStore, "Patient.c")), 0);
+        AssertSuccessResource(permitted, 201, ResourceId(permitted), "1");
+        Assert.Single(reusedStore["Patient"]);
+    }
+
+    /// <summary>Authorization follows the parsed method, interaction, and URL type, never the body or outer bundle.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void EntryPermissionsUseResourceAndInteraction(FhirReleases.FhirSequenceCodes version)
+    {
+        (string Scope, string Method, string Url)[] denied =
+        [
+            ("Patient.r", "GET", "Observation/seed"),
+            ("Patient.r", "HEAD", "Observation/seed"),
+            ("Patient.s", "GET", "Observation?status=final"),
+            ("Patient.c", "GET", "Patient/seed"),
+            ("Patient.c", "HEAD", "Patient/seed"),
+            ("Patient.u", "GET", "Patient/seed"),
+            ("Patient.u", "HEAD", "Patient/seed"),
+            ("Patient.c", "GET", "Patient?name=Seed"),
+            ("Patient.u", "GET", "Patient?name=Seed"),
+            ("Patient.r", "GET", "Patient?name=Seed"),
+            ("Patient.c", "GET", "Patient/$not-installed"),
+            ("Patient.u", "GET", "Patient/seed/$not-installed"),
+            ("Patient.r", "POST", "Patient/$not-installed"),
+            ("Patient.c", "POST", "Patient/seed/$not-installed"),
+            ("Patient.r", "POST", "$not-installed"),
+            // Conditional update is deliberately not mapped by the restricted policy.
+            ("Patient.u", "PUT", "Patient?_id=seed"),
+            ("Patient.c", "POST", "Observation"),
+        ];
+        foreach (string kind in new[] { "batch", "transaction" })
+        {
+            using IFhirStore store = CreateStore(version);
+            SeedPatient(store, "seed");
+            SeedResource(store, "Observation", "seed", Observation("seed", "Patient/seed"));
+            string[] before = Fingerprint(store);
+            MutationWatch watch = new(store);
+            foreach ((string scope, string method, string url) in denied)
+            {
+                JsonObject response = SendBundle(store, Bundle(kind,
+                    Entry("denied", method, url, method is "POST" or "PUT" ? Patient("seed") : null)),
+                    Authorize(store, scope));
+                AssertOwnDenial(ResponseEntry(response, 0), method, url);
+                AssertUnchanged(store, before, watch);
+            }
+
+            foreach ((string scope, string method, string url) in new[]
+            {
+                ("Patient.r", "GET", "Patient/seed"),
+                ("Patient.r", "HEAD", "Patient/seed"),
+                ("Patient.s", "GET", "Patient?name=Seed"),
+                ("Patient.r", "GET", "Patient/$not-installed"),
+                ("Patient.u", "POST", "Patient/seed/$not-installed"),
+            })
+            {
+                JsonObject response = SendBundle(store, Bundle(kind, Entry("allowed", method, url)), Authorize(store, scope));
+                Assert.NotEqual("401 Unauthorized", ResponseEntry(response, 0)["response"]!["status"]!.GetValue<string>());
+                AssertUnchanged(store, before, watch);
+            }
+        }
+    }
+
+    /// <summary>Every denial is discovered before any group runs, irrespective of source order or malformed siblings.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void TransactionDenialPreventsEveryMutation(FhirReleases.FhirSequenceCodes version)
+    {
+        (string Allowed, string Denied, string Scope)[] cases =
+        [
+            ("DELETE", "POST", "Patient.d"),
+            ("DELETE", "PUT", "Patient.d"),
+            ("POST", "GET", "Patient.c"),
+            ("POST", "HEAD", "Patient.c"),
+            ("PUT", "GET", "Patient.u"),
+            ("PUT", "HEAD", "Patient.u"),
+        ];
+        foreach ((string allowed, string denied, string scope) in cases)
+        {
+            foreach (bool reverse in new[] { false, true })
+            {
+                using IFhirStore store = CreateStore(version);
+                SeedPatient(store, "seed", "Original");
+                SeedResource(store, "Observation", "observation", Observation("observation", "Patient/seed"));
+                string[] before = Fingerprint(store);
+                MutationWatch watch = new(store);
+                JsonObject permitted = Entry("permitted", allowed, allowed == "POST" ? "Patient" : "Patient/seed",
+                    allowed == "DELETE" ? null : Patient(allowed == "POST" ? "client" : "seed", "MustNotPersist"));
+                JsonObject refused = Entry("denied", denied, denied == "POST" ? "Patient" : "Patient/seed",
+                    denied is "POST" or "PUT" ? Patient(null, "MustNotPersist") : null);
+                JsonObject[] pair = reverse ? [refused, permitted] : [permitted, refused];
+                JsonObject response = SendBundle(store, Bundle("transaction",
+                    Entry("unparsed", "GET", "NotAResource/id"), pair[0], new() { ["fullUrl"] = "missing" }, pair[1]),
+                    Authorize(store, scope));
+                Assert.Equal(4, Entries(response).Count);
+                JsonObject own = Entries(response).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == "denied");
+                AssertOwnDenial(own, denied, denied == "POST" ? "Patient" : "Patient/seed");
+                JsonObject collateral = Entries(response).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == "permitted");
+                AssertCollateralDenial(collateral);
+                Assert.Single(Issues(collateral));
+                JsonObject malformed = Entries(response).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == "unparsed");
+                AssertStatus(malformed, 500);
+                Assert.Equal("not-supported", Issues(malformed)[0]!["code"]!.GetValue<string>());
+                AssertStatus(ResponseEntry(response, Entries(response).Count - 1), 400);
+                Assert.Equal("missing", ResponseEntry(response, Entries(response).Count - 1)["fullUrl"]!.GetValue<string>());
+                AssertUnchanged(store, before, watch);
+            }
+        }
+
+        // A permitted read is collateral too: no successful resources or read metadata are fabricated.
+        using IFhirStore readStore = CreateStore(version);
+        SeedPatient(readStore, "seed");
+        MutationWatch readWatch = new(readStore);
+        string[] readBefore = Fingerprint(readStore);
+        JsonObject readResponse = SendBundle(readStore, Bundle("transaction",
+            Entry("read", "GET", "Patient/seed"), Entry("denied", "DELETE", "Patient/seed")), Authorize(readStore, "Patient.r"));
+        AssertCollateralDenial(ResponseEntry(readResponse, 1));
+        AssertUnchanged(readStore, readBefore, readWatch);
+    }
+
+    /// <summary>Descendant denials refuse the enclosing transaction, but not independent outer batch units.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void NestedDenialBlocksEnclosingTransaction(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string nestedKind in new[] { "batch", "transaction" })
+        {
+            foreach (string deniedMethod in new[] { "GET", "PUT" })
+            {
+                using IFhirStore store = CreateStore(version);
+                SeedPatient(store, "seed");
+                MutationWatch watch = new(store);
+                string[] before = Fingerprint(store);
+                JsonObject nested = Bundle(nestedKind,
+                    Entry("nested-create", "POST", "Patient", Patient("child")),
+                    Entry("denied", deniedMethod, "Patient/seed", deniedMethod == "PUT" ? Patient("seed", "Changed") : null));
+                JsonObject response = SendBundle(store, Bundle("transaction",
+                    Entry("parent-create", "POST", "Patient", Patient("parent")),
+                    Entry("wrapper", "POST", "/", nested)), Authorize(store, "Patient.c"));
+                AssertOrder(response, "parent-create", "wrapper");
+                AssertCollateralDenial(ResponseEntry(response, 0));
+                JsonObject wrapper = ResponseEntry(response, 1);
+                AssertCollateralDenial(wrapper);
+                Assert.Equal(2, Issues(wrapper).Count);
+                Assert.Equal("forbidden", Issues(wrapper)[1]!["code"]!.GetValue<string>());
+                Assert.Equal($"Denied descendant Bundle.entry[1].entry[1]: Unauthorized request: {deniedMethod} Patient/seed, parsed interaction: " +
+                    (deniedMethod == "GET" ? "InstanceRead" : "InstanceUpdate"),
+                    Issues(wrapper)[1]!["diagnostics"]!.GetValue<string>());
+                AssertUnchanged(store, before, watch);
+            }
+        }
+
+        using IFhirStore independent = CreateStore(version);
+        SeedPatient(independent, "seed", "Original");
+        MutationWatch independentWatch = new(independent);
+        string original = Stored(independent, "Patient", "seed").ToJsonString();
+        JsonObject batch = SendBundle(independent, Bundle("batch",
+            Entry("before", "POST", "Patient", Patient(null, "Before")),
+            Entry("wrapper", "POST", "/", Bundle("transaction",
+                Entry("nested-create", "POST", "Patient", Patient("child")),
+                Entry("denied", "GET", "Patient/seed"))),
+            Entry("after", "POST", "Patient", Patient(null, "After"))), Authorize(independent, "Patient.c"));
+        AssertOrder(batch, "before", "wrapper", "after");
+        AssertStatus(ResponseEntry(batch, 0), 201);
+        AssertStatus(ResponseEntry(batch, 1), 200);
+        JsonObject rejectedChild = Assert.IsType<JsonObject>(ResponseEntry(batch, 1)["resource"]);
+        AssertCollateralDenial(ResponseEntry(rejectedChild, 0));
+        AssertOwnDenial(ResponseEntry(rejectedChild, 1), "GET", "Patient/seed");
+        AssertStatus(ResponseEntry(batch, 2), 201);
+        Assert.Equal(3, independent["Patient"].Count);
+        Assert.Equal(original, Stored(independent, "Patient", "seed").ToJsonString());
+        Assert.Equal(new[]
+        {
+            $"create:Patient/{ResourceId(ResponseEntry(batch, 0))}",
+            $"create:Patient/{ResourceId(ResponseEntry(batch, 2))}",
+        }, independentWatch.Events);
+
+        // Walk beyond one executable level, retaining the original ordinal path.
+        using IFhirStore deep = CreateStore(version);
+        MutationWatch deepWatch = new(deep);
+        string[] deepBefore = Fingerprint(deep);
+        JsonObject deepResponse = SendBundle(deep, Bundle("transaction", Entry("outer", "POST", "/", Bundle("batch",
+            Entry("middle", "POST", "/", Bundle("transaction", Entry("denied", "HEAD", "Observation/absent")))))),
+            Authorize(deep, "Patient.r"));
+        Assert.Contains("Bundle.entry[0].entry[0].entry[0]", Issues(ResponseEntry(deepResponse, 0))[1]!["diagnostics"]!.GetValue<string>());
+        AssertUnchanged(deep, deepBefore, deepWatch);
+
+        // A direct denial must not stop structural scanning before a later descendant denial.
+        JsonObject multiple = SendBundle(deep, Bundle("transaction",
+            Entry("own", "POST", "Observation", Observation("client", "Patient/absent")),
+            Entry("wrapper", "POST", "/", Bundle("batch",
+                Entry("unparsed", "GET", "NotAResource/id"),
+                Entry("first-denied", "GET", "Observation/absent"),
+                Entry("second-denied", "HEAD", "Observation/absent")))),
+            Authorize(deep, "Patient.c"));
+        AssertOwnDenial(ResponseEntry(multiple, 0), "POST", "Observation");
+        JsonObject multipleWrapper = ResponseEntry(multiple, 1);
+        AssertCollateralDenial(multipleWrapper);
+        Assert.Equal(3, Issues(multipleWrapper).Count);
+        Assert.Contains("Bundle.entry[1].entry[1]: Unauthorized request: GET Observation/absent",
+            Issues(multipleWrapper)[1]!["diagnostics"]!.GetValue<string>());
+        Assert.Contains("Bundle.entry[1].entry[2]: Unauthorized request: HEAD Observation/absent",
+            Issues(multipleWrapper)[2]!["diagnostics"]!.GetValue<string>());
+        AssertUnchanged(deep, deepBefore, deepWatch);
+
+        // A batch create changes the shared ID during interaction execution, not
+        // transaction preparation. The later URL must still be checked as a type search.
+        using IFhirStore aliased = CreateStore(version);
+        object shared = ToModel(version, Patient("Patient", "Aliased"));
+        object aliasedRequest = ToModel(version, Bundle("transaction",
+            Entry("earlier-batch", "POST", "/", Bundle("batch",
+                Entry("batch-create", "POST", "Patient", Patient("placeholder")))),
+            Entry("later-transaction", "POST", "/", Bundle("transaction",
+                Entry("transaction-create", "POST", "Patient", Patient("placeholder")),
+                Entry("denied-search", "GET", "Patient?name=Aliased")))));
+        SetEntryResource(EntryResource(aliasedRequest, 0), 0, shared);
+        SetEntryResource(EntryResource(aliasedRequest, 1), 0, shared);
+        string aliasedInputBefore = ToJson(aliased, aliasedRequest).ToJsonString();
+        string[] aliasedBefore = Fingerprint(aliased);
+        MutationWatch aliasedWatch = new(aliased);
+        JsonObject aliasedResponse = SendObjectBundle(aliased, aliasedRequest, Authorize(aliased, "Patient.c"));
+        AssertUnchanged(aliased, aliasedBefore, aliasedWatch);
+        Assert.Equal(aliasedInputBefore, ToJson(aliased, aliasedRequest).ToJsonString());
+        AssertCollateralDenial(ResponseEntry(aliasedResponse, 0));
+        AssertCollateralDenial(ResponseEntry(aliasedResponse, 1));
+        Assert.Single(Issues(ResponseEntry(aliasedResponse, 0)));
+        Assert.Equal(2, Issues(ResponseEntry(aliasedResponse, 1)).Count);
+        Assert.Equal("Denied descendant Bundle.entry[1].entry[1]: Unauthorized request: GET Patient?name=Aliased, parsed interaction: TypeSearch",
+            Issues(ResponseEntry(aliasedResponse, 1))[1]!["diagnostics"]!.GetValue<string>());
+    }
+
+    /// <summary>Interaction-time re-ID cannot change admission; shared occurrences retain their live execution effects.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void InteractionTimeAliasedIdsPreserveAdmission(FhirReleases.FhirSequenceCodes version)
+    {
+        using (IFhirStore store = CreateStore(version))
+        {
+            object shared = ToModel(version, Patient("Patient", "Aliased"));
+            Hl7.Fhir.Model.Bundle request = AliasedNestedRequest(version, shared,
+                Bundle("batch", Entry("batch-create", "POST", "Patient", Patient("placeholder"))),
+                Bundle("transaction",
+                    Entry("transaction-create", "POST", "Patient", Patient("placeholder")),
+                    // Materialize one match: the two keys intentionally share the same body ID.
+                    Entry("search", "GET", "Patient?name=Aliased&_count=1")));
+            MutationWatch watch = new(store);
+            JsonObject response = SendObjectBundle(store, request, Authorize(store, "Patient.c", "Patient.s"));
+            JsonObject first = ResponseEntry(NestedResponse(response, 0), 0);
+            JsonObject later = NestedResponse(response, 1);
+            JsonObject second = ResponseEntry(later, 0);
+            string firstId = LocationId(first);
+            string secondId = LocationId(second);
+            Assert.NotEqual(firstId, secondId);
+            Assert.True(Guid.TryParse(firstId, out _));
+            Assert.True(Guid.TryParse(secondId, out _));
+            AssertSuccessResource(first, 201, secondId, "1", firstId);
+            AssertSuccessResource(second, 201, secondId, "1");
+            Assert.Equal(new[] { firstId, secondId }.Order(), store["Patient"].Keys.Order());
+            Assert.Same(shared, store["Patient"][firstId]);
+            Assert.Same(shared, store["Patient"][secondId]);
+            Assert.Equal(secondId, ToJson(store, shared)["id"]!.GetValue<string>());
+            Assert.Equal(new[] { $"create:Patient/{firstId}", $"create:Patient/{secondId}" }, watch.Events);
+            AssertStatus(ResponseEntry(later, 1), 200);
+            Assert.Equal(2, ResponseEntry(later, 1)["resource"]!["total"]!.GetValue<int>());
+            JsonObject search = Assert.IsType<JsonObject>(ResponseEntry(later, 1)["resource"]);
+            Assert.Single(Entries(search));
+            Assert.Equal(secondId, ResourceId(ResponseEntry(search, 0)));
+            Assert.Equal("Patient", ModelBundle(EntryResource(request, 0)).Entry[0].Request!.Url);
+            Assert.Equal("Patient", ModelBundle(EntryResource(request, 1)).Entry[0].Request!.Url);
+            Assert.Equal("Patient?name=Aliased&_count=1", ModelBundle(EntryResource(request, 1)).Entry[1].Request!.Url);
+        }
+
+        foreach (string candidate in new[] { "zero", "one", "multiple", "earlier-write", "strict", "mismatch", "search-error" })
+        {
+            foreach (bool header in new[] { false, true })
+            {
+                using IFhirStore store = CreateStore(version, strict: candidate == "strict");
+                if (candidate is "one" or "multiple")
+                {
+                    SeedPatient(store, "match-one", "Match");
+                }
+                if (candidate == "multiple")
+                {
+                    SeedPatient(store, "match-two", "Match");
+                }
+                string query = candidate == "search-error" ? "not-a-search-parameter=value" : "name=Match";
+                JsonObject earlier = Entry("candidate", "POST", candidate == "mismatch" ? "Observation" : "Patient", Patient("placeholder"));
+                if (candidate is not ("strict" or "mismatch"))
+                {
+                    SetConditional(earlier, query, header);
+                }
+                JsonObject batch = candidate == "earlier-write"
+                    ? Bundle("batch", Entry("earlier-match", "POST", "Patient", Patient(null, "Match")), earlier)
+                    : Bundle("batch", earlier);
+                object shared = ToModel(version, Patient("Patient", "Aliased"));
+                Hl7.Fhir.Model.Bundle request = AliasedNestedRequest(version, shared, batch,
+                    Bundle("transaction",
+                        Entry("create", "POST", "Patient", Patient("placeholder")),
+                        Entry("denied-read", "GET", "Patient/Patient")));
+                string input = ToJson(store, request).ToJsonString();
+                string[] before = Fingerprint(store);
+                MutationWatch watch = new(store);
+                JsonObject response = SendObjectBundle(store, request, Authorize(store, "Patient.c", "Patient.s", "Observation.c"),
+                    headers: candidate == "search-error" ? StrictSearchHeaders() : null);
+                AssertCollateralDenial(ResponseEntry(response, 0));
+                Assert.Single(Issues(ResponseEntry(response, 0)));
+                AssertCollateralDenial(ResponseEntry(response, 1));
+                Assert.Equal("Denied descendant Bundle.entry[1].entry[1]: Unauthorized request: GET Patient/Patient, parsed interaction: InstanceRead",
+                    Issues(ResponseEntry(response, 1))[1]!["diagnostics"]!.GetValue<string>());
+                Assert.Equal(input, ToJson(store, request).ToJsonString());
+                AssertUnchanged(store, before, watch);
+            }
+        }
+
+        // Every ordinal is visited, even when Bundle, entry, request and resource objects repeat.
+        using (IFhirStore store = CreateStore(version))
+        {
+            Hl7.Fhir.Model.Bundle child = ModelBundle(ToModel(version, Bundle("batch",
+                Entry("denied", "GET", "Observation/Patient", Patient("Patient")),
+                Entry("also-denied", "GET", "Observation/Patient", Patient("Patient")))));
+            child.Entry[1].Request = child.Entry[0].Request;
+            child.Entry[1].Resource = child.Entry[0].Resource;
+            child.Entry.Add(child.Entry[0]);
+            Hl7.Fhir.Model.Bundle request = ModelBundle(ToModel(version, Bundle("transaction",
+                Entry("wrapper", "POST", "/", Bundle("batch")))));
+            request.Entry[0].Resource = child;
+            request.Entry.Add(request.Entry[0]);
+            string input = ToJson(store, request).ToJsonString();
+            string[] before = Fingerprint(store);
+            MutationWatch watch = new(store);
+            JsonObject response = SendObjectBundle(store, request, Authorize(store, "Patient.c", "Patient.s"));
+            Assert.Equal(2, Entries(response).Count);
+            for (int wrapper = 0; wrapper < 2; wrapper++)
+            {
+                JsonObject refused = ResponseEntry(response, wrapper);
+                AssertCollateralDenial(refused);
+                Assert.Equal(4, Issues(refused).Count);
+                for (int descendant = 0; descendant < 3; descendant++)
+                {
+                    Assert.Equal($"Denied descendant Bundle.entry[{wrapper}].entry[{descendant}]: Unauthorized request: GET Observation/Patient, parsed interaction: InstanceRead",
+                        Issues(refused)[descendant + 1]!["diagnostics"]!.GetValue<string>());
+                }
+            }
+            Assert.Equal(input, ToJson(store, request).ToJsonString());
+            AssertUnchanged(store, before, watch);
+        }
+
+        // Reusing an approved child in independent batch positions must see its prior URL/ID writes.
+        using (IFhirStore store = CreateStore(version))
+        {
+            Hl7.Fhir.Model.Bundle child = ModelBundle(ToModel(version, Bundle("transaction",
+                Entry("create", "POST", "Patient", Patient("client", "Repeated")),
+                Entry("read", "GET", "Patient/client"),
+                Entry("same-request", "GET", "Patient/client"))));
+            child.Entry[2].Request = child.Entry[1].Request;
+            Hl7.Fhir.Model.Bundle request = ModelBundle(ToModel(version, Bundle("batch",
+                Entry("wrapper", "POST", "/", Bundle("transaction")),
+                Entry("observer", "GET", "Patient/client"))));
+            request.Entry[0].Resource = child;
+            request.Entry.Insert(1, request.Entry[0]);
+            request.Entry[2].Request = child.Entry[1].Request;
+            object shared = Assert.IsAssignableFrom<Hl7.Fhir.Model.Resource>(child.Entry[0].Resource);
+            MutationWatch watch = new(store);
+            JsonObject response = SendObjectBundle(store, request, Authorize(store, "Patient.c", "Patient.r"));
+            string firstId = LocationId(ResponseEntry(NestedResponse(response, 0), 0));
+            string secondId = LocationId(ResponseEntry(NestedResponse(response, 1), 0));
+            Assert.NotEqual(firstId, secondId);
+            Assert.Equal($"Patient/{secondId}", child.Entry[1].Request!.Url);
+            Assert.Same(child.Entry[1].Request, child.Entry[2].Request);
+            Assert.Same(child.Entry[1].Request, request.Entry[2].Request);
+            // Read responses also retain the live body, but their addressed Locations stay original.
+            AssertSuccessResource(ResponseEntry(NestedResponse(response, 0), 1), 200, secondId, "1", firstId);
+            AssertSuccessResource(ResponseEntry(NestedResponse(response, 0), 2), 200, secondId, "1", firstId);
+            AssertSuccessResource(ResponseEntry(NestedResponse(response, 1), 1), 200, secondId, "1");
+            AssertSuccessResource(ResponseEntry(response, 2), 200, secondId, "1");
+            Assert.Equal(new[] { firstId, secondId }.Order(), store["Patient"].Keys.Order());
+            Assert.Same(shared, store["Patient"][firstId]);
+            Assert.Same(shared, store["Patient"][secondId]);
+            Assert.Equal(secondId, ToJson(store, shared)["id"]!.GetValue<string>());
+            Assert.Equal(new[] { $"create:Patient/{firstId}", $"create:Patient/{secondId}" }, watch.Events);
+        }
+    }
+
+    /// <summary>Conditional outcomes bind later DELETE aliases from real current IDs, not inferred POST assignments.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ConditionalAliasOutcomesPreserveLiveDeleteTargets(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string outcome in new[] { "match", "no-match", "multiple", "earlier-write", "search-error" })
+        {
+            foreach (bool header in new[] { false, true })
+            {
+                using IFhirStore store = CreateStore(version);
+                SeedPatient(store, "client", "SeededTarget");
+                if (outcome == "multiple")
+                {
+                    SeedPatient(store, "second-match", "SeededTarget");
+                }
+                string seeded = Stored(store, "Patient", "client").ToJsonString();
+                string query = outcome switch
+                {
+                    "no-match" => "name=Absent",
+                    "earlier-write" => "name=Introduced",
+                    "search-error" => "not-a-search-parameter=value",
+                    _ => "name=SeededTarget",
+                };
+                JsonObject conditional = Entry("conditional", "POST", "Patient", Patient("placeholder"));
+                SetConditional(conditional, query, header);
+                string submitted = conditional["request"]!["url"]!.GetValue<string>();
+                JsonObject batch = outcome == "earlier-write"
+                    ? Bundle("batch", Entry("introduce-match", "POST", "Patient", Patient(null, "Introduced")), conditional)
+                    : Bundle("batch", conditional);
+                object shared = ToModel(version, Patient("client", "SharedInput"));
+                Hl7.Fhir.Model.Bundle request = AliasedNestedRequest(version, shared, batch,
+                    Bundle("transaction",
+                        Entry("child-post", "POST", "Patient", Patient("placeholder")),
+                        Entry("child-delete", "DELETE", "Patient/client")));
+                MutationWatch watch = new(store);
+                JsonObject response = SendObjectBundle(store, request, Authorize(store, "Patient.c", "Patient.s", "Patient.d"),
+                    headers: outcome == "search-error" ? StrictSearchHeaders() : null);
+                JsonObject earlier = NestedResponse(response, 0);
+                JsonObject conditionalResponse = ResponseEntry(earlier, Entries(earlier).Count - 1);
+                JsonObject later = NestedResponse(response, 1);
+                AssertOrder(later, "child-delete", "child-post");
+                JsonObject deleted = ResponseEntry(later, 0);
+                JsonObject created = ResponseEntry(later, 1);
+                string childId = LocationId(created);
+                AssertSuccessResource(created, 201, childId, "1");
+                Assert.True(Guid.TryParse(childId, out _));
+                Assert.Same(shared, store["Patient"][childId]);
+                Assert.Equal(childId, ToJson(store, shared)["id"]!.GetValue<string>());
+                Assert.Equal(submitted, ModelBundle(EntryResource(request, 0)).Entry[^1].Request!.Url);
+                Assert.Equal("Patient", ModelBundle(EntryResource(request, 1)).Entry[0].Request!.Url);
+                List<string> expectedKeys = [childId];
+                List<string> expectedEvents = [];
+                if (outcome == "earlier-write")
+                {
+                    JsonObject introduced = ResponseEntry(earlier, 0);
+                    string introducedId = LocationId(introduced);
+                    AssertSuccessResource(introduced, 201, introducedId, "1");
+                    AssertSuccessResource(conditionalResponse, 200, introducedId, "1");
+                    Assert.Equal("Introduced", Stored(store, "Patient", introducedId)["name"]![0]!["family"]!.GetValue<string>());
+                    expectedKeys.Add(introducedId);
+                    expectedEvents.Add($"create:Patient/{introducedId}");
+                }
+                else if (outcome == "no-match")
+                {
+                    string batchId = LocationId(conditionalResponse);
+                    Assert.NotEqual(batchId, childId);
+                    AssertSuccessResource(conditionalResponse, 201, childId, "1", batchId);
+                    Assert.Same(shared, store["Patient"][batchId]);
+                    expectedKeys.Add(batchId);
+                    expectedEvents.Add($"create:Patient/{batchId}");
+                }
+                else if (outcome == "match")
+                {
+                    AssertSuccessResource(conditionalResponse, 200, "client", "1");
+                }
+                else
+                {
+                    AssertStatus(conditionalResponse, 412);
+                    Assert.Null(conditionalResponse["resource"]);
+                    Assert.Null(conditionalResponse["response"]!["location"]);
+                    Assert.Contains(outcome == "multiple" ? "too many matches" : "not-a-search-parameter",
+                        Issues(conditionalResponse)[0]!["diagnostics"]!.GetValue<string>());
+                }
+                if (outcome == "no-match")
+                {
+                    AssertStatus(deleted, 200);
+                    Assert.Equal("client", ResourceId(deleted));
+                    Assert.Equal(seeded, deleted["resource"]!.ToJsonString());
+                    Assert.DoesNotContain("client", store["Patient"].Keys);
+                    expectedEvents.Add("delete:Patient/client");
+                    Assert.Equal("Patient/client", ModelBundle(EntryResource(request, 1)).Entry[1].Request!.Url);
+                }
+                else
+                {
+                    AssertStatus(deleted, 404);
+                    Assert.Null(deleted["resource"]);
+                    Assert.Equal(seeded, Stored(store, "Patient", "client").ToJsonString());
+                    Assert.Equal($"Patient/{childId}", ModelBundle(EntryResource(request, 1)).Entry[1].Request!.Url);
+                    expectedKeys.Add("client");
+                }
+                if (outcome == "multiple")
+                {
+                    expectedKeys.Add("second-match");
+                }
+                expectedEvents.Add($"create:Patient/{childId}");
+                Assert.Equal(expectedKeys.Order(), store["Patient"].Keys.Order());
+                Assert.Equal(expectedEvents, watch.Events);
+                Assert.Empty(store["Observation"]);
+            }
+        }
+    }
+
+    /// <summary>Failures before assignment preserve the seeded DELETE target and earlier authorized partial effects.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void PreAssignmentFailuresPreserveLiveDeleteTargets(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string failure in new[] { "strict", "mismatch", "query-error", "header-error" })
+        {
+            using IFhirStore store = CreateStore(version, strict: failure == "strict");
+            SeedPatient(store, "client", "SeededTarget");
+            string seeded = Stored(store, "Patient", "client").ToJsonString();
+            object shared = ToModel(version, Patient("client", "SharedInput"));
+            JsonObject candidate = Entry("failure", "POST", failure == "mismatch" ? "Observation" : "Patient", Patient("placeholder"));
+            if (failure.EndsWith("-error", StringComparison.Ordinal))
+            {
+                SetConditional(candidate, "not-a-search-parameter=value", failure == "header-error");
+            }
+            Hl7.Fhir.Model.Bundle request = AliasedNestedRequest(version, shared,
+                Bundle("batch", Entry("earlier-success", "POST", "Patient", Patient(null, "EarlierSuccess")), candidate),
+                Bundle("transaction",
+                    Entry("forced-create", "POST", "Patient", Patient("placeholder")),
+                    Entry("delete", "DELETE", "Patient/client")));
+            MutationWatch watch = new(store);
+            JsonObject response = SendObjectBundle(store, request, Authorize(store, "*.*"),
+                headers: failure.EndsWith("-error", StringComparison.Ordinal) ? StrictSearchHeaders() : null);
+            JsonObject earlier = NestedResponse(response, 0);
+            string earlierId = LocationId(ResponseEntry(earlier, 0));
+            AssertSuccessResource(ResponseEntry(earlier, 0), 201, earlierId, "1");
+            JsonObject failed = ResponseEntry(earlier, 1);
+            AssertStatus(failed, failure == "strict" ? 400 : failure == "mismatch" ? 422 : 412);
+            Assert.Null(failed["resource"]);
+            Assert.Null(failed["response"]!["location"]);
+            Assert.Contains(failure == "strict" ? "Resource.id" : failure == "mismatch" ? "does not match request" : "not-a-search-parameter",
+                Issues(failed)[0]!["diagnostics"]!.GetValue<string>());
+            JsonObject later = NestedResponse(response, 1);
+            AssertOrder(later, "delete", "forced-create");
+            AssertStatus(ResponseEntry(later, 0), 404);
+            JsonObject created = ResponseEntry(later, 1);
+            string childId = LocationId(created);
+            AssertSuccessResource(created, 201, childId, "1");
+            Assert.Equal($"Patient/{childId}", ModelBundle(EntryResource(request, 1)).Entry[1].Request!.Url);
+            Assert.Equal(seeded, Stored(store, "Patient", "client").ToJsonString());
+            Assert.Equal(new[] { "client", earlierId, childId }.Order(), store["Patient"].Keys.Order());
+            Assert.Equal("EarlierSuccess", Stored(store, "Patient", earlierId)["name"]![0]!["family"]!.GetValue<string>());
+            Assert.Same(shared, store["Patient"][childId]);
+            Assert.Equal(childId, ToJson(store, shared)["id"]!.GetValue<string>());
+            Assert.Equal(new[] { $"create:Patient/{earlierId}", $"create:Patient/{childId}" }, watch.Events);
+            Assert.Empty(store["Observation"]);
+        }
+    }
+
+    /// <summary>Literal URL text and actual targets qualify the invariant against the current parser and policy.</summary>
+    public static IEnumerable<object[]> TransactionUrlCases
+    {
+        get
+        {
+            (string Method, string? Url, string OriginalId, bool Remaps, Common.StoreInteractionCodes? Interaction, int Status)[] cases =
+            [
+                ("GET", "Patient/Patient", "Patient", true, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("GET", "Observation/client", "client", true, Common.StoreInteractionCodes.InstanceRead, 404),
+                ("GET", "Patient/absent", "client", false, Common.StoreInteractionCodes.InstanceRead, 404),
+                ("HEAD", "Patient/client", "client", true, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("GET", "/Patient/client?_tag=client&&_pretty=true&text=client%2Fclient?client", "client", true, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("GET", "{base}/Patient/Patient?_tag=Patient&_format=json", "Patient", true, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("GET", "{base}/Patient/fhir?text=fhir%2Ffhir&_pretty=true", "fhir", true, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("GET", "//Patient//client?_tag=client", "client", true, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("PUT", "Patient/Patient?_format=json&_pretty=true", "Patient", true, Common.StoreInteractionCodes.InstanceUpdate, 200),
+                ("PUT", "/Patient/client?_pretty=true", "client", true, Common.StoreInteractionCodes.InstanceUpdate, 200),
+                ("PUT", "{base}/Patient/client?name=Created&_format=json", "client", true, Common.StoreInteractionCodes.InstanceUpdateConditional, 200),
+                ("PUT", "Patient/client?_id=client", "client", true, Common.StoreInteractionCodes.InstanceUpdateConditional, 412),
+                ("PATCH", "Patient/Patient?_format=json&_pretty=true", "Patient", true, Common.StoreInteractionCodes.InstancePatch, 501),
+                ("PATCH", "Patient/client?name=Created&_pretty=true", "client", true, Common.StoreInteractionCodes.InstancePatchConditional, 501),
+                ("DELETE", "Patient/client?_tag=client", "client", true, Common.StoreInteractionCodes.InstanceDelete, 404),
+                ("DELETE", "Patient/client/", "client", false, Common.StoreInteractionCodes.InstanceDelete, 200),
+                ("DELETE", "{base}/Patient/client/?_pretty=true", "client", false, Common.StoreInteractionCodes.InstanceDelete, 200),
+                ("GET", "Patient/client/", "client", false, Common.StoreInteractionCodes.InstanceRead, 200),
+                ("POST", "Patient", "Patient", false, Common.StoreInteractionCodes.TypeCreate, 201),
+                ("GET", "Patient?name=Created", "Patient", false, Common.StoreInteractionCodes.TypeSearch, 200),
+                ("POST", "Patient?name=Absent", "Patient", false, Common.StoreInteractionCodes.TypeCreateConditional, 201),
+                ("PUT", "Patient?name=Created", "Patient", false, Common.StoreInteractionCodes.InstanceUpdateConditional, 200),
+                ("GET", "metadata", "metadata", false, Common.StoreInteractionCodes.SystemCapabilities, 200),
+                ("GET", "Patient/client/_history", "_history", false, Common.StoreInteractionCodes.InstanceReadHistory, 501),
+                ("GET", "Patient/client/_history/1", "1", false, Common.StoreInteractionCodes.InstanceReadVersion, 501),
+                ("DELETE", "Patient/client/_history", "_history", false, Common.StoreInteractionCodes.InstanceDeleteHistory, 501),
+                ("GET", "Patient/client/Observation", "Observation", false, Common.StoreInteractionCodes.CompartmentTypeSearch, 501),
+                ("GET", "Patient/client/*", "*", false, Common.StoreInteractionCodes.CompartmentSearch, 501),
+                ("GET", "Patient/$not-installed", "$not-installed", false, Common.StoreInteractionCodes.TypeOperation, 404),
+                ("POST", "Patient/client/$not-installed", "$not-installed", false, Common.StoreInteractionCodes.InstanceOperation, 404),
+                ("POST", "Patient/_search", "_search", false, Common.StoreInteractionCodes.TypeSearch, 200),
+                ("GET", "urn:uuid:00000000-0000-0000-0000-000000000001", "urn:uuid:00000000-0000-0000-0000-000000000001", false, null, 500),
+                ("GET", "Unknown/Patient", "Patient", false, null, 500),
+                ("GET", "Patient/client/unknown", "unknown", false, null, 500),
+                ("GET", "http://elsewhere.test/Patient/client", "client", false, null, 500),
+                ("GET", null, "client", false, Common.StoreInteractionCodes.SystemSearch, 403),
+            ];
+            foreach (object[] version in Versions)
+            {
+                foreach ((string method, string? url, string id, bool remaps, Common.StoreInteractionCodes? interaction, int status) in cases)
+                {
+                    foreach (bool optionalNull in new[] { false, true })
+                    {
+                        yield return [version[0], method, url!, id, remaps, interaction!, status, optionalNull];
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Only the final ordinary instance-ID range changes; all other shapes keep their literal handling.</summary>
+    [Theory]
+    [MemberData(nameof(TransactionUrlCases))]
+    public void TransactionUrlRemappingPreservesAuthorizationAndLiteralBoundaries(
+        FhirReleases.FhirSequenceCodes version,
+        string method,
+        string? submitted,
+        string originalId,
+        bool remaps,
+        Common.StoreInteractionCodes? interaction,
+        int status,
+        bool optionalNull)
+    {
+        using IFhirStore store = CreateStore(version);
+        SeedPatient(store, "client", "SeededTarget");
+        SeedResource(store, "Observation", "client", Observation("client", "Patient/client"));
+        string seeded = Stored(store, "Patient", "client").ToJsonString();
+        string seededObservation = Stored(store, "Observation", "client").ToJsonString();
+        AuthorizationInfo? authorization = optionalNull ? null : Authorize(store, "*.*");
+        string? url = submitted?.Replace("{base}", store.Config.BaseUrl, StringComparison.Ordinal);
+        JsonObject target = Entry("target", method, "Patient/client",
+            method is "PUT" or "POST" ? Patient(null, "Updated") : null);
+        JsonObject json = Bundle("transaction",
+            Entry("create", "POST", "Patient", Patient("placeholder", "Created")),
+            target,
+            Entry("reference", "POST", "Observation", Observation("observation", PatientFullUrl)),
+            Entry("urn-source", "GET", "NotAResource/noop"));
+        json["entry"]![0]!["fullUrl"] = PatientFullUrl;
+        Hl7.Fhir.Model.Bundle request = ModelBundle(ToModel(version, json));
+        request.Entry[0].Resource!.Id = originalId;
+        request.Entry[1].Request!.Url = url;
+        FhirRequestContext before = Context(store, method, url ?? string.Empty, authorization);
+        Assert.Equal(interaction, before.Interaction);
+
+        // A scope-discriminating refusal also proves no URL/body preparation happened.
+        AuthorizationInfo restricted = Authorize(store, "Patient.c", "Observation.c");
+        FhirRequestContext restrictedTarget = Context(store, method, url ?? string.Empty, restricted);
+        if ((restrictedTarget.Interaction is not null) && !restrictedTarget.IsAuthorized())
+        {
+            string input = ToJson(store, request).ToJsonString();
+            string[] fingerprint = Fingerprint(store);
+            MutationWatch deniedWatch = new(store);
+            JsonObject denied = SendObjectBundle(store, request, restricted);
+            JsonObject own = Entries(denied).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == "target");
+            AssertOwnDenial(own, method, url ?? string.Empty);
+            Assert.Equal(input, ToJson(store, request).ToJsonString());
+            AssertUnchanged(store, fingerprint, deniedWatch);
+        }
+
+        MutationWatch watch = new(store);
+        JsonObject response = SendObjectBundle(store, request, authorization);
+        JsonObject created = Entries(response).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == PatientFullUrl);
+        string allocatedId = LocationId(created);
+        Assert.True(Guid.TryParse(allocatedId, out _));
+        Assert.NotEqual(originalId, allocatedId);
+        string? expectedUrl = url;
+        if (remaps)
+        {
+            int queryStart = url!.IndexOf('?');
+            int pathEnd = queryStart < 0 ? url.Length : queryStart;
+            expectedUrl = url[..(pathEnd - originalId.Length)] + allocatedId + url[pathEnd..];
+        }
+        Assert.Equal(expectedUrl, request.Entry[1].Request!.Url);
+        FhirRequestContext after = Context(store, method, request.Entry[1].Request!.Url ?? string.Empty, authorization);
+        Assert.Equal((before.Interaction, before.HttpMethod, before.ResourceType), (after.Interaction, after.HttpMethod, after.ResourceType));
+        Assert.Equal(before.UrlQuery, after.UrlQuery);
+        JsonObject executed = Entries(response).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == "target");
+        AssertStatus(executed, status);
+        JsonObject reference = Entries(response).OfType<JsonObject>().Single(e => e["fullUrl"]!.GetValue<string>() == "reference");
+        Assert.Equal($"Patient/{allocatedId}", Stored(store, "Observation", ResourceId(reference))["subject"]!["reference"]!.GetValue<string>());
+        Assert.Equal("Patient", request.Entry[0].Request!.Url);
+        Assert.Equal("NotAResource/noop", request.Entry[3].Request!.Url);
+        Assert.Equal(seededObservation, Stored(store, "Observation", "client").ToJsonString());
+        if ((method is "GET" or "HEAD") && (interaction == Common.StoreInteractionCodes.InstanceRead) && (status == 200))
+        {
+            Assert.Equal(remaps ? allocatedId : "client", ResourceId(executed));
+            Assert.Equal(remaps ? "Created" : "SeededTarget", executed["resource"]!["name"]![0]!["family"]!.GetValue<string>());
+        }
+        if ((method == "PUT") && (status == 200))
+        {
+            Assert.Equal(allocatedId, ResourceId(executed));
+            Assert.Equal("Updated", Stored(store, "Patient", allocatedId)["name"]![0]!["family"]!.GetValue<string>());
+            Assert.Contains($"update:Patient/{allocatedId}", watch.Events);
+        }
+        if ((method == "DELETE") && (status == 200))
+        {
+            Assert.Equal("client", ResourceId(executed));
+            Assert.Equal(seeded, executed["resource"]!.ToJsonString());
+            Assert.DoesNotContain("client", store["Patient"].Keys);
+            Assert.Equal(new[] { "delete:Patient/client", $"create:Patient/{allocatedId}", $"create:Observation/{ResourceId(reference)}" }, watch.Events);
+        }
+        else
+        {
+            Assert.Equal(seeded, Stored(store, "Patient", "client").ToJsonString());
+        }
+    }
+
+    /// <summary>Batch units retain input order, duplicate identities, live-state reads, and conditional visibility.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void BatchKeepsIndependentOutcomes(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        MutationWatch watch = new(store);
+        JsonObject first = Entry("first", "PUT", "Patient/created", Patient("created", "Allowed"));
+        first.Remove("fullUrl");
+        JsonObject conditional = Entry("duplicate", "POST", "Patient", Patient(null, "MustNotCreate"));
+        conditional["request"]!["ifNoneExist"] = "_id=created";
+        JsonObject response = SendBundle(store, Bundle("batch",
+            first,
+            Entry("duplicate", "POST", "Observation", Observation("denied", "Patient/created")),
+            Entry("duplicate", "GET", "Patient/created"),
+            conditional,
+            Entry("denied-read", "GET", "Observation/absent"),
+            Entry("nested-batch", "POST", "/", Bundle("batch",
+                Entry("nested-denied", "HEAD", "Observation/absent"),
+                Entry("nested-allowed", "GET", "Patient/created")))),
+            Authorize(store, "Patient.c", "Patient.u", "Patient.r", "Patient.s"));
+        Assert.Equal(new[] { 201, 401, 200, 200, 401, 200 }, Statuses(response));
+        Assert.Null(ResponseEntry(response, 0)["fullUrl"]);
+        Assert.Equal("duplicate", ResponseEntry(response, 1)["fullUrl"]!.GetValue<string>());
+        Assert.Equal("duplicate", ResponseEntry(response, 2)["fullUrl"]!.GetValue<string>());
+        Assert.Equal("duplicate", ResponseEntry(response, 3)["fullUrl"]!.GetValue<string>());
+        AssertOwnDenial(ResponseEntry(response, 1), "POST", "Observation");
+        AssertOwnDenial(ResponseEntry(response, 4), "GET", "Observation/absent");
+        AssertSuccessResource(ResponseEntry(response, 0), 201, "created", "1");
+        AssertSuccessResource(ResponseEntry(response, 2), 200, "created", "1");
+        AssertSuccessResource(ResponseEntry(response, 3), 200, "created", "1");
+        JsonObject nested = Assert.IsType<JsonObject>(ResponseEntry(response, 5)["resource"]);
+        AssertOwnDenial(ResponseEntry(nested, 0), "HEAD", "Observation/absent");
+        AssertSuccessResource(ResponseEntry(nested, 1), 200, "created", "1");
+        Assert.Single(store["Patient"]);
+        Assert.Empty(store["Observation"]);
+        Assert.Equal("Allowed", Stored(store, "Patient", "created")["name"]![0]!["family"]!.GetValue<string>());
+        Assert.Equal(new[] { "update:Patient/created" }, watch.Events);
+    }
+
+    /// <summary>Rejected object input must not even prepare the actual live dictionary resource or its request URLs.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void RejectedTransactionDoesNotMutateAliasedInput(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        JsonObject patient = Patient("client", "LiveOriginal");
+        patient["generalPractitioner"] = new JsonArray(new JsonObject { ["reference"] = "client" });
+        SeedResource(store, "Patient", "client", patient);
+        object live = store["Patient"]["client"];
+        object request = ToModel(version, Bundle("transaction",
+            Entry("post", "POST", "Patient", Patient("placeholder"), fullUrl: PatientFullUrl),
+            Entry("read", "GET", "Patient/client"),
+            Entry("denied", "GET", "Observation/absent")));
+        SetEntryResource(request, 0, live);
+        Assert.Same(live, EntryResource(request, 0));
+        string inputBefore = ToJson(store, request).ToJsonString();
+        string[] before = Fingerprint(store);
+        MutationWatch watch = new(store);
+        JsonObject response = SendObjectBundle(store, request, Authorize(store, "Patient.c", "Patient.r"));
+        AssertCollateralDenial(ResponseEntry(response, 0));
+        AssertCollateralDenial(ResponseEntry(response, 1));
+        AssertOwnDenial(ResponseEntry(response, 2), "GET", "Observation/absent");
+        Assert.Equal(inputBefore, ToJson(store, request).ToJsonString());
+        Assert.Same(live, store["Patient"]["client"]);
+        Assert.Equal("client", Stored(store, "Patient", "client")["generalPractitioner"]![0]!["reference"]!.GetValue<string>());
+        AssertUnchanged(store, before, watch);
+    }
+
+    /// <summary>Reservation/admission never moves descendant reference searches ahead of earlier parent writes.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void NestedAuthorizedTransactionResolvesReferencesAtExecution(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        MutationWatch watch = new(store);
+        JsonObject response = SendBundle(store, Bundle("transaction",
+            Entry("child", "POST", "/", Bundle("transaction",
+                Entry("observation", "POST", "Observation", Observation("child", "Patient?name=WrittenFirst")))),
+            Entry("parent", "PUT", "Patient/parent", Patient("parent", "WrittenFirst"))),
+            Authorize(store, "Patient.u", "Observation.c"));
+        // The child POST cannot see the parent PUT in a later method group.
+        JsonObject earlyChild = Assert.IsType<JsonObject>(ResponseEntry(response, 0)["resource"]);
+        AssertStatus(ResponseEntry(earlyChild, 0), 201);
+        Assert.Equal("Patient?name=WrittenFirst", Stored(store, "Observation", ResourceId(ResponseEntry(earlyChild, 0)))["subject"]!["reference"]!.GetValue<string>());
+        Assert.Equal(new[] { $"create:Observation/{ResourceId(ResponseEntry(earlyChild, 0))}", "update:Patient/parent" }, watch.Events);
+
+        using IFhirStore ordered = CreateStore(version);
+        MutationWatch orderedWatch = new(ordered);
+        JsonObject positive = SendBundle(ordered, Bundle("transaction",
+            Entry("read", "GET", "Patient/client"),
+            Entry("parent", "POST", "Patient", Patient("client", "WrittenFirst")),
+            Entry("child", "POST", "/", Bundle("transaction",
+                Entry("observation", "POST", "Observation", Observation("child", "Patient?name=WrittenFirst"))))),
+            Authorize(ordered, "Patient.c", "Patient.r", "Observation.c"));
+        AssertOrder(positive, "parent", "child", "read");
+        string parentId = ResourceId(ResponseEntry(positive, 0));
+        JsonObject child = Assert.IsType<JsonObject>(ResponseEntry(positive, 1)["resource"]);
+        string childId = ResourceId(ResponseEntry(child, 0));
+        AssertSuccessResource(ResponseEntry(positive, 0), 201, parentId, "1");
+        AssertSuccessResource(ResponseEntry(child, 0), 201, childId, "1");
+        AssertSuccessResource(ResponseEntry(positive, 2), 200, parentId, "1");
+        Assert.Equal($"Patient/{parentId}", Stored(ordered, "Observation", childId)["subject"]!["reference"]!.GetValue<string>());
+        Assert.Equal(new[] { $"create:Patient/{parentId}", $"create:Observation/{childId}" }, orderedWatch.Events);
+        Assert.Single(ordered["Patient"]);
+        Assert.Single(ordered["Observation"]);
+    }
+
+    /// <summary>Only executable POST-to-base bundles are descendants; stored and operation payloads are ordinary bodies.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void StoredBundlePayloadIsNotRecursivelyAdmitted(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string kind in new[] { "batch", "transaction" })
+        {
+            using IFhirStore store = CreateStore(version);
+            MutationWatch watch = new(store);
+            JsonObject stored = SendBundle(store, Bundle(kind, Entry("stored", "POST", "Bundle", Bundle("transaction",
+                Entry("payload", "DELETE", "Observation/absent")))), Authorize(store, "Bundle.c"));
+            JsonObject created = ResponseEntry(stored, 0);
+            AssertSuccessResource(created, 201, ResourceId(created), "1");
+            Assert.Single(store["Bundle"]);
+            Assert.Equal("DELETE", Stored(store, "Bundle", ResourceId(created))["entry"]![0]!["request"]!["method"]!.GetValue<string>());
+            Assert.Equal(new[] { $"create:Bundle/{ResourceId(created)}" }, watch.Events);
+            string[] before = Fingerprint(store);
+            int priorEvents = watch.Events.Count;
+            JsonObject executable = SendBundle(store, Bundle(kind, Entry("execute", "POST", "/", Bundle("transaction",
+                Entry("payload", "DELETE", "Observation/absent")))), Authorize(store, "Bundle.c"));
+            JsonObject denial = kind == "transaction"
+                ? ResponseEntry(executable, 0)
+                : ResponseEntry(Assert.IsType<JsonObject>(ResponseEntry(executable, 0)["resource"]), 0);
+            if (kind == "transaction")
+            {
+                AssertCollateralDenial(denial);
+                Assert.Contains("Denied descendant", Issues(denial)[1]!["diagnostics"]!.GetValue<string>());
+            }
+            else
+            {
+                AssertOwnDenial(denial, "DELETE", "Observation/absent");
+            }
+            Assert.Equal(before, Fingerprint(store));
+            Assert.Equal(priorEvents, watch.Events.Count);
+
+            // A parsed operation is authorized by its method/type, not by entries in its Bundle payload.
+            JsonObject operation = SendBundle(store, Bundle(kind, Entry("operation", "POST", "Patient/$not-installed",
+                Bundle("transaction", Entry("payload", "DELETE", "Observation/absent")))), Authorize(store, "Patient.u"));
+            Assert.NotEqual("401 Unauthorized", ResponseEntry(operation, 0)["response"]!["status"]!.GetValue<string>());
+            Assert.Equal(before, Fingerprint(store));
+            Assert.Equal(priorEvents, watch.Events.Count);
+        }
+    }
+
+    /// <summary>Null authorization is policy-driven, including the explicit required-but-not-optional configuration.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void NullAuthorizationRespectsTenantPolicy(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach ((bool required, bool allowed) in new[] { (false, false), (false, true), (true, false) })
+        {
+            foreach (string kind in new[] { "batch", "transaction" })
+            {
+                using IFhirStore store = CreateStore(version, required, allowed);
+                SeedPatient(store, "seed");
+                MutationWatch watch = new(store);
+                string[] before = Fingerprint(store);
+                JsonObject response = SendBundle(store, Bundle(kind,
+                    Entry("update", "PUT", "Patient/seed", Patient("seed", "NullAllowed"))), null);
+                if (required)
+                {
+                    AssertOwnDenial(ResponseEntry(response, 0), "PUT", "Patient/seed");
+                    AssertUnchanged(store, before, watch);
+                }
+                else
+                {
+                    AssertSuccessResource(ResponseEntry(response, 0), 200, "seed", "2");
+                    Assert.Equal("NullAllowed", Stored(store, "Patient", "seed")["name"]![0]!["family"]!.GetValue<string>());
+                    Assert.Equal(new[] { "update:Patient/seed" }, watch.Events);
+                }
+
+                before = Fingerprint(store);
+                int priorEvents = watch.Events.Count;
+                JsonObject restricted = SendBundle(store, Bundle(kind,
+                    Entry("denied", "DELETE", "Patient/seed")), Authorize(store, "Patient.r"));
+                AssertOwnDenial(ResponseEntry(restricted, 0), "DELETE", "Patient/seed");
+                Assert.Equal(before, Fingerprint(store));
+                Assert.Equal(priorEvents, watch.Events.Count);
+            }
+        }
+    }
+
+    /// <summary>Real LoadDirectory initialization bypasses recursively, but the exemption ends before runtime dispatch.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void InitialLoadingRetainsBundleBypass(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string kind in new[] { "batch", "transaction" })
+        {
+            DirectoryInfo root = new(AppContext.BaseDirectory);
+            while (!File.Exists(Path.Combine(root.FullName, "fhir-candle.sln")))
+            {
+                root = root.Parent ?? throw new InvalidOperationException("Repository root not found.");
+            }
+            string path = Path.Combine(root.FullName, "scratch", "1119-02", $"bundle-loading-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(path);
+            try
+            {
+                JsonObject request = Bundle(kind,
+                    Entry("parent", "PUT", "Patient/loaded-parent", Patient("loaded-parent", "LoadedParent")),
+                    Entry("nested", "POST", "/", Bundle(kind == "batch" ? "transaction" : "batch",
+                        Entry("child", "PUT", "Patient/loaded-child", Patient("loaded-child", "LoadedChild")))),
+                    Entry("literal-boundary", "POST", "/", Bundle("transaction",
+                        Entry("alias", "POST", "Patient", Patient("Patient", "LoadedAliased")),
+                        Entry("search", "GET", "Patient?name=LoadedAliased"))));
+                File.WriteAllText(Path.Combine(path, "bundle.json"), request.ToJsonString());
+                using IFhirStore store = CreateStore(version, smartRequired: true, smartAllowed: false, new DirectoryInfo(path));
+                string aliasId = Assert.Single(store["Patient"].Keys, id => id is not ("loaded-child" or "loaded-parent"));
+                Assert.True(Guid.TryParse(aliasId, out _));
+                Assert.Equal(3, store["Patient"].Count);
+                Assert.Equal("LoadedParent", Stored(store, "Patient", "loaded-parent")["name"]![0]!["family"]!.GetValue<string>());
+                Assert.Equal("LoadedChild", Stored(store, "Patient", "loaded-child")["name"]![0]!["family"]!.GetValue<string>());
+                Assert.Equal("LoadedAliased", Stored(store, "Patient", aliasId)["name"]![0]!["family"]!.GetValue<string>());
+                string[] before = Fingerprint(store);
+                MutationWatch watch = new(store);
+                JsonObject response = SendBundle(store, request, null);
+                Assert.All(Entries(response).OfType<JsonObject>(), e => AssertStatus(e, 401));
+                AssertUnchanged(store, before, watch);
+                JsonObject restricted = SendBundle(store, request, Authorize(store, "Patient.r"));
+                if (kind == "transaction")
+                {
+                    AssertCollateralDenial(ResponseEntry(restricted, 0)); // POST wrapper is grouped first.
+                    AssertCollateralDenial(ResponseEntry(restricted, 1));
+                    AssertOwnDenial(ResponseEntry(restricted, 2), "PUT", "Patient/loaded-parent");
+                }
+                else
+                {
+                    AssertOwnDenial(ResponseEntry(restricted, 0), "PUT", "Patient/loaded-parent");
+                    JsonObject childResponse = Assert.IsType<JsonObject>(ResponseEntry(restricted, 1)["resource"]);
+                    AssertOwnDenial(ResponseEntry(childResponse, 0), "PUT", "Patient/loaded-child");
+                    JsonObject literalResponse = NestedResponse(restricted, 2);
+                    AssertOwnDenial(ResponseEntry(literalResponse, 0), "POST", "Patient");
+                    AssertOwnDenial(ResponseEntry(literalResponse, 1), "GET", "Patient?name=LoadedAliased");
+                }
+                AssertUnchanged(store, before, watch);
+            }
+            finally
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>Authorization admission is not rollback: a later authorized missing read retains earlier creates.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void AuthorizedExecutionFailureDoesNotRollBack(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        MutationWatch watch = new(store);
+        JsonObject response = SendBundle(store, Bundle("transaction",
+            Entry("patient", "POST", "Patient", Patient("client"), fullUrl: PatientFullUrl),
+            Entry("observation", "POST", "Observation", Observation("observation", PatientFullUrl)),
+            Entry("missing", "GET", "Patient/absent")),
+            Authorize(store, "Patient.c", "Patient.r", "Observation.c"));
+        string patientId = ResourceId(ResponseEntry(response, 0));
+        string observationId = ResourceId(ResponseEntry(response, 1));
+        AssertSuccessResource(ResponseEntry(response, 0), 201, patientId, "1");
+        AssertSuccessResource(ResponseEntry(response, 1), 201, observationId, "1");
+        AssertStatus(ResponseEntry(response, 2), 404);
+        Assert.Single(store["Patient"]);
+        Assert.Single(store["Observation"]);
+        Assert.Equal($"Patient/{patientId}", Stored(store, "Observation", observationId)["subject"]!["reference"]!.GetValue<string>());
+        Assert.Equal(ResponseEntry(response, 0)["resource"]!.ToJsonString(), Stored(store, "Patient", patientId).ToJsonString());
+        Assert.Equal(ResponseEntry(response, 1)["resource"]!.ToJsonString(), Stored(store, "Observation", observationId).ToJsonString());
+        Assert.Equal(new[] { $"create:Patient/{patientId}", $"create:Observation/{observationId}" }, watch.Events);
+    }
+
+    private static Hl7.Fhir.Model.Bundle ModelBundle(object bundle) => Assert.IsType<Hl7.Fhir.Model.Bundle>(bundle);
+
+    private static JsonObject NestedResponse(JsonObject response, int index) =>
+        Assert.IsType<JsonObject>(ResponseEntry(response, index)["resource"]);
+
+    private static string LocationId(JsonObject entry) => entry["response"]!["location"]!.GetValue<string>().Split('/')[^1];
+
+    private static Dictionary<string, StringValues> StrictSearchHeaders() => new() { ["Prefer"] = "handling=strict" };
+
+    private static void SetConditional(JsonObject entry, string query, bool header)
+    {
+        entry["request"]![header ? "ifNoneExist" : "url"] = header ? query : $"Patient?{query}";
+    }
+
+    private static Hl7.Fhir.Model.Bundle AliasedNestedRequest(
+        FhirReleases.FhirSequenceCodes version,
+        object shared,
+        JsonObject earlierBatch,
+        JsonObject laterTransaction)
+    {
+        Hl7.Fhir.Model.Bundle request = ModelBundle(ToModel(version, Bundle("transaction",
+            Entry("earlier-batch", "POST", "/", earlierBatch),
+            Entry("later-transaction", "POST", "/", laterTransaction))));
+        Hl7.Fhir.Model.Bundle batch = ModelBundle(EntryResource(request, 0));
+        SetEntryResource(batch, batch.Entry.Count - 1, shared);
+        SetEntryResource(EntryResource(request, 1), 0, shared);
+        return request;
+    }
+
+    private sealed class MutationWatch
+    {
+        public List<string> Events { get; } = [];
+
+        public MutationWatch(IFhirStore store)
+        {
+            store.OnInstanceCreated += (_, e) => Events.Add($"create:{e.ResourceType}/{e.ResourceId}");
+            store.OnInstanceUpdated += (_, e) => Events.Add($"update:{e.ResourceType}/{e.ResourceId}");
+            store.OnInstanceDeleted += (_, e) => Events.Add($"delete:{e.ResourceType}/{e.ResourceId}");
+        }
+    }
+
+    private static string[] Fingerprint(IFhirStore store) => store.OrderBy(s => s.Key, StringComparer.Ordinal)
+        .SelectMany(s => new[] { $"{s.Key}:count={s.Value.Count}" }.Concat(s.Value.OrderBy(r => r.Key, StringComparer.Ordinal)
+            .Select(r => $"{s.Key}/{r.Key}:{ToJson(store, r.Value).ToJsonString()}"))).ToArray();
+
+    private static void AssertUnchanged(IFhirStore store, string[] before, MutationWatch watch)
+    {
+        Assert.Equal(before, Fingerprint(store));
+        Assert.Empty(watch.Events);
+    }
+
+    private static JsonArray Issues(JsonObject entry) => entry["response"]!["outcome"]!["issue"]!.AsArray();
+
+    private static void AssertRefusal(JsonObject entry)
+    {
+        AssertStatus(entry, 401);
+        Assert.Null(entry["resource"]);
+        Assert.Null(entry["response"]!["etag"]);
+        Assert.Null(entry["response"]!["location"]);
+        Assert.Null(entry["response"]!["lastModified"]);
+        Assert.All(Issues(entry), issue => Assert.Equal("forbidden", issue!["code"]!.GetValue<string>()));
+    }
+
+    private static void AssertOwnDenial(JsonObject entry, string method, string url)
+    {
+        AssertRefusal(entry);
+        Assert.Single(Issues(entry));
+        Assert.StartsWith($"Unauthorized request: {method} {url}, parsed interaction: ", Issues(entry)[0]!["diagnostics"]!.GetValue<string>());
+        Assert.DoesNotContain("not executed", Issues(entry)[0]!["diagnostics"]!.GetValue<string>());
+    }
+
+    private static void AssertCollateralDenial(JsonObject entry)
+    {
+        AssertRefusal(entry);
+        Assert.Equal("Entry not executed because transaction authorization failed", Issues(entry)[0]!["diagnostics"]!.GetValue<string>());
+    }
+
+    private static void SeedResource(IFhirStore store, string type, string id, JsonObject resource)
+    {
+        FhirRequestContext ctx = Context(store, "PUT", $"{type}/{id}", Authorize(store, "*.*")) with
+        {
+            SourceContent = resource.ToJsonString(),
+            SourceFormat = JsonFormat,
+        };
+        Assert.True(store.InstanceUpdate(ctx, out FhirResponseContext response), response.SerializedOutcome);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    private static IFhirStore CreateStore(
+        FhirReleases.FhirSequenceCodes version,
+        bool smartRequired = false,
+        bool smartAllowed = true,
+        DirectoryInfo? loadDirectory = null,
+        bool strict = false)
     {
         IFhirStore store = version switch
         {
@@ -346,8 +1447,11 @@ public class BundleAuthorizationTests
             BaseUrl = $"http://localhost/fhir/bundle-{version.ToString().ToLowerInvariant()}",
             AllowExistingId = false,
             AllowCreateAsUpdate = true,
-            SmartAllowed = true,
+            SmartRequired = smartRequired,
+            SmartAllowed = smartAllowed,
+            LoadDirectory = loadDirectory,
             SupportNotChanged = true,
+            Strict = strict,
         });
         return store;
     }
@@ -371,6 +1475,18 @@ public class BundleAuthorizationTests
 
     private static void SeedPatient(IFhirStore store, string id, string family = "Seed")
     {
+        if (store.Config.Strict)
+        {
+            FhirRequestContext seed = Context(store, "POST", "Patient", Authorize(store, "*.*")) with
+            {
+                SourceContent = Patient(id, family).ToJsonString(),
+                SourceFormat = JsonFormat,
+            };
+            Assert.True(store.InstanceCreate(seed, out FhirResponseContext created, forceAllowExistingId: true), created.SerializedOutcome);
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            return;
+        }
+
         FhirRequestContext ctx = Context(store, "PUT", $"Patient/{id}", Authorize(store, "*.*")) with
         {
             SourceContent = Patient(id, family).ToJsonString(),
@@ -450,9 +1566,17 @@ public class BundleAuthorizationTests
         return JsonNode.Parse(response.SerializedResource)!.AsObject();
     }
 
-    private static JsonObject SendObjectBundle(IFhirStore store, object bundle, AuthorizationInfo authorization)
+    private static JsonObject SendObjectBundle(
+        IFhirStore store,
+        object bundle,
+        AuthorizationInfo? authorization,
+        Dictionary<string, StringValues>? headers = null)
     {
-        FhirRequestContext ctx = Context(store, "POST", string.Empty, authorization) with { SourceObject = bundle };
+        FhirRequestContext ctx = Context(store, "POST", string.Empty, authorization) with
+        {
+            SourceObject = bundle,
+            RequestHeaders = headers ?? [],
+        };
         Assert.True(store.PerformInteraction(ctx, out FhirResponseContext response, serializeReturn: false));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return ToJson(store, response.Resource!);

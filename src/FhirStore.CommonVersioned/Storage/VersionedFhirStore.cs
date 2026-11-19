@@ -1772,6 +1772,23 @@ public partial class VersionedFhirStore : IFhirStore
         Bundle requestBundle,
         out FhirResponseContext response)
     {
+        return DoProcessBundle(ctx, requestBundle, out response, null);
+    }
+
+    /// <summary>Processes a fresh bundle unit or an explicitly approved nested continuation.</summary>
+    private bool DoProcessBundle(
+        FhirRequestContext ctx,
+        Bundle requestBundle,
+        out FhirResponseContext response,
+        BundleAdmissionScope? approvedScope)
+    {
+        // Loading is an exact-state exemption, including recursive bundle dispatch.
+        bool loading = _loadState != LoadStateCodes.None;
+        if (loading)
+        {
+            approvedScope = null;
+        }
+
         Bundle responseBundle = new Bundle()
         {
             Id = Guid.NewGuid().ToString(),
@@ -1781,12 +1798,31 @@ public partial class VersionedFhirStore : IFhirStore
         {
             case Bundle.BundleType.Transaction:
                 responseBundle.Type = Bundle.BundleType.TransactionResponse;
-                ProcessTransaction(ctx, requestBundle, responseBundle);
+                if (!loading)
+                {
+                    approvedScope ??= AdmitBundle(ctx, requestBundle, new("Bundle"));
+                }
+
+                if (approvedScope?.Denials.Any() == true)
+                {
+                    RefuseTransaction(requestBundle, responseBundle, approvedScope);
+                }
+                else
+                {
+                    ProcessTransaction(ctx, requestBundle, responseBundle, approvedScope);
+                }
                 break;
 
             case Bundle.BundleType.Batch:
                 responseBundle.Type = Bundle.BundleType.BatchResponse;
-                ProcessBatch(ctx, requestBundle, responseBundle);
+                if (loading || (approvedScope is not null))
+                {
+                    ProcessBatch(ctx, requestBundle, responseBundle, approvedScope);
+                }
+                else
+                {
+                    ProcessAdmittedBatch(ctx, requestBundle, responseBundle);
+                }
                 break;
 
             default:
@@ -7127,7 +7163,10 @@ rs,
         return lookupRecs;
     }
 
-    private void fixTransactionBundleReferences(Bundle bundle, List<TransactionResourceIdLookupRec> transactionIdRecs)
+    private void fixTransactionBundleReferences(
+        FhirRequestContext ctx,
+        Bundle bundle,
+        List<TransactionResourceIdLookupRec> transactionIdRecs)
     {
         if (bundle.Type != Bundle.BundleType.Transaction)
         {
@@ -7150,10 +7189,10 @@ rs,
             }
 
             // check the URL to see if there is a reference to fix
-            string? projectedUrl = ProjectTransactionRequestUrl(entry.Request.Url, originalIdLookup, out bool hasOriginalIdMatch);
-            if (hasOriginalIdMatch)
+            string? remappedUrl = RemapTransactionInstanceRequestUrl(ctx, entry, originalIdLookup);
+            if (remappedUrl != entry.Request.Url)
             {
-                entry.Request.Url = projectedUrl;
+                entry.Request.Url = remappedUrl;
             }
 
             // if there is no resource, there is nothing else to check on this entry
@@ -7383,14 +7422,15 @@ rs,
     private void ProcessTransaction(
         FhirRequestContext ctx,
         Bundle transaction,
-        Bundle response)
+        Bundle response,
+        BundleAdmissionScope? approvedScope = null)
     {
-        // Reserve identities at the existing preparation point, then bind the live resource identities.
+        // Reserve once at execution, then bind originals from the current shared objects.
         IReadOnlyList<TransactionIdentityReservation> reservations = ReserveTransactionIdentities(transaction);
         List<TransactionResourceIdLookupRec> idRecs = buildTransactionResourceLookup(transaction, reservations);
 
         // fix all the references
-        fixTransactionBundleReferences(transaction, idRecs);
+        fixTransactionBundleReferences(ctx, transaction, idRecs);
 
         // Process DELETE, POST, PUT/PATCH, GET/HEAD, then the legacy missing-request tail.
         foreach (TransactionEntryOccurrence occurrence in EnumerateTransactionEntryOccurrences(transaction))
@@ -7398,7 +7438,7 @@ rs,
             Bundle.EntryComponent entry = occurrence.Entry;
             if (entry.Request is not null)
             {
-                processEntry(entry);
+                processEntry(occurrence);
                 continue;
             }
 
@@ -7421,8 +7461,9 @@ rs,
 
         return;
 
-        void processEntry(Bundle.EntryComponent entry)
+        void processEntry(TransactionEntryOccurrence occurrence)
         {
+            Bundle.EntryComponent entry = occurrence.Entry;
             bool opSuccess;
             FhirResponseContext opResponse;
 
@@ -7463,28 +7504,9 @@ rs,
                 return;
             }
 
-            // check authorization on individual requests within a bundle if we are not in loading state
-            if ((_loadState == LoadStateCodes.None) &&
-                (!ctx.IsAuthorized()))
-            {
-                response.Entry.Add(new()
-                {
-                    FullUrl = entry.FullUrl,
-                    Response = new()
-                    {
-                        Status = getResponseStatus(HttpStatusCode.Unauthorized),
-                        Outcome = SerializationUtils.BuildOutcomeForRequest(
-                            HttpStatusCode.Unauthorized,
-                            $"Unauthorized request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
-                            OperationOutcome.IssueType.Forbidden),
-                    },
-                });
-
-                return;
-            }
-
             // attempt the request specified (transactions have id's already created, so treat them as such)
-            opSuccess = PerformInteraction(entryCtx, out opResponse, serializeReturn: false, forceAllowExistingId: true);
+            opSuccess = DispatchBundleEntry(entryCtx, approvedScope?.Entry(occurrence.InputIndex).ChildScope,
+                out opResponse, serializeReturn: false, forceAllowExistingId: true);
             if (opSuccess)
             {
                 response.Entry.Add(new()
@@ -7542,13 +7564,15 @@ rs,
     private void ProcessBatch(
         FhirRequestContext ctx,
         Bundle batch,
-        Bundle response)
+        Bundle response,
+        BundleAdmissionScope? approvedScope = null)
     {
         bool opSuccess;
         FhirResponseContext opResponse;
 
-        foreach (Bundle.EntryComponent entry in batch.Entry)
+        for (int index = 0; index < batch.Entry.Count; index++)
         {
+            Bundle.EntryComponent entry = batch.Entry[index];
             if (entry.Request is null)
             {
                 response.Entry.Add(new()
@@ -7587,28 +7611,8 @@ rs,
                 continue;
             }
 
-            // check authorization on individual requests within a bundle if we are not in loading state
-            if ((_loadState == LoadStateCodes.None) &&
-                (!ctx.IsAuthorized()))
-            {
-                response.Entry.Add(new()
-                {
-                    FullUrl = entry.FullUrl,
-                    Response = new()
-                    {
-                        Status = getResponseStatus(HttpStatusCode.Unauthorized),
-                        Outcome = SerializationUtils.BuildOutcomeForRequest(
-                            HttpStatusCode.Unauthorized,
-                            $"Unauthorized request: {entry.Request.Method} {entry.Request.Url}, parsed interaction: {entryCtx.Interaction}",
-                            OperationOutcome.IssueType.Forbidden),
-                    },
-                });
-
-                continue;
-            }
-
             // attempt the request specified
-            opSuccess = PerformInteraction(entryCtx, out opResponse, false);
+            opSuccess = DispatchBundleEntry(entryCtx, approvedScope?.Entry(index).ChildScope, out opResponse, false);
             if (opSuccess)
             {
                 response.Entry.Add(new()
