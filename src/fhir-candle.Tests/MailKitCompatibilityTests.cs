@@ -201,24 +201,30 @@ public sealed class MailKitCompatibilityTests
         AssertNoCommunication(host, args);
     }
 
-    /// <summary>An impossible TCP port proves local argument-validation failure, not SMTP rejection.</summary>
-    [Fact]
-    public async Task EmailInvalidPortRegistersFailureWithoutCommunication()
+    /// <summary>Malformed mailboxes fail during MIME construction, before impossible-port validation.</summary>
+    [Theory]
+    [InlineData("sender@unit.test", "recipient@@unit.test")]
+    [InlineData("sender@@unit.test", "recipient@unit.test")]
+    public async Task EmailMalformedAddressRegistersFailureWithoutCommunication(string sender, string endpoint)
+    {
+        using NotificationHost host = new(config => config.SmtpUser = sender);
+        SubscriptionSendEventArgs args = EventArgs(host);
+        args.Subscription.Endpoint = endpoint;
+        Assert.False(await NotifyAsync(host, args));
+        Assert.IsType<ParseException>(AssertEmailFailure(host, args, endpoint));
+    }
+
+    /// <summary>An impossible TCP port proves normalized addresses reach local validation, not SMTP rejection.</summary>
+    [Theory]
+    [InlineData("recipient@unit.test")]
+    [InlineData("MaIlTo: recipient@unit.test ")]
+    public async Task EmailInvalidPortRegistersFailureWithoutCommunication(string endpoint)
     {
         using NotificationHost host = new();
         SubscriptionSendEventArgs args = EventArgs(host);
+        args.Subscription.Endpoint = endpoint;
         Assert.False(await NotifyAsync(host, args));
-        Assert.Equal(CommunicationSentinel, args.Subscription.LastCommunicationTicks);
-        string error = Assert.Single(args.Subscription.NotificationErrors);
-        Assert.Contains("Email Handshake", error, StringComparison.Ordinal);
-        Assert.Contains("recipient@unit.test", error, StringComparison.Ordinal);
-        Assert.Contains("failed:", error, StringComparison.Ordinal);
-        (LogLevel Level, string Message, Exception? Exception) logged =
-            Assert.Single(host.Log.Entries, entry => entry.Level >= LogLevel.Error);
-        Assert.Equal(LogLevel.Error, logged.Level);
-        Assert.Contains("Email notification delivery failed", logged.Message, StringComparison.Ordinal);
-        Assert.Contains("Subscription/mailkit-sub", logged.Message, StringComparison.Ordinal);
-        ArgumentOutOfRangeException exception = Assert.IsType<ArgumentOutOfRangeException>(logged.Exception);
+        ArgumentOutOfRangeException exception = Assert.IsType<ArgumentOutOfRangeException>(AssertEmailFailure(host, args, endpoint));
         Assert.Equal("port", exception.ParamName);
     }
 
@@ -254,6 +260,19 @@ public sealed class MailKitCompatibilityTests
         Assert.Equal(CommunicationSentinel, args.Subscription.LastCommunicationTicks);
         Assert.Empty(args.Subscription.NotificationErrors);
         Assert.DoesNotContain(host.Log.Entries, entry => entry.Level >= LogLevel.Error);
+    }
+
+    private static Exception AssertEmailFailure(NotificationHost host, SubscriptionSendEventArgs args, string originalEndpoint)
+    {
+        Assert.Equal(CommunicationSentinel, args.Subscription.LastCommunicationTicks);
+        string error = Assert.Single(args.Subscription.NotificationErrors);
+        Assert.Contains($"Email Handshake to {originalEndpoint} failed:", error, StringComparison.Ordinal);
+        (LogLevel Level, string Message, Exception? Exception) logged =
+            Assert.Single(host.Log.Entries, entry => entry.Level >= LogLevel.Error);
+        Assert.Equal(LogLevel.Error, logged.Level);
+        Assert.Contains("Email notification delivery failed", logged.Message, StringComparison.Ordinal);
+        Assert.Contains("Subscription/mailkit-sub", logged.Message, StringComparison.Ordinal);
+        return Assert.IsAssignableFrom<Exception>(logged.Exception);
     }
 
     private static MethodInfo ResolveMethod(string name, Type returnType, params Type[] parameterTypes)
