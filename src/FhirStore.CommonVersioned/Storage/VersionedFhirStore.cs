@@ -7068,7 +7068,9 @@ rs,
         public required List<string> Identifiers { get; init; }
     }
 
-    private List<TransactionResourceIdLookupRec> buildTransactionResourceLookup(Bundle bundle)
+    private List<TransactionResourceIdLookupRec> buildTransactionResourceLookup(
+        Bundle bundle,
+        IReadOnlyList<TransactionIdentityReservation> reservations)
     {
         if (bundle.Type != Bundle.BundleType.Transaction)
         {
@@ -7080,18 +7082,10 @@ rs,
 
         List<TransactionResourceIdLookupRec> lookupRecs = [];
 
-        foreach (Bundle.EntryComponent entry in bundle.Entry)
+        foreach (TransactionIdentityReservation reservation in reservations)
         {
+            Bundle.EntryComponent entry = bundle.Entry[reservation.InputIndex];
             List<string> identifiers;
-
-            // only need to process POS entries that have resources
-            if ((entry.Request is null) ||
-                (entry.Request.Method is null) ||
-                (entry.Request.Method != Bundle.HTTPVerb.POST) ||
-                (entry.Resource is null))
-            {
-                continue;
-            }
 
             if (entry.Resource is IIdentifiable<List<Identifier>> irl)
             {
@@ -7121,9 +7115,10 @@ rs,
 
             lookupRecs.Add(new()
             {
-                OriginalId = entry.Resource.Id,
+                // Bind originals now: ancestor or earlier nested preparation may have changed an aliased object.
+                OriginalId = entry.Resource!.Id,
                 FullUrl = entry.FullUrl!,
-                Id = Guid.NewGuid().ToString(),
+                Id = reservation.Id,
                 ResourceType = entry.Resource.TypeName,
                 Identifiers = identifiers,
             });
@@ -7155,10 +7150,10 @@ rs,
             }
 
             // check the URL to see if there is a reference to fix
-            string idSegment = entry.Request.Url?.Split('/')[^1].Split('?')[0] ?? string.Empty;
-            if (originalIdLookup.Contains(idSegment))
+            string? projectedUrl = ProjectTransactionRequestUrl(entry.Request.Url, originalIdLookup, out bool hasOriginalIdMatch);
+            if (hasOriginalIdMatch)
             {
-                entry.Request.Url = entry.Request.Url!.Replace(idSegment, originalIdLookup[idSegment].First().Id);
+                entry.Request.Url = projectedUrl;
             }
 
             // if there is no resource, there is nothing else to check on this entry
@@ -7390,36 +7385,23 @@ rs,
         Bundle transaction,
         Bundle response)
     {
-        // build our list of id mappings
-        List<TransactionResourceIdLookupRec> idRecs = buildTransactionResourceLookup(transaction);
+        // Reserve identities at the existing preparation point, then bind the live resource identities.
+        IReadOnlyList<TransactionIdentityReservation> reservations = ReserveTransactionIdentities(transaction);
+        List<TransactionResourceIdLookupRec> idRecs = buildTransactionResourceLookup(transaction, reservations);
 
         // fix all the references
         fixTransactionBundleReferences(transaction, idRecs);
 
-        // batch needs to process in order of DELETE, POST, PUT/PATCH, GET/HEAD
-        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request?.Method == Bundle.HTTPVerb.DELETE))
+        // Process DELETE, POST, PUT/PATCH, GET/HEAD, then the legacy missing-request tail.
+        foreach (TransactionEntryOccurrence occurrence in EnumerateTransactionEntryOccurrences(transaction))
         {
-            processEntry(entry);
-        }
+            Bundle.EntryComponent entry = occurrence.Entry;
+            if (entry.Request is not null)
+            {
+                processEntry(entry);
+                continue;
+            }
 
-        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request?.Method == Bundle.HTTPVerb.POST))
-        {
-            processEntry(entry);
-        }
-
-        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => (e.Request?.Method == Bundle.HTTPVerb.PUT) || (e.Request?.Method == Bundle.HTTPVerb.PATCH)))
-        {
-            processEntry(entry);
-        }
-
-        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => (e.Request?.Method == Bundle.HTTPVerb.GET) || (e.Request?.Method == Bundle.HTTPVerb.HEAD)))
-        {
-            processEntry(entry);
-        }
-
-        // check for entries without a request
-        foreach (Bundle.EntryComponent entry in transaction.Entry.Where(e => e.Request is null))
-        {
             response.Entry.Add(new Bundle.EntryComponent()
             {
                 FullUrl = entry.FullUrl,
@@ -7461,22 +7443,7 @@ rs,
                 return;
             }
 
-            FhirRequestContext entryCtx = new()
-            {
-                TenantName = ctx.TenantName,
-                Store = ctx.Store,
-                Authorization = ctx.Authorization,
-                RequestHeaders = ctx.RequestHeaders,
-                Forwarded = ctx.Forwarded,
-                HttpMethod = entry.Request.Method?.ToString() ?? string.Empty,
-                Url = entry.Request.Url ?? string.Empty,
-                IfMatch = entry.Request.IfMatch ?? string.Empty,
-                IfModifiedSince = entry.Request.IfModifiedSince?.ToFhirDateTime() ?? string.Empty,
-                IfNoneMatch = entry.Request.IfNoneMatch ?? string.Empty,
-                IfNoneExist = entry.Request.IfNoneExist ?? string.Empty,
-
-                SourceObject = entry.Resource,
-            };
+            FhirRequestContext entryCtx = CreateBundleEntryContext(ctx, entry, entry.Request.Url);
 
             if (entryCtx.Interaction is null)
             {
@@ -7600,22 +7567,7 @@ rs,
                 continue;
             }
 
-            FhirRequestContext entryCtx = new()
-            {
-                TenantName = ctx.TenantName,
-                Store = ctx.Store,
-                Authorization = ctx.Authorization,
-                RequestHeaders = ctx.RequestHeaders,
-                Forwarded = ctx.Forwarded,
-                HttpMethod = entry.Request.Method?.ToString() ?? string.Empty,
-                Url = entry.Request.Url ?? string.Empty,
-                IfMatch = entry.Request.IfMatch ?? string.Empty,
-                IfModifiedSince = entry.Request.IfModifiedSince?.ToFhirDateTime() ?? string.Empty,
-                IfNoneMatch = entry.Request.IfNoneMatch ?? string.Empty,
-                IfNoneExist = entry.Request.IfNoneExist ?? string.Empty,
-
-                SourceObject = entry.Resource,
-            };
+            FhirRequestContext entryCtx = CreateBundleEntryContext(ctx, entry, entry.Request.Url);
 
             if (entryCtx.Interaction is null)
             {
