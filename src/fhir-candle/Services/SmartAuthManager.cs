@@ -1351,7 +1351,11 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
 
         string code = Guid.NewGuid().ToString();
 
-        extractScopes(scopes, out HashSet<string> userScopes, out HashSet<string> patientScopes);
+        extractScopes(
+            scopes.SelectMany(scope => scope.Split(' ', StringSplitOptions.RemoveEmptyEntries)),
+            out HashSet<string> userScopes,
+            out HashSet<string> patientScopes,
+            includeSystemScopes: true);
 
         DateTime expiration = DateTime.UtcNow.AddHours(24);
 
@@ -1376,6 +1380,9 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
                 Scope = string.Join(" ", scopes),
                 Audience = tenant.BaseUrl,
             },
+            // Backend system permissions reuse the non-patient scope container.
+            UserScopes = userScopes,
+            PatientScopes = patientScopes,
             Expires = new DateTimeOffset(expiration).ToUniversalTime(),
         };
 
@@ -1392,13 +1399,15 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
     }
 
     /// <summary>Extracts the scopes.</summary>
-    /// <param name="scopes">       The scopes.</param>
-    /// <param name="userScopes">   [out] The user scopes.</param>
-    /// <param name="patientScopes">[out] The patient scopes.</param>
+    /// <param name="scopes">             The scopes.</param>
+    /// <param name="userScopes">         [out] The user scopes.</param>
+    /// <param name="patientScopes">      [out] The patient scopes.</param>
+    /// <param name="includeSystemScopes">Whether to include backend system scopes as non-patient permissions.</param>
     private void extractScopes(
         IEnumerable<string> scopes,
         out HashSet<string> userScopes, 
-        out HashSet<string> patientScopes)
+        out HashSet<string> patientScopes,
+        bool includeSystemScopes = false)
     {
         userScopes = new();
         patientScopes = new();
@@ -1418,6 +1427,7 @@ public class SmartAuthManager : ISmartAuthManager, IDisposable
             switch (components[0])
             {
                 case "user":
+                case "system" when includeSystemScopes:
                     AddScope(components[1], components[2].ToLowerInvariant(), ref userScopes);
                     break;
 

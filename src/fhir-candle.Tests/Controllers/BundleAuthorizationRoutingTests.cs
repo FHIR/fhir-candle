@@ -9,15 +9,18 @@ extern alias candleR5;
 
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
+using FhirCandle.Smart;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Tokens;
 
 namespace fhir.candle.Tests.Controllers;
 
@@ -29,6 +32,14 @@ public class BundleAuthorizationRoutingTests
     private const string XmlFormat = "application/fhir+xml";
     private const string CollateralDiagnostic = "Entry not executed because transaction authorization failed";
     private static readonly XNamespace _fhir = "http://hl7.org/fhir";
+
+    /// <summary>Each supported version once for direct backend requests.</summary>
+    public static IEnumerable<object[]> VersionCases =>
+        from FhirReleases.FhirSequenceCodes version in new[]
+        {
+            FhirReleases.FhirSequenceCodes.R4, FhirReleases.FhirSequenceCodes.R4B, FhirReleases.FhirSequenceCodes.R5,
+        }
+        select new object[] { version };
 
     /// <summary>All supported versions and both executable bundle types.</summary>
     public static IEnumerable<object[]> BundleCases =>
@@ -57,6 +68,64 @@ public class BundleAuthorizationRoutingTests
         from object[] bundle in BundleCases
         from bool unknownBearer in new[] { false, true }
         select new object[] { bundle[0], bundle[1], unknownBearer };
+
+    /// <summary>An exchanged backend token permits only its scoped reads and searches without changing the store.</summary>
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BackendAssertionTokenAuthorizesOnlyRequestedFhirRequests(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version);
+        IFhirStore store = host.Store;
+        Seed(store);
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys();
+        string clientId = RegisterAssertionClient(host.AuthManager, publicKey);
+        (string token, AuthorizationInfo authorization) = await ExchangeAssertion(
+            host, clientId, privateKey, "system/Patient.rs");
+
+        Assert.False(string.IsNullOrEmpty(authorization.Key));
+        Assert.True(Guid.TryParse(authorization.Key, out Guid key));
+        Assert.NotEqual(Guid.Empty, key);
+        Assert.Empty(authorization.UserId);
+        Assert.Empty(authorization.LaunchPatient);
+        Assert.Empty(authorization.PatientScopes);
+        Assert.DoesNotContain("*.*", authorization.UserScopes);
+        Assert.DoesNotContain("*.*", authorization.PatientScopes);
+        Assert.Equal(new[] { "Patient.r", "Patient.s" }, authorization.UserScopes.OrderBy(s => s, StringComparer.Ordinal));
+        AssertUnchanged(store, before, watch);
+
+        JsonNode seededPatient = JsonNode.Parse(Serialize(store, store["Patient"]["seed"]))!;
+        using HttpResponseMessage read = await SendAsync(host, store, "GET", "Patient/seed", token);
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(JsonFormat, read.Content.Headers.ContentType?.MediaType);
+        Assert.True(JsonNode.DeepEquals(seededPatient, JsonNode.Parse(await read.Content.ReadAsStringAsync())));
+        AssertUnchanged(store, before, watch);
+
+        using HttpResponseMessage search = await SendAsync(host, store, "GET", "Patient", token);
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Equal(JsonFormat, search.Content.Headers.ContentType?.MediaType);
+        JsonObject bundle = JsonNode.Parse(await search.Content.ReadAsStringAsync())!.AsObject();
+        Assert.Equal("Bundle", bundle["resourceType"]!.GetValue<string>());
+        Assert.Equal("searchset", bundle["type"]!.GetValue<string>());
+        JsonObject match = Assert.Single(bundle["entry"]!.AsArray())!.AsObject();
+        Assert.Equal("match", match["search"]!["mode"]!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(seededPatient, match["resource"]));
+        AssertUnchanged(store, before, watch);
+
+        using HttpResponseMessage unrelated = await SendAsync(host, store, "GET", "Observation", token);
+        Assert.Equal(HttpStatusCode.Unauthorized, unrelated.StatusCode);
+        AssertUnchanged(store, before, watch);
+
+        using HttpResponseMessage update = await SendAsync(
+            host, store, "PUT", "Patient/seed", token, Patient("seed", "MustNotPersist").ToJsonString());
+        Assert.Equal(HttpStatusCode.Unauthorized, update.StatusCode);
+        AssertUnchanged(store, before, watch);
+
+        using HttpResponseMessage delete = await SendAsync(host, store, "DELETE", "Patient/seed", token);
+        Assert.Equal(HttpStatusCode.Unauthorized, delete.StatusCode);
+        AssertUnchanged(store, before, watch);
+    }
 
     /// <summary>The same effective permissions allow a direct read but reject direct and bundled writes.</summary>
     [Theory]
@@ -244,6 +313,69 @@ public class BundleAuthorizationRoutingTests
         }
 
         AssertUnchanged(store, before, watch);
+    }
+
+    private static (JsonWebKey PrivateKey, JsonWebKey PublicKey) CreateAssertionKeys()
+    {
+        using RSA rsa = RSA.Create(2048);
+        JsonWebKey privateKey = JsonWebKeyConverter.ConvertFromRSASecurityKey(new RsaSecurityKey(rsa.ExportParameters(true)));
+        JsonWebKey publicKey = JsonWebKeyConverter.ConvertFromRSASecurityKey(new RsaSecurityKey(rsa.ExportParameters(false)));
+        string keyId = Guid.NewGuid().ToString();
+        privateKey.Alg = "RS384";
+        privateKey.Kid = keyId;
+        privateKey.KeyOps.Add("sign");
+        publicKey.Alg = "RS384";
+        publicKey.Kid = keyId;
+        publicKey.KeyOps.Add("verify");
+        Assert.True(string.IsNullOrEmpty(publicKey.D));
+        return (privateKey, publicKey);
+    }
+
+    private static string RegisterAssertionClient(ISmartAuthManager manager, JsonWebKey publicKey)
+    {
+        JsonWebKeySet keySet = new();
+        keySet.Keys.Add(publicKey);
+        SmartClientRegistration registration = new()
+        {
+            ClientName = "https://client.example.test/" + Guid.NewGuid().ToString(),
+            KeySet = keySet,
+        };
+        Assert.True(manager.TryRegisterClient(registration, out string clientId, out List<string> messages), string.Join("\n", messages));
+        Assert.Empty(messages);
+        Assert.Equal(registration.ClientName, clientId);
+        Assert.True(manager.SmartClients[clientId].Keys.ContainsKey(publicKey.Kid));
+        return clientId;
+    }
+
+    private static async Task<(string AccessToken, AuthorizationInfo Authorization)> ExchangeAssertion(
+        TestHost host, string clientId, JsonWebKey signingKey, string scope)
+    {
+        TenantConfiguration tenant = host.Store.Config;
+        string assertion = host.AuthManager.GenerateSignedJwt(
+            clientId, clientId, tenant.BaseUrl, Guid.NewGuid().ToString(), DateTime.UtcNow.AddMinutes(10), signingKey);
+        Assert.False(string.IsNullOrEmpty(assertion));
+        using FormUrlEncodedContent form = new(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_assertion_type"] = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            ["client_assertion"] = assertion,
+            ["scope"] = scope,
+        });
+        using HttpResponseMessage response = await host.Factory.Client.PostAsync($"/_smart/{tenant.ControllerName}/token", form);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        JsonObject body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        Assert.Equal("bearer", body["token_type"]!.GetValue<string>());
+        Assert.Equal(scope, body["scope"]!.GetValue<string>());
+        Assert.Equal(clientId, body["client_id"]!.GetValue<string>());
+        string token = body["access_token"]!.GetValue<string>();
+        Assert.False(string.IsNullOrEmpty(token));
+        Assert.True(host.AuthManager.TryGetAuthorization(tenant.ControllerName, "Bearer " + token, out AuthorizationInfo authorization));
+        Assert.Equal(tenant.ControllerName, authorization.Tenant);
+        Assert.Equal(clientId, authorization.RequestParameters.ClientId);
+        Assert.Equal(tenant.BaseUrl, authorization.RequestParameters.Audience);
+        Assert.Equal(scope, authorization.RequestParameters.Scope);
+        return (token, authorization);
     }
 
     private static AuthorizationInfo InstallAuthorization(TestHost host, params string[] scopes)
