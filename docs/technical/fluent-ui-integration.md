@@ -84,6 +84,24 @@ Managed regressions exercise drawer/feedback delivery, search/row activation,
 autocomplete selection, and SMART key-family RSA→RS384 / EC→ES384 callbacks.
 They do not infer working callbacks from unmatched attributes compiling.
 
+The picker ignores header/non-data rows before mutating selection or notifying
+its consumer. Managed checks dispatch the rendered sortable header event and
+bubble through the released row handler, retaining selected IDs and callback
+counts in both single- and multiple-selection modes while sorting still works.
+
+The service-owned drawer binds `FluentNav.OnItemClick` to cancellation of its
+own `DialogInstance` for enabled destinations. It retains the normal anchor
+`Href` and default behavior, with no extra `NavigateTo` or layout-hamburger
+shortcut. Managed tests await the complete rendered anchor event, including
+the released item's continuation after cancellation/disposal, check renderer
+errors, and verify that the dialog disappears but its provider remains.
+Category expansion and default Escape/backdrop dismissal remain vendor-owned.
+`FluentDialogBody` renders the configured FHIR Candle title and the version
+in its `ActionTemplate` footer; submit/close actions remain hidden. Tenant
+links render explicit child-content icons because 5.1.0 suppresses `IconRest`
+on category subitems. Each affected link's own subtree is checked for its icon.
+These checks do not establish native browser-anchor navigation or visual layout.
+
 ## Preference and theme lifecycle
 
 The canonical application preference remains the **plaintext** local-storage
@@ -139,8 +157,12 @@ remaining unchanged. `candle-theme.css` maps released `--colorBrandBackground`
 and `--colorNeutral*` tokens into small app-owned `--candle-*` semantics.
 
 Only user revisions persist through the adapter. Before its synchronous
-mode-only write, it rereads storage so newer colors/unknown fields survive.
-Storage denial is an in-memory fallback. Root disposal unsubscribes managed
+mode-only write, it rereads storage on **every** write so newer colors, nested
+and added members survive and deleted fields stay deleted, even with repeated
+stale managed payloads. A valid empty `{}` is authoritative, not a parse error.
+Only missing, unreadable, invalid, or non-object storage falls back to the valid
+managed object. Revisions remain monotonic per connection, and disconnected
+writers cannot write. Storage denial is an in-memory fallback. Root disposal unsubscribes managed
 events, waits for synchronization, removes the browser listener, and disposes
 the callback reference. Expected `JSDisconnectedException` is handled at the
 interop boundary; unrelated JS errors are not silently swallowed.
@@ -231,6 +253,22 @@ on each target, alongside both original hosting facts and `Sdk6UiContractTests`.
 Retain `CandleThemeTests`, `FluentUiIntegrationTests`, and `BlazorInteropTests`
 as complementary preference/state, managed binding, and disconnection checks.
 
+For the bounded UI-remediation gate, build both targets above, then run:
+
+```powershell
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.CandleThemeTests|FullyQualifiedName~fhir.candle.Tests.FluentUiIntegrationTests|FullyQualifiedName~fhir.candle.Tests.BlazorInteropTests|FullyQualifiedName~fhir.candle.Tests.Sdk6UiContractTests"
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.CandleThemeTests|FullyQualifiedName~fhir.candle.Tests.FluentUiIntegrationTests|FullyQualifiedName~fhir.candle.Tests.BlazorInteropTests|FullyQualifiedName~fhir.candle.Tests.Sdk6UiContractTests"
+node --test .github\scripts\tests\candle-theme.test.cjs
+```
+
+The separate JavaScript check requires Node.js 24+ (locally 24.22.1), with
+no npm install or .NET dependency. CI runs the same script on its existing
+OS matrix. It executes the **actual** adapter in `node:vm` with isolated
+storage/media/document doubles and `node:test`: successive stale writes after
+external objects (including `{}`), invalid/unavailable storage, initialization,
+revisions, and disconnect behavior. This is JavaScript execution, not a
+real-browser, media-query implementation, visual, or end-to-end result.
+
 Recorded Phase 2 evidence at `90e1da3` on Windows: host builds for both targets
 had zero diagnostics; focused theme/managed-integration/interop checks passed
 **43/43 per target**. All five props importers resolved all three Fluent
@@ -255,7 +293,8 @@ No pack, tool install, publish, browser, or preview qualification was performed.
 The original historical net11 baseline was **CANCELLED**; group 4's historical
 full-suite passes are not Fluent v5 evidence.
 
-Managed interop doubles do not execute the real bootstrap, storage, media
+Managed interop doubles do not execute the real bootstrap; the separate Node
+check does, against boundary doubles rather than native browser storage, media
 queries, or browser disposal. Prerender/HTTP/manifest/hash checks do not prove
 focus, contrast, viewport/scroll behavior, actual CSS application, editor
 interaction, or end-to-end browser equivalence. Windows evidence is not an

@@ -81,6 +81,10 @@ jobs:
       shell: pwsh
       run: ./.github/scripts/tests/Test-ReleaseScripts.ps1
 
+    - name: Test theme adapter (Node.js 24+)
+      shell: pwsh
+      run: node --test .github/scripts/tests/candle-theme.test.cjs
+
     - name: Install dependencies
       run: dotnet restore
 

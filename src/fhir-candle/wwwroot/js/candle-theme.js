@@ -11,15 +11,15 @@
     const object = json => {
         try {
             const value = JSON.parse(json);
-            return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-        } catch { return {}; }
+            return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+        } catch { return null; }
     };
     const apply = dark => {
         // Independent of the vendor initializer's document/body theme attributes.
         document.documentElement.dataset.candleTheme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
     };
-    const early = object(read());
+    const early = object(read()) ?? {};
     apply(early.mode === "dark" || (early.mode !== "light" && !!media?.matches));
 
     window.candleTheme = {
@@ -28,7 +28,7 @@
             const json = read();
             const changed = event => callback.invokeMethodAsync("SystemChanged", event.matches);
             media?.addEventListener("change", changed);
-            listeners.set(id, { changed, json, revision: 0 });
+            listeners.set(id, { changed, revision: 0 });
             return { id, json, isSystemDark: !!media?.matches };
         },
         apply(id, dark) {
@@ -37,16 +37,14 @@
         persist(id, json, revision) {
             const listener = listeners.get(id);
             if (!listener || revision <= listener.revision) return;
-            const incoming = object(json);
-            const latest = read();
-            // Only mode belongs to this writer. Re-read atomically before a synchronous write
-            // so another tab's newer colors/unknown members survive an outstanding interop call.
-            const value = latest === listener.json ? incoming : object(latest);
+            const incoming = object(json) ?? {};
+            // Only mode belongs to this writer. Re-read before every synchronous write;
+            // any valid object (including {}) owns the other fields, not the managed snapshot.
+            const value = object(read()) ?? incoming;
             value.mode = incoming.mode;
             const updated = JSON.stringify(value);
             try { window.localStorage.setItem("theme", updated); }
             catch { /* Storage denial is a usable in-memory preference, not a fatal JS error. */ }
-            listener.json = updated;
             listener.revision = revision;
         },
         disconnect(id) {

@@ -165,6 +165,75 @@ public class FluentUiIntegrationTests
         Assert.DoesNotContain(pendingJs.Calls, call => call.Name == "candleTheme.persist");
     }
 
+    /// <summary>The complete vendor anchor event dismisses only its owning service-created drawer.</summary>
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/smart/clients")]
+    [InlineData("/store?store=test")]
+    [InlineData("/subscriptions/local?store=test")]
+    [InlineData("/subscriptions/notifications-received?store=test")]
+    public async Task DrawerDestinationDismissesOwningDialog(string href)
+    {
+        using ServiceProvider services = Services(new RecordingJs());
+        await using ManagedRenderer renderer = new(services);
+        (NavMenu menu, Task closed) = await OpenDrawerAsync(renderer);
+        FluentDialogProvider provider = Assert.Single(renderer.Components<FluentDialogProvider>());
+        FluentNavCategory category = Assert.Single(renderer.Components<FluentNavCategory>());
+        await renderer.ClickAsync(category, "button");
+        Assert.False(category.Expanded);
+        Assert.Single(renderer.Components<NavMenu>());
+        await renderer.ClickAsync(category, "button");
+        Assert.True(category.Expanded);
+
+        FluentNavItem item = renderer.Components<FluentNavItem>().Single(item => item.Href == href);
+        renderer.AssertDefaultAnchor(item, href);
+        TestNavigation navigation = Assert.IsType<TestNavigation>(services.GetRequiredService<NavigationManager>());
+        // DispatchEventAsync awaits FluentNavItem's continuation AFTER our callback cancels the dialog.
+        await renderer.ClickAsync(item, "a");
+        renderer.ThrowErrors();
+        Assert.Empty(renderer.Components<NavMenu>());
+        Assert.Empty(renderer.Components<FluentDialog>());
+        Assert.Same(provider, Assert.Single(renderer.Components<FluentDialogProvider>()));
+        await closed;
+        Assert.Equal(0, navigation.NavigateCalls);
+        Assert.NotEqual(true, menu.DialogInstance.Options.PreventDismissOnEscape);
+    }
+
+    /// <summary>The released body places the configured title and version in drawer title/footer slots.</summary>
+    [Fact]
+    public async Task DrawerRendersConfiguredTitleAndVersionFooter()
+    {
+        using ServiceProvider services = Services(new RecordingJs());
+        await using ManagedRenderer renderer = new(services);
+        (NavMenu menu, Task closed) = await OpenDrawerAsync(renderer);
+        renderer.AssertDrawerPresentation(menu);
+        Assert.False(menu.DialogInstance.Options.Header.CloseAction.Visible);
+        Assert.False(menu.DialogInstance.Options.Footer.PrimaryAction.Visible);
+        Assert.False(menu.DialogInstance.Options.Footer.SecondaryAction.Visible);
+        await renderer.Dispatcher.InvokeAsync(() => menu.DialogInstance.CancelAsync());
+        await closed;
+    }
+
+    /// <summary>Every tenant destination renders its own icon, even when Fluent suppresses subitem IconRest.</summary>
+    [Fact]
+    public async Task DrawerRendersEachTenantLinkIcon()
+    {
+        using ServiceProvider services = Services(new RecordingJs());
+        await using ManagedRenderer renderer = new(services);
+        (NavMenu menu, Task closed) = await OpenDrawerAsync(renderer);
+        foreach (string href in new[]
+        {
+            "/store?store=test", "/subscriptions/local?store=test",
+            "/subscriptions/notifications-received?store=test",
+        })
+        {
+            FluentNavItem item = renderer.Components<FluentNavItem>().Single(item => item.Href == href);
+            renderer.AssertLinkIcon(item, href);
+        }
+        await renderer.Dispatcher.InvokeAsync(() => menu.DialogInstance.CancelAsync());
+        await closed;
+    }
+
     /// <summary>Search and row activation exercise the picker's bound callbacks, including clear and multi-select.</summary>
     [Fact]
     public async Task PickerCallbacksPreserveFilteringAndSelection()
@@ -203,6 +272,7 @@ public class FluentUiIntegrationTests
         Assert.True(grid.OnRowClick.HasDelegate);
         Assert.False(grid.OnRowFocus.HasDelegate);
         await Activate("alpha");
+        await HeaderPreservesSelection();
         await Activate("bravo");
         Assert.Equal(["bravo"], selections.Last());
         await renderer.UpdateAsync(new() { [nameof(ResourcePicker.AllowMultipleSelection)] = true });
@@ -210,6 +280,7 @@ public class FluentUiIntegrationTests
         Assert.Equal(["alpha", "bravo"], selections.Last());
         await Activate("bravo");
         Assert.Equal(["alpha"], selections.Last());
+        await HeaderPreservesSelection();
 
         await renderer.Dispatcher.InvokeAsync(() => grid.ShowColumnOptionsAsync(0));
         FluentTextInput search = renderer.Components<FluentTextInput>()
@@ -267,6 +338,29 @@ public class FluentUiIntegrationTests
             await renderer.Dispatcher.InvokeAsync(() => grid.OnRowClick.InvokeAsync(
                 renderer.Components<FluentDataGridRow<InstanceTableRec>>().Single(row => row.Item?.Id == id)));
         }
+
+        async Task HeaderPreservesSelection()
+        {
+            ResourcePicker picker = Assert.Single(renderer.Components<ResourcePicker>());
+            string[] selected = picker.SelectedIds.Order().ToArray();
+            int callbacks = selections.Count;
+            FluentDataGridRow<InstanceTableRec> header = renderer.Components<FluentDataGridRow<InstanceTableRec>>()
+                .Single(row => row.RowType == DataGridRowType.Header);
+            Assert.Null(header.Item);
+            // The real sortable button click bubbles through the real header row's onclick.
+            await renderer.ClickAsync(header, "fluent-button", "title", "Id");
+            string[] firstOrder = renderer.Components<FluentDataGridRow<InstanceTableRec>>()
+                .Where(row => row.Item is not null).Select(row => row.Item!.Id).ToArray();
+            Assert.Equal(selected, picker.SelectedIds.Order().ToArray());
+            Assert.Equal(callbacks, selections.Count);
+            Assert.NotEmpty(picker.SelectedIds); // The Login consumer's selected-ID availability is retained.
+            await renderer.ClickAsync(header, "fluent-button", "title", "Id");
+            string[] secondOrder = renderer.Components<FluentDataGridRow<InstanceTableRec>>()
+                .Where(row => row.Item is not null).Select(row => row.Item!.Id).ToArray();
+            Assert.Equal(firstOrder.Reverse(), secondOrder);
+            Assert.Equal(selected, picker.SelectedIds.Order().ToArray());
+            Assert.Equal(callbacks, selections.Count);
+        }
     }
 
     /// <summary>The actual typed select updates both key family and algorithm, and errors reach MESSAGES_TOP.</summary>
@@ -311,6 +405,15 @@ public class FluentUiIntegrationTests
         builder.AddAttribute(1, nameof(MainLayout.Body), body);
         builder.CloseComponent();
     };
+
+    private static async Task<(NavMenu Menu, Task Closed)> OpenDrawerAsync(ManagedRenderer renderer)
+    {
+        await renderer.MountAsync<CandleUiRoot>(new() { [nameof(CandleUiRoot.ChildContent)] = LayoutContent() });
+        FluentButton navigation = renderer.Components<FluentButton>().Single(button => button.Title == "Navigation");
+        Task closed = renderer.Dispatcher.InvokeAsync(() => navigation.OnClick.InvokeAsync(new MouseEventArgs()));
+        await EventuallyAsync(renderer, () => renderer.Components<NavMenu>().Any());
+        return (Assert.Single(renderer.Components<NavMenu>()), closed);
+    }
 
     private static ServiceProvider Services(RecordingJs js)
     {
@@ -390,6 +493,117 @@ public class FluentUiIntegrationTests
             Assert.Contains(Frames(), frame => frame.FrameType == RenderTreeFrameType.Element && frame.ElementName == "svg");
             Assert.Contains(Frames(), frame => frame.FrameType == RenderTreeFrameType.Markup &&
                 frame.MarkupContent.Contains("<path", StringComparison.Ordinal));
+        }
+
+        public Task ClickAsync(IComponent component, string name, string? attribute = null, string? value = null) =>
+            Dispatcher.InvokeAsync(async () =>
+            {
+                Element target = Assert.Single(Elements(component), element => element.Name == name &&
+                    (attribute is null || Equals(element.Attributes.GetValueOrDefault(attribute), value)));
+                // Snapshot the actual rendered ancestry; Renderer dispatches handlers, not DOM bubbling.
+                for (Element? element = target; element is not null; element = element.Parent)
+                {
+                    if (element.ClickHandler != 0)
+                    {
+                        await DispatchEventAsync(element.ClickHandler, null, new MouseEventArgs());
+                        ThrowErrors();
+                    }
+                    if (Equals(element.Attributes.GetValueOrDefault("__internal_stopPropagation_onclick"), true))
+                    {
+                        break;
+                    }
+                }
+            });
+
+        public void AssertDefaultAnchor(FluentNavItem item, string href)
+        {
+            Element anchor = Assert.Single(Elements(item), element => element.Name == "a");
+            Assert.Equal(href, anchor.Attributes["href"]);
+            Assert.NotEqual(0UL, anchor.ClickHandler);
+            Assert.NotEqual(true, anchor.Attributes.GetValueOrDefault("__internal_preventDefault_onclick"));
+        }
+
+        public void AssertLinkIcon(FluentNavItem item, string href)
+        {
+            Element anchor = Assert.Single(Elements(item), element =>
+                element.Name == "a" && Equals(element.Attributes.GetValueOrDefault("href"), href));
+            Assert.Contains(anchor.Descendants(), element => element.Name == "svg");
+            Assert.Contains(anchor.Descendants(), element => element.Text.Contains("<path", StringComparison.Ordinal));
+        }
+
+        public void AssertDrawerPresentation(NavMenu menu)
+        {
+            Assert.Single(Components<FluentDialogBody>());
+            Element body = Assert.Single(Elements(menu), element => element.Name == "fluent-drawer-body");
+            Element title = Assert.Single(body.Descendants(), element =>
+                Equals(element.Attributes.GetValueOrDefault("slot"), "title"));
+            Assert.Equal("FHIR Candle", string.Concat(title.Descendants().Prepend(title).Select(element => element.Text)));
+            Element footer = Assert.Single(body.Descendants(), element =>
+                Equals(element.Attributes.GetValueOrDefault("slot"), "footer"));
+            Assert.Contains(menu.GetType().Assembly.GetName().Version!.ToString(),
+                string.Concat(footer.Descendants().Prepend(footer).Select(element => element.Text)));
+            Assert.DoesNotContain(footer.Descendants(), element => element.Name == "button");
+        }
+
+        private IEnumerable<Element> Elements(IComponent component)
+        {
+            int id = ReferenceEquals(component, _root) ? _rootId : Frames()
+                .Single(frame => frame.FrameType == RenderTreeFrameType.Component && ReferenceEquals(frame.Component, component))
+                .ComponentId;
+            Element root = new(string.Empty, null);
+            ReadComponent(id, root);
+            return root.Descendants();
+        }
+
+        private void ReadComponent(int id, Element parent)
+        {
+            ArrayRange<RenderTreeFrame> frames = GetCurrentRenderTreeFrames(id);
+            ReadFrames(frames.Array, 0, frames.Count, parent);
+        }
+
+        private void ReadFrames(RenderTreeFrame[] frames, int start, int end, Element parent)
+        {
+            for (int index = start; index < end; index++)
+            {
+                RenderTreeFrame frame = frames[index];
+                switch (frame.FrameType)
+                {
+                    case RenderTreeFrameType.Element:
+                        Element element = new(frame.ElementName, parent);
+                        parent.Children.Add(element);
+                        ReadFrames(frames, index + 1, index + frame.ElementSubtreeLength, element);
+                        index += frame.ElementSubtreeLength - 1;
+                        break;
+                    case RenderTreeFrameType.Component:
+                        ReadComponent(frame.ComponentId, parent);
+                        index += frame.ComponentSubtreeLength - 1;
+                        break;
+                    case RenderTreeFrameType.Attribute:
+                        parent.Attributes[frame.AttributeName] = frame.AttributeValue;
+                        if (frame.AttributeName == "onclick")
+                        {
+                            parent.ClickHandler = frame.AttributeEventHandlerId;
+                        }
+                        break;
+                    case RenderTreeFrameType.Text:
+                        parent.Text += frame.TextContent;
+                        break;
+                    case RenderTreeFrameType.Markup:
+                        parent.Text += frame.MarkupContent;
+                        break;
+                }
+            }
+        }
+
+        private sealed class Element(string name, Element? parent)
+        {
+            public string Name { get; } = name;
+            public Element? Parent { get; } = parent;
+            public Dictionary<string, object?> Attributes { get; } = [];
+            public List<Element> Children { get; } = [];
+            public ulong ClickHandler { get; set; }
+            public string Text { get; set; } = string.Empty;
+            public IEnumerable<Element> Descendants() => Children.SelectMany(child => child.Descendants().Prepend(child));
         }
 
         public string RenderedText() => string.Concat(Frames().Select(frame => frame.FrameType switch
@@ -511,7 +725,12 @@ public class FluentUiIntegrationTests
     private sealed class TestNavigation : NavigationManager
     {
         public TestNavigation() => Initialize("http://localhost/", "http://localhost/");
-        protected override void NavigateToCore(string uri, bool forceLoad) => Uri = ToAbsoluteUri(uri).ToString();
+        public int NavigateCalls { get; private set; }
+        protected override void NavigateToCore(string uri, bool forceLoad)
+        {
+            NavigateCalls++;
+            Uri = ToAbsoluteUri(uri).ToString();
+        }
     }
 
     private sealed class TestStores : Dictionary<string, IFhirStore>, IFhirStoreManager

@@ -21,6 +21,15 @@ dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
 
 Prefer running single tests over the full suite for performance. Tests use xUnit with `FullyQualifiedName` filter expressions.
 
+The separate theme-adapter check requires Node.js 24 or later (locally
+verified with 24.22.1), with no npm install. It executes the actual script
+with isolated browser-boundary doubles, not a browser. Ordinary .NET tests
+do not require Node:
+
+```powershell
+node --test .github\scripts\tests\candle-theme.test.cjs
+```
+
 ## Architecture
 
 ### Shared Project Pattern (Key Design)

@@ -228,27 +228,26 @@
 
     private void HandleRowFocus(FluentDataGridRow<InstanceTableRec> row)
     {
+        if (row?.Item is null || row.RowType != DataGridRowType.Default)
+        {
+            return;
+        }
+
         if (AllowMultipleSelection)
         {
-            if (row?.Item is not null)
+            if (SelectedIds.Contains(row.Item.Id))
             {
-                if (SelectedIds.Contains(row.Item.Id))
-                {
-                    SelectedIds.Remove(row.Item.Id);
-                }
-                else
-                {
-                    SelectedIds.Add(row.Item.Id);
-                }
+                SelectedIds.Remove(row.Item.Id);
+            }
+            else
+            {
+                SelectedIds.Add(row.Item.Id);
             }
         }
         else
         {
             SelectedIds.Clear();
-            if (row?.Item is not null)
-            {
-                SelectedIds.Add(row.Item.Id);
-            }
+            SelectedIds.Add(row.Item.Id);
         }
 
         SelectedIdsChanged.InvokeAsync(SelectedIds);

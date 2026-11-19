@@ -100,6 +100,18 @@ dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Relea
 dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
 ```
 
+### Theme adapter JavaScript
+
+The separate, dependency-free adapter check requires Node.js 24 or later
+(locally verified with 24.22.1). It executes the actual script under Node's
+built-in test runner with isolated browser-boundary doubles, not a browser:
+
+```powershell
+node --test .github\scripts\tests\candle-theme.test.cjs
+```
+
+No npm install is needed. Ordinary .NET tests do not require Node.
+
 **Prefer the smallest command that covers the change.** Combine related
 filters in one runner invocation and escalate only when focused results
 require it. The normal build restores packages; the test commands above
