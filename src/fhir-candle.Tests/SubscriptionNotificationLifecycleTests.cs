@@ -7,6 +7,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Reflection;
+using System.Text;
 using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
@@ -771,6 +772,214 @@ public sealed class SubscriptionNotificationLifecycleTests
     }
 
     [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task CompletionDiagnosticsDoNotHoldLifecycleLock(FhirReleases.FhirSequenceCodes version)
+    {
+        const string Payload = "{\"diagnostic\":\"accepted payload\"}\nsecond line";
+        const string Error = "accepted diagnostic error\nsecond line";
+        foreach (string entry in new[] { "delivered", "failed", "execution-error", "public-error" })
+        {
+            using LifecycleTestStore fixture = new(version);
+            fixture.Seed();
+            fixture.Match("diagnostic-event");
+            SubscriptionSendEventArgs args = Assert.Single(fixture.Sent);
+            ParsedSubscription subscription = args.Subscription;
+            Dictionary<long, SubscriptionEvent> history = subscription.GeneratedEvents;
+            object lifecycle = fixture.Field("SubscriptionLifecycleLock");
+            long priorCommunication = LifecycleTestStore.Now.AddMinutes(-2).UtcTicks;
+            lock (lifecycle)
+            {
+                subscription.LastCommunicationTicks = priorCommunication;
+            }
+            bool delivered = entry == "delivered";
+            string expectedLine = delivered
+                ? $"Sending content for event: Subscription/{LifecycleTestStore.Id}:1: \n-----\n{Payload}\n-----"
+                : $" <<< Subscription/{LifecycleTestStore.Id}: {Error}";
+            using ManualResetEventSlim reached = new();
+            using ManualResetEventSlim release = new();
+            using DiagnosticWriter writer = new(line =>
+            {
+                AssertDiagnosticOutsideLocks(fixture, history);
+                Assert.Equal(expectedLine, line);
+                reached.Set();
+                Assert.True(release.Wait(TimeSpan.FromSeconds(10)));
+            });
+            SetDiagnosticWriter(fixture, writer);
+            Task worker = Task.Run(async () =>
+            {
+                if (entry is "delivered" or "failed")
+                {
+                    Outcome expected = delivered ? new(OutcomeKind.Delivered, Payload) : new(OutcomeKind.Failed, Error: Error);
+                    Assert.True(fixture.Store.TryDispatchSubscriptionNotification(args, () => Task.FromResult(expected),
+                        out Task<Outcome> completion));
+                    Assert.Equal(expected, await completion);
+                }
+                else if (entry == "execution-error")
+                {
+                    RegisterExecutionError(fixture, args.Revision, Error);
+                }
+                else
+                {
+                    RegisterIdOnlyError(fixture, LifecycleTestStore.Id, Error);
+                }
+            });
+            Task? off = null;
+            void AssertAcceptedBookkeeping()
+            {
+                lock (lifecycle)
+                {
+                    Assert.Equal(delivered ? LifecycleTestStore.Now.UtcTicks : priorCommunication, subscription.LastCommunicationTicks);
+                    if (delivered)
+                    {
+                        KeyValuePair<long, string> record = Assert.Single(subscription.SerializedEvents);
+                        Assert.Equal(1, record.Key);
+                        Assert.Equal(Payload, record.Value);
+                        Assert.Empty(subscription.NotificationErrors);
+                    }
+                    else
+                    {
+                        Assert.Empty(subscription.SerializedEvents);
+                        Assert.Equal(Error, Assert.Single(subscription.NotificationErrors));
+                    }
+                    Assert.Same(history, subscription.GeneratedEvents);
+                    lock (history)
+                    {
+                        Assert.Equal(1, Assert.Single(history).Key);
+                        Assert.Equal(1, subscription.CurrentEventCount);
+                    }
+                }
+            }
+            try
+            {
+                Assert.True(reached.Wait(TimeSpan.FromSeconds(10)));
+                Assert.False(worker.IsCompleted);
+                Assert.Equal(expectedLine, Assert.Single(writer.Lines));
+                AssertAcceptedBookkeeping();
+                off = Task.Run(() => fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "off"));
+                await off.WaitAsync(TimeSpan.FromSeconds(10));
+                // Output is still held: the transition and all normalized views must already agree.
+                Assert.False(release.IsSet);
+                Assert.False(worker.IsCompleted);
+                fixture.AssertViews("off");
+                Assert.NotEqual(args.Revision, subscription.Revision);
+                AssertAcceptedBookkeeping();
+            }
+            finally
+            {
+                release.Set();
+                await Task.WhenAll(off is null ? [worker] : [worker, off]).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            Assert.Equal(expectedLine, Assert.Single(writer.Lines));
+            AssertAcceptedBookkeeping();
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task StaleDiagnosticsDoNotRecordOrWrite(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string change in new[] { "cycle", "replace" })
+        {
+            foreach (bool failed in new[] { false, true })
+            {
+                using LifecycleTestStore fixture = new(version);
+                fixture.Seed();
+                SubscriptionSendEventArgs args = fixture.Args();
+                ParsedSubscription prior = args.Subscription;
+                Dictionary<long, SubscriptionEvent> history = prior.GeneratedEvents;
+                using DiagnosticWriter writer = new(_ => AssertDiagnosticOutsideLocks(fixture, history));
+                SetDiagnosticWriter(fixture, writer);
+                TaskCompletionSource<Outcome> transport = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                Assert.True(fixture.Store.TryDispatchSubscriptionNotification(args, () => transport.Task, out Task<Outcome> completion));
+                Outcome completed;
+                try
+                {
+                    Assert.False(completion.IsCompleted);
+                    if (change == "cycle")
+                    {
+                        fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "off");
+                        fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "active");
+                    }
+                    else
+                    {
+                        fixture.PutSubscription();
+                    }
+                    RegisterExecutionError(fixture, args.Revision, "stale execution diagnostic");
+                }
+                finally
+                {
+                    transport.TrySetResult(failed
+                        ? new(OutcomeKind.Failed, "stale failed payload", "stale completion error")
+                        : new(OutcomeKind.Delivered, "stale delivered payload"));
+                    completed = await completion.WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                Assert.Equal(OutcomeKind.Suppressed, completed.Kind);
+                Assert.Empty(writer.Lines);
+                lock (fixture.Field("SubscriptionLifecycleLock"))
+                {
+                    ParsedSubscription current = fixture.Subscription;
+                    Assert.NotEqual(args.Revision, current.Revision);
+                    Assert.Equal("active", current.CurrentStatus);
+                    foreach (ParsedSubscription subscription in new[] { prior, current })
+                    {
+                        Assert.Equal(0, subscription.LastCommunicationTicks);
+                        Assert.Empty(subscription.SerializedEvents);
+                        Assert.Empty(subscription.NotificationErrors);
+                    }
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ErrorDiagnosticsPreserveEntryPointContracts(FhirReleases.FhirSequenceCodes version)
+    {
+        foreach (string state in new[] { "off", "requested", "expired", "replaced" })
+        {
+            using LifecycleTestStore fixture = new(version);
+            fixture.Seed(state is "expired" or "replaced" ? "active" : state);
+            ParsedSubscription prior = fixture.Subscription;
+            long revision = prior.Revision;
+            if (state == "expired")
+            {
+                fixture.Clock.Advance(TimeSpan.FromMinutes(31));
+            }
+            else if (state == "replaced")
+            {
+                fixture.PutSubscription();
+            }
+            using DiagnosticWriter writer = new(_ => AssertDiagnosticOutsideLocks(fixture, prior.GeneratedEvents));
+            SetDiagnosticWriter(fixture, writer);
+            RegisterExecutionError(fixture, revision, "ineligible execution diagnostic");
+            Assert.Empty(writer.Lines);
+            Assert.Empty(prior.NotificationErrors);
+            ParsedSubscription current = fixture.Subscription;
+            Assert.Equal(state == "replaced" ? "active" : state == "expired" ? "off" : state, current.CurrentStatus);
+            long currentRevision = current.Revision;
+            long deadline = current.ExpirationTicks;
+            RegisterIdOnlyError(fixture, "missing-subscription", "unknown id diagnostic");
+            Assert.Empty(writer.Lines);
+            // This public API intentionally records by current id, even when inactive or replaced.
+            RegisterIdOnlyError(fixture, LifecycleTestStore.Id, "current id-only diagnostic");
+            Assert.Equal($" <<< Subscription/{LifecycleTestStore.Id}: current id-only diagnostic", Assert.Single(writer.Lines));
+            lock (fixture.Field("SubscriptionLifecycleLock"))
+            {
+                Assert.Equal("current id-only diagnostic", Assert.Single(current.NotificationErrors));
+                Assert.Empty(current.SerializedEvents);
+                Assert.Equal(0, current.LastCommunicationTicks);
+                Assert.Equal(currentRevision, current.Revision);
+                Assert.Equal(deadline, current.ExpirationTicks);
+                if (state == "replaced")
+                {
+                    Assert.NotSame(prior, current);
+                    Assert.Empty(prior.NotificationErrors);
+                }
+            }
+        }
+    }
+
+    [Theory]
     [MemberData(nameof(Managers))]
     public async Task ManagerStopPreservesInFlightDrainAndTimerOwnership(FhirReleases.FhirSequenceCodes version, bool restOnly)
     {
@@ -819,6 +1028,45 @@ public sealed class SubscriptionNotificationLifecycleTests
         fixture.Handler.StartOperation = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
         using HttpResponseMessage probe = await fixture.Client.GetAsync("https://ownership.unit.test");
         Assert.Equal(HttpStatusCode.NoContent, probe.StatusCode);
+    }
+
+    private static void SetDiagnosticWriter(LifecycleTestStore fixture, TextWriter writer) => fixture.Store.GetType()
+        .GetField("_subscriptionDiagnosticWriter", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .SetValue(fixture.Store, new Action<string>(writer.WriteLine));
+
+    private static void RegisterExecutionError(LifecycleTestStore fixture, long revision, string error) => fixture.Store.GetType()
+        .GetMethod("RegisterSubscriptionExecutionError", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .Invoke(fixture.Store, [LifecycleTestStore.Id, revision, error]);
+
+    private static void RegisterIdOnlyError(LifecycleTestStore fixture, string id, string error) => fixture.Store.GetType()
+        .GetMethod("RegisterError", BindingFlags.Instance | BindingFlags.Public)!
+        .Invoke(fixture.Store, [id, error]);
+
+    private static void AssertDiagnosticOutsideLocks(LifecycleTestStore fixture, Dictionary<long, SubscriptionEvent> history)
+    {
+        fixture.AssertOutsideLocks();
+        Assert.False(Monitor.IsEntered(history));
+        foreach (IResourceStore resourceStore in fixture.Store.Values)
+        {
+            object mutation = resourceStore.GetType().GetField("_lockObject", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(resourceStore)!;
+            Assert.False(mutation is System.Threading.Lock resourceLock ? resourceLock.IsHeldByCurrentThread : Monitor.IsEntered(mutation));
+            object registration = resourceStore.GetType().GetField("_subscriptionRegistrationLock", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(resourceStore)!;
+            Assert.False(Monitor.IsEntered(registration));
+        }
+    }
+
+    private sealed class DiagnosticWriter : TextWriter
+    {
+        private readonly Action<string> _onWriteLine;
+        internal ConcurrentQueue<string> Lines { get; } = new();
+        public override Encoding Encoding => Encoding.UTF8;
+        internal DiagnosticWriter(Action<string> onWriteLine) => _onWriteLine = onWriteLine;
+        public override void WriteLine(string? value)
+        {
+            string line = Assert.IsType<string>(value);
+            Lines.Enqueue(line);
+            _onWriteLine(line);
+        }
     }
 
     private sealed class NotificationFixture : IDisposable

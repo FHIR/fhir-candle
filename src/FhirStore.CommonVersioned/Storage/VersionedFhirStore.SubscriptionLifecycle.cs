@@ -20,6 +20,19 @@ public partial class VersionedFhirStore
     private bool _lifecycleStopped;
     private readonly TaskCompletionSource _subscriptionTimerDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static readonly TimeSpan _maximumTimerWait = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+    private Action<string> _subscriptionDiagnosticWriter = Console.WriteLine;
+
+    private static string RecordSubscriptionSendLocked(ParsedSubscription subscription, long eventNumber, string content)
+    {
+        subscription.SerializedEvents[eventNumber] = content;
+        return $"Sending content for event: Subscription/{subscription.Id}:{eventNumber}: \n-----\n{content}\n-----";
+    }
+
+    private static string RecordSubscriptionErrorLocked(ParsedSubscription subscription, string error)
+    {
+        subscription.NotificationErrors.Add(error);
+        return $" <<< Subscription/{subscription.Id}: {error}";
+    }
 
     private long NextSubscriptionRevisionLocked() => checked(++_subscriptionRevision);
 
@@ -292,6 +305,7 @@ public partial class VersionedFhirStore
     internal void RegisterSubscriptionExecutionError(string id, long revision, string error)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        string? diagnostic = null;
         lock (SubscriptionLifecycleLock)
         {
             if (!_lifecycleStopped && _subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
@@ -301,11 +315,15 @@ public partial class VersionedFhirStore
                 if (subscription.Revision == revision &&
                     SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now))
                 {
-                    subscription.RegisterError(error);
+                    diagnostic = RecordSubscriptionErrorLocked(subscription, error);
                 }
             }
         }
         PublishSubscriptionChanges(changes);
+        if (diagnostic is not null)
+        {
+            _subscriptionDiagnosticWriter(diagnostic);
+        }
     }
 
     private bool CanDispatchLocked(SubscriptionSendEventArgs args, List<SubscriptionChangedEventArgs> changes)
@@ -370,6 +388,7 @@ public partial class VersionedFhirStore
         }
 
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
         {
             if (!CanDispatchLocked(args, changes))
@@ -385,15 +404,19 @@ public partial class VersionedFhirStore
                 if (outcome.SerializedContent is not null)
                 {
                     long number = args.NotificationEvents.Select(subscriptionEvent => subscriptionEvent.EventNumber).DefaultIfEmpty(0).Max();
-                    args.Subscription.RegisterSerializedSend(number, outcome.SerializedContent);
+                    diagnostics.Add(RecordSubscriptionSendLocked(args.Subscription, number, outcome.SerializedContent));
                 }
                 if (outcome.Kind == SubscriptionNotificationOutcome.OutcomeKind.Failed && !string.IsNullOrEmpty(outcome.Error))
                 {
-                    args.Subscription.RegisterError(outcome.Error);
+                    diagnostics.Add(RecordSubscriptionErrorLocked(args.Subscription, outcome.Error));
                 }
             }
         }
         PublishSubscriptionChanges(changes);
+        foreach (string diagnostic in diagnostics)
+        {
+            _subscriptionDiagnosticWriter(diagnostic);
+        }
         return outcome;
     }
 

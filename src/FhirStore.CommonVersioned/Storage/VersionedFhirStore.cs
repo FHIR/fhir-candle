@@ -3227,12 +3227,17 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="errorMessage">Message describing the error.</param>
     public void RegisterError(string id, string errorMessage)
     {
+        string? diagnostic = null;
         lock (SubscriptionLifecycleLock)
         {
             if (!_lifecycleStopped && _subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
             {
-                subscription.RegisterError(errorMessage);
+                diagnostic = RecordSubscriptionErrorLocked(subscription, errorMessage);
             }
+        }
+        if (diagnostic is not null)
+        {
+            _subscriptionDiagnosticWriter(diagnostic);
         }
     }
 
