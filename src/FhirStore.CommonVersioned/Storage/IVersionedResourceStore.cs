@@ -22,6 +22,9 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>The requested resource or null.</returns>
     Hl7.Fhir.Model.Resource? InstanceRead(string id);
 
+    /// <summary>Reads raw Subscription state only while the owning store holds lifecycle protection.</summary>
+    Subscription? ReadRawSubscription(string id);
+
     /// <summary>Gets by canonical.</summary>
     /// <param name="url">URL of the resource.</param>
     /// <returns>The by canonical.</returns>
@@ -158,7 +161,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <param name="topicUrl">URL of the topic.</param>
     /// <param name="id">      The subscription id.</param>
     /// <param name="filters"> The filters.</param>
-    void SetExecutableSubscription(string topicUrl, string id, List<ParsedSearchParameter> filters);
+    void SetExecutableSubscription(string topicUrl, string id, long revision, List<ParsedSearchParameter> filters);
 
     /// <summary>Removes the executable subscription.</summary>
     /// <param name="topicUrl">URL of the topic.</param>

@@ -94,6 +94,10 @@ public class TenantConfiguration
     /// <summary>
     /// Gets or sets the maximum allowed subscription expiration minutes.
     /// </summary>
+    /// <remarks>
+    /// A positive value caps accepted subscriptions at the earlier explicit UTC end or acceptance
+    /// time plus this lifetime. Zero removes only the cap; negative values are rejected.
+    /// </remarks>
     public int MaxSubscriptionExpirationMinutes { get; set; } = 30;
 
     /// <summary>

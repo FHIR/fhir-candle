@@ -253,6 +253,26 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     void ChangeSubscriptionStatus(string id, string status);
 
     /// <summary>
+    /// Admits current revision-bound delivery and starts its transport synchronously under lifecycle
+    /// protection. The bounded starter must invoke the actual operation without preparation awaits,
+    /// queue hops, store/manager re-entry, or callbacks. Await the returned task outside all locks.
+    /// Completion bookkeeping is fenced to the same eligible revision; stale work is suppressed.
+    /// </summary>
+    /// <param name="args">Work with an identity and revision captured by value.</param>
+    /// <param name="startTransport">The bounded synchronous transport starter.</param>
+    /// <param name="deliveryTask">The observed, lifecycle-fenced completion task.</param>
+    /// <returns>Whether the starter was invoked.</returns>
+    bool TryDispatchSubscriptionNotification(
+        SubscriptionSendEventArgs args,
+        Func<Task<SubscriptionNotificationOutcome>> startTransport,
+        out Task<SubscriptionNotificationOutcome> deliveryTask);
+
+    /// <summary>Activates only the original, still-current and unexpired requested handshake.</summary>
+    /// <param name="args">The successfully delivered handshake's captured identity/revision.</param>
+    /// <returns>Whether the requested lifecycle was activated.</returns>
+    bool TryCompleteSubscriptionHandshake(SubscriptionSendEventArgs args);
+
+    /// <summary>
     /// Registers a new compartment definition in the FHIR store.
     /// </summary>
     /// <param name="compartmentDefinition">The compartment definition to register.</param>

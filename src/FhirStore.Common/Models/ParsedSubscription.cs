@@ -111,12 +111,18 @@ public class ParsedSubscription
     /// <summary>Gets or sets the current status of the subscription.</summary>
     public string CurrentStatus { get; set; } = "active";
 
+    /// <summary>Gets or sets the tenant-local store-issued lifecycle revision.</summary>
+    public long Revision { get; set; }
+
     public string Reason { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the system tick (time) when the last communication was sent.</summary>
+    /// <summary>Gets or sets the UTC instant ticks of the last successful transport delivery.</summary>
     public long LastCommunicationTicks { get; set; } = 0;
 
-    /// <summary>Gets or sets the expiration ticks.</summary>
+    /// <summary>
+    /// Gets or sets the absolute UTC deadline ticks. Only
+    /// <see cref="SubscriptionLifecyclePolicy.UnlimitedExpirationTicks"/> means unlimited; zero is finite.
+    /// </summary>
     public required long ExpirationTicks { get; set; }
 
     /// <summary>Gets the number of current events.</summary>

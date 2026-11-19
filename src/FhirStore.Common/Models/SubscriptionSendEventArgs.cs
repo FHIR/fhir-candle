@@ -14,6 +14,9 @@ public class SubscriptionSendEventArgs : EventArgs
     /// <summary>Gets the parsed subscription.</summary>
     public required ParsedSubscription Subscription { get; init; }
 
+    /// <summary>Gets the lifecycle revision captured when this work was published.</summary>
+    public long Revision { get; init; }
+
     /// <summary>Gets or initializes the notification events.</summary>
     public IEnumerable<SubscriptionEvent> NotificationEvents { get; init; } = Array.Empty<SubscriptionEvent>();
 

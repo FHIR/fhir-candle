@@ -3,6 +3,8 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+extern alias candleR4;
+
 using System.CommandLine;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -232,19 +234,26 @@ public sealed class MailKitCompatibilityTests
         NotificationHost host,
         ParsedSubscription.NotificationTypeCodes notificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
         string contentType = "",
-        params long[] eventNumbers) => new()
+        params long[] eventNumbers)
+    {
+        ParsedSubscription subscription = new()
+        {
+            Id = "mailkit-sub",
+            TopicUrl = "http://unit.test/SubscriptionTopic/mailkit",
+            ExpirationTicks = DateTime.MaxValue.Ticks,
+            CurrentStatus = notificationType == ParsedSubscription.NotificationTypeCodes.Handshake ? "requested" : "active",
+            ChannelCode = "email",
+            Endpoint = "recipient@unit.test",
+            ContentType = contentType,
+            LastCommunicationTicks = CommunicationSentinel,
+        };
+        ((candleR4::FhirCandle.Storage.VersionedFhirStore)host.Store).StoreProcessSubscription(subscription);
+        Assert.Same(subscription, Assert.Single(host.Store.CurrentSubscriptions));
+        return new()
         {
             Tenant = host.Store.Config,
-            Subscription = new()
-            {
-                Id = "mailkit-sub",
-                TopicUrl = "http://unit.test/SubscriptionTopic/mailkit",
-                ExpirationTicks = DateTime.MaxValue.Ticks,
-                ChannelCode = "email",
-                Endpoint = "recipient@unit.test",
-                ContentType = contentType,
-                LastCommunicationTicks = CommunicationSentinel,
-            },
+            Subscription = subscription,
+            Revision = subscription.Revision,
             NotificationType = notificationType,
             NotificationEvents = eventNumbers.Select(number => new SubscriptionEvent
             {
@@ -254,6 +263,7 @@ public sealed class MailKitCompatibilityTests
                 Focus = new object(),
             }).ToArray(),
         };
+    }
 
     private static void AssertNoCommunication(NotificationHost host, SubscriptionSendEventArgs args)
     {
@@ -301,11 +311,11 @@ public sealed class MailKitCompatibilityTests
     private static async Task<bool> NotifyAsync(
         NotificationHost host, SubscriptionSendEventArgs args, CancellationToken cancellationToken = default)
     {
-        MethodInfo method = ResolveMethod("TryNotifyEmail", typeof(Task<bool>),
+        MethodInfo method = ResolveMethod("TryNotifyEmail", typeof(Task<SubscriptionNotificationOutcome>),
             typeof(IFhirStore), typeof(SubscriptionSendEventArgs), typeof(string), typeof(CancellationToken));
-        Task<bool> delivery = Assert.IsAssignableFrom<Task<bool>>(
+        Task<SubscriptionNotificationOutcome> delivery = Assert.IsAssignableFrom<Task<SubscriptionNotificationOutcome>>(
             Invoke(method, host.Service, host.Store, args, JsonPayload, cancellationToken));
-        return await delivery;
+        return (await delivery).Succeeded;
     }
 
     private sealed class NotificationHost : IDisposable

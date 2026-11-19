@@ -21,7 +21,8 @@ public class SubscriptionConverter
     public static string PayloadContentVsUrl = "http://hl7.org/fhir/ValueSet/subscription-payload-content";
 
     /// <summary>(Immutable) The maximum subscription ticks.</summary>
-    private readonly long _maxSubscriptionTicks;
+    private readonly int _maximumExpirationMinutes;
+    private readonly TimeProvider _clock;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubscriptionConverter"/> class.
@@ -29,8 +30,43 @@ public class SubscriptionConverter
     /// <param name="MaxSubscriptionExpirationMinutes">The maximum subscription expiration in
     ///  minutes.</param>
     public SubscriptionConverter(int MaxSubscriptionExpirationMinutes)
+        : this(MaxSubscriptionExpirationMinutes, TimeProvider.System)
     {
-        _maxSubscriptionTicks = TimeSpan.FromMinutes(MaxSubscriptionExpirationMinutes).Ticks;
+    }
+
+    /// <summary>Creates a tenant-owned converter using an explicit UTC clock.</summary>
+    /// <param name="maximumExpirationMinutes">The nonnegative cap; zero removes only the cap.</param>
+    /// <param name="clock">The tenant's clock.</param>
+    public SubscriptionConverter(int maximumExpirationMinutes, TimeProvider clock)
+    {
+        SubscriptionLifecyclePolicy.ValidateMaximumExpirationMinutes(maximumExpirationMinutes);
+        _maximumExpirationMinutes = maximumExpirationMinutes;
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+    }
+
+    /// <summary>Tests a native status literal before either representation is mutated.</summary>
+    /// <param name="literal">The case-sensitive FHIR status literal.</param>
+    /// <returns>Whether the SDK supports the literal.</returns>
+    public bool IsValidStatus(string literal) =>
+        Hl7.Fhir.Utility.EnumUtility.ParseLiteral<SubscriptionStatusCodes>(literal) is not null;
+
+    /// <summary>Calculates the effective deadline at the accepted resource commit instant.</summary>
+    /// <param name="subscription">The accepted native resource, retaining its original End.</param>
+    /// <param name="utcNow">The commit-time UTC instant.</param>
+    /// <returns>The effective UTC deadline ticks, or the unlimited sentinel.</returns>
+    public long ExpirationFor(Subscription subscription, DateTimeOffset utcNow) =>
+        SubscriptionLifecyclePolicy.CalculateExpirationTicks(utcNow, _maximumExpirationMinutes, subscription.End);
+
+    private static bool HasValidStatus(Subscription subscription)
+    {
+        try
+        {
+            return subscription.Status is not null && Enum.IsDefined(subscription.Status.Value);
+        }
+        catch (Hl7.Fhir.Validation.CodedValidationException)
+        {
+            return false;
+        }
     }
     public void UpdateResourceStatus(object subscription, string statusLiteral)
     {
@@ -58,6 +94,7 @@ public class SubscriptionConverter
         if ((subscription is null) ||
             (subscription is not Hl7.Fhir.Model.Subscription sub) ||
             string.IsNullOrEmpty(sub.Id) ||
+            !HasValidStatus(sub) ||
             string.IsNullOrEmpty(sub.Topic) ||
             (!sub.Topic.StartsWith("http", StringComparison.Ordinal)))
         {
@@ -65,12 +102,7 @@ public class SubscriptionConverter
             return false;
         }
 
-        long expirationTicks = sub.End?.Ticks ?? _maxSubscriptionTicks;
-
-        if (expirationTicks > _maxSubscriptionTicks)
-        {
-            expirationTicks = _maxSubscriptionTicks;
-        }
+        long expirationTicks = ExpirationFor(sub, _clock.GetUtcNow());
 
         HashSet<string> tags = (sub.Meta?.Tag?.Any() ?? false)
             ? tags = new(sub.Meta.Tag.Select(t => $"{t.System}|{t.Code}"))
@@ -93,6 +125,7 @@ public class SubscriptionConverter
                 : string.Empty,
             MaxEventsPerNotification = sub.MaxCount ?? 0,
             ExpirationTicks = expirationTicks,
+            CurrentStatus = Hl7.Fhir.Utility.EnumUtility.GetLiteral(sub.Status)!,
         };
 
         // add parameters
@@ -144,7 +177,9 @@ public class SubscriptionConverter
     {
         if ((common is null) ||
             string.IsNullOrEmpty(common.Id) ||
-            string.IsNullOrEmpty(common.TopicUrl))
+            string.IsNullOrEmpty(common.TopicUrl) ||
+            !SubscriptionLifecyclePolicy.IsValidExpirationTicks(common.ExpirationTicks) ||
+            !IsValidStatus(common.CurrentStatus))
         {
             subscription = null!;
             return false;
@@ -158,7 +193,8 @@ public class SubscriptionConverter
         }
         catch (Exception)
         {
-            status = SubscriptionStatusCodes.Requested;
+            subscription = null!;
+            return false;
         }
 
         subscription = new()
@@ -174,7 +210,7 @@ public class SubscriptionConverter
             ContentType = common.ContentType,
             Content = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<Subscription.SubscriptionPayloadContent>(common.ContentLevel),
             MaxCount = common.MaxEventsPerNotification,
-            End = new DateTimeOffset(common.ExpirationTicks, TimeSpan.Zero),
+            End = SubscriptionLifecyclePolicy.GetExpiration(common.ExpirationTicks),
         };
 
         // add tags
@@ -317,10 +353,7 @@ public class SubscriptionConverter
         string notificationType,
         string baseUrl)
     {
-        if (!Enum.TryParse(subscription.CurrentStatus, out SubscriptionStatusCodes statusCode))
-        {
-            statusCode = SubscriptionStatusCodes.Active;
-        }
+        SubscriptionStatusCodes? statusCode = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<SubscriptionStatusCodes>(subscription.CurrentStatus);
 
         return new Hl7.Fhir.Model.SubscriptionStatus()
         {
@@ -366,10 +399,7 @@ public class SubscriptionConverter
             Entry = new(),
         };
 
-        if (!Enum.TryParse(subscription.CurrentStatus, out SubscriptionStatusCodes statusCode))
-        {
-            statusCode = SubscriptionStatusCodes.Active;
-        }
+        SubscriptionStatusCodes? statusCode = Hl7.Fhir.Utility.EnumUtility.ParseLiteral<SubscriptionStatusCodes>(subscription.CurrentStatus);
 
         // create our status resource
         SubscriptionStatus status = (SubscriptionStatus)StatusForSubscription(subscription, notificationType, baseUrl);

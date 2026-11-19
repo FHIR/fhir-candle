@@ -179,29 +179,17 @@ public class OpSubscriptionEvents : IFhirOperation
             return false;
         }
 
-        Bundle? bundle;
-        lock (subscription.GeneratedEvents)
+        Bundle? bundle = store.RetainedSubscriptionEvents(
+            ctx.Id, sinceNumber, untilParsed ? untilNumber : null, contentLevel);
+        if (bundle is null)
         {
-            long highestEvent = subscription.CurrentEventCount;
-            if (!untilParsed)
+            opResponse = new()
             {
-                untilNumber = highestEvent;
-            }
-
-            long upperBound = Math.Min(untilNumber, highestEvent);
-            long[] eventNumbers = sinceNumber > upperBound
-                ? Array.Empty<long>()
-                : subscription.GeneratedEvents.Keys
-                    .Where(number => (sinceNumber <= number) && (number <= upperBound))
-                    .OrderBy(number => number)
-                    .ToArray();
-
-            bundle = store.BundleForSubscriptionEvents(
-                ctx.Id,
-                eventNumbers,
-                "query-event",
-                contentLevel,
-                allowEmptySelectionFallback: false);
+                StatusCode = HttpStatusCode.NotFound,
+                Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound, $"Subscription {ctx.Id} was not found."),
+            };
+            return false;
         }
 
         opResponse = new()

@@ -85,6 +85,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
     /// <summary>The executable subscriptions, by subscription topic url.</summary>
     private Dictionary<string, ExecutableSubscriptionInfo> _executableSubscriptions = new();
+    private readonly object _subscriptionRegistrationLock = new();
 
     /// <summary>The supported includes.</summary>
     private string[] _supportedIncludes = [];
@@ -440,6 +441,11 @@ public class ResourceStore<T> : IVersionedResourceStore
             return null;
         }
 
+        if (typeof(T) == typeof(Subscription))
+        {
+            return _store.SubscriptionResourceSnapshot(id);
+        }
+
         if (!_resourceStore.TryGetValue(id, out T? resource))
         {
             return null;
@@ -447,6 +453,10 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         return resource;
     }
+
+    /// <inheritdoc/>
+    public Subscription? ReadRawSubscription(string id) =>
+        _resourceStore.TryGetValue(id, out T? resource) ? resource as Subscription : null;
 
     /// <summary>Interface for has identifier.</summary>
     internal interface IHasIdentifier
@@ -643,36 +653,60 @@ public class ResourceStore<T> : IVersionedResourceStore
                 break;
         }
 
+        List<SubscriptionChangedEventArgs> subscriptionChanges = [];
         lock (_lockObject)
         {
-            if (_resourceStore.ContainsKey(source.Id))
+            if (parsedSubscription is not null)
             {
-                statusCode = HttpStatusCode.Conflict;
-                outcome = SerializationUtils.BuildOutcomeForRequest(
-                    statusCode,
-                    $"Resource {source.TypeName}/{source.Id} already exists; POST-base create interaction cannot overwrite existing resources",
-                    OperationOutcome.IssueType.Duplicate);
-                return null;
+                Monitor.Enter(_store.SubscriptionLifecycleLock);
             }
-
-            if (source.Meta is null)
+            try
             {
-                source.Meta = new Meta();
+                if (_resourceStore.ContainsKey(source.Id))
+                {
+                    statusCode = HttpStatusCode.Conflict;
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
+                        statusCode,
+                        $"Resource {source.TypeName}/{source.Id} already exists; POST-base create interaction cannot overwrite existing resources",
+                        OperationOutcome.IssueType.Duplicate);
+                    return null;
+                }
+
+                if (source.Meta is null)
+                {
+                    source.Meta = new Meta();
+                }
+
+                if (parsedSubscription is not null)
+                {
+                    _store.ValidateSubscriptionCommitLocked();
+                }
+                source.Meta.VersionId = "1";
+                source.Meta.LastUpdated = DateTimeOffset.UtcNow;
+
+                if (!_resourceStore.TryAdd(source.Id, (T)source))
+                {
+                    statusCode = HttpStatusCode.InternalServerError;
+                    outcome = SerializationUtils.BuildOutcomeForRequest(
+                        statusCode,
+                        $"Failed to create resource {source.TypeName}/{source.Id}");
+                    return null;
+                }
+                if (parsedSubscription is not null)
+                {
+                    _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges);
+                }
             }
-
-            source.Meta.VersionId = "1";
-            source.Meta.LastUpdated = DateTimeOffset.UtcNow;
-
-            if (!_resourceStore.TryAdd(source.Id, (T)source))
+            finally
             {
-                statusCode = HttpStatusCode.InternalServerError;
-                outcome = SerializationUtils.BuildOutcomeForRequest(
-                    statusCode,
-                    $"Failed to create resource {source.TypeName}/{source.Id}");
-                return null;
+                if (parsedSubscription is not null)
+                {
+                    Monitor.Exit(_store.SubscriptionLifecycleLock);
+                }
             }
         }
 
+        _store.PublishSubscriptionChanges(subscriptionChanges);
         RegisterInstanceCreated(source.Id);
         _store.RegisterInstanceCreated(_resourceName, source.Id);
 
@@ -707,11 +741,6 @@ public class ResourceStore<T> : IVersionedResourceStore
         if (parsedSubscriptionTopic is not null)
         {
             _ = _store.StoreProcessSubscriptionTopic(parsedSubscriptionTopic);
-        }
-
-        if (parsedSubscription is not null)
-        {
-            _ = _store.StoreProcessSubscription(parsedSubscription);
         }
 
         switch (source)
@@ -835,76 +864,100 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         T? previous;
 
+        List<SubscriptionChangedEventArgs> subscriptionChanges = [];
         lock (_lockObject)
         {
-            if (!_resourceStore.ContainsKey(source.Id))
+            if (parsedSubscription is not null)
             {
-                if (allowCreate)
+                Monitor.Enter(_store.SubscriptionLifecycleLock);
+            }
+            try
+            {
+                if (!_resourceStore.ContainsKey(source.Id))
                 {
-                    source.Meta.VersionId = "1";
-                    previous = null;
+                    if (allowCreate)
+                    {
+                        source.Meta.VersionId = "1";
+                        previous = null;
+                    }
+                    else
+                    {
+                        outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.BadRequest,
+                            $"Update as Create is disabled");
+                        sc = HttpStatusCode.BadRequest;
+                        return null;
+                    }
+                }
+                else if (int.TryParse(_resourceStore[source.Id].Meta?.VersionId ?? string.Empty, out int version))
+                {
+                    previous = (T)_resourceStore[source.Id].DeepCopy();
+                    source.Meta.VersionId = (version + 1).ToString();
                 }
                 else
                 {
-                    outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.BadRequest,
-                        $"Update as Create is disabled");
-                    sc = HttpStatusCode.BadRequest;
-                    return null;
+                    previous = (T)_resourceStore[source.Id].DeepCopy();
+                    source.Meta.VersionId = "1";
                 }
-            }
-            else if (int.TryParse(_resourceStore[source.Id].Meta?.VersionId ?? string.Empty, out int version))
-            {
-                previous = (T)_resourceStore[source.Id].DeepCopy();
-                source.Meta.VersionId = (version + 1).ToString();
-            }
-            else
-            {
-                previous = (T)_resourceStore[source.Id].DeepCopy();
-                source.Meta.VersionId = "1";
-            }
 
-            // check preconditions
-            if (ifNoneMatch.Equals("*", StringComparison.Ordinal))
-            {
-                outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.PreconditionFailed,
-                    "Prior version exists, but If-None-Match is *");
-                sc = HttpStatusCode.PreconditionFailed;
-                return null;
-            }
-
-            if (!string.IsNullOrEmpty(ifNoneMatch))
-            {
-                if (ifNoneMatch.Equals($"W/\"{previous?.Meta?.VersionId ?? string.Empty}\"", StringComparison.Ordinal))
+                // check preconditions
+                if (ifNoneMatch.Equals("*", StringComparison.Ordinal))
                 {
                     outcome = SerializationUtils.BuildOutcomeForRequest(
                         HttpStatusCode.PreconditionFailed,
-                        $"Conditional update query returned a match with version: {previous?.Meta?.VersionId}, If-None-Match: {ifNoneMatch}");
+                        "Prior version exists, but If-None-Match is *");
                     sc = HttpStatusCode.PreconditionFailed;
                     return null;
                 }
-            }
 
-            if (!string.IsNullOrEmpty(ifMatch))
-            {
-                if (!ifMatch.Equals($"W/\"{previous?.Meta?.VersionId}\"", StringComparison.Ordinal))
+                if (!string.IsNullOrEmpty(ifNoneMatch))
                 {
-                    outcome = SerializationUtils.BuildOutcomeForRequest(
-                        HttpStatusCode.PreconditionFailed,
-                        $"Conditional update query returned a match with version: {previous?.Meta?.VersionId}, If-Match: {ifNoneMatch}");
-                    sc = HttpStatusCode.PreconditionFailed;
-                    return null;
+                    if (ifNoneMatch.Equals($"W/\"{previous?.Meta?.VersionId ?? string.Empty}\"", StringComparison.Ordinal))
+                    {
+                        outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.PreconditionFailed,
+                            $"Conditional update query returned a match with version: {previous?.Meta?.VersionId}, If-None-Match: {ifNoneMatch}");
+                        sc = HttpStatusCode.PreconditionFailed;
+                        return null;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(ifMatch))
+                {
+                    if (!ifMatch.Equals($"W/\"{previous?.Meta?.VersionId}\"", StringComparison.Ordinal))
+                    {
+                        outcome = SerializationUtils.BuildOutcomeForRequest(
+                            HttpStatusCode.PreconditionFailed,
+                            $"Conditional update query returned a match with version: {previous?.Meta?.VersionId}, If-Match: {ifNoneMatch}");
+                        sc = HttpStatusCode.PreconditionFailed;
+                        return null;
+                    }
+                }
+
+                // update the last updated time
+                if (parsedSubscription is not null)
+                {
+                    _store.ValidateSubscriptionCommitLocked();
+                }
+                source.Meta.LastUpdated = DateTimeOffset.UtcNow;
+
+                // store
+                _resourceStore[source.Id] = (T)source;
+                if (parsedSubscription is not null)
+                {
+                    _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges);
                 }
             }
-
-            // update the last updated time
-            source.Meta.LastUpdated = DateTimeOffset.UtcNow;
-
-            // store
-            _resourceStore[source.Id] = (T)source;
+            finally
+            {
+                if (parsedSubscription is not null)
+                {
+                    Monitor.Exit(_store.SubscriptionLifecycleLock);
+                }
+            }
         }
 
+        _store.PublishSubscriptionChanges(subscriptionChanges);
         RegisterInstanceUpdated(source.Id);
         _store.RegisterInstanceUpdated(_resourceName, source.Id);
 
@@ -952,11 +1005,6 @@ public class ResourceStore<T> : IVersionedResourceStore
         if (parsedSubscriptionTopic is not null)
         {
             _ = _store.StoreProcessSubscriptionTopic(parsedSubscriptionTopic);
-        }
-
-        if (parsedSubscription is not null)
-        {
-            _ = _store.StoreProcessSubscription(parsedSubscription);
         }
 
         switch (source)
@@ -1007,11 +1055,40 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         T? previous;
 
+        List<SubscriptionChangedEventArgs> subscriptionChanges = [];
         lock (_lockObject)
         {
-            _ = _resourceStore.TryRemove(id, out previous);
+            bool subscriptionMutation = typeof(T) == typeof(Subscription);
+            if (subscriptionMutation)
+            {
+                Monitor.Enter(_store.SubscriptionLifecycleLock);
+            }
+            try
+            {
+                if (subscriptionMutation)
+                {
+                    _store.ValidateSubscriptionCommitLocked();
+                }
+                _ = _resourceStore.TryRemove(id, out previous);
+                if (subscriptionMutation && previous is not null)
+                {
+                    previous = (T)previous.DeepCopy();
+                    if (_store._subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+                    {
+                        _store.CommitSubscriptionLocked(subscription, null, true, subscriptionChanges);
+                    }
+                }
+            }
+            finally
+            {
+                if (subscriptionMutation)
+                {
+                    Monitor.Exit(_store.SubscriptionLifecycleLock);
+                }
+            }
         }
 
+        _store.PublishSubscriptionChanges(subscriptionChanges);
         if (previous is null)
         {
             return null;
@@ -1065,12 +1142,6 @@ public class ResourceStore<T> : IVersionedResourceStore
                 break;
 
             case "Subscription":
-                {
-                    if (_subscriptionConverter.TryParse(previous, out ParsedSubscription subscription))
-                    {
-                        _ = _store.StoreProcessSubscription(subscription, true);
-                    }
-                }
                 break;
 
             case "ValueSet":
@@ -1091,23 +1162,21 @@ public class ResourceStore<T> : IVersionedResourceStore
         IEnumerable<ExecutableSubscriptionInfo.CompiledQueryTrigger> queryTriggers,
         ParsedResultParameters? resultParameters)
     {
-        if (_executableSubscriptions.ContainsKey(url))
+        lock (_subscriptionRegistrationLock)
         {
-            _executableSubscriptions[url].InteractionTriggers = interactionTriggers;
-            _executableSubscriptions[url].FhirPathTriggers = fhirpathTriggers;
-            _executableSubscriptions[url].QueryTriggers = queryTriggers;
-            _executableSubscriptions[url].AdditionalContext = resultParameters;
-        }
-        else
-        {
-            _executableSubscriptions.Add(url, new()
+            if (!_executableSubscriptions.TryGetValue(url, out ExecutableSubscriptionInfo? executable))
             {
-                TopicUrl = url,
-                InteractionTriggers = interactionTriggers,
-                FhirPathTriggers = fhirpathTriggers,
-                QueryTriggers = queryTriggers,
-                AdditionalContext = resultParameters,
-            });
+                executable = new() { TopicUrl = url };
+                _executableSubscriptions.Add(url, executable);
+            }
+            executable.InteractionTriggers = interactionTriggers.ToArray();
+            executable.FhirPathTriggers = fhirpathTriggers.ToArray();
+            executable.QueryTriggers = queryTriggers.Select(trigger => trigger with
+            {
+                PreviousTest = trigger.PreviousTest.ToArray(),
+                CurrentTest = trigger.CurrentTest.ToArray(),
+            }).ToArray();
+            executable.AdditionalContext = resultParameters;
         }
     }
 
@@ -1115,23 +1184,16 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="topicUrl">URL of the topic.</param>
     /// <param name="id">      The subscription id.</param>
     /// <param name="filters"> The compiled filters.</param>
-    public void SetExecutableSubscription(string topicUrl, string id, List<ParsedSearchParameter> filters)
+    public void SetExecutableSubscription(string topicUrl, string id, long revision, List<ParsedSearchParameter> filters)
     {
-        if (!_executableSubscriptions.ContainsKey(topicUrl))
+        lock (_subscriptionRegistrationLock)
         {
-            _executableSubscriptions.Add(topicUrl, new()
+            if (!_executableSubscriptions.TryGetValue(topicUrl, out ExecutableSubscriptionInfo? executable))
             {
-                TopicUrl = topicUrl,
-            });
-        }
-
-        if (_executableSubscriptions[topicUrl].FiltersBySubscription.ContainsKey(id))
-        {
-            _executableSubscriptions[topicUrl].FiltersBySubscription[id] = filters;
-        }
-        else
-        {
-            _executableSubscriptions[topicUrl].FiltersBySubscription.Add(id, filters);
+                executable = new() { TopicUrl = topicUrl };
+                _executableSubscriptions.Add(topicUrl, executable);
+            }
+            executable.FiltersBySubscription[id] = new(revision, filters.ToArray());
         }
     }
 
@@ -1139,7 +1201,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="subscriptionTopicUrl">URL of the subscription topic.</param>
     public void RemoveExecutableSubscriptionTopic(string subscriptionTopicUrl)
     {
-        if (_executableSubscriptions.ContainsKey(subscriptionTopicUrl))
+        lock (_subscriptionRegistrationLock)
         {
             _executableSubscriptions.Remove(subscriptionTopicUrl);
         }
@@ -1150,17 +1212,41 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="id">      The subscription id.</param>
     public void RemoveExecutableSubscription(string topicUrl, string id)
     {
-        if (!_executableSubscriptions.ContainsKey(topicUrl))
+        lock (_subscriptionRegistrationLock)
         {
-            return;
+            if (_executableSubscriptions.TryGetValue(topicUrl, out ExecutableSubscriptionInfo? executable))
+            {
+                executable.FiltersBySubscription.Remove(id);
+            }
         }
+    }
 
-        if (!_executableSubscriptions[topicUrl].FiltersBySubscription.ContainsKey(id))
+    private Dictionary<string, ExecutableSubscriptionInfo> SubscriptionExecutionSnapshot()
+    {
+        lock (_subscriptionRegistrationLock)
         {
-            return;
+            return _executableSubscriptions.ToDictionary(entry => entry.Key, entry =>
+            {
+                ParsedResultParameters? context = null;
+                if (entry.Value.AdditionalContext is ParsedResultParameters source)
+                {
+                    context = new(string.Empty, _store, this, _resourceName);
+                    foreach ((string key, List<SearchParamDefinition> values) in source.Inclusions)
+                    {
+                        context.Inclusions.Add(key, values.ToList());
+                    }
+                    foreach ((string key, List<string> values) in source.IterativeInclusions)
+                    {
+                        context.IterativeInclusions.Add(key, values.ToList());
+                    }
+                    foreach ((string key, List<SearchParamDefinition> values) in source.ReverseInclusions)
+                    {
+                        context.ReverseInclusions.Add(key, values.ToList());
+                    }
+                }
+                return entry.Value.Snapshot(context);
+            });
         }
-
-        _executableSubscriptions[topicUrl].FiltersBySubscription.Remove(id);
     }
 
 
@@ -1210,8 +1296,9 @@ public class ResourceStore<T> : IVersionedResourceStore
         List<string> matchedTopics = new();
 
         Dictionary<string, List<string>> topicErrors = new();
+        Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
 
-        foreach ((string topicUrl, ExecutableSubscriptionInfo executable) in _executableSubscriptions)
+        foreach ((string topicUrl, ExecutableSubscriptionInfo executable) in executableSubscriptions)
         {
             bool matched = false;
 
@@ -1429,10 +1516,11 @@ public class ResourceStore<T> : IVersionedResourceStore
         // traverse the list of matched topics to test against subscription filters
         foreach (string topicUrl in matchedTopics)
         {
-            ParsedResultParameters? additions = _executableSubscriptions[topicUrl].AdditionalContext;
+            ParsedResultParameters? additions = executableSubscriptions[topicUrl].AdditionalContext;
 
-            foreach ((string subscriptionId, List<ParsedSearchParameter> filters) in _executableSubscriptions[topicUrl].FiltersBySubscription)
+            foreach ((string subscriptionId, ExecutableSubscriptionInfo.Binding binding) in executableSubscriptions[topicUrl].FiltersBySubscription)
             {
+                ParsedSearchParameter[] filters = binding.Filters;
                 // don't trigger twice on multiple passing filters
                 if (notifiedSubscriptions.Contains(subscriptionId))
                 {
@@ -1474,32 +1562,24 @@ public class ResourceStore<T> : IVersionedResourceStore
                         }
                     }
 
-                    SubscriptionEvent subEvent = new()
-                    {
-                        SubscriptionId = subscriptionId,
-                        TopicUrl = topicUrl,
-                        EventNumber = _store.GetSubscriptionEventCount(subscriptionId, true),
-                        Focus = focus,
-                        AdditionalContext = additionalContext.AsEnumerable<object>(),
-                    };
-
-                    _store.RegisterSendEvent(subscriptionId, subEvent);
+                    _store.AcceptSubscriptionEvent(subscriptionId, topicUrl, binding.Revision, focus, additionalContext.ToArray());
                 }
             }
         }
 
         foreach ((string topicUrl, List<string> errors) in topicErrors)
         {
-            if (!_executableSubscriptions.ContainsKey(topicUrl))
+            if (!executableSubscriptions.ContainsKey(topicUrl))
             {
                 continue;
             }
 
-            foreach (string subId in _executableSubscriptions[topicUrl].FiltersBySubscription.Keys)
+            foreach (string subId in executableSubscriptions[topicUrl].FiltersBySubscription.Keys)
             {
                 foreach (string error in errors)
                 {
-                    _store.RegisterError(subId, error);
+                    _store.RegisterSubscriptionExecutionError(subId,
+                        executableSubscriptions[topicUrl].FiltersBySubscription[subId].Revision, error);
                 }
             }
         }
@@ -1510,11 +1590,6 @@ public class ResourceStore<T> : IVersionedResourceStore
     public void TestCreateAgainstSubscriptions(T current)
     {
         // TODO: Change this to async
-
-        if (!_executableSubscriptions.Any())
-        {
-            return;
-        }
 
         try
         {
@@ -1556,11 +1631,6 @@ public class ResourceStore<T> : IVersionedResourceStore
     public void TestUpdateAgainstSubscriptions(T current, T previous)
     {
         // TODO: Change this to async
-
-        if (!_executableSubscriptions.Any())
-        {
-            return;
-        }
 
         try
         {
@@ -1604,11 +1674,6 @@ public class ResourceStore<T> : IVersionedResourceStore
     public void TestDeleteAgainstSubscriptions(T previous)
     {
         // TODO: Change this to async
-
-        if (!_executableSubscriptions.Any())
-        {
-            return;
-        }
 
         try
         {
@@ -1844,6 +1909,22 @@ public class ResourceStore<T> : IVersionedResourceStore
     public IEnumerable<Resource> TypeSearch(ParsedSearchParameter[] parameters, bool isNestedSearch = false)
     {
         Dictionary<string, Resource[]> reverseChainCache = [];
+
+        if (typeof(T) == typeof(Subscription))
+        {
+            // Normalize and detach before either branch evaluates status filters.
+            foreach (Subscription resource in _store.SubscriptionResourceSnapshots())
+            {
+                bool matches = isNestedSearch
+                    ? _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache)
+                    : _searchTester.TestForMatch(resource.ToPocoNode(), parameters);
+                if (matches)
+                {
+                    yield return resource;
+                }
+            }
+            yield break;
+        }
 
         string[] keys;
 

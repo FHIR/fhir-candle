@@ -1100,7 +1100,7 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
         s.TimeoutSeconds.ShouldBeNull();
         s.ContentType.ShouldBe("application/fhir+json");
         s.ContentLevel.ShouldBe("id-only");
-        s.CurrentStatus.ShouldBe("active");
+        s.CurrentStatus.ShouldBe("requested");
     }
 
     [Theory]
@@ -1196,7 +1196,7 @@ public class R4BTestSubscriptions : IClassFixture<R4BTests>
             {
                 { resourceType, new List<ParsedSubscription.SubscriptionFilter>() },
             },
-            ExpirationTicks = DateTime.Now.AddMinutes(10).Ticks,
+            ExpirationTicks = DateTimeOffset.UtcNow.AddMinutes(10).UtcTicks,
             ChannelSystem = string.Empty,
             ChannelCode = "rest-hook",
             ContentType = "application/fhir+json",

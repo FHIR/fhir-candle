@@ -97,7 +97,7 @@ public partial class VersionedFhirStore : IFhirStore
     internal readonly static TopicConverter _topicConverter = new();
 
     /// <summary>The subscription converter.</summary>
-    internal static SubscriptionConverter _subscriptionConverter = null!;
+    internal SubscriptionConverter _subscriptionConverter = null!;
 
     /// <summary>(Immutable) The topics, by id.</summary>
     internal readonly ConcurrentDictionary<string, ParsedSubscriptionTopic> _topics = [];
@@ -186,7 +186,16 @@ public partial class VersionedFhirStore : IFhirStore
     /// Initializes a new instance of the <see cref="VersionedFhirStore"/> class.
     /// </summary>
     public VersionedFhirStore()
+        : this(TimeProvider.System)
     {
+    }
+
+    /// <summary>Creates a store with a tenant-owned UTC clock and expiration timer.</summary>
+    /// <param name="clock">The UTC clock used for subscription lifecycle decisions.</param>
+    public VersionedFhirStore(TimeProvider clock)
+    {
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _subscriptionTimer = clock.CreateTimer(ExpireSubscriptions, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _searchTester = new() { FhirStore = this, };
     }
 
@@ -229,7 +238,7 @@ public partial class VersionedFhirStore : IFhirStore
 
         if (_subscriptionConverter is null)
         {
-            _subscriptionConverter = new(config.MaxSubscriptionExpirationMinutes);
+            _subscriptionConverter = new(config.MaxSubscriptionExpirationMinutes, _clock);
         }
 
         SymbolTable st = new SymbolTable().AddStandardFP().AddFhirExtensions();
@@ -832,7 +841,7 @@ public partial class VersionedFhirStore : IFhirStore
     public IEnumerable<ParsedSubscriptionTopic> CurrentTopics => _topics.Values;
 
     /// <summary>Gets the current subscriptions.</summary>
-    public IEnumerable<ParsedSubscription> CurrentSubscriptions => _subscriptions.Values;
+    public IEnumerable<ParsedSubscription> CurrentSubscriptions => SubscriptionSnapshots();
 
     /// <summary>Gets the received notifications.</summary>
     public ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> ReceivedNotifications => _receivedNotifications;
@@ -996,55 +1005,6 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>Check expired subscriptions.</summary>
-    private void CheckExpiredSubscriptions()
-    {
-        if (!_subscriptions.Any())
-        {
-            return;
-        }
-
-        long currentTicks = DateTimeOffset.Now.Ticks;
-
-        HashSet<string> idsToRemove = new();
-
-        // traverse subscriptions to find the ones we need to remove
-        foreach (ParsedSubscription sub in _subscriptions.Values)
-        {
-            if ((sub.ExpirationTicks == -1) ||
-                (sub.ExpirationTicks > currentTicks))
-            {
-                continue;
-            }
-
-            idsToRemove.Add(sub.Id);
-        }
-
-        // remove the parsed subscription and update the resource to be off
-        foreach (string id in idsToRemove)
-        {
-            // remove the executable version of this subscription
-            _ = _subscriptions.TryRemove(id, out _);
-
-            // look for a subscription resource to modify
-            if (!_store.TryGetValue("Subscription", out IVersionedResourceStore? rs) ||
-                !rs!.TryGetValue(id, out object? resourceObj) ||
-                (resourceObj is not Subscription r))
-            {
-                continue;
-            }
-
-            r.Status = SubscriptionConverter.OffCode;
-            rs.InstanceUpdate(
-                r,
-                false,
-                string.Empty,
-                string.Empty,
-                _protectedResources,
-                out _,
-                out _);
-        }
-    }
-
     /// <summary>Check and send heartbeats.</summary>
     /// <param name="state">The state.</param>
     private void CheckUsage(object? state)
@@ -2941,6 +2901,23 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool StoreProcessSubscriptionTopic(ParsedSubscriptionTopic topic, bool remove = false)
     {
+        lock (SubscriptionLifecycleLock)
+        {
+            bool result = ProcessSubscriptionTopicLocked(topic, remove);
+            if (!remove)
+            {
+                foreach (ParsedSubscription subscription in _subscriptions.Values.Where(subscription => subscription.TopicUrl == topic.Url))
+                {
+                    RemoveSubscriptionBindingsLocked(subscription);
+                    InstallSubscriptionBindingsLocked(subscription);
+                }
+            }
+            return result;
+        }
+    }
+
+    private bool ProcessSubscriptionTopicLocked(ParsedSubscriptionTopic topic, bool remove)
+    {
         if (remove)
         {
             if (!_topics.ContainsKey(topic.Url))
@@ -3155,17 +3132,21 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>The subscription event count.</returns>
     public long GetSubscriptionEventCount(string subscriptionId, bool increment)
     {
-        if (!_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
+        List<SubscriptionChangedEventArgs> changes = [];
+        long count = 0;
+        lock (SubscriptionLifecycleLock)
         {
-            return 0;
+            if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
+            {
+                DateTimeOffset now = _clock.GetUtcNow();
+                NormalizeSubscriptionLocked(subscription, now, changes);
+                count = increment && !_lifecycleStopped &&
+                    SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now)
+                    ? subscription.IncrementEventCount() : subscription.CurrentEventCount;
+            }
         }
-
-        if (increment)
-        {
-            return subscription.IncrementEventCount();
-        }
-
-        return subscription.CurrentEventCount;
+        PublishSubscriptionChanges(changes);
+        return count;
     }
 
     /// <summary>Registers the subscriptions changed.</summary>
@@ -3177,18 +3158,25 @@ public partial class VersionedFhirStore : IFhirStore
         bool removed = false,
         bool sendHandshake = false)
     {
-        EventHandler<SubscriptionChangedEventArgs>? handler = OnSubscriptionsChanged;
-
-        if (handler is not null)
+        List<SubscriptionChangedEventArgs> changes = [];
+        lock (SubscriptionLifecycleLock)
         {
-            handler(this, new()
+            if (!_lifecycleStopped && subscription is not null &&
+                _subscriptions.TryGetValue(subscription.Id, out ParsedSubscription? current) &&
+                ReferenceEquals(current, subscription))
             {
-                Tenant = _config,
-                ChangedSubscription = subscription,
-                RemovedSubscriptionId = removed ? subscription?.Id : null,
-                SendHandshake = sendHandshake,
-            });
+                NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes);
+                changes.Add(new()
+                {
+                    Tenant = _config,
+                    ChangedSubscription = removed ? null : subscription,
+                    RemovedSubscriptionId = removed ? subscription.Id : null,
+                    Revision = subscription.Revision,
+                    SendHandshake = !removed && sendHandshake && subscription.CurrentStatus == "requested",
+                });
+            }
         }
+        PublishSubscriptionChanges(changes);
     }
 
     /// <summary>Change subscription status.</summary>
@@ -3196,22 +3184,15 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="status">The status.</param>
     public void ChangeSubscriptionStatus(string id, string status)
     {
-        if (!_subscriptions.TryGetValue(id, out ParsedSubscription? parsedSubscription) ||
-            (parsedSubscription is null))
+        List<SubscriptionChangedEventArgs> changes = [];
+        lock (SubscriptionLifecycleLock)
         {
-            return;
+            if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+            {
+                ChangeSubscriptionStatusLocked(subscription, status, changes);
+            }
         }
-
-        if (!_store.TryGetValue("Subscription", out IVersionedResourceStore? rs) ||
-            !rs.TryGetValue(id, out object? storedSubscription) ||
-            (storedSubscription is not Subscription s))
-        {
-            return;
-        }
-
-        _subscriptionConverter.UpdateResourceStatus(s, status);
-
-        RegisterSubscriptionsChanged(parsedSubscription);
+        PublishSubscriptionChanges(changes);
     }
 
     /// <summary>Registers the event.</summary>
@@ -3219,22 +3200,26 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="subscriptionEvent">The subscription event.</param>
     public void RegisterSendEvent(string subscriptionId, SubscriptionEvent subscriptionEvent)
     {
-        _subscriptions[subscriptionId].RegisterEvent(subscriptionEvent);
-
-        EventHandler<SubscriptionSendEventArgs>? handler = OnSubscriptionSendEvent;
-
-        if (handler is not null)
+        List<SubscriptionChangedEventArgs> changes = [];
+        SubscriptionSendEventArgs? send = null;
+        lock (SubscriptionLifecycleLock)
         {
-            handler(this, new()
+            if (!_lifecycleStopped && _subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
             {
-                Tenant = _config,
-                Subscription = _subscriptions[subscriptionId],
-                NotificationEvents = new List<SubscriptionEvent>() { subscriptionEvent },
-                NotificationType = ParsedSubscription.NotificationTypeCodes.EventNotification,
-            });
+                DateTimeOffset now = _clock.GetUtcNow();
+                NormalizeSubscriptionLocked(subscription, now, changes);
+                if (SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now))
+                {
+                    subscription.RegisterEvent(subscriptionEvent);
+                    send = SendArgumentsLocked(subscription, subscriptionEvent);
+                }
+            }
         }
-
-        //StateHasChanged();
+        PublishSubscriptionChanges(changes);
+        if (send is not null)
+        {
+            OnSubscriptionSendEvent?.Invoke(this, send);
+        }
     }
 
     /// <summary>Adds a subscription error.</summary>
@@ -3242,12 +3227,13 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="errorMessage">Message describing the error.</param>
     public void RegisterError(string id, string errorMessage)
     {
-        if (!_subscriptions.ContainsKey(id))
+        lock (SubscriptionLifecycleLock)
         {
-            return;
+            if (!_lifecycleStopped && _subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+            {
+                subscription.RegisterError(errorMessage);
+            }
         }
-
-        _subscriptions[id].RegisterError(errorMessage);
     }
 
     /// <summary>Registers the received subscription changed.</summary>
@@ -3316,27 +3302,13 @@ public partial class VersionedFhirStore : IFhirStore
         string contentType = "",
         string contentLevel = "")
     {
-        if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
+        (Bundle? bundle, string subscriptionContentType) = BuildSubscriptionEvents(
+            subscriptionId, eventNumbers, notificationType, contentLevel, true);
+        if (bundle is not null)
         {
-            Bundle? bundle;
-            lock (subscription.GeneratedEvents)
-            {
-                bundle = _subscriptionConverter.BundleForSubscriptionEvents(
-                    subscription,
-                    eventNumbers,
-                    notificationType,
-                    _config.BaseUrl,
-                    contentLevel);
-            }
-
-            if (bundle is null)
-            {
-                return string.Empty;
-            }
-
             string serialized = SerializationUtils.SerializeFhir(
                 bundle,
-                string.IsNullOrEmpty(contentType) ? subscription.ContentType : contentType,
+                string.IsNullOrEmpty(contentType) ? subscriptionContentType : contentType,
                 pretty,
                 string.Empty);
 
@@ -3408,21 +3380,8 @@ public partial class VersionedFhirStore : IFhirStore
         string contentLevel = "",
         bool allowEmptySelectionFallback = true)
     {
-        if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
-        {
-            lock (subscription.GeneratedEvents)
-            {
-                return _subscriptionConverter.BundleForSubscriptionEvents(
-                    subscription,
-                    eventNumbers,
-                    notificationType,
-                    _config.BaseUrl,
-                    contentLevel,
-                    allowEmptySelectionFallback);
-            }
-        }
-
-        return null;
+        return BuildSubscriptionEvents(subscriptionId, eventNumbers, notificationType,
+            contentLevel, allowEmptySelectionFallback).Bundle;
     }
 
     /// <summary>Parse notification bundle.</summary>
@@ -3455,15 +3414,7 @@ public partial class VersionedFhirStore : IFhirStore
         string subscriptionId,
         string notificationType)
     {
-        if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
-        {
-            return _subscriptionConverter.StatusForSubscription(
-                subscription,
-                notificationType,
-                _config.BaseUrl);
-        }
-
-        return null;
+        return SubscriptionStatusSnapshots(notificationType).FirstOrDefault(snapshot => snapshot.Id == subscriptionId).Resource;
     }
 
     /// <summary>Process the subscription.</summary>
@@ -3472,41 +3423,18 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool StoreProcessSubscription(ParsedSubscription subscription, bool remove = false)
     {
-        if (remove)
+        List<SubscriptionChangedEventArgs> changes = [];
+        bool result;
+        lock (SubscriptionLifecycleLock)
         {
-            if (!_subscriptions.ContainsKey(subscription.Id))
-            {
-                return false;
-            }
-
-            // remove from all resources
-            foreach (IVersionedResourceStore rs in _store.Values)
-            {
-                rs.RemoveExecutableSubscription(subscription.TopicUrl, subscription.Id);
-            }
-
-            _ = _subscriptions.TryRemove(subscription.Id, out _);
-
-            RegisterSubscriptionsChanged(subscription, true);
-
-            return true;
+            result = CommitSubscriptionLocked(subscription, null, remove, changes);
         }
+        PublishSubscriptionChanges(changes);
+        return result;
+    }
 
-        // check for existing record
-        bool priorExisted = _subscriptions.TryGetValue(subscription.Id, out ParsedSubscription? priorSubscription);
-        string priorState;
-
-        if (priorExisted)
-        {
-            priorState = priorSubscription!.CurrentStatus;
-            _subscriptions[subscription.Id] = subscription;
-        }
-        else
-        {
-            priorState = "off";
-            _ = _subscriptions.TryAdd(subscription.Id, subscription);
-        }
-
+    private bool InstallSubscriptionBindingsLocked(ParsedSubscription subscription)
+    {
         // check to see if we have this topic
         if (!_topics.ContainsKey(subscription.TopicUrl))
         {
@@ -3524,10 +3452,9 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        // check for overriding the expiration of subscriptions
-        if (_loadState == LoadStateCodes.Process)
+        if (!SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, _clock.GetUtcNow()))
         {
-            subscription.ExpirationTicks = -1;
+            return true;
         }
 
         ParsedSubscriptionTopic topic = _topics[subscription.TopicUrl];
@@ -3545,7 +3472,7 @@ public partial class VersionedFhirStore : IFhirStore
                 !subscription.Filters.ContainsKey("Resource"))
             {
                 // add an empty filter record so the engine knows about the subscription
-                rs.SetExecutableSubscription(subscription.TopicUrl, subscription.Id, new());
+                rs.SetExecutableSubscription(subscription.TopicUrl, subscription.Id, subscription.Revision, new());
                 continue;
             }
 
@@ -3596,11 +3523,9 @@ public partial class VersionedFhirStore : IFhirStore
                     parsedFilters.Add(sp);
                 }
 
-                rs.SetExecutableSubscription(subscription.TopicUrl, subscription.Id, parsedFilters);
+                rs.SetExecutableSubscription(subscription.TopicUrl, subscription.Id, subscription.Revision, parsedFilters);
             }
         }
-
-        RegisterSubscriptionsChanged(subscription, false, priorState.Equals("off"));
 
         return true;
     }
@@ -7742,6 +7667,7 @@ rs,
             // dispose managed state (managed objects)
             if (disposing)
             {
+                StopSubscriptionLifecycle();
                 _capacityMonitor?.Dispose();
 
                 foreach (IVersionedResourceStore rs in _store.Values)

@@ -13,6 +13,8 @@ using MimeKit;
 using fhir.candle.Models;
 using System.Collections.Concurrent;
 using FhirCandle.Configuration;
+using Outcome = FhirCandle.Models.SubscriptionNotificationOutcome;
+using OutcomeKind = FhirCandle.Models.SubscriptionNotificationOutcome.OutcomeKind;
 
 namespace fhir.candle.Services;
 
@@ -23,7 +25,9 @@ public class NotificationManager : INotificationManager
     private bool _hasDisposed = false;
 
     /// <summary>The HTTP client for REST notifications.</summary>
-    private readonly HttpClient _httpClient = new();
+    private readonly HttpClient _httpClient;
+    private readonly bool _ownsHttpClient;
+    private readonly TimeProvider _clock;
 
     /// <summary>The logger.</summary>
     private ILogger _logger;
@@ -32,10 +36,26 @@ public class NotificationManager : INotificationManager
     private IFhirStoreManager _storeManager;
 
     /// <summary>The heartbeat timer.</summary>
-    private Timer? _heartbeatTimer;
+    private ITimer? _heartbeatTimer;
 
     /// <summary>The queued-notification timer.</summary>
-    private Timer? _notificationTimer;
+    private ITimer? _notificationTimer;
+
+    private readonly Dictionary<(IFhirStore Store, string Id, long Revision), long> _heartbeatReservations = [];
+    private readonly Dictionary<(IFhirStore Store, string Id), long> _handshakeRevisions = [];
+
+    internal Func<SmtpClient, string, int, CancellationToken, Task> SmtpConnect { get; set; } =
+        (client, host, port, token) => client.ConnectAsync(host, port, true, token);
+    internal Func<SmtpClient, string, string, CancellationToken, Task> SmtpAuthenticate { get; set; } =
+        (client, user, password, token) => client.AuthenticateAsync(user, password, token);
+    internal Func<SmtpClient, MimeMessage, CancellationToken, Task> SmtpSend { get; set; } =
+        (client, message, token) => client.SendAsync(message, token);
+    internal Func<SmtpClient, CancellationToken, Task> SmtpDisconnect { get; set; } =
+        (client, token) => client.IsConnected ? client.DisconnectAsync(true, token) : Task.CompletedTask;
+    internal Func<zulip_cs_lib.ZulipClient, string, int, Task<(bool success, string? details, ulong messageId)>> ZulipStream { get; set; } =
+        (client, message, id) => client.Messages.TrySendStream(message, "Subscription Notification", [id]);
+    internal Func<zulip_cs_lib.ZulipClient, string, int, Task<(bool success, string? details, ulong messageId)>> ZulipPrivate { get; set; } =
+        (client, message, id) => client.Messages.TrySendPrivate(message, [id]);
 
     /// <summary>Serializes scheduling with the beginning of shutdown.</summary>
     private readonly object _lifecycleLock = new();
@@ -95,7 +115,28 @@ public class NotificationManager : INotificationManager
         Dictionary<string, TenantConfiguration> tenants,
         IFhirStoreManager fhirStoreManager,
         ILogger<NotificationManager> logger)
+        : this(serverConfig, tenants, fhirStoreManager, logger, TimeProvider.System, null)
     {
+    }
+
+    /// <summary>Creates a manager with a controlled clock and an optional caller-owned HTTP client.</summary>
+    /// <param name="serverConfig">The server configuration.</param>
+    /// <param name="tenants">The tenants.</param>
+    /// <param name="fhirStoreManager">The store manager.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="clock">The UTC clock and service timer factory.</param>
+    /// <param name="httpClient">An optional caller-owned transport client.</param>
+    public NotificationManager(
+        CandleConfig serverConfig,
+        Dictionary<string, TenantConfiguration> tenants,
+        IFhirStoreManager fhirStoreManager,
+        ILogger<NotificationManager> logger,
+        TimeProvider clock,
+        HttpClient? httpClient)
+    {
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _ownsHttpClient = httpClient is null;
+        _httpClient = httpClient ?? new();
         _logger = logger;
         _storeManager = fhirStoreManager;
 
@@ -137,100 +178,52 @@ public class NotificationManager : INotificationManager
     /// <param name="store">The store.</param>
     /// <param name="e">    Subscription event information.</param>
     /// <param name="cancellationToken">Cancellation of delivery during shutdown.</param>
-    /// <returns>An asynchronous result that yields true if it succeeds, false if it fails.</returns>
-    private async Task<bool> TryNotify(IFhirStore store, SubscriptionSendEventArgs e, CancellationToken cancellationToken)
+    /// <returns>The revision-fenced notification outcome.</returns>
+    private async Task<Outcome> TryNotify(IFhirStore store, SubscriptionSendEventArgs e, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string contents;
-
-        switch (e.NotificationType)
+        Outcome admission = await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.SetupComplete))).ConfigureAwait(false);
+        if (admission.Kind == OutcomeKind.Suppressed)
         {
-            case ParsedSubscription.NotificationTypeCodes.Handshake:
-                {
-                    contents = store.SerializeSubscriptionEvents(
-                                    e.Subscription.Id,
-                                    Array.Empty<long>(),
-                                    "handshake",
-                                    false);
-                }
-                break;
-
-            case ParsedSubscription.NotificationTypeCodes.Heartbeat:
-                {
-                    contents = store.SerializeSubscriptionEvents(
-                                    e.Subscription.Id,
-                                    Array.Empty<long>(),
-                                    "heartbeat",
-                                    false);
-                }
-                break;
-
-            case ParsedSubscription.NotificationTypeCodes.EventNotification:
-                {
-                    if (!e.NotificationEvents.Any())
-                    {
-                        return false;
-                    }
-
-                    contents = store.SerializeSubscriptionEvents(
-                                    e.Subscription.Id,
-                                    e.NotificationEvents.Select(ne => ne.EventNumber),
-                                    "event-notification",
-                                    false);
-                }
-                break;
-
-            case ParsedSubscription.NotificationTypeCodes.QueryStatus:
-                throw new NotImplementedException("TryNotify <<< QueryStatus is not an implemented mode for notifications");
-            //break;
-
-            case ParsedSubscription.NotificationTypeCodes.QueryEvent:
-                throw new NotImplementedException("TryNotify <<< QueryEvent is not an implemented mode for notifications");
-            //break;
-
-            default:
-                _logger.LogError($"TryNotify <<< Unknown notification type: {e.NotificationType}");
-                return false;
+            return admission;
         }
-
-        bool success;
-
-        switch (e.Subscription.ChannelCode.ToLowerInvariant())
+        try
         {
-            case "email":
-                success = await TryNotifyEmail(store, e, contents, cancellationToken).ConfigureAwait(false);
-                break;
+            string notificationType = e.NotificationType switch
+            {
+                ParsedSubscription.NotificationTypeCodes.Handshake => "handshake",
+                ParsedSubscription.NotificationTypeCodes.Heartbeat => "heartbeat",
+                ParsedSubscription.NotificationTypeCodes.EventNotification => "event-notification",
+                _ => throw new NotSupportedException($"Unknown delivery type: {e.NotificationType}"),
+            };
+            if (e.NotificationType == ParsedSubscription.NotificationTypeCodes.EventNotification && !e.NotificationEvents.Any())
+            {
+                throw new InvalidOperationException("Event notification has no events.");
+            }
+            string contents = store.SerializeSubscriptionEvents(e.Subscription.Id,
+                e.NotificationEvents.Select(notificationEvent => notificationEvent.EventNumber), notificationType, false);
+            Outcome outcome = e.Subscription.ChannelCode.ToLowerInvariant() switch
+            {
+                "email" => await TryNotifyEmail(store, e, contents, cancellationToken).ConfigureAwait(false),
+                "rest-hook" => await TryNotifyRestHook(store, e, contents, cancellationToken).ConfigureAwait(false),
+                "zulip" => await TryNotifyZulip(store, e, contents, cancellationToken).ConfigureAwait(false),
+                _ => throw new NotSupportedException($"Unimplemented channel type: {e.Subscription.ChannelCode}"),
+            };
 
-            case "rest-hook":
-                success = await TryNotifyRestHook(store, e, contents, cancellationToken).ConfigureAwait(false);
-                break;
-
-            case "zulip":
-                success = await TryNotifyZulip(store, e, contents, cancellationToken).ConfigureAwait(false);
-                break;
-
-            case "websocket":
-            default:
-                _logger.LogError($"TryNotify <<< unimplemented channel type: {e.Subscription.ChannelCode}");
-                return false;
+            if (e.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake && outcome.Succeeded)
+            {
+                store.TryCompleteSubscriptionHandshake(e);
+            }
+            return outcome;
         }
-
-        if ((e.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake) &&
-            success)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            store.ChangeSubscriptionStatus(e.Subscription.Id, "active");
+            throw;
         }
-
-        if (e.NotificationEvents.Any())
+        catch (Exception exception)
         {
-            e.Subscription.RegisterSerializedSend(e.NotificationEvents.Select(ne => ne.EventNumber).Max(), contents);
+            return await PreparationFailureAsync(store, e, "Notification", exception).ConfigureAwait(false);
         }
-        else
-        {
-            e.Subscription.RegisterSerializedSend(0, contents);
-        }
-
-        return success;
     }
 
     /// <summary>Attempt to send a notification via REST Hook.</summary>
@@ -238,8 +231,8 @@ public class NotificationManager : INotificationManager
     /// <param name="e">       Subscription event information.</param>
     /// <param name="contents">Serialized contents of the notification.</param>
     /// <param name="cancellationToken">Cancellation of delivery during shutdown.</param>
-    /// <returns>True if it succeeds, false if it fails.</returns>
-    private async Task<bool> TryNotifyRestHook(
+    /// <returns>The revision-fenced REST outcome.</returns>
+    private async Task<Outcome> TryNotifyRestHook(
         IFhirStore store,
         SubscriptionSendEventArgs e,
         string contents,
@@ -249,7 +242,7 @@ public class NotificationManager : INotificationManager
         // auto-pass any notifications to example.org
         if (e.Subscription.Endpoint.Contains("example.org", StringComparison.Ordinal))
         {
-            return true;
+            return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Simulated, contents))).ConfigureAwait(false);
         }
 
         HttpRequestMessage request = null!;
@@ -282,33 +275,8 @@ public class NotificationManager : INotificationManager
             }
 
             // send our request
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-
-            // check the status code
-            if ((response.StatusCode != System.Net.HttpStatusCode.OK) &&
-                (response.StatusCode != System.Net.HttpStatusCode.Accepted) &&
-                (response.StatusCode != System.Net.HttpStatusCode.NoContent))
-            {
-                // failure
-                e.Subscription.RegisterError($"REST POST to {e.Subscription.Endpoint} failed: {response.StatusCode}");
-                return false;
-            }
-
-            e.Subscription.LastCommunicationTicks = DateTime.Now.Ticks;
-
-            if (e.NotificationEvents.Any())
-            {
-                _logger.LogInformation(
-                    $" <<< Subscription/{e.Subscription.Id}" +
-                    $" POST: {e.Subscription.Endpoint}" +
-                    $" Events: {string.Join(',', e.NotificationEvents.Select(ne => ne.EventNumber))}");
-            }
-            else
-            {
-                _logger.LogInformation(
-                    $" <<< Subscription/{e.Subscription.Id}" +
-                    $" POST {e.NotificationType}: {e.Subscription.Endpoint}");
-            }
+            return await DispatchAsync(store, e,
+                () => RestOutcomeAsync(_httpClient.SendAsync(request, cancellationToken), contents, e.Subscription.Endpoint)).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -316,9 +284,7 @@ public class NotificationManager : INotificationManager
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "REST notification delivery failed for Subscription/{SubscriptionId}", e.Subscription.Id);
-            e.Subscription.RegisterError($"REST POST {e.NotificationType} to {e.Subscription.Endpoint} failed: {ex.Message}");
-            return false;
+            return await PreparationFailureAsync(store, e, "REST", ex).ConfigureAwait(false);
         }
         finally
         {
@@ -328,7 +294,31 @@ public class NotificationManager : INotificationManager
             }
         }
 
-        return true;
+    }
+
+    private static Task<Outcome> DispatchAsync(IFhirStore store, SubscriptionSendEventArgs args, Func<Task<Outcome>> start)
+    {
+        store.TryDispatchSubscriptionNotification(args, start, out Task<Outcome> completion);
+        return completion;
+    }
+
+    private static async Task<Outcome> RestOutcomeAsync(Task<HttpResponseMessage> operation, string contents, string endpoint)
+    {
+        using HttpResponseMessage response = await operation.ConfigureAwait(false);
+        return response.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.Accepted or System.Net.HttpStatusCode.NoContent
+            ? new(OutcomeKind.Delivered, contents)
+            : new(OutcomeKind.Failed, Error: $"REST POST to {endpoint} failed: {response.StatusCode}");
+    }
+
+    private async Task<Outcome> PreparationFailureAsync(IFhirStore store, SubscriptionSendEventArgs args, string channel, Exception exception)
+    {
+        Outcome outcome = await DispatchAsync(store, args, () => Task.FromResult(new Outcome(OutcomeKind.Failed,
+            Error: $"{channel} {args.NotificationType} to {args.Subscription.Endpoint} failed: {exception.Message}"))).ConfigureAwait(false);
+        if (outcome.Kind == OutcomeKind.Failed)
+        {
+            _logger.LogError(exception, "{Channel} notification delivery failed for Subscription/{SubscriptionId}", channel, args.Subscription.Id);
+        }
+        return outcome;
     }
 
     /// <summary>Attempt to send a notification via Zulip.</summary>
@@ -336,8 +326,8 @@ public class NotificationManager : INotificationManager
     /// <param name="e">       Subscription event information.</param>
     /// <param name="contents">Serialized contents of the notification.</param>
     /// <param name="cancellationToken">Cancellation of delivery during shutdown.</param>
-    /// <returns>An asynchronous result that yields true if it succeeds, false if it fails.</returns>
-    private async Task<bool> TryNotifyZulip(
+    /// <returns>The revision-fenced Zulip outcome.</returns>
+    private async Task<Outcome> TryNotifyZulip(
         IFhirStore store,
         SubscriptionSendEventArgs e,
         string contents,
@@ -352,7 +342,7 @@ public class NotificationManager : INotificationManager
             string.IsNullOrEmpty(zulipEmail) ||
             string.IsNullOrEmpty(zulipKey))
         {
-            return false;
+            return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Failed))).ConfigureAwait(false);
         }
 
         // send the request to the endpoint
@@ -362,10 +352,11 @@ public class NotificationManager : INotificationManager
 
             if (client is null)
             {
-                return false;
+                return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Failed))).ConfigureAwait(false);
             }
 
             string messageText = BuildZulipMessage(store, e, contents);
+            Outcome outcome = new(OutcomeKind.SetupComplete);
 
             if (e.Subscription.Parameters.ContainsKey("streamId"))
             {
@@ -378,10 +369,12 @@ public class NotificationManager : INotificationManager
 
                     cancellationToken.ThrowIfCancellationRequested();
                     // This existing Zulip API has no cancellation overload. Keep awaiting any started send.
-                    (bool success, string? details, ulong messageId) result = await client.Messages.TrySendStream(
-                        messageText,
-                        "Subscription Notification",
-                        new int[] { id }).ConfigureAwait(false);
+                    outcome = await DispatchAsync(store, e,
+                        () => ZulipOutcomeAsync(ZulipStream(client, messageText, id), contents)).ConfigureAwait(false);
+                    if (!outcome.Succeeded)
+                    {
+                        return outcome;
+                    }
                 }
             }
 
@@ -395,13 +388,16 @@ public class NotificationManager : INotificationManager
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
-                    (bool success, string? details, ulong messageId) result = await client.Messages.TrySendPrivate(
-                        messageText,
-                        new int[] { id }).ConfigureAwait(false);
+                    outcome = await DispatchAsync(store, e,
+                        () => ZulipOutcomeAsync(ZulipPrivate(client, messageText, id), contents)).ConfigureAwait(false);
+                    if (!outcome.Succeeded)
+                    {
+                        return outcome;
+                    }
                 }
             }
 
-            e.Subscription.LastCommunicationTicks = DateTime.Now.Ticks;
+            return outcome;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -409,12 +405,15 @@ public class NotificationManager : INotificationManager
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Zulip notification delivery failed for Subscription/{SubscriptionId}", e.Subscription.Id);
-            e.Subscription.RegisterError($"Zulip {e.NotificationType} to {e.Subscription.Endpoint} failed: {ex.Message}");
-            return false;
+            return await PreparationFailureAsync(store, e, "Zulip", ex).ConfigureAwait(false);
         }
 
-        return true;
+    }
+
+    private static async Task<Outcome> ZulipOutcomeAsync(Task<(bool success, string? details, ulong messageId)> operation, string contents)
+    {
+        (bool success, string? details, ulong messageId) result = await operation.ConfigureAwait(false);
+        return result.success ? new(OutcomeKind.Delivered, contents) : new(OutcomeKind.Failed, Error: result.details);
     }
 
     /// <summary>Parse email mime.</summary>
@@ -550,8 +549,8 @@ public class NotificationManager : INotificationManager
     /// <param name="e">       Subscription event information.</param>
     /// <param name="contents">Serialized contents of the notification.</param>
     /// <param name="cancellationToken">Cancellation of delivery during shutdown.</param>
-    /// <returns>An asynchronous result that yields true if it succeeds, false if it fails.</returns>
-    private async Task<bool> TryNotifyEmail(
+    /// <returns>The revision-fenced email outcome.</returns>
+    private async Task<Outcome> TryNotifyEmail(
         IFhirStore store,
         SubscriptionSendEventArgs e,
         string contents,
@@ -566,7 +565,7 @@ public class NotificationManager : INotificationManager
             string.IsNullOrEmpty(_smtpUser) ||
             (_smtpPort == 0))
         {
-            return false;
+            return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Failed))).ConfigureAwait(false);
         }
 
         if (destination.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
@@ -576,7 +575,7 @@ public class NotificationManager : INotificationManager
 
         if (destination.Contains("example.org", StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Simulated, contents))).ConfigureAwait(false);
         }
 
         // send the request to the endpoint
@@ -584,18 +583,34 @@ public class NotificationManager : INotificationManager
         {
             using (MemoryStream ms = new MemoryStream((byte[])System.Text.Encoding.UTF8.GetBytes(contents)))
             {
-                MimeMessage message = BuildEmailMimeMessage(store, e, from, destination, ms);
+                using MimeMessage message = BuildEmailMimeMessage(store, e, from, destination, ms);
 
                 using (SmtpClient client = new())
                 {
-                    await client.ConnectAsync(_smtpHost, _smtpPort, true, cancellationToken).ConfigureAwait(false);
-                    await client.AuthenticateAsync(_smtpUser, _smtpPassword, cancellationToken).ConfigureAwait(false);
-                    await client.SendAsync(message, cancellationToken).ConfigureAwait(false);
-                    await client.DisconnectAsync(true, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        Outcome outcome = await EmailStepAsync(store, e,
+                            () => SmtpConnect(client, _smtpHost, _smtpPort, cancellationToken), null, cancellationToken).ConfigureAwait(false);
+                        if (outcome.Kind != OutcomeKind.SetupComplete)
+                        {
+                            return outcome;
+                        }
+                        outcome = await EmailStepAsync(store, e,
+                            () => SmtpAuthenticate(client, _smtpUser, _smtpPassword, cancellationToken), null, cancellationToken).ConfigureAwait(false);
+                        if (outcome.Kind != OutcomeKind.SetupComplete)
+                        {
+                            return outcome;
+                        }
+                        return await EmailStepAsync(store, e,
+                            () => SmtpSend(client, message, cancellationToken), contents, cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // Cleanup is not delivery and remains permitted after revocation.
+                        await SmtpDisconnect(client, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
-
-            e.Subscription.LastCommunicationTicks = DateTime.Now.Ticks;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -603,12 +618,53 @@ public class NotificationManager : INotificationManager
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Email notification delivery failed for Subscription/{SubscriptionId}", e.Subscription.Id);
-            e.Subscription.RegisterError($"Email {e.NotificationType} to {e.Subscription.Endpoint} failed: {ex.Message}");
-            return false;
+            return await PreparationFailureAsync(store, e, "Email", ex).ConfigureAwait(false);
         }
 
-        return true;
+    }
+
+    private async Task<Outcome> EmailStepAsync(IFhirStore store, SubscriptionSendEventArgs args,
+        Func<Task> start, string? contents, CancellationToken cancellationToken)
+    {
+        Exception? failure = null;
+        Task<Outcome> Start()
+        {
+            // Invoke the existing MailKit API before the starter returns, including synchronous errors.
+            try
+            {
+                return Observe(start());
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failure = exception;
+                return Task.FromResult(new Outcome(OutcomeKind.Failed,
+                    Error: $"Email {args.NotificationType} to {args.Subscription.Endpoint} failed: {exception.Message}"));
+            }
+        }
+        async Task<Outcome> Observe(Task operation)
+        {
+            try
+            {
+                await operation.ConfigureAwait(false);
+                return new(contents is null ? OutcomeKind.SetupComplete : OutcomeKind.Delivered, contents);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+                return new(OutcomeKind.Failed,
+                    Error: $"Email {args.NotificationType} to {args.Subscription.Endpoint} failed: {exception.Message}");
+            }
+        }
+        Outcome outcome = await DispatchAsync(store, args, Start).ConfigureAwait(false);
+        if (outcome.Kind == OutcomeKind.Failed && failure is not null)
+        {
+            _logger.LogError(failure, "Email notification delivery failed for Subscription/{SubscriptionId}", args.Subscription.Id);
+        }
+        return outcome;
     }
 
     /// <summary>Builds an email message.</summary>
@@ -713,15 +769,26 @@ public class NotificationManager : INotificationManager
             {
                 store.OnSubscriptionsChanged += Store_OnSubscriptionsChanged;
                 store.OnSubscriptionSendEvent += Store_OnSubscriptionSendEvent;
+                foreach (ParsedSubscription subscription in store.CurrentSubscriptions)
+                {
+                    long revision = subscription.Revision;
+                    Store_OnSubscriptionsChanged(store, new()
+                    {
+                        Tenant = store.Config,
+                        ChangedSubscription = subscription,
+                        Revision = revision,
+                        SendHandshake = subscription.CurrentStatus == "requested",
+                    });
+                }
             }
 
-            _heartbeatTimer = new Timer(
+            _heartbeatTimer = _clock.CreateTimer(
                 CheckAndSendHeartbeats,
                 null,
                 TimeSpan.Zero,
                 TimeSpan.FromSeconds(2));
 
-            _notificationTimer = new Timer(
+            _notificationTimer = _clock.CreateTimer(
                 CheckNotificationQ,
                 null,
                 TimeSpan.Zero,
@@ -755,7 +822,8 @@ public class NotificationManager : INotificationManager
     {
         try
         {
-            if (!await TryNotify(request.Store, request.Args, _sendCancellation.Token).ConfigureAwait(false))
+            Outcome outcome = await TryNotify(request.Store, request.Args, _sendCancellation.Token).ConfigureAwait(false);
+            if (outcome.Kind == OutcomeKind.Failed)
             {
                 _logger.LogWarning("Notification delivery failed for Subscription/{SubscriptionId}", request.Args.Subscription.Id);
             }
@@ -767,6 +835,21 @@ public class NotificationManager : INotificationManager
         catch (Exception exception)
         {
             _logger.LogError(exception, "Notification delivery failed for Subscription/{SubscriptionId}", request.Args.Subscription.Id);
+        }
+        finally
+        {
+            if (request.Args.NotificationType == ParsedSubscription.NotificationTypeCodes.Heartbeat)
+            {
+                lock (_lifecycleLock)
+                {
+                    (IFhirStore, string, long) key = (request.Store, request.Args.Subscription.Id, request.Args.Revision);
+                    if (!_stopping && _heartbeatReservations.ContainsKey(key))
+                    {
+                        _heartbeatReservations[key] = _clock.GetUtcNow().UtcTicks +
+                            (long)(request.Args.Subscription.HeartbeatSeconds ?? 0) * TimeSpan.TicksPerSecond;
+                    }
+                }
+            }
         }
     }
 
@@ -780,31 +863,33 @@ public class NotificationManager : INotificationManager
             {
                 return;
             }
-            long currentTicks = DateTime.Now.Ticks;
+            DateTimeOffset now = _clock.GetUtcNow();
+            long currentTicks = now.UtcTicks;
+            HashSet<(IFhirStore Store, string Id, long Revision)> current = [];
 
             foreach (IFhirStore store in _storeManager.Values)
             {
                 foreach (ParsedSubscription sub in store.CurrentSubscriptions)
                 {
-                    if ((!sub.CurrentStatus.Equals("active", StringComparison.Ordinal)) ||
+                    long revision = sub.Revision;
+                    (IFhirStore, string, long) key = (store, sub.Id, revision);
+                    current.Add(key);
+                    if ((!SubscriptionLifecyclePolicy.CanGenerateEvents(sub.CurrentStatus, sub.ExpirationTicks, now)) ||
                         (sub.HeartbeatSeconds is null) ||
                         (sub.HeartbeatSeconds <= 0))
                     {
                         continue;
                     }
 
-                    // wait one offset if the subscription is new
-                    if (sub.LastCommunicationTicks == 0)
+                    long interval = (long)sub.HeartbeatSeconds * TimeSpan.TicksPerSecond;
+                    if (!_heartbeatReservations.TryGetValue(key, out long next))
                     {
-                        sub.LastCommunicationTicks = currentTicks + ((long)sub.HeartbeatSeconds - 1 * TimeSpan.TicksPerSecond);
-                        continue;
+                        next = currentTicks + interval;
+                        _heartbeatReservations[key] = next;
                     }
-
-                    long threshold = currentTicks - ((long)sub.HeartbeatSeconds! * TimeSpan.TicksPerSecond);
-
-                    if (sub.LastCommunicationTicks < threshold)
+                    if (next != long.MaxValue && currentTicks >= Math.Max(next, sub.LastCommunicationTicks + interval))
                     {
-                        sub.LastCommunicationTicks = currentTicks;
+                        _heartbeatReservations[key] = long.MaxValue;
 
                         _notificationRequestQ.Enqueue(new()
                         {
@@ -813,11 +898,21 @@ public class NotificationManager : INotificationManager
                             {
                                 Tenant = store.Config,
                                 Subscription = sub,
+                                Revision = revision,
                                 NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
                             },
                         });
                     }
                 }
+            }
+            foreach ((IFhirStore Store, string Id, long Revision) key in _heartbeatReservations.Keys.Where(key => !current.Contains(key)).ToArray())
+            {
+                _heartbeatReservations.Remove(key);
+            }
+            foreach (KeyValuePair<(IFhirStore Store, string Id), long> entry in _handshakeRevisions
+                .Where(entry => !current.Contains((entry.Key.Store, entry.Key.Id, entry.Value))).ToArray())
+            {
+                _handshakeRevisions.Remove(entry.Key);
             }
         }
     }
@@ -859,22 +954,32 @@ public class NotificationManager : INotificationManager
                 return;
             }
 
-            // check for a deleted subscription
-            if (!string.IsNullOrEmpty(e.RemovedSubscriptionId))
+            IFhirStore store = _storeManager[e.Tenant.ControllerName];
+            string? changedId = string.IsNullOrEmpty(e.RemovedSubscriptionId) ? e.ChangedSubscription?.Id : e.RemovedSubscriptionId;
+            foreach ((IFhirStore Store, string Id, long Revision) key in _heartbeatReservations.Keys
+                .Where(key => ReferenceEquals(key.Store, store) && key.Id == changedId && key.Revision < e.Revision).ToArray())
             {
-                // TODO: Remove any existing heartbeat record
+                _heartbeatReservations.Remove(key);
+            }
+            if (changedId is not null && _handshakeRevisions.TryGetValue((store, changedId), out long priorRevision) &&
+                priorRevision < e.Revision)
+            {
+                _handshakeRevisions.Remove((store, changedId));
             }
 
-            IFhirStore store = _storeManager[e.Tenant.ControllerName];
-
-            // check for a new subscription
-            if (e.SendHandshake)
+            if (e.SendHandshake && e.ChangedSubscription is not null)
             {
-                if (e.ChangedSubscription is null)
+                // Subscription changes publish after unlocking and may race the startup snapshot.
+                ParsedSubscription? current = store.CurrentSubscriptions.FirstOrDefault(subscription => subscription.Id == changedId);
+                if (current is null || !ReferenceEquals(current, e.ChangedSubscription) || current.Revision != e.Revision ||
+                    !SubscriptionLifecyclePolicy.CanDeliverNotification(current.CurrentStatus, current.ExpirationTicks,
+                        ParsedSubscription.NotificationTypeCodes.Handshake, _clock.GetUtcNow()) ||
+                    (_handshakeRevisions.TryGetValue((store, current.Id), out long queuedRevision) && queuedRevision >= e.Revision))
                 {
                     return;
                 }
 
+                _handshakeRevisions[(store, current.Id)] = e.Revision;
                 _notificationRequestQ.Enqueue(new()
                 {
                     Store = store,
@@ -882,16 +987,12 @@ public class NotificationManager : INotificationManager
                     {
                         Tenant = e.Tenant,
                         Subscription = e.ChangedSubscription!,
+                        Revision = e.Revision,
                         NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
                     }
                 });
             }
 
-            // check for a changed subscription
-            if (e.ChangedSubscription is not null)
-            {
-                // TODO: Check for changes to the heartbeat interval
-            }
         }
     }
 
@@ -927,8 +1028,8 @@ public class NotificationManager : INotificationManager
             }
 
             _stopping = true;
-            _heartbeatTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-            _notificationTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _heartbeatTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _notificationTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             if (_started)
             {
                 foreach (IFhirStore store in _storeManager.Values)
@@ -938,6 +1039,8 @@ public class NotificationManager : INotificationManager
                 }
             }
             _notificationRequestQ.Clear();
+            _heartbeatReservations.Clear();
+            _handshakeRevisions.Clear();
             _stopTask = DrainAsync();
             return _stopTask;
         }
@@ -1002,7 +1105,10 @@ public class NotificationManager : INotificationManager
             {
                 return;
             }
-            _httpClient.Dispose();
+            if (_ownsHttpClient)
+            {
+                _httpClient.Dispose();
+            }
             _sendCancellation.Dispose();
             _hasDisposed = true;
         }

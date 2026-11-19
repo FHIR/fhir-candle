@@ -76,7 +76,28 @@ public class ExecutableSubscriptionInfo
     public IEnumerable<CompiledQueryTrigger> QueryTriggers { get; set; } = Array.Empty<CompiledQueryTrigger>();
 
     /// <summary>Gets or sets the subscription filters, by subscription id.</summary>
-    public Dictionary<string, List<ParsedSearchParameter>> FiltersBySubscription { get; set; } = new();
+    public Dictionary<string, Binding> FiltersBySubscription { get; set; } = new();
+
+    /// <summary>A captured revision and its compiled filters, never reread from a mutable subscription.</summary>
+    /// <param name="Revision">The admitted lifecycle revision.</param>
+    /// <param name="Filters">The resource-local compiled filter snapshot.</param>
+    public sealed record Binding(long Revision, ParsedSearchParameter[] Filters);
+
+    /// <summary>Copies the executable containers while the resource registration lock is held.</summary>
+    internal ExecutableSubscriptionInfo Snapshot(ParsedResultParameters? additionalContext) => new()
+    {
+        TopicUrl = TopicUrl,
+        InteractionTriggers = InteractionTriggers.ToArray(),
+        FhirPathTriggers = FhirPathTriggers.ToArray(),
+        QueryTriggers = QueryTriggers.Select(trigger => trigger with
+        {
+            PreviousTest = trigger.PreviousTest.ToArray(),
+            CurrentTest = trigger.CurrentTest.ToArray(),
+        }).ToArray(),
+        FiltersBySubscription = FiltersBySubscription.ToDictionary(entry => entry.Key,
+            entry => new Binding(entry.Value.Revision, entry.Value.Filters.ToArray())),
+        AdditionalContext = additionalContext,
+    };
 
     public ParsedResultParameters? AdditionalContext { get; set; } = null;
 }
