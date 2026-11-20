@@ -4824,8 +4824,12 @@ rs,
         return success;
     }
 
+    internal Action<string, ParsedSearchParameter[]>? NestedTypeSearchObserver { get; set; }
+
     internal Resource[] DoNestedTypeSearch(string resourceType, ParsedSearchParameter[] parameters)
     {
+        NestedTypeSearchObserver?.Invoke(resourceType, parameters);
+
         if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? ivrs))
         {
             return [];

@@ -1969,7 +1969,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             {
                 bool matches = isNestedSearch
                     ? _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache)
-                    : _searchTester.TestForMatch(resource.ToPocoNode(), parameters);
+                    : _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache);
                 if (matches)
                 {
                     yield return resource;
@@ -2013,7 +2013,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
                 PocoNode r = resource.ToPocoNode();
 
-                if (_searchTester.TestForMatch(r, parameters))
+                if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
                 {
                     yield return resource;
                 }

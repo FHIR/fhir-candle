@@ -10,6 +10,7 @@ extern alias candleR5;
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
 using FhirCandle.Models;
@@ -71,6 +72,9 @@ public partial class Sdk6ContractTests
         ["zero", "one", "one-target-many", "multiple-targets", "distinct-names", "distinct-names-reversed",
          "same-key", "same-key-reversed", "independent-related", "independent-related-reversed",
          "nested-filters", "nested-filters-reversed"]);
+
+    /// <summary>Each counted direct search runs against a fresh store of each supported version.</summary>
+    public static IEnumerable<object[]> ReverseChainCountCases => LifecycleTestStore.Versions;
 
     /// <summary>All four existing POST routes have independent repeated, encoded, merged, and empty controls.</summary>
     public static IEnumerable<object[]> SearchFormCases
@@ -315,6 +319,203 @@ public partial class Sdk6ContractTests
                 _ => throw new ArgumentOutOfRangeException(nameof(kind)),
             };
             await AssertSearchProbe(replay, graph, probe with { Id = pass + "-" + probe.Id });
+        }
+    }
+
+    /// <summary>Reached reverse-chain keys, including empty results, each dispatch one inner search per request.</summary>
+    [Theory]
+    [MemberData(nameof(ReverseChainCountCases))]
+    public async Task ReverseChainCountsInnerSearchesPerReachedKey(FhirReleases.FhirSequenceCodes version)
+    {
+        const CompatibilityFormat format = CompatibilityFormat.Json;
+        CompatibilityTenant tenant = Tenant(version, $"has-counts-{VersionName(version)}");
+        CompatibilityScenario scenario = new("reverse-chain-counts", SearchEvidence, [tenant], []);
+        await using CompatibilityReplay replay = new(scenario, CompatibilityTransport.Direct);
+        await replay.AssertNoClinicalResourcesAsync(format);
+        IFhirStore store = replay.GetOwnedStore(tenant.Name);
+
+        const string has = "_has:Observation:subject:";
+        const string finalPath = $"Patient?{has}status=final";
+        const string finalCall = "Observation?status=final";
+        const string preliminaryCall = "Observation?status=preliminary";
+        const string observation = """
+            {"resourceType":"Observation","id":"o1","status":"final","code":{"coding":[{"code":"red"}]},
+             "subject":{"reference":"Patient/p1"}}
+            """;
+        List<string> tallyMismatches = [];
+
+        await Put("Patient/p1", """{"resourceType":"Patient","id":"p1"}""", HttpStatusCode.Created);
+        await Put("Observation/o1", observation, HttpStatusCode.Created);
+        await Check(finalPath, ["Patient/p1"], finalCall);
+
+        await Put("Patient/p2", """{"resourceType":"Patient","id":"p2"}""", HttpStatusCode.Created);
+        await Put("Patient/p3", """{"resourceType":"Patient","id":"p3"}""", HttpStatusCode.Created);
+        await Check(finalPath, ["Patient/p1"], finalCall);
+        await Check($"Patient?{has}status=preliminary", [], preliminaryCall);
+        await Check($"{finalPath}&{has}status=preliminary", [], finalCall, preliminaryCall);
+        await Check($"{finalPath}&{has}status=final&{has}code=red", ["Patient/p1"], finalCall, "Observation?code=red");
+
+        await Put("Observation/o1", observation.Replace("\"final\"", "\"preliminary\"", StringComparison.Ordinal), HttpStatusCode.OK);
+        await Check(finalPath, [], finalCall);
+
+        Assert.Contains(store.GetSearchParameters("Observation"),
+            parameter => parameter.Name == "has-member" && parameter.SearchType == "reference");
+        await Put("Observation/panel", """
+            {"resourceType":"Observation","id":"panel","status":"final","code":{"text":"Panel"},
+             "hasMember":[{"reference":"Observation/o1"}]}
+            """, HttpStatusCode.Created);
+        const string member = "_has:Observation:has-member:_id=";
+        const string panelPath = $"Patient?{has}{member}panel";
+        await Check(panelPath, ["Patient/p1"], "Observation?" + member + "panel", "Observation?_id=panel");
+        await Check($"{panelPath}&{has}{member}absent", [],
+            "Observation?" + member + "panel", "Observation?_id=panel",
+            "Observation?" + member + "absent", "Observation?_id=absent");
+
+        // Report every tally discrepancy, but only after the probes have verified their exact results.
+        Assert.True(tallyMismatches.Count == 0, string.Join(Environment.NewLine, tallyMismatches));
+
+        async Task Put(string path, string content, HttpStatusCode status)
+        {
+            CompatibilityResponse response = await replay.SendAsync(new(tenant.Name, "PUT", path) { Format = format, Content = content });
+            CompatibilityDirectResponse direct = Assert.IsType<CompatibilityDirectResponse>(response.Direct);
+            Assert.True(direct.Success, direct.SerializedOutcome);
+            Assert.Equal(status, response.Status);
+        }
+
+        async Task Check(string path, string[] expectedIds, params string[] expectedCalls)
+        {
+            Dictionary<string, int> calls = new(StringComparer.Ordinal);
+            CompatibilityResponse response;
+            Action clearObserver = ObserveNestedTypeSearch(store, calls);
+            try
+            {
+                response = await replay.SendAsync(new(tenant.Name, "GET", path) { Format = format });
+            }
+            finally
+            {
+                clearObserver();
+            }
+
+            CompatibilityDirectResponse direct = Assert.IsType<CompatibilityDirectResponse>(response.Direct);
+            Assert.True(direct.Success, direct.SerializedOutcome);
+            Assert.Equal(HttpStatusCode.OK, response.Status);
+            string[] actualIds = AssertCountedSearchMatches(JsonNode.Parse(direct.SerializedResource)!.AsObject(), expectedIds);
+            string? mismatch = NestedSearchTallyMismatch(version, path, expectedIds, actualIds, expectedCalls, calls);
+            if (mismatch is not null)
+            {
+                tallyMismatches.Add(mismatch);
+            }
+        }
+    }
+
+    /// <summary>Normalized Subscription snapshots reuse inner searches without reusing candidate-specific matches.</summary>
+    [Theory]
+    [MemberData(nameof(ReverseChainCountCases))]
+    public void ReverseChainCountsInnerSearchesForSubscriptionSnapshots(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        fixture.Seed(subscription: false);
+        foreach (string id in new[] { "s1", "s2" })
+        {
+            JsonObject subscription = fixture.SubscriptionJson("off");
+            subscription["id"] = id;
+            fixture.Put(subscription);
+        }
+        fixture.Put(JsonNode.Parse("""
+            {"resourceType":"Provenance","id":"prov","target":[{"reference":"Subscription/s1"}],
+             "recorded":"2025-01-02T03:04:05Z","agent":[{"who":{"reference":"Practitioner/author"}}]}
+            """)!.AsObject());
+        Assert.Contains(fixture.Store.GetSearchParameters("Provenance"),
+            parameter => parameter.Name == "target" && parameter.SearchType == "reference");
+        AssertCountedSearchMatches(fixture.Get("Subscription?status=off"), ["Subscription/s1", "Subscription/s2"]);
+
+        const string path = "Subscription?status=off&_has:Provenance:target:_id=prov";
+        Dictionary<string, int> calls = new(StringComparer.Ordinal);
+        JsonObject bundle;
+        Action clearObserver = ObserveNestedTypeSearch(fixture.Store, calls);
+        try
+        {
+            bundle = fixture.Get(path);
+        }
+        finally
+        {
+            clearObserver();
+        }
+
+        string[] expectedIds = ["Subscription/s1"];
+        string[] actualIds = AssertCountedSearchMatches(bundle, expectedIds);
+        string? mismatch = NestedSearchTallyMismatch(version, path, expectedIds, actualIds, ["Provenance?_id=prov"], calls);
+        Assert.True(mismatch is null, mismatch);
+    }
+
+    private static string[] AssertCountedSearchMatches(JsonObject bundle, string[] expectedIds)
+    {
+        Assert.Equal("Bundle", bundle["resourceType"]!.GetValue<string>());
+        Assert.Equal("searchset", bundle["type"]!.GetValue<string>());
+        Assert.Equal(expectedIds.Length, bundle["total"]!.GetValue<int>());
+
+        string[] actualIds = (bundle["entry"]?.AsArray() ?? []).Select(entry =>
+        {
+            Assert.Equal("match", entry!["search"]!["mode"]!.GetValue<string>());
+            JsonNode resource = entry["resource"]!;
+            return $"{resource["resourceType"]!.GetValue<string>()}/{resource["id"]!.GetValue<string>()}";
+        }).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(expectedIds.Order(StringComparer.Ordinal), actualIds);
+        return actualIds;
+    }
+
+    private static string? NestedSearchTallyMismatch(
+        FhirReleases.FhirSequenceCodes version, string path, string[] expectedIds, string[] actualIds,
+        string[] expectedCalls, Dictionary<string, int> calls)
+    {
+        (string Signature, int Count)[] expected = expectedCalls.Order(StringComparer.Ordinal).Select(signature => (signature, 1)).ToArray();
+        (string Signature, int Count)[] actual = calls.OrderBy(call => call.Key, StringComparer.Ordinal).Select(call => (call.Key, call.Value)).ToArray();
+        return expected.SequenceEqual(actual)
+            ? null
+            : $"{version} GET {path}: verified IDs expected [{string.Join(", ", expectedIds)}], actual [{string.Join(", ", actualIds)}]; " +
+              $"expected tally [{Display(expected)}], actual [{Display(actual)}].";
+
+        static string Display((string Signature, int Count)[] tally) =>
+            string.Join(", ", tally.Select(call => $"{call.Signature} x{call.Count}"));
+    }
+
+    private static Action ObserveNestedTypeSearch(IFhirStore store, Dictionary<string, int> calls)
+    {
+        switch (store)
+        {
+            case candleR4::FhirCandle.Storage.VersionedFhirStore r4:
+                r4.NestedTypeSearchObserver = (type, filters) => Count(type, filters, filter =>
+                    (filter.Name, filter.Values, filter.ReverseChainedParameterLink?.ResourceType,
+                     filter.ReverseChainedParameterLink?.Name, filter.ReverseChainedParameterFilter));
+                return () => r4.NestedTypeSearchObserver = null;
+            case candleR4B::FhirCandle.Storage.VersionedFhirStore r4b:
+                r4b.NestedTypeSearchObserver = (type, filters) => Count(type, filters, filter =>
+                    (filter.Name, filter.Values, filter.ReverseChainedParameterLink?.ResourceType,
+                     filter.ReverseChainedParameterLink?.Name, filter.ReverseChainedParameterFilter));
+                return () => r4b.NestedTypeSearchObserver = null;
+            case candleR5::FhirCandle.Storage.VersionedFhirStore r5:
+                r5.NestedTypeSearchObserver = (type, filters) => Count(type, filters, filter =>
+                    (filter.Name, filter.Values, filter.ReverseChainedParameterLink?.ResourceType,
+                     filter.ReverseChainedParameterLink?.Name, filter.ReverseChainedParameterFilter));
+                return () => r5.NestedTypeSearchObserver = null;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(store));
+        }
+
+        void Count<T>(string type, T[] filters, Func<T, (string Name, string[] Values, string? LinkType, string? LinkName, T? Child)> describe)
+            where T : class
+        {
+            string signature = $"{type}?{string.Join('&', filters.Select(Signature))}";
+            calls[signature] = calls.GetValueOrDefault(signature) + 1;
+
+            string Signature(T filter)
+            {
+                (string name, string[] values, string? linkType, string? linkName, T? child) = describe(filter);
+                // Nested _has nodes have no values of their own; the child distinguishes the effective filters.
+                return child is null
+                    ? $"{name}={string.Join(',', values)}"
+                    : $"{name}:{linkType}:{linkName}:{Signature(child)}";
+            }
         }
     }
 
