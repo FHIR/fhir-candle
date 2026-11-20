@@ -37,6 +37,8 @@ public partial class Sdk6ContractTests
     private const string DateBoundaryBeforeUtc = "0001-01-01T13:59:59+14:00";
     private const string DateBoundaryAfterUtc = "9999-12-31T10:00:00-14:00";
     private const string DateBoundaryLocalCarry = "9999-12-31T23:59:59.99999999+1";
+    private const string DateBoundaryInvalidHour = "9999-12-31T24:00:00+01:00";
+    private const string DateBoundaryHourProjection = "9999-12-31T23:00:00Z";
 
     public static IEnumerable<object[]> DateBoundaryQueryCases => DateBoundaryReplayRows(
         "0001", "0001-01", "0001-01-01", "9999", "9999-12", "9999-12-31",
@@ -354,6 +356,22 @@ public partial class Sdk6ContractTests
     }
 
     [Theory]
+    [InlineData(DateBoundaryInvalidHour, DateBoundaryHourProjection, 9999, 12, 31, 23, 0, 0)]
+    [InlineData("2000-02-29T12:34:56-14:01", "2000-03-01T02:35:56Z", 2000, 3, 1, 2, 35, 56)]
+    [InlineData("2000-02-29T12:34:56-15:00", "2000-03-01T03:34:56Z", 2000, 3, 1, 3, 34, 56)]
+    public void DateBoundaryRejectsMalformedFieldsBeforeUtcProjection(string malformed, string projectedUtc,
+        int year, int month, int day, int hour, int minute, int second)
+    {
+        using CompatibilityReplay replay = DateBoundaryNativeReplay();
+        ParsedSearchParameter query = ParseDateBoundaryQuery(replay, "Observation", "date=eq2000");
+        Assert.False(query.TryParseDateString(malformed, out _, out _, out _));
+        Assert.False(ParsedSearchParameter.TryParseFhirDate(malformed, out _, out _));
+
+        DateTimeOffset start = DateBoundaryUtc(year, month, day, hour, minute, second);
+        AssertDateBoundaryAdapters(query, projectedUtc, start, start.AddTicks(TimeSpan.TicksPerSecond - 1), 1);
+    }
+
+    [Theory]
     [InlineData("0001", 1, 1, 1, 365)]
     [InlineData("0001-01", 1, 1, 1, 65)]
     [InlineData("0001-01-01", 1, 1, 1, 31)]
@@ -472,7 +490,7 @@ public partial class Sdk6ContractTests
 
     [Theory]
     [InlineData("Patient", "birthdate", "0000", "1999-12-31")]
-    [InlineData("Observation", "date", "9999-12-31T24:00:00Z", "1999-12-31T23:59:59Z")]
+    [InlineData("Observation", "date", DateBoundaryInvalidHour, "1999-12-31T23:59:59Z")]
     public void DateBoundaryInvalidStoredPrimitiveIsNotAMatch(string type, string key, string invalid, string valid)
     {
         using CompatibilityReplay replay = DateBoundaryNativeReplay();
@@ -492,6 +510,10 @@ public partial class Sdk6ContractTests
         PocoNode controlNode = Assert.Single(ExtractDateBoundaryNative(query, Assert.IsAssignableFrom<Resource>(controlResponse.Resource)));
         Assert.Equal(valid, Assert.IsAssignableFrom<PrimitiveType>(controlNode.Poco).JsonValue);
         Assert.True(EvalDateSearch.TestDate(controlNode, query));
+        if (!patient)
+        {
+            Assert.True(EvalDateSearch.TestDate(new FhirDateTime(DateBoundaryHourProjection).ToPocoNode(), query));
+        }
 
         bool written = TryWriteDateBoundaryNative(store, malformed, out FhirResponseContext malformedResponse);
         PocoNode[] extracted = written && malformedResponse.Resource is Resource admitted

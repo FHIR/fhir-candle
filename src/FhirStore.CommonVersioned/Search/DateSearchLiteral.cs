@@ -38,6 +38,9 @@ internal static class DateSearchLiteral
         (long width, int approxDays) = text.Length switch
         {
             4 => ((DateTime.IsLeapYear(year) ? 366 : 365) * TimeSpan.TicksPerDay, 365),
+            // The longest two-month span is 62 days; 65 leaves a margin for time zones and inclusive endpoints.
+            // Use the same fixed ap delta on both sides before saturation; AddMonths(2) would vary with
+            // month length and make the window asymmetric around February.
             7 => (monthDays * TimeSpan.TicksPerDay, 65),
             10 => (TimeSpan.TicksPerDay, 31),
             _ => (0L, 1),
