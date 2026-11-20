@@ -654,6 +654,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
 
         List<SubscriptionChangedEventArgs> subscriptionChanges = [];
+        List<string> subscriptionDiagnostics = [];
         lock (_lockObject)
         {
             if (parsedSubscription is not null)
@@ -694,7 +695,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 }
                 if (parsedSubscription is not null)
                 {
-                    _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges);
+                    _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
                 }
             }
             finally
@@ -706,7 +707,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        _store.PublishSubscriptionChanges(subscriptionChanges);
+        _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
         RegisterInstanceCreated(source.Id);
         _store.RegisterInstanceCreated(_resourceName, source.Id);
 
@@ -865,6 +866,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         T? previous;
 
         List<SubscriptionChangedEventArgs> subscriptionChanges = [];
+        List<string> subscriptionDiagnostics = [];
         lock (_lockObject)
         {
             if (parsedSubscription is not null)
@@ -945,7 +947,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 _resourceStore[source.Id] = (T)source;
                 if (parsedSubscription is not null)
                 {
-                    _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges);
+                    _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
                 }
             }
             finally
@@ -957,7 +959,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        _store.PublishSubscriptionChanges(subscriptionChanges);
+        _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
         RegisterInstanceUpdated(source.Id);
         _store.RegisterInstanceUpdated(_resourceName, source.Id);
 
@@ -1056,6 +1058,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         T? previous;
 
         List<SubscriptionChangedEventArgs> subscriptionChanges = [];
+        List<string> subscriptionDiagnostics = [];
         lock (_lockObject)
         {
             bool subscriptionMutation = typeof(T) == typeof(Subscription);
@@ -1075,7 +1078,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                     previous = (T)previous.DeepCopy();
                     if (_store._subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
                     {
-                        _store.CommitSubscriptionLocked(subscription, null, true, subscriptionChanges);
+                        _store.CommitSubscriptionLocked(subscription, null, true, subscriptionChanges, subscriptionDiagnostics);
                     }
                 }
             }
@@ -1088,7 +1091,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        _store.PublishSubscriptionChanges(subscriptionChanges);
+        _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
         if (previous is null)
         {
             return null;

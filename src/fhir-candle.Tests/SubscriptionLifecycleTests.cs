@@ -1044,6 +1044,55 @@ internal sealed class LifecycleTestStore : IDisposable
         }
         return resource;
     }
+    internal JsonObject SubscriptionWithBindingParameters(string status, params string[] parameters)
+    {
+        JsonObject resource = SubscriptionJson(status);
+        foreach (string parameter in parameters)
+        {
+            if (Version == FhirReleases.FhirSequenceCodes.R5)
+            {
+                resource["filterBy"]!.AsArray().Add(new JsonObject
+                {
+                    ["resourceType"] = "Encounter",
+                    ["filterParameter"] = parameter,
+                    ["value"] = "ignored",
+                });
+            }
+            else
+            {
+                JsonNode criteria = resource["_criteria"]!["extension"]![0]!;
+                criteria["valueString"] = criteria["valueString"]!.GetValue<string>() + $"&{parameter}=ignored";
+            }
+        }
+        return resource;
+    }
+    internal ParsedSubscription SubscriptionWithBindingModifiers(string status, params string[] modifiers)
+    {
+        lock (Field("SubscriptionLifecycleLock"))
+        {
+            ParsedSubscription source = (ParsedSubscription)((IDictionary)Field("_subscriptions"))[Id]!;
+            ParsedSubscription.SubscriptionFilter patient = Assert.Single(source.Filters["Encounter"]);
+            Assert.Equal("patient", patient.Name);
+            ParsedSubscription subscription = new()
+            {
+                Id = source.Id,
+                TopicUrl = source.TopicUrl,
+                ExpirationTicks = source.ExpirationTicks,
+                CurrentStatus = status,
+                ChannelSystem = source.ChannelSystem,
+                ChannelCode = source.ChannelCode,
+                Endpoint = source.Endpoint,
+                ContentType = source.ContentType,
+                ContentLevel = source.ContentLevel,
+                Filters = source.Filters.ToDictionary(entry => entry.Key, entry => new List<ParsedSubscription.SubscriptionFilter>(entry.Value)),
+            };
+            foreach (string modifier in modifiers)
+            {
+                subscription.Filters["Encounter"].Add(patient with { Modifier = modifier });
+            }
+            return subscription;
+        }
+    }
     internal void Seed(string status = "active", string? end = null, bool subscription = true)
     {
         Put(Fixture("patient"));

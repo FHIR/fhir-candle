@@ -51,11 +51,15 @@ public partial class VersionedFhirStore
         SendHandshake = !removed && subscription.CurrentStatus == "requested",
     };
 
-    internal void PublishSubscriptionChanges(IEnumerable<SubscriptionChangedEventArgs> changes)
+    internal void PublishSubscriptionChanges(IEnumerable<SubscriptionChangedEventArgs> changes, List<string> diagnostics)
     {
         foreach (SubscriptionChangedEventArgs change in changes)
         {
             OnSubscriptionsChanged?.Invoke(this, change);
+        }
+        foreach (string diagnostic in diagnostics)
+        {
+            _subscriptionDiagnosticWriter(diagnostic);
         }
     }
 
@@ -81,7 +85,8 @@ public partial class VersionedFhirStore
         ParsedSubscription subscription,
         Subscription? resource,
         bool remove,
-        List<SubscriptionChangedEventArgs> changes)
+        List<SubscriptionChangedEventArgs> changes,
+        List<string> diagnostics)
     {
         if (_lifecycleStopped || !_subscriptionConverter.IsValidStatus(subscription.CurrentStatus) ||
             !SubscriptionLifecyclePolicy.IsValidExpirationTicks(subscription.ExpirationTicks))
@@ -114,9 +119,9 @@ public partial class VersionedFhirStore
         // Reprocessing an installed descriptor is not a replacement or a renewal.
         if (ReferenceEquals(prior, subscription) && resource is null)
         {
-            NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, deferTimerRearm: true);
+            NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics, deferTimerRearm: true);
             RemoveSubscriptionBindingsLocked(subscription);
-            bool executable = InstallSubscriptionBindingsLocked(subscription);
+            bool executable = InstallSubscriptionBindingsLocked(subscription, diagnostics);
             RearmSubscriptionTimerLocked();
             return executable;
         }
@@ -140,14 +145,14 @@ public partial class VersionedFhirStore
         }
         _subscriptions[subscription.Id] = subscription;
         SetStoredSubscriptionStatusLocked(subscription.Id, subscription.CurrentStatus);
-        bool installed = InstallSubscriptionBindingsLocked(subscription);
+        bool installed = InstallSubscriptionBindingsLocked(subscription, diagnostics);
         changes.Add(SubscriptionChangeLocked(subscription));
         RearmSubscriptionTimerLocked();
         return installed;
     }
 
     private bool ChangeSubscriptionStatusLocked(
-        ParsedSubscription subscription, string status, List<SubscriptionChangedEventArgs> changes,
+        ParsedSubscription subscription, string status, List<SubscriptionChangedEventArgs> changes, List<string> diagnostics,
         bool deferTimerRearm = false)
     {
         if (_lifecycleStopped || !_subscriptionConverter.IsValidStatus(status))
@@ -169,7 +174,7 @@ public partial class VersionedFhirStore
         subscription.CurrentStatus = status;
         subscription.Revision = revision;
         SetStoredSubscriptionStatusLocked(subscription.Id, status);
-        InstallSubscriptionBindingsLocked(subscription);
+        InstallSubscriptionBindingsLocked(subscription, diagnostics);
         changes.Add(SubscriptionChangeLocked(subscription));
         if (!deferTimerRearm)
         {
@@ -179,21 +184,21 @@ public partial class VersionedFhirStore
     }
 
     private bool NormalizeSubscriptionLocked(
-        ParsedSubscription subscription, DateTimeOffset now, List<SubscriptionChangedEventArgs> changes,
+        ParsedSubscription subscription, DateTimeOffset now, List<SubscriptionChangedEventArgs> changes, List<string> diagnostics,
         bool deferTimerRearm = false)
     {
         return !_lifecycleStopped && (subscription.CurrentStatus is "active" or "requested") &&
             SubscriptionLifecyclePolicy.IsExpired(subscription.ExpirationTicks, now) &&
-            ChangeSubscriptionStatusLocked(subscription, "off", changes, deferTimerRearm);
+            ChangeSubscriptionStatusLocked(subscription, "off", changes, diagnostics, deferTimerRearm);
     }
 
-    private void NormalizeSubscriptionsLocked(List<SubscriptionChangedEventArgs> changes, bool deferTimerRearm = false)
+    private void NormalizeSubscriptionsLocked(List<SubscriptionChangedEventArgs> changes, List<string> diagnostics, bool deferTimerRearm = false)
     {
         DateTimeOffset now = _clock.GetUtcNow();
         bool changed = false;
         foreach (ParsedSubscription subscription in _subscriptions.Values)
         {
-            changed |= NormalizeSubscriptionLocked(subscription, now, changes, deferTimerRearm: true);
+            changed |= NormalizeSubscriptionLocked(subscription, now, changes, diagnostics, deferTimerRearm: true);
         }
         if (changed && !deferTimerRearm)
         {
@@ -204,62 +209,66 @@ public partial class VersionedFhirStore
     private ParsedSubscription[] SubscriptionSnapshots()
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         ParsedSubscription[] subscriptions;
         lock (SubscriptionLifecycleLock)
         {
-            NormalizeSubscriptionsLocked(changes);
+            NormalizeSubscriptionsLocked(changes, diagnostics);
             subscriptions = _subscriptions.Values.ToArray();
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return subscriptions;
     }
 
     internal Subscription? SubscriptionResourceSnapshot(string id)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         Subscription? snapshot;
         lock (SubscriptionLifecycleLock)
         {
             if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
             {
-                NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes);
+                NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
             }
             snapshot = _store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore)
                 ? (Subscription?)resourceStore.ReadRawSubscription(id)?.DeepCopy()
                 : null;
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return snapshot;
     }
 
     internal Subscription[] SubscriptionResourceSnapshots()
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         Subscription[] snapshots;
         lock (SubscriptionLifecycleLock)
         {
-            NormalizeSubscriptionsLocked(changes);
+            NormalizeSubscriptionsLocked(changes, diagnostics);
             snapshots = _store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore)
                 ? ((IReadOnlyDictionary<string, Resource>)resourceStore).Values.Cast<Subscription>()
                     .Select(resource => (Subscription)resource.DeepCopy()).ToArray()
                 : [];
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return snapshots;
     }
 
     internal (string Id, string Status, Resource Resource)[] SubscriptionStatusSnapshots(string notificationType)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         (string, string, Resource)[] snapshots;
         lock (SubscriptionLifecycleLock)
         {
-            NormalizeSubscriptionsLocked(changes);
+            NormalizeSubscriptionsLocked(changes, diagnostics);
             snapshots = _subscriptions.Values.Select(subscription =>
                 (subscription.Id, subscription.CurrentStatus,
                     _subscriptionConverter.StatusForSubscription(subscription, notificationType, _config.BaseUrl))).ToArray();
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return snapshots;
     }
 
@@ -267,13 +276,14 @@ public partial class VersionedFhirStore
         string id, string topicUrl, long revision, Resource focus, IEnumerable<object> additionalContext)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         SubscriptionSendEventArgs? send = null;
         lock (SubscriptionLifecycleLock)
         {
             if (!_lifecycleStopped && _subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
             {
                 DateTimeOffset now = _clock.GetUtcNow();
-                NormalizeSubscriptionLocked(subscription, now, changes);
+                NormalizeSubscriptionLocked(subscription, now, changes, diagnostics);
                 if (subscription.Revision == revision && subscription.TopicUrl == topicUrl &&
                     SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now))
                 {
@@ -294,7 +304,7 @@ public partial class VersionedFhirStore
                 }
             }
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         if (send is not null)
         {
             OnSubscriptionSendEvent?.Invoke(this, send);
@@ -313,13 +323,14 @@ public partial class VersionedFhirStore
     internal void RegisterSubscriptionExecutionError(string id, long revision, string error)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         string? diagnostic = null;
         lock (SubscriptionLifecycleLock)
         {
             if (!_lifecycleStopped && _subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
             {
                 DateTimeOffset now = _clock.GetUtcNow();
-                NormalizeSubscriptionLocked(subscription, now, changes);
+                NormalizeSubscriptionLocked(subscription, now, changes, diagnostics);
                 if (subscription.Revision == revision &&
                     SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now))
                 {
@@ -327,14 +338,14 @@ public partial class VersionedFhirStore
                 }
             }
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         if (diagnostic is not null)
         {
             _subscriptionDiagnosticWriter(diagnostic);
         }
     }
 
-    private bool CanDispatchLocked(SubscriptionSendEventArgs args, List<SubscriptionChangedEventArgs> changes)
+    private bool CanDispatchLocked(SubscriptionSendEventArgs args, List<SubscriptionChangedEventArgs> changes, List<string> diagnostics)
     {
         if (_lifecycleStopped || !_subscriptions.TryGetValue(args.Subscription.Id, out ParsedSubscription? current) ||
             !ReferenceEquals(current, args.Subscription))
@@ -342,7 +353,7 @@ public partial class VersionedFhirStore
             return false;
         }
         DateTimeOffset now = _clock.GetUtcNow();
-        NormalizeSubscriptionLocked(current, now, changes);
+        NormalizeSubscriptionLocked(current, now, changes, diagnostics);
         return current.Revision == args.Revision &&
             SubscriptionLifecyclePolicy.CanDeliverNotification(current.CurrentStatus, current.ExpirationTicks, args.NotificationType, now);
     }
@@ -355,10 +366,11 @@ public partial class VersionedFhirStore
     {
         ArgumentNullException.ThrowIfNull(startTransport);
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         Task<SubscriptionNotificationOutcome>? operation = null;
         lock (SubscriptionLifecycleLock)
         {
-            if (CanDispatchLocked(args, changes))
+            if (CanDispatchLocked(args, changes, diagnostics))
             {
                 try
                 {
@@ -371,7 +383,7 @@ public partial class VersionedFhirStore
             }
         }
         // Even an already-completed or synchronously throwing starter is observed after unlock.
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         deliveryTask = operation is null
             ? Task.FromResult(new SubscriptionNotificationOutcome(SubscriptionNotificationOutcome.OutcomeKind.Suppressed))
             : CompleteSubscriptionDispatchAsync(args, operation);
@@ -399,7 +411,7 @@ public partial class VersionedFhirStore
         List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
         {
-            if (!CanDispatchLocked(args, changes))
+            if (!CanDispatchLocked(args, changes, diagnostics))
             {
                 outcome = new(SubscriptionNotificationOutcome.OutcomeKind.Suppressed);
             }
@@ -420,11 +432,7 @@ public partial class VersionedFhirStore
                 }
             }
         }
-        PublishSubscriptionChanges(changes);
-        foreach (string diagnostic in diagnostics)
-        {
-            _subscriptionDiagnosticWriter(diagnostic);
-        }
+        PublishSubscriptionChanges(changes, diagnostics);
         return outcome;
     }
 
@@ -432,14 +440,15 @@ public partial class VersionedFhirStore
     public bool TryCompleteSubscriptionHandshake(SubscriptionSendEventArgs args)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         bool activated;
         lock (SubscriptionLifecycleLock)
         {
             activated = args.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake &&
-                CanDispatchLocked(args, changes) &&
-                ChangeSubscriptionStatusLocked(args.Subscription, "active", changes);
+                CanDispatchLocked(args, changes, diagnostics) &&
+                ChangeSubscriptionStatusLocked(args.Subscription, "active", changes, diagnostics);
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return activated;
     }
 
@@ -447,6 +456,7 @@ public partial class VersionedFhirStore
         string id, IEnumerable<long> numbers, string notificationType, string contentLevel, bool allowEmptySelectionFallback)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         Bundle? bundle = null;
         string contentType = string.Empty;
         try
@@ -455,7 +465,7 @@ public partial class VersionedFhirStore
             {
                 if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
                 {
-                    NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes);
+                    NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
                     contentType = subscription.ContentType;
                     lock (subscription.GeneratedEvents)
                     {
@@ -468,7 +478,7 @@ public partial class VersionedFhirStore
         }
         finally
         {
-            PublishSubscriptionChanges(changes);
+            PublishSubscriptionChanges(changes, diagnostics);
         }
         return (bundle, contentType);
     }
@@ -476,6 +486,7 @@ public partial class VersionedFhirStore
     internal Bundle? RetainedSubscriptionEvents(string id, long since, long? until, string contentLevel)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         Bundle? bundle = null;
         try
         {
@@ -483,7 +494,7 @@ public partial class VersionedFhirStore
             {
                 if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
                 {
-                    NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes);
+                    NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
                     lock (subscription.GeneratedEvents)
                     {
                         long highestEvent = subscription.CurrentEventCount;
@@ -499,7 +510,7 @@ public partial class VersionedFhirStore
         }
         finally
         {
-            PublishSubscriptionChanges(changes);
+            PublishSubscriptionChanges(changes, diagnostics);
         }
         return bundle;
     }
@@ -522,16 +533,17 @@ public partial class VersionedFhirStore
     private void ExpireSubscriptions(object? state)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
         {
             if (_lifecycleStopped)
             {
                 return;
             }
-            NormalizeSubscriptionsLocked(changes, deferTimerRearm: true);
+            NormalizeSubscriptionsLocked(changes, diagnostics, deferTimerRearm: true);
             RearmSubscriptionTimerLocked();
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
     }
 
     private void StopSubscriptionLifecycle()

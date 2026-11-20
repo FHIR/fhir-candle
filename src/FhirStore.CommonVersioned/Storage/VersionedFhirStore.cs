@@ -2901,19 +2901,23 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool StoreProcessSubscriptionTopic(ParsedSubscriptionTopic topic, bool remove = false)
     {
+        List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
+        bool result;
         lock (SubscriptionLifecycleLock)
         {
-            bool result = ProcessSubscriptionTopicLocked(topic, remove);
+            result = ProcessSubscriptionTopicLocked(topic, remove);
             if (!remove)
             {
                 foreach (ParsedSubscription subscription in _subscriptions.Values.Where(subscription => subscription.TopicUrl == topic.Url))
                 {
                     RemoveSubscriptionBindingsLocked(subscription);
-                    InstallSubscriptionBindingsLocked(subscription);
+                    InstallSubscriptionBindingsLocked(subscription, diagnostics);
                 }
             }
-            return result;
         }
+        PublishSubscriptionChanges(changes, diagnostics);
+        return result;
     }
 
     private bool ProcessSubscriptionTopicLocked(ParsedSubscriptionTopic topic, bool remove)
@@ -3133,19 +3137,20 @@ public partial class VersionedFhirStore : IFhirStore
     public long GetSubscriptionEventCount(string subscriptionId, bool increment)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         long count = 0;
         lock (SubscriptionLifecycleLock)
         {
             if (_subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
             {
                 DateTimeOffset now = _clock.GetUtcNow();
-                NormalizeSubscriptionLocked(subscription, now, changes);
+                NormalizeSubscriptionLocked(subscription, now, changes, diagnostics);
                 count = increment && !_lifecycleStopped &&
                     SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now)
                     ? subscription.IncrementEventCount() : subscription.CurrentEventCount;
             }
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return count;
     }
 
@@ -3159,13 +3164,14 @@ public partial class VersionedFhirStore : IFhirStore
         bool sendHandshake = false)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
         {
             if (!_lifecycleStopped && subscription is not null &&
                 _subscriptions.TryGetValue(subscription.Id, out ParsedSubscription? current) &&
                 ReferenceEquals(current, subscription))
             {
-                NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes);
+                NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
                 changes.Add(new()
                 {
                     Tenant = _config,
@@ -3176,7 +3182,7 @@ public partial class VersionedFhirStore : IFhirStore
                 });
             }
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
     }
 
     /// <summary>Change subscription status.</summary>
@@ -3185,14 +3191,15 @@ public partial class VersionedFhirStore : IFhirStore
     public void ChangeSubscriptionStatus(string id, string status)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
         {
             if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
             {
-                ChangeSubscriptionStatusLocked(subscription, status, changes);
+                ChangeSubscriptionStatusLocked(subscription, status, changes, diagnostics);
             }
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
     }
 
     /// <summary>Registers the event.</summary>
@@ -3201,13 +3208,14 @@ public partial class VersionedFhirStore : IFhirStore
     public void RegisterSendEvent(string subscriptionId, SubscriptionEvent subscriptionEvent)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         SubscriptionSendEventArgs? send = null;
         lock (SubscriptionLifecycleLock)
         {
             if (!_lifecycleStopped && _subscriptions.TryGetValue(subscriptionId, out ParsedSubscription? subscription))
             {
                 DateTimeOffset now = _clock.GetUtcNow();
-                NormalizeSubscriptionLocked(subscription, now, changes);
+                NormalizeSubscriptionLocked(subscription, now, changes, diagnostics);
                 if (SubscriptionLifecyclePolicy.CanGenerateEvents(subscription.CurrentStatus, subscription.ExpirationTicks, now))
                 {
                     subscription.RegisterEvent(subscriptionEvent);
@@ -3215,7 +3223,7 @@ public partial class VersionedFhirStore : IFhirStore
                 }
             }
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         if (send is not null)
         {
             OnSubscriptionSendEvent?.Invoke(this, send);
@@ -3429,16 +3437,17 @@ public partial class VersionedFhirStore : IFhirStore
     public bool StoreProcessSubscription(ParsedSubscription subscription, bool remove = false)
     {
         List<SubscriptionChangedEventArgs> changes = [];
+        List<string> diagnostics = [];
         bool result;
         lock (SubscriptionLifecycleLock)
         {
-            result = CommitSubscriptionLocked(subscription, null, remove, changes);
+            result = CommitSubscriptionLocked(subscription, null, remove, changes, diagnostics);
         }
-        PublishSubscriptionChanges(changes);
+        PublishSubscriptionChanges(changes, diagnostics);
         return result;
     }
 
-    private bool InstallSubscriptionBindingsLocked(ParsedSubscription subscription)
+    private bool InstallSubscriptionBindingsLocked(ParsedSubscription subscription, List<string> diagnostics)
     {
         // check to see if we have this topic
         if (!_topics.ContainsKey(subscription.TopicUrl))
@@ -3501,7 +3510,7 @@ public partial class VersionedFhirStore : IFhirStore
                     // TODO: support inline-defined parameters
                     if (!rs.TryGetSearchParamDefinition(filter.Name, out SearchParamDefinition? spd))
                     {
-                        Console.WriteLine($"Cannot apply filter with no search parameter definition {resourceName}?{filter.Name}");
+                        diagnostics.Add($"Cannot apply filter with no search parameter definition {resourceName}?{filter.Name}");
                         continue;
                     }
 
@@ -3511,7 +3520,7 @@ public partial class VersionedFhirStore : IFhirStore
                     {
                         if (!Enum.TryParse(filter.Modifier, true, out modifierCode))
                         {
-                            Console.WriteLine($"Ignoring unknown modifier: {resourceName}?{filter.Name}:{filter.Modifier}");
+                            diagnostics.Add($"Ignoring unknown modifier: {resourceName}?{filter.Name}:{filter.Modifier}");
                         }
                     }
 

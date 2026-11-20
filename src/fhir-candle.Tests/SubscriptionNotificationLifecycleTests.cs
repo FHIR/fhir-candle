@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Text.Json.Nodes;
 using fhir.candle.Services;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
@@ -1019,6 +1020,317 @@ public sealed class SubscriptionNotificationLifecycleTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public async Task BindingParameterDiagnosticsDoNotHoldStoreLocks(FhirReleases.FhirSequenceCodes version)
+    {
+        string[] parameters = ["missing-binding-parameter", "missing-binding-parameter-second", "missing-binding-parameter"];
+        string[] expected = parameters.Select(parameter =>
+            $"Cannot apply filter with no search parameter definition Encounter?{parameter}").ToArray();
+        foreach (string entry in new[] { "post", "put-create", "put-replace", "reprocess", "topic-reprocess", "topic-replace", "reactivate", "handshake" })
+        {
+            await AssertBindingDiagnosticsUnlockedAsync(version, expected, [string.Empty],
+                preparationEmits: entry is "reprocess" or "topic-reprocess" or "topic-replace",
+                fixture =>
+                {
+                    fixture.Seed(subscription: false);
+                    if (entry == "post")
+                    {
+                        JsonObject resource = fixture.SubscriptionWithBindingParameters("active", parameters);
+                        return () =>
+                        {
+                            (bool success, FhirResponseContext response) = fixture.Interact("POST", "Subscription", resource);
+                            Assert.True(success, response.SerializedOutcome);
+                            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+                        };
+                    }
+                    if (entry == "put-create")
+                    {
+                        return () =>
+                        {
+                            (bool success, FhirResponseContext response) = fixture.Interact("PUT", "Subscription/" + LifecycleTestStore.Id,
+                                fixture.SubscriptionWithBindingParameters("active", parameters));
+                            Assert.True(success, response.SerializedOutcome);
+                            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+                        };
+                    }
+                    if (entry == "put-replace")
+                    {
+                        fixture.PutSubscription();
+                        return () =>
+                        {
+                            (bool success, FhirResponseContext response) = fixture.Interact("PUT", "Subscription/" + LifecycleTestStore.Id,
+                                fixture.SubscriptionWithBindingParameters("active", parameters));
+                            Assert.True(success, response.SerializedOutcome);
+                            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                        };
+                    }
+
+                    string status = entry == "reactivate" ? "off" : entry == "handshake" ? "requested" : "active";
+                    fixture.Put(fixture.SubscriptionWithBindingParameters(status, parameters));
+                    ParsedSubscription subscription = fixture.Subscription;
+                    if (status != "active")
+                    {
+                        Assert.Null(fixture.ExecutableRevision(subscription));
+                        Assert.True(fixture.Reprocess(subscription));
+                        Assert.True(ReprocessBindingTopic(fixture));
+                        Assert.Null(fixture.ExecutableRevision(subscription));
+                        fixture.AssertViews(status);
+                    }
+                    return entry switch
+                    {
+                        "reprocess" => () => Assert.True(fixture.Reprocess(subscription)),
+                        "topic-reprocess" => () => Assert.True(ReprocessBindingTopic(fixture)),
+                        "topic-replace" => () => fixture.Put(fixture.Fixture("topic-query")),
+                        "reactivate" => () => fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "active"),
+                        "handshake" => ConditionalBindingHandshake(fixture),
+                        _ => throw new InvalidOperationException(entry),
+                    };
+                });
+        }
+
+        // A rejected replacement must not install or capture binding warnings.
+        using LifecycleTestStore rejected = new(version);
+        rejected.Seed();
+        ParsedSubscription prior = rejected.Subscription;
+        long revision = prior.Revision;
+        string rawVersion = rejected.Get("Subscription/" + LifecycleTestStore.Id)["meta"]!["versionId"]!.GetValue<string>();
+        using DiagnosticWriter writer = new(_ => AssertDiagnosticOutsideLocks(rejected, prior.GeneratedEvents));
+        SetDiagnosticWriter(rejected, writer);
+        FhirRequestContext context = new(rejected.Store, "PUT", "Subscription/" + LifecycleTestStore.Id)
+        {
+            SourceContent = rejected.SubscriptionWithBindingParameters("active", parameters).ToJsonString(),
+            SourceFormat = "application/fhir+json",
+            DestinationFormat = "application/fhir+json",
+            IfMatch = "W/\"not-current\"",
+        };
+        Assert.False(rejected.Store.PerformInteraction(context, out FhirResponseContext failure, true, true));
+        Assert.Null(failure.Resource);
+        Assert.Empty(writer.Lines);
+        Assert.Same(prior, rejected.Subscription);
+        Assert.Equal(revision, prior.Revision);
+        Assert.Equal(revision, rejected.ExecutableRevision(prior));
+        Assert.Equal(rawVersion, rejected.Get("Subscription/" + LifecycleTestStore.Id)["meta"]!["versionId"]!.GetValue<string>());
+        rejected.Delete();
+        Assert.Empty(writer.Lines);
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task BindingModifierDiagnosticsDoNotHoldStoreLocks(FhirReleases.FhirSequenceCodes version)
+    {
+        string[] modifiers = ["unknown-binding-modifier", "unknown-binding-modifier-second", "unknown-binding-modifier"];
+        string[] expected = modifiers.Select(modifier => $"Ignoring unknown modifier: Encounter?patient:{modifier}").ToArray();
+        foreach (string entry in new[] { "direct", "reprocess", "topic-reprocess", "topic-replace", "reactivate", "handshake" })
+        {
+            await AssertBindingDiagnosticsUnlockedAsync(version, expected, [string.Empty, .. modifiers],
+                preparationEmits: entry is "reprocess" or "topic-reprocess" or "topic-replace",
+                fixture =>
+                {
+                    fixture.Seed("off");
+                    string status = entry == "reactivate" ? "off" : entry == "handshake" ? "requested" : "active";
+                    // This is a new programmatic descriptor, not an invalid native R5 enum.
+                    ParsedSubscription subscription = fixture.SubscriptionWithBindingModifiers(status, modifiers);
+                    Assert.Equal(0, subscription.Revision);
+                    if (entry == "direct")
+                    {
+                        return () => Assert.True(fixture.Reprocess(subscription));
+                    }
+                    Assert.True(fixture.Reprocess(subscription));
+                    Assert.Same(subscription, fixture.Subscription);
+                    Assert.True(subscription.Revision > 0);
+                    if (status != "active")
+                    {
+                        Assert.Null(fixture.ExecutableRevision(subscription));
+                        Assert.True(fixture.Reprocess(subscription));
+                        Assert.True(ReprocessBindingTopic(fixture));
+                        Assert.Null(fixture.ExecutableRevision(subscription));
+                        fixture.AssertViews(status);
+                    }
+                    return entry switch
+                    {
+                        "reprocess" => () => Assert.True(fixture.Reprocess(subscription)),
+                        "topic-reprocess" => () => Assert.True(ReprocessBindingTopic(fixture)),
+                        "topic-replace" => () => fixture.Put(fixture.Fixture("topic-query")),
+                        "reactivate" => () => fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "active"),
+                        "handshake" => ConditionalBindingHandshake(fixture),
+                        _ => throw new InvalidOperationException(entry),
+                    };
+                });
+        }
+    }
+
+    private static bool ReprocessBindingTopic(LifecycleTestStore fixture)
+    {
+        ParsedSubscriptionTopic topic;
+        lock (fixture.Field("SubscriptionLifecycleLock"))
+        {
+            topic = (ParsedSubscriptionTopic)((IDictionary)fixture.Field("_topics"))[LifecycleTestStore.Topic]!;
+        }
+        return (bool)fixture.Store.GetType().GetMethod("StoreProcessSubscriptionTopic")!.Invoke(fixture.Store, [topic, false])!;
+    }
+
+    private static Action ConditionalBindingHandshake(LifecycleTestStore fixture)
+    {
+        SubscriptionSendEventArgs args = fixture.Args(ParsedSubscription.NotificationTypeCodes.Handshake);
+        Assert.False(fixture.Store.TryCompleteSubscriptionHandshake(fixture.Args()));
+        Assert.Equal("requested", args.Subscription.CurrentStatus);
+        return () =>
+        {
+            Assert.True(fixture.Store.TryCompleteSubscriptionHandshake(args));
+            Assert.False(fixture.Store.TryCompleteSubscriptionHandshake(args));
+        };
+    }
+
+    private static async Task AssertBindingDiagnosticsUnlockedAsync(
+        FhirReleases.FhirSequenceCodes version, string[] expected, string[] filterModifiers,
+        bool preparationEmits, Func<LifecycleTestStore, Action> prepare)
+    {
+        using LifecycleTestStore fixture = new(version);
+        ConcurrentQueue<ParsedSubscription> descriptors = new();
+        fixture.Store.OnSubscriptionsChanged += (_, change) =>
+        {
+            if (change.ChangedSubscription is not null)
+            {
+                descriptors.Enqueue(change.ChangedSubscription);
+            }
+        };
+        Dictionary<long, SubscriptionEvent>[] Histories() => descriptors.Select(subscription => subscription.GeneratedEvents).Distinct().ToArray();
+        using DiagnosticWriter setupWriter = new(_ => AssertDiagnosticOutsideLocks(fixture, Histories()));
+        SetDiagnosticWriter(fixture, setupWriter);
+        Action install = prepare(fixture);
+        Assert.Equal(preparationEmits ? expected : [], setupWriter.Lines.ToArray());
+        fixture.Put(fixture.Fixture("other-patient"));
+        ParsedSubscription? prior = descriptors.LastOrDefault();
+        long? priorRevision = prior?.Revision;
+        long? priorDeadline = prior?.ExpirationTicks;
+        string? priorStatus = prior?.CurrentStatus;
+        using ManualResetEventSlim reached = new();
+        using ManualResetEventSlim release = new();
+        int written = 0;
+        using DiagnosticWriter writer = new(line =>
+        {
+            Dictionary<long, SubscriptionEvent>[] histories = Histories();
+            Assert.NotEmpty(histories);
+            AssertDiagnosticOutsideLocks(fixture, histories);
+            int index = Interlocked.Increment(ref written) - 1;
+            Assert.InRange(index, 0, expected.Length - 1);
+            Assert.Equal(expected[index], line);
+            if (index == 0)
+            {
+                reached.Set();
+                Assert.True(release.Wait(TimeSpan.FromSeconds(10)));
+            }
+        });
+        SetDiagnosticWriter(fixture, writer);
+        Task worker = Task.Run(install);
+        Task? off = null;
+        ParsedSubscription? installed = null;
+        Dictionary<long, SubscriptionEvent>? history = null;
+        long installedRevision = 0;
+        try
+        {
+            Assert.True(reached.Wait(TimeSpan.FromSeconds(10)));
+            Assert.False(worker.IsCompleted);
+            Assert.Equal(expected[0], Assert.Single(writer.Lines));
+            installed = fixture.Subscription;
+            history = installed.GeneratedEvents;
+            installedRevision = installed.Revision;
+            Assert.Equal(installedRevision, fixture.ExecutableRevision(installed));
+            Assert.True(installedRevision > 0);
+            AssertBindingFilters(fixture, installed, filterModifiers);
+            if (ReferenceEquals(prior, installed))
+            {
+                Assert.Equal(priorDeadline, installed.ExpirationTicks);
+                if (priorStatus == "active")
+                {
+                    Assert.Equal(priorRevision, installedRevision);
+                }
+                else
+                {
+                    Assert.True(installedRevision > priorRevision);
+                }
+            }
+            fixture.AssertViews("active");
+            fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "active");
+            Assert.Equal(installedRevision, installed.Revision);
+            Assert.Equal(expected[0], Assert.Single(writer.Lines));
+
+            // Both the original valid patient filter and modifier fallback must still filter.
+            long count = installed.CurrentEventCount;
+            int sends = fixture.Sent.Count;
+            JsonObject miss = fixture.Fixture("complete");
+            miss["id"] = "binding-filter-miss";
+            miss["subject"]!["reference"] = "Patient/other-patient";
+            fixture.Put(miss);
+            Assert.Equal(count, installed.CurrentEventCount);
+            Assert.Equal(sends, fixture.Sent.Count);
+            fixture.Match("binding-filter-positive");
+            SubscriptionSendEventArgs sent = Assert.Single(fixture.Sent.Skip(sends));
+            Assert.Same(installed, sent.Subscription);
+            Assert.Equal(installedRevision, sent.Revision);
+            Assert.Equal(count + 1, installed.CurrentEventCount);
+            lock (fixture.Field("SubscriptionLifecycleLock"))
+            {
+                lock (history)
+                {
+                    Assert.Equal(count + 1, Assert.Single(sent.NotificationEvents).EventNumber);
+                    Assert.Same(Assert.Single(sent.NotificationEvents), history[count + 1]);
+                }
+            }
+
+            off = Task.Run(() =>
+            {
+                fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "off");
+                fixture.AssertViews("off");
+                Assert.Null(fixture.ExecutableRevision(installed));
+            });
+            await off.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(release.IsSet);
+            Assert.False(worker.IsCompleted);
+            Assert.Equal(expected[0], Assert.Single(writer.Lines));
+            Assert.True(installed.Revision > installedRevision);
+            fixture.Match("binding-after-off");
+            Assert.Equal(count + 1, installed.CurrentEventCount);
+            Assert.Equal(sends + 1, fixture.Sent.Count);
+        }
+        finally
+        {
+            release.Set();
+            await Task.WhenAll(off is null ? [worker] : [worker, off]).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        Assert.Equal(expected, writer.Lines.ToArray());
+        Assert.Same(installed, fixture.Subscription);
+        Assert.Same(history, installed!.GeneratedEvents);
+        fixture.AssertViews("off");
+        fixture.Delete();
+        Assert.Equal(expected, writer.Lines.ToArray());
+    }
+
+    private static void AssertBindingFilters(LifecycleTestStore fixture, ParsedSubscription subscription, string[] modifiers)
+    {
+        object resourceStore = fixture.Store["Encounter"];
+        object registration = resourceStore.GetType().GetField("_subscriptionRegistrationLock", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(resourceStore)!;
+        lock (registration)
+        {
+            IDictionary topics = (IDictionary)resourceStore.GetType().GetField("_executableSubscriptions", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(resourceStore)!;
+            object executable = topics[subscription.TopicUrl]!;
+            IDictionary bindings = (IDictionary)executable.GetType().GetProperty("FiltersBySubscription")!.GetValue(executable)!;
+            object binding = bindings[subscription.Id]!;
+            object[] filters = ((IEnumerable)binding.GetType().GetProperty("Filters")!.GetValue(binding)!).Cast<object>().ToArray();
+            Assert.Equal(modifiers, filters.Select(filter => (string?)filter.GetType().GetProperty("ModifierLiteral")!.GetValue(filter)).ToArray());
+            foreach (object filter in filters)
+            {
+                Assert.Equal("patient", filter.GetType().GetProperty("Name")!.GetValue(filter));
+                Assert.Equal(["Patient/sub-patient"], (string[])filter.GetType().GetProperty("Values")!.GetValue(filter)!);
+                Assert.Equal("None", filter.GetType().GetProperty("Modifier")!.GetValue(filter)!.ToString());
+                Assert.Equal(false, filter.GetType().GetProperty("IgnoredParameter")!.GetValue(filter));
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public async Task CompletionDiagnosticsDoNotHoldLifecycleLock(FhirReleases.FhirSequenceCodes version)
     {
         const string Payload = "{\"diagnostic\":\"accepted payload\"}\nsecond line";
@@ -1288,10 +1600,13 @@ public sealed class SubscriptionNotificationLifecycleTests
         .GetMethod("RegisterError", BindingFlags.Instance | BindingFlags.Public)!
         .Invoke(fixture.Store, [id, error]);
 
-    private static void AssertDiagnosticOutsideLocks(LifecycleTestStore fixture, Dictionary<long, SubscriptionEvent> history)
+    private static void AssertDiagnosticOutsideLocks(LifecycleTestStore fixture, params Dictionary<long, SubscriptionEvent>[] histories)
     {
         fixture.AssertOutsideLocks();
-        Assert.False(Monitor.IsEntered(history));
+        foreach (Dictionary<long, SubscriptionEvent> history in histories)
+        {
+            Assert.False(Monitor.IsEntered(history));
+        }
         foreach (IResourceStore resourceStore in fixture.Store.Values)
         {
             object mutation = resourceStore.GetType().GetField("_lockObject", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(resourceStore)!;
@@ -1379,7 +1694,7 @@ public sealed class SubscriptionNotificationLifecycleTests
             .GetField("_handshakeRevisions", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Service)!).Count;
         internal void Publish(SubscriptionChangedEventArgs change) => Store.Store.GetType()
             .GetMethod("PublishSubscriptionChanges", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(Store.Store, [new[] { change }]);
+            .Invoke(Store.Store, [new[] { change }, new List<string>()]);
         internal Dictionary<object, long> HeartbeatSchedule()
         {
             IDictionary reservations = (IDictionary)Service.GetType()
