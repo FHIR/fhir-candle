@@ -1349,6 +1349,31 @@ public class ResourceStore<T> : IVersionedResourceStore
             {
                 foreach (ExecutableSubscriptionInfo.CompiledFhirPathTrigger cfp in executable.FhirPathTriggers)
                 {
+                    // Check interaction eligibility before expression evaluation and its error side effects.
+                    switch (interaction)
+                    {
+                        case ExecutableSubscriptionInfo.InteractionTypes.Create:
+                            if (!cfp.OnCreate)
+                            {
+                                continue;
+                            }
+                            break;
+
+                        case ExecutableSubscriptionInfo.InteractionTypes.Update:
+                            if (!cfp.OnUpdate)
+                            {
+                                continue;
+                            }
+                            break;
+
+                        case ExecutableSubscriptionInfo.InteractionTypes.Delete:
+                            if (!cfp.OnDelete)
+                            {
+                                continue;
+                            }
+                            break;
+                    }
+
                     try
                     {
                         bool result;

@@ -7,6 +7,12 @@ default landing page of the subscriptions RI, the following command can be used:
 fhir-candle --reference-implementation subscriptions --load-package hl7.fhir.uv.subscriptions-backport#1.1.0 --load-examples false --protect-source true -m 1000
 ```
 
+## Resource-trigger interactions
+
+Supported resource interactions apply before FHIRPath criteria are evaluated. An update-only
+topic cannot generate create or delete events merely because its expression matches. When
+interaction restrictions are omitted, the trigger remains eligible for create, update, and delete.
+
 ## Subscription lifecycle
 
 Only active, unexpired subscriptions generate events or begin event/heartbeat delivery.
