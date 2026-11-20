@@ -2041,3 +2041,197 @@ qualification only: no full suite, other OS, browser, live provider, performance
 general numeric precision/unit conversion or migration-wide acceptance claim.
 H1/H2/M1–M6 source/tests and all earlier inventories remain unchanged; M8 is
 out of scope.
+
+## M7 remediation R1: represented scale-28 windows (2026-11-20)
+
+This addendum supersedes only the original M7 arithmetic description and
+its then-known no-unresolved-bug qualification. All preceding inventories,
+measurements, corrections and limits remain historical Phase 1 evidence.
+This is a correction to Candle's chosen closed, query-relative 10% policy,
+not an SDK-causation claim or a universal FHIR approximation mandate.
+
+### Independent counterexample and exact arithmetic
+
+Source reasoning predicted that `abs(requested) * 0.1m` at requested magnitude
+`0.0000000000000000000000000006` rounds the mathematical tolerance `6e-29`
+outward to `1e-28`, incorrectly admitting both adjacent represented values.
+That prediction was not treated as runtime evidence: both RED commands below
+ran with the helper byte-identical to committed
+`5208670a3e9c6aee43a6a865fd4197910073957e` (Git blob
+`a89e4cc89315af9001bbf315fbbe853b123d8ee1`) before its arithmetic changed.
+
+The independently authored JSON and XML graphs contain these exact scalar
+spellings, each in a native decimal Observation Quantity with UCUM mg:
+
+| Graph | Candidate identities and values | Literal operand / independent expected membership |
+|---|---|---|
+| `scale28-positive` | `Observation/scale28-p5` = `0.0000000000000000000000000005`; `Observation/scale28-p6` = `0.0000000000000000000000000006`; `Observation/scale28-p7` = `0.0000000000000000000000000007`; `Observation/scale28-pfar` = `78000000000000000000000000000` | `ap0.0000000000000000000000000006`; only `Observation/scale28-p6`, total 1 |
+| `scale28-negative` | `Observation/scale28-n5` = `-0.0000000000000000000000000005`; `Observation/scale28-n6` = `-0.0000000000000000000000000006`; `Observation/scale28-n7` = `-0.0000000000000000000000000007`; `Observation/scale28-nfar` = `-78000000000000000000000000000` | `ap-0.0000000000000000000000000006`; only `Observation/scale28-n6`, total 1 |
+
+The positive mathematical interval is `[5.4e-28, 6.6e-28]`; its negative
+reflection is `[-6.6e-28, -5.4e-28]`. Only the represented center belongs
+in either graph. No expected ID is computed from arithmetic, the helper,
+SDK conversion or actual responses. There is no zero candidate to mask
+this defect with an unrelated zero failure.
+
+After both public RED confirmations, only the helper's final arithmetic
+changed. Existing requested-zero and candidate-zero/opposite-sign guards
+remain. Same-sign subtraction stays in range; compute
+`decimal distance = decimal.Abs(candidate - requested)` and the requested
+magnitude. Reject strictly `distance > decimal.MaxValue / 10m` **before**
+multiplication; the exact constant quotient is
+`7922816251426433759354395033.5`. Equality proceeds, rather than being
+rejected. Larger distances cannot satisfy the comparison for any
+representable request. Otherwise compare `distance * 10m <= magnitude`
+inclusively. This avoids materializing a scale-29 rounded tolerance and
+guards multiplication overflow; the same-sign far candidate in each new
+graph exercises the rejection.
+
+The old statement that the predicate never divides is superseded **only**
+by this exact constant range guard: there is no candidate/request division,
+outer-endpoint construction, double conversion, epsilon, exception-as-nonmatch
+or numeric framework. Both evaluator callers, parser/dispatch, native decimal
+and unit eligibility, lexical/prefix policies, integer/date approximation and
+all other equality/precision/conversion exclusions are unchanged. Ordinary
+inclusive endpoints and the original range-safety groups remain protected.
+
+### Actually reached RED requests
+
+Both frameworks discovered **49 tests: one inventory fact passed, all 48
+theory rows failed, zero skipped**, exit 1. Every graph's definition-first
+public PUT and four Observation PUTs succeeded with the unchanged complete
+wire/content assertions, including tiny and near-limit decimal values.
+`SearchParameter/m7-decimal` still selects
+`Observation.value.ofType(Quantity).value`; only R5 has `processingMode=normal`.
+The ordinary-decimal operands below therefore exercise native decimal-number
+and Quantity paths, not integer-backed surrogate nodes.
+
+Here are the exact four reached request paths. Each is **GET**; prefix with
+`http://localhost/fhir/m7-{family}-{graph}-{version}/`, where family is the
+literal `decimal-number` or `quantity`, graph is the table's signed graph,
+and version is exactly `r4`, `r4b` or `r5` for the tuple below. Both formats
+and boundaries use the same path; pipes/colon/slashes are encoded only by
+the unchanged `SearchRequest`.
+
+| Key / family / graph | Exact GET path | Expected IDs / total | Actual entry order / total |
+|---|---|---|---|
+| D+ / decimal-number / scale28-positive | `Observation?m7-decimal=ap0.0000000000000000000000000006` | `[Observation/scale28-p6]` / 1 | `[Observation/scale28-p6, Observation/scale28-p7, Observation/scale28-p5]` / 3 |
+| D− / decimal-number / scale28-negative | `Observation?m7-decimal=ap-0.0000000000000000000000000006` | `[Observation/scale28-n6]` / 1 | `[Observation/scale28-n5, Observation/scale28-n6, Observation/scale28-n7]` / 3 |
+| Q+ / quantity / scale28-positive | `Observation?value-quantity=ap0.0000000000000000000000000006%7Chttp%3A%2F%2Funitsofmeasure.org%7Cmg` | `[Observation/scale28-p6]` / 1 | `[Observation/scale28-p6, Observation/scale28-p7, Observation/scale28-p5]` / 3 |
+| Q− / quantity / scale28-negative | `Observation?value-quantity=ap-0.0000000000000000000000000006%7Chttp%3A%2F%2Funitsofmeasure.org%7Cmg` | `[Observation/scale28-n6]` / 1 | `[Observation/scale28-n5, Observation/scale28-n6, Observation/scale28-n7]` / 3 |
+
+Every cell below records the corresponding reached result on **each**
+framework: status **200 OK**, successful searchset, expected total 1 versus
+actual 3 and the exact IDs in the keyed table above. This enumerates all
+48 reached rows per framework, not an extrapolation from one version.
+
+| Version / format / boundary | D+ | D− | Q+ | Q− |
+|---|---|---|---|---|
+| R4 / JSON / direct | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4 / XML / direct | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4 / JSON / HTTP | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4 / XML / HTTP | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4B / JSON / direct | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4B / XML / direct | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4B / JSON / HTTP | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R4B / XML / HTTP | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R5 / JSON / direct | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R5 / XML / direct | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R5 / JSON / HTTP | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+| R5 / XML / HTTP | 200, 1→3 | 200, 1→3 | 200, 1→3 | 200, 1→3 |
+
+The first observed failure on both frameworks was D+, R4B/JSON/direct:
+`GET http://localhost/fhir/m7-decimal-number-scale28-positive-r4b/Observation?m7-decimal=ap0.0000000000000000000000000006`.
+The unchanged assertion reported `System.InvalidOperationException`,
+`Assert.Equal() Failure: Values differ`, `Expected: 1`, `Actual: 3`,
+with the expected/actual IDs above. All 48 rows failed at this total check.
+Direct responses had already passed success/Bundle and the exact
+`information` / `success` / `Type search successful` outcome assertion.
+HTTP passed status/media/body checks; no separate HTTP OperationOutcome
+diagnostic was observed or asserted. Far candidates were absent from the
+actual entries. **No failing RED GET reached its subsequent form POST**,
+nor the later per-entry full-content assertions; successful setup PUTs
+retain their full-content evidence independently.
+
+### Additive inventory and observed GREEN
+
+`ApproximateSearchScale28Cases` projects the existing `ReplayCases` into
+two families × two signs × R4/R4B/R5 × JSON/XML × HTTP/direct: **48 uniquely
+labeled rows**, each with a fresh default/lenient replay.
+`ApproximateSearchScale28WindowReturnsOnlyCenter` executes one literal signed
+probe per row. The separate
+`ApproximateSearchScale28TheoryDataIsNonEmptyAndLabeled` fact requires all
+48 unique labels/Cartesian tuples, 24 per family and per sign, 16 per version,
+definition-first seeding, exact four Observation identities plus the number
+definition, resource/generated-key agreement and unchanged `SearchIdentity`
+for every version/format/sign graph.
+
+These are **49 additional tests**, not edits to the old seven groups,
+three providers, 181 tests, probes or inventory fact. New rows reconcile to
+12 per family/sign, 24 per format or boundary, and four per each of the
+twelve version/format/boundary tuples. GREEN completes both GET and form
+POST for every primary probe: **96 added search requests per framework**
+(48 of each method), excluding setup. The unchanged helper assertions
+require exact successful searchset/total/IDs, modes, self/full URLs, no
+duplicates and complete authored raw resources; no wire assertion or numeric
+normalization changed. Far candidates are excluded without overflow.
+
+Combined M7 inventory is **230 tests**: original 84 decimal + 84 Quantity +
+12 retained-policy rows + one old fact, plus 48 R1 rows + one new fact.
+That is 228 theory rows, 76 per version and 19 per tuple, plus two facts.
+It executes **2,520 primary search requests per framework**
+(unchanged 2,424 + 96). The expected **1,641-test** protection union was
+also actually discovered and passed on both frameworks.
+
+Canonical root `AGENTS.md` and the phase plan authorize these exact commands,
+executed sequentially from the repository root without restore:
+
+```powershell
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ApproximateSearchScale28"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ApproximateSearchScale28"
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net11.0 --no-restore
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0 --no-restore
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ApproximateSearch"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ApproximateSearch"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~Sdk6ContractTests.ApproximateSearch|FullyQualifiedName~Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~Sdk6ContractTests.CompositeComponentsRemainWithinOneRoot|FullyQualifiedName~Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.IdentifierMutation|FullyQualifiedName~Sdk6ContractTests.ValueSetMembership|FullyQualifiedName~Sdk6ContractTests.UpdateRejection|FullyQualifiedName~Sdk6ContractTests.SubscriptionEvents|FullyQualifiedName~fhir.candle.Tests.SubscriptionLifecycle|FullyQualifiedName~fhir.candle.Tests.SubscriptionNotificationLifecycleTests|FullyQualifiedName~BundleAuthorization"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~Sdk6ContractTests.ApproximateSearch|FullyQualifiedName~Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~Sdk6ContractTests.CompositeComponentsRemainWithinOneRoot|FullyQualifiedName~Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.IdentifierMutation|FullyQualifiedName~Sdk6ContractTests.ValueSetMembership|FullyQualifiedName~Sdk6ContractTests.UpdateRejection|FullyQualifiedName~Sdk6ContractTests.SubscriptionEvents|FullyQualifiedName~fhir.candle.Tests.SubscriptionLifecycle|FullyQualifiedName~fhir.candle.Tests.SubscriptionNotificationLifecycleTests|FullyQualifiedName~BundleAuthorization"
+```
+
+| R1 invocation | Exit | Discovered / passed / failed / skipped | Test time / dotnet elapsed |
+|---|---:|---|---|
+| Unchanged-helper RED net11.0 | 1 | 49 / 1 / 48 / 0 | 8.5625 s / 19.17 s |
+| Unchanged-helper RED net10.0 | 1 | 49 / 1 / 48 / 0 | 8.7863 s / 23.68 s |
+| Corrected application build net11.0 | 0 | n/a | n/a / 11.13 s |
+| Corrected application build net10.0 | 0 | n/a | n/a / 17.26 s |
+| Focused GREEN net11.0 | 0 | 230 / 230 / 0 / 0 | 30.0366 s / 1:04.41 |
+| Focused GREEN net10.0 | 0 | 230 / 230 / 0 / 0 | 29.4071 s / 1:17.09 |
+| Bounded protection union net11.0 | 0 | 1,641 / 1,641 / 0 / 0 | 4.4730 min / 5:06.28 |
+| Bounded protection union net10.0 | 0 | 1,641 / 1,641 / 0 / 0 | 4.5122 min / 5:12.44 |
+
+All actual dotnet invocations above had zero compiler/analyzer warnings and
+errors. Between the builds and focused GREEN, one reporting-wrapper
+PowerShell parse error (“The Try statement is missing its Catch or Finally
+block”) occurred before dotnet ran: no tests were invoked or discovered.
+The overcomplicated nested quoted summary was replaced with a shorter
+line-separated, grouped report; the sanctioned commands and repository code
+did not change. There was no setup/compile/content failure, product retry,
+install/restore, manifest change, warning suppression or assertion relaxation.
+Output was captured in memory and reported, not redirected into scratch logs.
+
+Every selected protection family was independently reconciled in each union:
+**230, 96, 12, 84, 1, 1, 151, 31, 64, 483, 55, 97, 336** in the exact filter
+order above. Each original numeric family/group retained twelve passes;
+each new family/sign had twelve passes. All twelve M7 tuples had nineteen
+passing theory rows. Passing negative notification controls still emitted
+invalid-URI, held-current SMTP authentication rejection and REST
+`InternalServerError` diagnostics; these are not compiler diagnostics or
+failed tests.
+
+These R1 measurements precede this append. The final documented-tree
+four gates (both builds, then both unions) remain to be rerun and returned
+to the parent; no post-commit result is claimed here. Parent inspection,
+independent verification, staging/commit and identity gates remain its own.
+Qualification is bounded local Windows execution, not a full suite,
+cross-OS/browser/live-provider/performance or generalized numeric precision
+claim. Historical sections, H1/H2/M1–M6 source/tests and all read-only review
+inputs remain unchanged; no M8 work is included.

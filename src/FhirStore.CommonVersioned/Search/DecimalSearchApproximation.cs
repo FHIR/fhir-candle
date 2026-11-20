@@ -21,6 +21,15 @@ internal static class DecimalSearchApproximation
             return false;
         }
 
-        return decimal.Abs(candidate - requested) <= decimal.Abs(requested) * 0.1m;
+        decimal distance = decimal.Abs(candidate - requested);
+        decimal magnitude = decimal.Abs(requested);
+
+        // Larger distances cannot match any request; guard before scaling to avoid overflow.
+        if (distance > decimal.MaxValue / 10m)
+        {
+            return false;
+        }
+
+        return distance * 10m <= magnitude;
     }
 }

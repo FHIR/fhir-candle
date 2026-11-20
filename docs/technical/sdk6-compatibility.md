@@ -1446,3 +1446,108 @@ rerun the exact final four commands on the documented tree and return that
 evidence; parent integration and post-commit gates remain outstanding.
 No full-suite, other-OS, browser, live-provider, numeric-precision, performance
 or migration-wide qualification is inferred. No M8 work is included.
+
+## M7 remediation R1: exact represented-input approximation (2026-11-20)
+
+This explicitly supersedes only Phase 1's rounded-tolerance implementation
+description and its then-known no-unresolved-bug qualification. The original
+sections, inventories, results and limits above remain historical evidence.
+The local closed, query-relative 10% policy is unchanged; this is neither
+an SDK-causation claim nor a universal FHIR approximation requirement.
+
+Source reasoning predicted outward rounding of
+`abs(requested) * 0.1m`: at `0.0000000000000000000000000006`, the mathematical
+`6e-29` tolerance becomes represented `1e-28`. Independently executed public
+RED, rather than that prediction, confirmed the defect on **both** frameworks
+with the helper byte-identical to Phase 1 commit
+`5208670a3e9c6aee43a6a865fd4197910073957e`.
+
+Separate positive/negative raw JSON and XML graphs use native decimal
+Observation Quantities, UCUM mg, no zero, and definition-first public PUTs
+of the same active `SearchParameter/m7-decimal`. The exact positive candidates
+are `0.0000000000000000000000000005`,
+`0.0000000000000000000000000006`,
+`0.0000000000000000000000000007`, and
+`78000000000000000000000000000`; the negative graph reflects all four.
+Number requests are exactly
+`Observation?m7-decimal=ap0.0000000000000000000000000006` and
+`Observation?m7-decimal=ap-0.0000000000000000000000000006`.
+Quantity uses `value-quantity` with those identical ordinary-decimal operands
+and `|http://unitsofmeasure.org|mg` (encoded by unchanged request helpers).
+The exact positive interval `[5.4e-28, 6.6e-28]` and negative reflection
+`[-6.6e-28, -5.4e-28]` each contain only their represented center:
+`Observation/scale28-p6` or `Observation/scale28-n6`, total 1.
+
+Both RED runs discovered **49 tests: 1 passed / 48 failed / 0 skipped**,
+exit 1. All seed PUTs passed complete raw-content assertions. All 48 GETs
+returned **200 OK searchsets with three tiny entries / total 3**, instead
+of the literal center-only expectation / total 1. Positive entries were
+`scale28-p6,scale28-p7,scale28-p5`; negative entries were
+`scale28-n5,scale28-n6,scale28-n7` (all Observation IDs).
+Far candidates were absent. Every family/sign/version/format/boundary row
+failed the total assertion; **none reached POST** or subsequent per-entry
+content assertions. Direct outcomes had already passed
+`information/success/Type search successful`; HTTP status/media/body checks
+passed, with no separately observed HTTP OperationOutcome diagnostic.
+The first failure on each framework was R4B/JSON/direct GET
+`http://localhost/fhir/m7-decimal-number-scale28-positive-r4b/Observation?m7-decimal=ap0.0000000000000000000000000006`,
+reported as `System.InvalidOperationException`, `Assert.Equal()` expected
+1 / actual 3.
+
+Only after both confirmations, the helper retained its zero/sign guards and
+replaced the final tolerance comparison with same-sign
+`decimal distance = decimal.Abs(candidate - requested)` and requested
+magnitude, rejecting strictly `distance > decimal.MaxValue / 10m` before
+multiplication. That exact constant quotient is
+`7922816251426433759354395033.5`; equality proceeds. Otherwise it returns
+`distance * 10m <= magnitude`, keeping endpoints inclusive without a rounded
+scale-29 tolerance. The large same-sign candidates exercise the overflow
+guard. The historical “no division” description is superseded only by this
+constant guard: **no candidate or request division**, double conversion,
+outer endpoints, epsilon or generalized numeric redesign is introduced.
+Callers/parser/dispatch, lexical and unit eligibility, other prefixes and
+equality rounding, integer/date policies and conversion exclusions remain
+unchanged; original inclusive endpoint/range-safety coverage is retained.
+
+The additive provider/theory/fact contributes **48 rows + one fact**, with
+12 rows per family/sign, 24 per family or sign, 16 per FHIR version and four
+per each version/format/boundary tuple. The separate inventory pins all
+unique labels/tuples and definition-first exact five-resource graph identities.
+All original 181 tests/providers/groups/probes and their fact are unchanged.
+GREEN completes unchanged exact membership, full raw-resource, metadata,
+mode and URL assertions on GET **and form POST**: **96 added search requests
+per framework**. Combined M7 is **230 tests**, 228 theory rows (76 per version,
+19 per tuple) plus two facts, and **2,520 primary requests** (2,424 + 96).
+The expected bounded protection inventory is **1,641**, also actually passed.
+
+See the [R1 corpus and exact command/request matrix](../../src/fhir-candle.Tests/data/sdk6-compatibility/README.md#m7-remediation-r1-represented-scale-28-windows-2026-11-20)
+for every reached tuple, encoded paths, independent IDs, command literals
+and diagnostic qualifications. Canonical root `AGENTS.md` and the phase plan
+supplied the sequential no-restore commands. Observed pre-append results:
+
+| Gate | net11.0 | net10.0 |
+|---|---|---|
+| Unchanged-helper scale-28 RED | 49: 1 passed, 48 failed, 0 skipped; exit 1; 8.5625 s tests / 19.17 s elapsed | 49: 1 passed, 48 failed, 0 skipped; exit 1; 8.7863 s / 23.68 s |
+| Corrected application build | Exit 0; 11.13 s | Exit 0; 17.26 s |
+| Focused M7 GREEN | 230/230; exit 0; 30.0366 s tests / 1:04.41 elapsed | 230/230; exit 0; 29.4071 s / 1:17.09 |
+| Bounded protection union | 1,641/1,641; exit 0; 4.4730 min tests / 5:06.28 elapsed | 1,641/1,641; exit 0; 4.5122 min / 5:12.44 |
+
+All dotnet commands had zero compiler/analyzer warnings/errors and no skips.
+One overcomplicated reporting-wrapper PowerShell parse error occurred before
+focused dotnet invocation (“The Try statement is missing its Catch or Finally
+block”); a shorter line-separated grouped report fixed reporting only,
+without rerunning an already executed test or changing sanctioned commands.
+No setup/compile/content failure, assertion relaxation, numeric normalization,
+install/restore, manifest change or product retry occurred.
+All thirteen protection selections reconciled on each framework to
+230,96,12,84,1,1,151,31,64,483,55,97,336. Expected negative notification
+invalid-URI, rejected SMTP authentication and REST InternalServerError
+messages remain distinct from test failures and compiler diagnostics.
+
+These measurements precede this append; final documented-tree builds/unions
+will be rerun and reported to the parent. Parent direct inspection,
+independent verification, staging/commit/identity and post-commit gates remain
+outstanding, not claimed here. This is bounded local Windows qualification
+only, not full-suite, other-OS/browser/live-provider/performance or general
+numeric-precision acceptance. H1/H2/M1–M6 and read-only review inputs remain
+untouched; M8 is excluded.

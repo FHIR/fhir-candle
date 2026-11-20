@@ -27,6 +27,24 @@ public partial class Sdk6ContractTests
     public static IEnumerable<object[]> ApproximateSearchPolicyCases =>
         SearchCases.Select(row => new object[] { $"retained-integer-date / {row[0]}", row[1], row[2], row[3] });
 
+    /// <summary>Scale-28 windows independently cover both numeric families and signs in every replay tuple.</summary>
+    public static IEnumerable<object[]> ApproximateSearchScale28Cases
+    {
+        get
+        {
+            foreach (object[] tuple in ReplayCases)
+            {
+                foreach (string family in new[] { "decimal-number", "quantity" })
+                {
+                    foreach (string group in new[] { "scale28-positive", "scale28-negative" })
+                    {
+                        yield return [$"{family} / {group} / {tuple[0]}", tuple[1], tuple[2], tuple[3], family, group];
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>Scalar extraction must reach a native FHIR decimal, including integer-spelled resource tokens.</summary>
     [Theory]
     [MemberData(nameof(ApproximateSearchDecimalCases))]
@@ -81,6 +99,28 @@ public partial class Sdk6ContractTests
         {
             await AssertSearchProbe(replay, graph, probe);
         }
+    }
+
+    /// <summary>Neither adjacent represented value belongs to the exact signed scale-28 window.</summary>
+    [Theory]
+    [MemberData(nameof(ApproximateSearchScale28Cases))]
+    public async Task ApproximateSearchScale28WindowReturnsOnlyCenter(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport,
+        CompatibilityFormat format, string family, string group)
+    {
+        Assert.NotEmpty(label);
+        SearchGraph graph = ApproximateSearchGraph(Tenant(version, $"m7-{family}-{group}-{VersionName(version)}"), format, group);
+        await using CompatibilityReplay replay = new(SearchScenario($"m7-{family}-{group}", graph), transport);
+        await replay.RunAsync();
+        SearchProbe probe = group switch
+        {
+            "scale28-positive" => ApproximateSearchProbe(group, "ap0.0000000000000000000000000006",
+                ["Observation/scale28-p6"], family == "quantity"),
+            "scale28-negative" => ApproximateSearchProbe(group, "ap-0.0000000000000000000000000006",
+                ["Observation/scale28-n6"], family == "quantity"),
+            _ => throw new ArgumentOutOfRangeException(nameof(group)),
+        };
+        await AssertSearchProbe(replay, graph, probe);
     }
 
     /// <summary>Pin every family/group/version/format/transport row and the independently declared graph identities.</summary>
@@ -162,6 +202,70 @@ public partial class Sdk6ContractTests
         }
     }
 
+    /// <summary>Keep the additive signed matrix and its definition-first four-candidate graphs independent of M7's original inventory.</summary>
+    [Fact]
+    public void ApproximateSearchScale28TheoryDataIsNonEmptyAndLabeled()
+    {
+        object[][] rows = ApproximateSearchScale28Cases.ToArray();
+        string[] families = ["decimal-number", "quantity"];
+        string[] groups = ["scale28-positive", "scale28-negative"];
+        Assert.Equal(48, rows.Length);
+        Assert.Equal(48, rows.Select(row => (string)row[0]).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(rows, row =>
+        {
+            Assert.Contains(row[1].ToString()!, (string)row[0], StringComparison.Ordinal);
+            Assert.Contains(row[2].ToString()!, (string)row[0], StringComparison.Ordinal);
+            Assert.Contains(row[3].ToString()!, (string)row[0], StringComparison.Ordinal);
+            Assert.Contains((string)row[4], families);
+            Assert.Contains((string)row[5], groups);
+            Assert.Contains((string)row[4], (string)row[0], StringComparison.Ordinal);
+            Assert.Contains((string)row[5], (string)row[0], StringComparison.Ordinal);
+        });
+        foreach (string family in families)
+        {
+            Assert.Equal(24, rows.Count(row => (string)row[4] == family));
+        }
+        foreach (string group in groups)
+        {
+            Assert.Equal(24, rows.Count(row => (string)row[5] == group));
+        }
+        foreach (object[] tuple in ReplayCases)
+        {
+            foreach (string family in families)
+            {
+                foreach (string group in groups)
+                {
+                    Assert.Single(rows, row => row[1].Equals(tuple[1]) && row[2].Equals(tuple[2]) &&
+                        row[3].Equals(tuple[3]) && (string)row[4] == family && (string)row[5] == group);
+                }
+            }
+        }
+        foreach (FhirReleases.FhirSequenceCodes version in _versions)
+        {
+            Assert.Equal(16, rows.Count(row => row[1].Equals(version)));
+            foreach (CompatibilityFormat format in Enum.GetValues<CompatibilityFormat>())
+            {
+                foreach (string group in groups)
+                {
+                    SearchGraph graph = ApproximateSearchGraph(Tenant(version, $"m7-scale28-inventory-{VersionName(version)}"), format, group);
+                    string[] candidates = group switch
+                    {
+                        "scale28-positive" => ["Observation/scale28-p5", "Observation/scale28-p6",
+                            "Observation/scale28-p7", "Observation/scale28-pfar"],
+                        "scale28-negative" => ["Observation/scale28-n5", "Observation/scale28-n6",
+                            "Observation/scale28-n7", "Observation/scale28-nfar"],
+                        _ => throw new ArgumentOutOfRangeException(nameof(group)),
+                    };
+                    Assert.Equal("SearchParameter/m7-decimal", graph.Resources.Keys.First());
+                    Assert.Equal(candidates.Append("SearchParameter/m7-decimal").Order(StringComparer.Ordinal),
+                        graph.Resources.Keys.Order(StringComparer.Ordinal));
+                    Assert.Equal(graph.Resources.Keys.Order(StringComparer.Ordinal), graph.Generated.Keys.Order(StringComparer.Ordinal));
+                    Assert.All(graph.Resources, resource => Assert.Equal(resource.Key, SearchIdentity(resource.Value, format)));
+                }
+            }
+        }
+    }
+
     private static IEnumerable<object[]> ApproximateSearchRows(string family) =>
         SearchRows(_approximateSearchGroups).Select(row =>
             new object[] { $"{family} / {row[0]}", row[1], row[2], row[3], row[4] });
@@ -213,6 +317,20 @@ public partial class Sdk6ContractTests
                 ("p79", "79000000000000000000000000000", "79000000000000000000000000000"),
                 ("n78", "-78000000000000000000000000000", "-78000000000000000000000000000"),
                 ("n79", "-79000000000000000000000000000", "-79000000000000000000000000000"), ("zero", "0", "0"),
+            ],
+            "scale28-positive" =>
+            [
+                ("scale28-p5", "0.0000000000000000000000000005", "0.0000000000000000000000000005"),
+                ("scale28-p6", "0.0000000000000000000000000006", "0.0000000000000000000000000006"),
+                ("scale28-p7", "0.0000000000000000000000000007", "0.0000000000000000000000000007"),
+                ("scale28-pfar", "78000000000000000000000000000", "78000000000000000000000000000"),
+            ],
+            "scale28-negative" =>
+            [
+                ("scale28-n5", "-0.0000000000000000000000000005", "-0.0000000000000000000000000005"),
+                ("scale28-n6", "-0.0000000000000000000000000006", "-0.0000000000000000000000000006"),
+                ("scale28-n7", "-0.0000000000000000000000000007", "-0.0000000000000000000000000007"),
+                ("scale28-nfar", "-78000000000000000000000000000", "-78000000000000000000000000000"),
             ],
             _ => throw new ArgumentOutOfRangeException(nameof(group)),
         };
