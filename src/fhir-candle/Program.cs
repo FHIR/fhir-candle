@@ -49,16 +49,18 @@ public static partial class Program
             .Build();
 
         RootCommand root = CliOptions.RootCommand;
-        root.SetAction(async (ParseResult pr) => await RunServer(pr, extConfig));
+        root.SetAction(async (ParseResult parseResult) =>
+        {
+            await RunServer(parseResult, extConfig);
+            return _retVal;
+        });
 
         ParseResult pr = root.Parse(args, new ParserConfiguration()
         {
             ResponseFileTokenReplacer = null,
         });
 
-        await pr.InvokeAsync();
-
-        return _retVal;
+        return await pr.InvokeAsync();
 
 
         //// Create commands from CliOptions.Commands so the list is defined in one place

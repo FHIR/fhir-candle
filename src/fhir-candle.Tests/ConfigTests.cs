@@ -6,9 +6,11 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.ComponentModel.Design;
+using System.Diagnostics;
 using System.Net;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
@@ -984,10 +986,279 @@ public class ConfigTests
             pr.UnmatchedTokens.ShouldContain(argument);
         }
 
-        // Program.Main currently discards this parser exit code.
         exitCode.ShouldBe(1);
         actionInvoked.ShouldBeFalse();
         error.ToString().ShouldContain(value ?? argument);
+    }
+
+    /// <summary>Checks process status and output without letting the CLI start a host.</summary>
+    [Fact]
+    public async Task TestExecutableCliExitAndHostDispatch()
+    {
+        string assemblyPath = typeof(ConfigTests).Assembly.Location;
+        string? assemblyDirectory = Path.GetDirectoryName(assemblyPath);
+        if (string.IsNullOrEmpty(assemblyDirectory))
+        {
+            throw new InvalidOperationException($"Cannot locate the test output directory from '{assemblyPath}'.");
+        }
+
+        DirectoryInfo testOutput = new(assemblyDirectory);
+        DirectoryInfo? testProject = testOutput;
+        while (testProject is not null && !File.Exists(Path.Combine(testProject.FullName, "fhir-candle.Tests.csproj")))
+        {
+            testProject = testProject.Parent;
+        }
+
+        string tfm = testOutput.Name;
+        if (testProject is null || testProject.Parent is not DirectoryInfo src || src.Name != "src" ||
+            src.Parent is not DirectoryInfo repo ||
+            testOutput.Parent is not DirectoryInfo configuration ||
+            configuration.Parent is not DirectoryInfo bin || bin.Name != "bin" ||
+            bin.Parent?.FullName != testProject.FullName ||
+            !tfm.StartsWith("net", StringComparison.Ordinal) || !Version.TryParse(tfm[3..], out _))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{assemblyPath}' under fhir-candle.Tests/bin/<Configuration>/<TFM> beside its project.");
+        }
+
+        string appDirectory = Path.Combine(src.FullName, "fhir-candle", "bin", configuration.Name, tfm);
+        string appDll = Path.Combine(appDirectory, "fhir-candle.dll");
+        File.Exists(appDll).ShouldBeTrue($"Missing project-reference app output for {tfm}: {appDll}");
+        string version = typeof(fhir.candle.Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? throw new InvalidOperationException($"The app reference for {appDll} has no informational version.");
+
+        const string SmtpPortKey = "SMTP_Port";
+        const string InvalidSmtpPort = "m13-invalid-host-config";
+        const string CaughtHostException = "fhir-candle <<< caught exception:";
+        string runId = Guid.NewGuid().ToString("N");
+        string cacheSentinel = $"m13-missing-cache-{runId}";
+        string[] control = ["--port", "8080"];
+        CliRootCommand command = new();
+        ParseResult parsed = command.Parse(control, new ParserConfiguration() { ResponseFileTokenReplacer = null });
+        parsed.Errors.ShouldBeEmpty();
+
+        // Check the two pre-host guards independently before arming both in every child.
+        IConfiguration invalidSmtp = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [SmtpPortKey] = InvalidSmtpPort }).Build();
+        InvalidOperationException smtpFailure = Should.Throw<InvalidOperationException>(
+            () => new CandleConfig(command.CommandCliOptions, parsed, invalidSmtp));
+        Assert.Contains(SmtpPortKey, smtpFailure.Message, StringComparison.Ordinal);
+
+        IConfiguration missingCache = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [SmtpPortKey] = "465", ["Fhir_Package_Cache"] = cacheSentinel }).Build();
+        DirectoryNotFoundException cacheFailure = Should.Throw<DirectoryNotFoundException>(
+            () => new CandleConfig(command.CommandCliOptions, parsed, missingCache));
+        Assert.Contains(cacheSentinel, cacheFailure.Message, StringComparison.Ordinal);
+
+        // The child's relative cache lookup starts at the application base, not its working directory.
+        for (DirectoryInfo? directory = new(appDirectory); directory is not null; directory = directory.Parent)
+        {
+            string candidate = Path.Combine(directory.FullName, cacheSentinel);
+            Directory.Exists(candidate).ShouldBeFalse($"Cache guard must be a nonexistent directory: {candidate}");
+        }
+
+        string? dotnetHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        if (string.IsNullOrEmpty(dotnetHost))
+        {
+            dotnetHost = "dotnet";
+        }
+        else if (!Path.IsPathFullyQualified(dotnetHost) || !File.Exists(dotnetHost))
+        {
+            throw new InvalidOperationException($"DOTNET_HOST_PATH must name an existing absolute path: '{dotnetHost}'.");
+        }
+
+        string workingDirectory = Path.Combine(repo.FullName, "scratch", $"m13-cli-{runId}");
+        Path.Exists(workingDirectory).ShouldBeFalse($"The child working directory must be owned by this run: {workingDirectory}");
+        Directory.CreateDirectory(workingDirectory);
+        Exception? caseFailure = null;
+        try
+        {
+            (int controlExit, string controlOutput, _, string controlDetails) = await RunExecutableCliAsync(
+                dotnetHost, appDll, workingDirectory, InvalidSmtpPort, cacheSentinel, control);
+            int hResult = new InvalidOperationException().HResult;
+            controlExit.ShouldBe(OperatingSystem.IsWindows() ? hResult : (hResult & 0xFF), controlDetails);
+            controlOutput.Split('\n').Count(line => line.Contains(CaughtHostException, StringComparison.Ordinal)
+                && line.Contains(SmtpPortKey, StringComparison.Ordinal)).ShouldBe(1, controlDetails);
+
+            (string[] Arguments, int ExitCode, string? ErrorToken)[] cases =
+            [
+                (["--port", "not-a-number"], 1, "not-a-number"),
+                (["--unknown-cli-option"], 1, "--unknown-cli-option"),
+                (["--help"], 0, null),
+                (["--version"], 0, null),
+            ];
+            foreach ((string[] arguments, int expectedExit, string? errorToken) in cases)
+            {
+                (int exitCode, string output, string errors, string details) = await RunExecutableCliAsync(
+                    dotnetHost, appDll, workingDirectory, InvalidSmtpPort, cacheSentinel, arguments);
+                exitCode.ShouldBe(expectedExit, details);
+                output.Contains(CaughtHostException, StringComparison.Ordinal).ShouldBeFalse(details);
+                errors.Contains(CaughtHostException, StringComparison.Ordinal).ShouldBeFalse(details);
+                if (errorToken is not null)
+                {
+                    errors.Contains(errorToken, StringComparison.Ordinal).ShouldBeTrue(details);
+                    continue;
+                }
+
+                errors.ShouldBe(string.Empty, details);
+                if (arguments[0] == "--help")
+                {
+                    string[] optionLabelTokens = output
+                        .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                        .Where(line => line.StartsWith("  -", StringComparison.Ordinal))
+                        .Select(line => line[2..].Split("  ", 2, StringSplitOptions.None)[0])
+                        .SelectMany(label => label.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
+                        .ToArray();
+                    optionLabelTokens.Contains("--port", StringComparer.Ordinal).ShouldBeTrue(details);
+                    optionLabelTokens.Contains("--version", StringComparer.Ordinal).ShouldBeTrue(details);
+                }
+                else
+                {
+                    output.Trim().ShouldBe(version, details);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            caseFailure = ex;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+            catch (Exception ex) when (caseFailure is not null)
+            {
+                throw new AggregateException($"Could not remove the owned working directory '{workingDirectory}'.", caseFailure, ex);
+            }
+        }
+    }
+
+    private static async Task<(int ExitCode, string Stdout, string Stderr, string Details)> RunExecutableCliAsync(
+        string dotnetHost, string appDll, string workingDirectory, string smtpGuard, string cacheSentinel, string[] arguments)
+    {
+        ProcessStartInfo start = new(dotnetHost)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        start.ArgumentList.Add(appDll);
+        foreach (string argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        start.Environment.Clear();
+        string architectureRoot = $"DOTNET_ROOT_{RuntimeInformation.ProcessArchitecture.ToString().ToUpperInvariant()}";
+        string[] hostVariables = OperatingSystem.IsWindows()
+            ? ["PATH", "SystemRoot", architectureRoot, "DOTNET_ROOT(x86)", "DOTNET_ROOT"]
+            : ["PATH", architectureRoot, "DOTNET_ROOT"];
+        foreach (string name in hostVariables)
+        {
+            if (Environment.GetEnvironmentVariable(name) is string value)
+            {
+                start.Environment[name] = value;
+            }
+        }
+        start.Environment["SMTP_Port"] = smtpGuard;
+        start.Environment["Fhir_Package_Cache"] = cacheSentinel;
+
+        using Process process = new() { StartInfo = start };
+        using CancellationTokenSource childCancellation = new();
+        using CancellationTokenSource exitDeadline = new(TimeSpan.FromSeconds(30));
+        StreamReader? outputReader = null;
+        StreamReader? errorReader = null;
+        Task<string> stdout = Task.FromResult(string.Empty);
+        Task<string> stderr = Task.FromResult(string.Empty);
+        bool started = false;
+        int? pid = null;
+        int? exitCode = null;
+        Exception? runFailure = null;
+        string? cleanupFailure = null;
+        try
+        {
+            started = process.Start();
+            if (!started)
+            {
+                throw new InvalidOperationException($"Could not start the dotnet host '{dotnetHost}'.");
+            }
+
+            pid = process.Id;
+            outputReader = process.StandardOutput;
+            errorReader = process.StandardError;
+            stdout = outputReader.ReadToEndAsync(childCancellation.Token);
+            stderr = errorReader.ReadToEndAsync(childCancellation.Token);
+            await Task.WhenAll(process.WaitForExitAsync(childCancellation.Token), stdout, stderr)
+                .WaitAsync(exitDeadline.Token);
+            exitDeadline.Token.ThrowIfCancellationRequested();
+            exitCode = process.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            runFailure = ex;
+        }
+        finally
+        {
+            if (started && runFailure is not null)
+            {
+                using CancellationTokenSource cleanupDeadline = new(TimeSpan.FromSeconds(10));
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch (InvalidOperationException) when (process.HasExited)
+                {
+                    // The child exited between the liveness check and the kill attempt.
+                }
+                catch (Exception ex)
+                {
+                    cleanupFailure = $"\nCould not terminate the owned child tree: {ex}";
+                }
+
+                try
+                {
+                    await process.WaitForExitAsync(cleanupDeadline.Token);
+                    exitCode = process.ExitCode;
+                    await Task.WhenAll(stdout, stderr).WaitAsync(cleanupDeadline.Token);
+                    cleanupDeadline.Token.ThrowIfCancellationRequested();
+                }
+                catch (Exception ex)
+                {
+                    cleanupFailure += $"\nCould not confirm child exit and pipe cleanup within 10 seconds: {ex}";
+                }
+                finally
+                {
+                    childCancellation.Cancel();
+                }
+            }
+
+            outputReader?.Dispose();
+            errorReader?.Dispose();
+        }
+
+        string output = stdout.IsCompletedSuccessfully ? await stdout : "<read did not complete successfully>";
+        string errors = stderr.IsCompletedSuccessfully ? await stderr : "<read did not complete successfully>";
+        string tfm = Path.GetFileName(Path.GetDirectoryName(appDll))!;
+        string details = $"CLI case '{string.Join(' ', arguments)}', DLL '{appDll}', TFM {tfm}, " +
+            $"PID {pid?.ToString() ?? "not available"}, exit {exitCode?.ToString() ?? "unconfirmed"}\n" +
+            $"stdout:\n{output}\nstderr:\n{errors}";
+        if (runFailure is not null)
+        {
+            string reason = runFailure is OperationCanceledException && exitDeadline.IsCancellationRequested
+                ? "Child exit and output did not complete within 30 seconds."
+                : "Child launch or output capture failed.";
+            throw new InvalidOperationException($"{reason}\n{details}{cleanupFailure}", runFailure);
+        }
+
+        return (exitCode!.Value, output, errors, details);
     }
 
     private static Option<string[]?> GetTenantOption(CliOptions options, string optionName)
