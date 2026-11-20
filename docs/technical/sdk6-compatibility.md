@@ -555,8 +555,12 @@ These executed results, not the release note, resolve the earlier author gate.
 ### Identity, byte, path, disposal, and source-binding contract
 
 - Configuration, registry order/URLs, directive syntax and characterized
-  parser/latest/local-build quirks remain unchanged. Scope is bare and Name
-  unscoped; equality/hash ignore Scope and compare Name/Version case-sensitively.
+  parser/local-build quirks remain unchanged. The migration also preserved
+  `latest` quirks at the time; cross-registry `latest` now uses
+  [semantic precedence](../user/loading-data.md#automatic-package-version-selection)
+  instead of text ordering, without changing exact-version acquisition.
+  Scope is bare and Name unscoped; equality/hash ignore Scope and compare
+  Name/Version case-sensitively.
   CI keeps resolved download identities distinct from installed tags.
 - The physical content path remains
   `Path.Combine(configuredRoot, Name + "#" + Version, "package")`, ignoring

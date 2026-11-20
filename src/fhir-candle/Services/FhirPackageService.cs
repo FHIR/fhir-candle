@@ -553,7 +553,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
 
     private async ValueTask<PackageReference> ResolveLatest(string name)
     {
-        List<PackageReference> latestRecs = new();
+        List<SemVer> orderedRegistryWinners = [];
 
         foreach (Lazy<IRegistryClient?> registration in _packageClients)
         {
@@ -566,15 +566,11 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             {
                 continue;
             }
-            latestRecs.Add(new(name, versions[^1].ToString()));
+            orderedRegistryWinners.Add(versions[^1]);
         }
 
-        if (latestRecs.Count == 0)
-        {
-            return PackageReference.None;
-        }
-
-        return latestRecs.OrderByDescending(v => v.Version).First();
+        SemVer? winner = RegistryLatestVersionSelector.SelectWinner(orderedRegistryWinners);
+        return winner is null ? PackageReference.None : new PackageReference(name, winner.ToString());
     }
 
     /// <summary>

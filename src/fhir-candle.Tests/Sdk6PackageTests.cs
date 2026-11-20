@@ -35,6 +35,7 @@ using PackageReference = FhirCandle.Models.PackageReference;
 using PackageListing = FhirCandle.Models.PackageListing;
 using PackageRelease = FhirCandle.Models.PackageRelease;
 using Dist = FhirCandle.Models.Dist;
+using SemVer = SemanticVersioning.Version;
 
 namespace fhir.candle.Tests;
 
@@ -162,9 +163,9 @@ public sealed class Sdk6PackageTests
         Assert.Equal("10.0.0", versions.Items.First());
     }
 
-    /// <summary>Real service resolution pins parser quirks and prerelease-inclusive, cross-registry string ordering.</summary>
+    /// <summary>Real service resolution pins parser quirks and prerelease-inclusive semantic ordering.</summary>
     [Fact]
-    public async Task PackageDirectiveAndVersionPoliciesPreserveBaseline()
+    public async Task PackageDirectivePoliciesAndSemanticLatestSelection()
     {
         using LocalPackageFixture files = new();
         await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
@@ -179,7 +180,7 @@ public sealed class Sdk6PackageTests
                 RegistryListing(name, "1.0.0", "2.0.0", "10.0.0-beta.2", "invalid-version"))));
             routes.Add(registry.Expect("GET", "/npm/" + name, LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json",
                 RegistryListing(name, "1.0.0", "9.0.0-beta.1+build", "invalid-version"))));
-            routes.Add(registry.Expect("GET", "/fhir/" + name + "/9.0.0-beta.1+build", ArchiveResponse(name)));
+            routes.Add(registry.Expect("GET", "/fhir/" + name + "/10.0.0-beta.2", ArchiveResponse(name)));
             using FhirPackageService service = PackageService(files.Configuration(root + "/fhir/") with
             {
                 AdditionalNpmRegistryUrls = [root + "/npm/"],
@@ -187,7 +188,7 @@ public sealed class Sdk6PackageTests
             service.Init();
             PackageReference resolved = Assert.Single(await service.InstallPackages([directive], null, null).WaitAsync(LocalHttpFixture.Deadline));
             Assert.Equal(name, resolved.Name);
-            Assert.Equal("9.0.0-beta.1+build", resolved.Version);
+            Assert.Equal("10.0.0-beta.2", resolved.Version);
             Assert.Null(resolved.Scope);
         }
         // Within one registry, semantic ordering chooses 10 over 2 and includes prerelease/build metadata.
@@ -232,6 +233,110 @@ public sealed class Sdk6PackageTests
             await Assert.ThrowsAsync<IndexOutOfRangeException>(() => service.InstallPackages(["@scope"], null, null));
         }
         await AssertRoutes(registry, routes);
+    }
+
+    /// <summary>Compares numeric prereleases and preserves the original winner on metadata-only ties.</summary>
+    [Fact]
+    public void RegistryLatestVersionSelectorUsesTypedPrecedenceAndKeepsFirstOnTie()
+    {
+        Assert.Null(RegistryLatestVersionSelector.SelectWinner([]));
+
+        SemVer aaa = new("10.0.0-beta.2+aaa");
+        SemVer zzz = new("10.0.0-beta.2+zzz");
+        Assert.Same(aaa, RegistryLatestVersionSelector.SelectWinner([aaa, zzz]));
+        Assert.Same(zzz, RegistryLatestVersionSelector.SelectWinner([zzz, aaa]));
+
+        SemVer betaTwo = new("10.0.0-beta.2");
+        SemVer betaTen = new("10.0.0-beta.10");
+        Assert.Same(betaTen, RegistryLatestVersionSelector.SelectWinner([betaTen, betaTwo]));
+        Assert.Same(betaTen, RegistryLatestVersionSelector.SelectWinner([betaTwo, betaTen]));
+    }
+
+    /// <summary>Reverses actual registry order for semantic winners and metadata ties, without binding acquisition to the listing source.</summary>
+    [Theory]
+    [InlineData("/high", "/low", "10.0.0-beta.2")]
+    [InlineData("/low", "/high", "10.0.0-beta.2")]
+    [InlineData("/aaa", "/zzz", "10.0.0-beta.2+aaa")]
+    [InlineData("/zzz", "/aaa", "10.0.0-beta.2+zzz")]
+    public async Task CrossRegistryLatestPreservesSemanticPrecedenceAndExactIdentity(
+        string firstEndpoint, string secondEndpoint, string expectedVersion)
+    {
+        const string Name = "example.test.cross-registry.latest";
+        using LocalPackageFixture files = new();
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        Dictionary<string, string> listingVersions = new()
+        {
+            ["/high"] = "10.0.0-beta.2",
+            ["/low"] = "9.0.0-beta.1+build",
+            ["/aaa"] = "10.0.0-beta.2+aaa",
+            ["/zzz"] = "10.0.0-beta.2+zzz",
+        };
+        LocalHttpFixture.ExpectedRequest[] routes =
+        [
+            registry.Expect("GET", firstEndpoint + "/" + Name, LocalHttpFixture.RawResponse.Text(
+                HttpStatusCode.OK, "application/json", RegistryListing(Name, listingVersions[firstEndpoint]))),
+            registry.Expect("GET", secondEndpoint + "/" + Name, LocalHttpFixture.RawResponse.Text(
+                HttpStatusCode.OK, "application/json", RegistryListing(Name, listingVersions[secondEndpoint]))),
+            registry.Expect("GET", firstEndpoint + "/" + Name + "/" + expectedVersion, ArchiveResponse(Name)),
+        ];
+        using FhirPackageService service = PackageService(files.Configuration(root + firstEndpoint, root + secondEndpoint));
+        service.Init();
+
+        PackageReference resolved = Assert.Single(await service.InstallPackages([Name + "@latest"], null, null)
+            .WaitAsync(LocalHttpFixture.Deadline));
+        AssertLatestInstallation(files, resolved, Name, expectedVersion);
+        await AssertRoutes(registry, routes);
+    }
+
+    /// <summary>Tries the selected archive at both registries without attempting the lower listed version.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CrossRegistryLatestFallsBackOnlyForSelectedVersion(bool secondServesArchive)
+    {
+        const string Name = "example.test.cross-registry.fallback";
+        const string ExpectedVersion = "10.0.0-beta.2";
+        using LocalPackageFixture files = new();
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        LocalHttpFixture.ExpectedRequest[] routes =
+        [
+            registry.Expect("GET", "/high/" + Name, LocalHttpFixture.RawResponse.Text(
+                HttpStatusCode.OK, "application/json", RegistryListing(Name, "10.0.0-beta.2"))),
+            registry.Expect("GET", "/low/" + Name, LocalHttpFixture.RawResponse.Text(
+                HttpStatusCode.OK, "application/json", RegistryListing(Name, "9.0.0-beta.1+build"))),
+            registry.Expect("GET", "/high/" + Name + "/" + ExpectedVersion, LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound)),
+            registry.Expect("GET", "/low/" + Name + "/" + ExpectedVersion,
+                secondServesArchive ? ArchiveResponse(Name) : LocalHttpFixture.RawResponse.Empty(HttpStatusCode.NotFound)),
+        ];
+        using FhirPackageService service = PackageService(files.Configuration(root + "/high", root + "/low"));
+        service.Init();
+
+        Task<List<PackageReference>> install = service.InstallPackages([Name + "@latest"], null, null).WaitAsync(LocalHttpFixture.Deadline);
+        if (secondServesArchive)
+        {
+            PackageReference resolved = Assert.Single(await install);
+            AssertLatestInstallation(files, resolved, Name, ExpectedVersion);
+        }
+        else
+        {
+            Exception failure = await Assert.ThrowsAsync<Exception>(() => install);
+            Assert.Equal($"Failed to install package {Name}@10.0.0-beta.2 as requested by {Name}@latest", failure.Message);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(files.CacheDirectory));
+        }
+        await AssertRoutes(registry, routes);
+    }
+
+    private static void AssertLatestInstallation(LocalPackageFixture files, PackageReference resolved, string name, string expectedVersion)
+    {
+        Assert.Equal(name, resolved.Name);
+        Assert.Equal(expectedVersion, resolved.Version);
+        Assert.Null(resolved.Scope);
+        string identityDirectory = name + "#" + expectedVersion;
+        Assert.True(File.Exists(Path.Combine(files.CacheDirectory, identityDirectory, "package", "package.json")));
+        Assert.Equal(Path.Combine(files.CacheDirectory, identityDirectory),
+            Assert.Single(Directory.EnumerateFileSystemEntries(files.CacheDirectory)));
     }
 
     /// <summary>Configured FHIR clients precede NPM clients, with archive-only first-success fallback.</summary>

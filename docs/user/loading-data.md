@@ -10,6 +10,19 @@ passed into the default server will look for `fhirData/r4`, `fhirData/r4b`, and
 `fhirData/r5`. If tenant directories are not found, all tenants will try to load
 resources from the specified path.
 
+## Automatic package version selection
+
+When a package version is omitted, empty, or `latest`, Candle selects the
+highest semantic precedence among eligible registry winners, including eligible
+prereleases. If winners have equal precedence across registries, Candle keeps
+the first registered winner's full version, including any build metadata.
+
+This intentionally replaces text ordering across registries, so `latest` can
+now select a version that no registry serves as an archive. Candle first checks
+the cache for the exact selected identity. On a cache miss, it tries that exact
+version in configured registry order, regardless of which registry listed it.
+If none can supply it, installation fails without falling back to a lower version.
+
 ## Package import limits
 
 Package acquisition uses finite, Candle-owned limits. These intentionally narrow
