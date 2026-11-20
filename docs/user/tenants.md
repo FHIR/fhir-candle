@@ -54,15 +54,23 @@ or new granular-filter enforcement.
 
 ## Bundle authorization
 
+Transactions are non-atomic and have no general rollback or isolation. An
+authorized transaction can still leave earlier writes in place if a later
+entry fails during execution. Authorization and required-body refusals prevent
+execution instead of undoing writes: an HTTP `200 OK` with a
+`transaction-response` does not mean every entry ran or succeeded.
+
 Each executable batch or transaction entry is checked against its own resource
 type and interaction permissions, not just the permission to submit a Bundle.
-Batch entries have independent outcomes: a denied entry does not prevent other
-permitted entries from running in their normal input order.
+Ordinary batch entries have independent outcomes: a denied or failed entry
+does not prevent other permitted entries from running in their normal input
+order. A nested transaction reached by a batch applies its own checks without
+refusing the batch's other entries.
 
 Before any transaction preparation or mutation, every supported executable
-descendant is authorized, including reads and entries inside nested batches or
-transactions. An authorization denial prevents execution of that entire
-transaction subtree. The outer HTTP response remains `200 OK`, with a
+descendant is checked for authorization, including reads and entries inside
+nested batches or transactions. An authorization denial prevents execution of
+that entire transaction subtree. The outer HTTP response remains `200 OK`, with a
 `batch-response` or `transaction-response` Bundle. A denied entry has
 `401 Unauthorized` and an OperationOutcome `forbidden` issue identifying its
 submitted method, URL, and parsed interaction. Authorized transaction entries
@@ -72,6 +80,14 @@ descendant paths and submitted requests. These collateral refusals do not claim
 that the wrapper's own permissions were denied, and carry no successful resource,
 ETag, Location, or last-modified metadata.
 
+Authorization denials take precedence in the response. If there are no denials
+but an executable create or update (including conditional forms) lacks its
+resource body, the transaction is refused before preparation or
+execution. An entry missing its required body receives `400 Bad Request` with
+a `structure` issue; other parsed entries that did not run receive
+`424 Failed Dependency`. Skipped nested wrappers identify the ordinal paths
+of their own invalid descendants. Skips have no success resource or metadata.
+
 This includes supported programmatic nested Bundles and repeated or aliased
 Bundle, entry, request, and resource objects. Shared object identity is an
 in-process input property, not something represented by a serialized HTTP body.
@@ -79,9 +95,10 @@ Only executable batch/transaction Bundle requests are traversed recursively:
 a `POST Bundle` resource body or an operation payload is not executed or
 recursively admitted merely because it contains a Bundle.
 
-Recursive authorization admission is bypassed only while the store's internal
-load state is not `None` (initial loading). Outside loading, null authorization
-follows the existing tenant policy: entries require authorization when
+Bundle admission, including recursive authorization and transaction
+required-body checks, is bypassed only while the store's internal load state
+is not `None` (initial loading). Outside loading, null authorization follows
+the existing tenant policy: entries require authorization when
 `SmartRequired` is true; optional access remains permitted when it is false.
 A supplied restricted authorization still has its entry permissions checked.
 
@@ -102,11 +119,8 @@ reference resolution, including URN references, is separate from request-URL
 remapping and still observes live store state at the transaction's execution
 position.
 
-This is an authorization-before-mutation guarantee, not full FHIR transaction
-atomicity, rollback, or isolation. An authorized transaction can still leave
-earlier writes in place after a later non-authorization execution failure.
-It also does not provide arbitrary-hook sandboxing, token-revocation guarantees,
-or an end-to-end linearity guarantee.
+Bundle admission does not provide arbitrary-hook sandboxing, token-revocation
+guarantees, or an end-to-end linearity guarantee.
 
 ## Related
 

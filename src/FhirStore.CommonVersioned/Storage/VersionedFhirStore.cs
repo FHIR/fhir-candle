@@ -1765,7 +1765,11 @@ public partial class VersionedFhirStore : IFhirStore
 
                 if (approvedScope?.Denials.Any() == true)
                 {
-                    RefuseTransaction(requestBundle, responseBundle, approvedScope);
+                    RefuseTransaction(requestBundle, responseBundle, approvedScope, TransactionRefusal.Authorization);
+                }
+                else if (approvedScope?.HasMissingRequiredResource == true)
+                {
+                    RefuseTransaction(requestBundle, responseBundle, approvedScope, TransactionRefusal.Structure);
                 }
                 else
                 {
@@ -6894,7 +6898,12 @@ rs,
                 new() { Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.Batch },
                 //new() { Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.HistorySystem },
                 new() { Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.SearchSystem },
-                new() { Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.Transaction },
+                new()
+                {
+                    Code = Hl7.Fhir.Model.CapabilityStatement.SystemRestfulInteraction.Transaction,
+                    Documentation = "Transactions are non-atomic and have no general rollback. " +
+                        "Authorization and required-body checks can prevent execution; failures during execution can leave earlier writes in place.",
+                },
             },
             //SearchParam = new(),      // search parameters are expanded out to each resource
             Operation = _operations.Values

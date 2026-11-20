@@ -1131,6 +1131,265 @@ public class BundleAuthorizationTests
         AssertUnchanged(store, before, watch);
     }
 
+    /// <summary>Required-body refusals precede preparation and preserve the transaction's legacy response positions.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void TransactionMissingBodyRejectsBeforePreparation(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        JsonObject patient = Patient("seed", "LiveOriginal");
+        patient["generalPractitioner"] = new JsonArray(new JsonObject { ["reference"] = "seed" });
+        SeedResource(store, "Patient", "seed", patient);
+        SeedPatient(store, "remove");
+        AuthorizationInfo authorization = Authorize(store, "*.*");
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        System.Reflection.MethodInfo factory = Assert.IsAssignableFrom<System.Reflection.MethodInfo>(
+            store.GetType().GetMethod("CreateBundleEntryContext", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static));
+        FhirRequestContext parent = Context(store, "POST", string.Empty, authorization);
+
+        (string Method, string Url, string? IfNoneExist, Common.StoreInteractionCodes Interaction)[] cases =
+        [
+            ("POST", "Patient", null, Common.StoreInteractionCodes.TypeCreate),
+            ("POST", "Patient", "_id=seed", Common.StoreInteractionCodes.TypeCreate),
+            ("POST", "Patient?_id=seed", null, Common.StoreInteractionCodes.TypeCreateConditional),
+            ("PUT", "Patient/bodyless", null, Common.StoreInteractionCodes.InstanceUpdate),
+            ("PUT", "Patient?_id=seed", null, Common.StoreInteractionCodes.InstanceUpdateConditional),
+            ("PUT", "Patient/seed?_id=seed", null, Common.StoreInteractionCodes.InstanceUpdateConditional),
+        ];
+        foreach ((string method, string url, string? ifNoneExist, Common.StoreInteractionCodes interaction) in cases)
+        {
+            JsonObject missing = Entry("bodyless", method, url);
+            if (ifNoneExist is not null)
+            {
+                missing["request"]!["ifNoneExist"] = ifNoneExist;
+            }
+
+            Hl7.Fhir.Model.Bundle request = ModelBundle(ToModel(version, Bundle("transaction",
+                Entry("valid", "PUT", "Patient/seed", Patient("seed", "MustNotPersist")), missing)));
+            FhirRequestContext child = Assert.IsType<FhirRequestContext>(factory.Invoke(null, [parent, request.Entry[1], url]));
+            Assert.Equal(interaction, child.Interaction);
+            Assert.Equal(ifNoneExist ?? string.Empty, child.IfNoneExist);
+            Assert.True(child.IsAuthorized());
+            Assert.Null(child.SourceObject);
+
+            JsonObject response = SendObjectBundle(store, request, authorization);
+            Assert.Equal("transaction-response", response["type"]!.GetValue<string>());
+            int failedPosition = method == "POST" ? 0 : 1;
+            if (failedPosition == 0)
+            {
+                AssertOrder(response, "bodyless", "valid");
+            }
+            else
+            {
+                AssertOrder(response, "valid", "bodyless");
+            }
+            AssertMissingBody(ResponseEntry(response, failedPosition), method, url, interaction.ToString());
+            AssertStructuralSkip(ResponseEntry(response, 1 - failedPosition));
+            AssertUnchanged(store, before, watch);
+        }
+
+        // Even aliased live objects, reference literals, and remappable request URLs must not be prepared.
+        const string remappableRead = "/Patient/seed?_tag=seed";
+        const string remappableWrite = "Patient/seed?_format=json";
+        object live = store["Patient"]["seed"];
+        Hl7.Fhir.Model.Bundle aliased = ModelBundle(ToModel(version, Bundle("transaction",
+            Entry("alias", "POST", "Patient", Patient("placeholder"), fullUrl: PatientFullUrl),
+            Entry("read", "GET", remappableRead),
+            Entry("bodyless", "PUT", remappableWrite))));
+        SetEntryResource(aliased, 0, live);
+        string inputBefore = ToJson(store, aliased).ToJsonString();
+        JsonObject aliasedResponse = SendObjectBundle(store, aliased, authorization);
+        AssertOrder(aliasedResponse, PatientFullUrl, "bodyless", "read");
+        AssertStructuralSkip(ResponseEntry(aliasedResponse, 0));
+        AssertMissingBody(ResponseEntry(aliasedResponse, 1), "PUT", remappableWrite, "InstanceUpdate");
+        AssertStructuralSkip(ResponseEntry(aliasedResponse, 2));
+        Assert.Same(live, EntryResource(aliased, 0));
+        Assert.Same(live, store["Patient"]["seed"]);
+        Assert.Equal(inputBefore, ToJson(store, aliased).ToJsonString());
+        Assert.Equal("seed", aliased.Entry[0].Resource!.Id);
+        Assert.Equal(remappableRead, aliased.Entry[1].Request!.Url);
+        Assert.Equal(remappableWrite, aliased.Entry[2].Request!.Url);
+        JsonObject persisted = Stored(store, "Patient", "seed");
+        Assert.Equal("LiveOriginal", persisted["name"]![0]!["family"]!.GetValue<string>());
+        Assert.Equal("seed", persisted["generalPractitioner"]![0]!["reference"]!.GetValue<string>());
+        Assert.Equal("1", persisted["meta"]!["versionId"]!.GetValue<string>());
+        AssertUnchanged(store, before, watch);
+
+        Hl7.Fhir.Model.Bundle mixed = ModelBundle(ToModel(version, Bundle("transaction",
+            Entry("read", "GET", "Patient/seed"),
+            new() { ["fullUrl"] = "missing-request" },
+            Entry("patch", "PATCH", "Patient/seed"),
+            Entry("bodyless", "POST", "Patient"),
+            Entry("unparsed", "GET", "NotAResource/id"),
+            Entry("valid", "PUT", "Patient/seed", Patient("seed", "Updated")),
+            Entry("delete", "DELETE", "Patient/remove"),
+            Entry("omitted", "GET", "Patient/seed"))));
+        mixed.Entry[7].Request!.Method = null;
+        JsonObject mixedResponse = SendObjectBundle(store, mixed, authorization);
+        AssertOrder(mixedResponse, "delete", "bodyless", "patch", "valid", "read", "unparsed", "missing-request");
+        AssertStructuralSkip(ResponseEntry(mixedResponse, 0));
+        AssertMissingBody(ResponseEntry(mixedResponse, 1), "POST", "Patient", "TypeCreate");
+        AssertStructuralSkip(ResponseEntry(mixedResponse, 2));
+        AssertStructuralSkip(ResponseEntry(mixedResponse, 3));
+        AssertStructuralSkip(ResponseEntry(mixedResponse, 4));
+        AssertOutcomeOnly(ResponseEntry(mixedResponse, 5), 500,
+            ("not-supported", "Request could not be parsed to known interaction: GET NotAResource/id"));
+        AssertOutcomeOnly(ResponseEntry(mixedResponse, 6), 400, ("required", "Entry is missing a request"));
+        AssertUnchanged(store, before, watch);
+
+        mixed.Entry.RemoveAt(3); // Without the bodyless write, the malformed neighbors do not gate execution.
+        JsonObject admitted = SendObjectBundle(store, mixed, authorization);
+        AssertOrder(admitted, "delete", "patch", "valid", "read", "unparsed", "missing-request");
+        Assert.Equal(new[] { 200, 501, 200, 200, 500, 400 }, Statuses(admitted));
+        AssertOutcomeOnly(ResponseEntry(admitted, 1), 501,
+            ("not-supported", "Interaction not implemented: InstancePatch"),
+            ("not-supported", "Unsupported request: PATCH Patient/seed, parsed interaction: InstancePatch"));
+        AssertSuccessResource(ResponseEntry(admitted, 3), 200, "seed", "2");
+    }
+
+    /// <summary>Nested shape errors are scoped by ordinal occurrence, not by duplicate full URLs.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void NestedMissingBodyRefusesEnclosingTransaction(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        SeedPatient(store, "seed");
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        JsonObject response = SendBundle(store, Bundle("transaction",
+            Entry("valid", "PUT", "Patient/seed", Patient("seed", "MustNotPersist")),
+            Entry("invalid-wrapper", "POST", "/", Bundle("batch",
+                Entry("deep", "POST", "/", Bundle("transaction",
+                    Entry("deep-put", "PUT", "Patient/deep-bodyless", fullUrl: SecondPatientFullUrl),
+                    Entry("deep-post", "POST", "Patient", fullUrl: SecondPatientFullUrl))),
+                Entry("batch-put", "PUT", "Patient/batch-bodyless", fullUrl: SecondPatientFullUrl)), fullUrl: PatientFullUrl),
+            Entry("clean-wrapper", "POST", "/", Bundle("batch",
+                Entry("read", "GET", "Patient/seed")), fullUrl: PatientFullUrl)),
+            Authorize(store, "*.*"));
+
+        AssertOrder(response, PatientFullUrl, PatientFullUrl, "valid");
+        AssertStructuralSkip(ResponseEntry(response, 0),
+            "Structurally invalid descendant Bundle.entry[1].entry[0].entry[1]: Resource is required; Unsupported request: POST Patient, parsed interaction: TypeCreate",
+            "Structurally invalid descendant Bundle.entry[1].entry[0].entry[0]: Resource is required; Unsupported request: PUT Patient/deep-bodyless, parsed interaction: InstanceUpdate",
+            "Structurally invalid descendant Bundle.entry[1].entry[1]: Resource is required; Unsupported request: PUT Patient/batch-bodyless, parsed interaction: InstanceUpdate");
+        AssertStructuralSkip(ResponseEntry(response, 1));
+        AssertStructuralSkip(ResponseEntry(response, 2));
+        AssertUnchanged(store, before, watch);
+    }
+
+    /// <summary>Admission still checks later descendants and renders only authorization refusals when any are denied.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void TransactionAuthorizationDenialTakesPrecedenceOverMissingBody(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        SeedPatient(store, "seed");
+        MutationWatch watch = new(store);
+        string[] before = Fingerprint(store);
+        AuthorizationInfo authorization = Authorize(store, "Patient.c");
+        Assert.True(Context(store, "POST", "Patient", authorization).IsAuthorized());
+        Assert.False(Context(store, "GET", "Observation/absent", authorization).IsAuthorized());
+        Assert.False(Context(store, "POST", "Observation", authorization).IsAuthorized());
+        JsonObject response = SendBundle(store, Bundle("transaction",
+            Entry("authorized-bodyless", "POST", "Patient"),
+            Entry("wrapper", "POST", "/", Bundle("batch", Entry("denied-read", "GET", "Observation/absent"))),
+            Entry("valid", "POST", "Patient", Patient("client", "MustNotPersist"))),
+            authorization);
+
+        AssertOrder(response, "authorized-bodyless", "wrapper", "valid");
+        const string collateral = "Entry not executed because transaction authorization failed";
+        AssertOutcomeOnly(ResponseEntry(response, 0), 401, ("forbidden", collateral));
+        AssertOutcomeOnly(ResponseEntry(response, 1), 401, ("forbidden", collateral),
+            ("forbidden", "Denied descendant Bundle.entry[1].entry[0]: Unauthorized request: GET Observation/absent, parsed interaction: InstanceRead"));
+        AssertOutcomeOnly(ResponseEntry(response, 2), 401, ("forbidden", collateral));
+        AssertUnchanged(store, before, watch);
+
+        JsonObject directlyDenied = SendBundle(store, Bundle("transaction",
+            Entry("denied-bodyless", "POST", "Observation")), authorization);
+        AssertOrder(directlyDenied, "denied-bodyless");
+        AssertOutcomeOnly(ResponseEntry(directlyDenied, 0), 401,
+            ("forbidden", "Unauthorized request: POST Observation, parsed interaction: TypeCreate"));
+        AssertUnchanged(store, before, watch);
+    }
+
+    /// <summary>An ordinary batch wraps a refused transaction but still dispatches independent entries in place.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void OrdinaryBatchKeepsStructuralRefusalLocal(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        MutationWatch watch = new(store);
+        AuthorizationInfo authorization = Authorize(store, "Patient.c", "Patient.u", "Patient.r");
+        Assert.True(Context(store, "PUT", "Patient/batch-missing", authorization).IsAuthorized());
+        Assert.True(Context(store, "POST", "Patient", authorization).IsAuthorized());
+        JsonObject response = SendBundle(store, Bundle("batch",
+            Entry("before", "POST", "Patient", Patient(null, "Before")),
+            Entry("wrapper", "POST", "/", Bundle("transaction",
+                Entry("nested-write", "PUT", "Patient/after", Patient("after", "MustNotPersist")),
+                Entry("nested-bodyless", "PUT", "Patient/nested-missing"))),
+            Entry("ordinary-put", "PUT", "Patient/batch-missing"),
+            Entry("ordinary-post", "POST", "Patient"),
+            Entry("after", "PUT", "Patient/after", Patient("after", "After")),
+            Entry("read", "GET", "Patient/after")),
+            authorization);
+
+        AssertOrder(response, "before", "wrapper", "ordinary-put", "ordinary-post", "after", "read");
+        string beforeId = ResourceId(ResponseEntry(response, 0));
+        AssertSuccessResource(ResponseEntry(response, 0), 201, beforeId, "1");
+        AssertStatus(ResponseEntry(response, 1), 200);
+        JsonObject child = NestedResponse(response, 1);
+        Assert.Equal("transaction-response", child["type"]!.GetValue<string>());
+        AssertOrder(child, "nested-write", "nested-bodyless");
+        AssertStructuralSkip(ResponseEntry(child, 0));
+        AssertMissingBody(ResponseEntry(child, 1), "PUT", "Patient/nested-missing", "InstanceUpdate");
+        AssertMissingBody(ResponseEntry(response, 2), "PUT", "Patient/batch-missing", "InstanceUpdate");
+        JsonObject ordinaryPost = ResponseEntry(response, 3);
+        string createError = Issues(ordinaryPost)[0]!["diagnostics"]!.GetValue<string>();
+        Assert.StartsWith("Failed to deserialize resource, format: , error:", createError);
+        AssertOutcomeOnly(ordinaryPost, 415, ("structure", createError),
+            ("not-supported", "Unsupported request: POST Patient, parsed interaction: TypeCreate"));
+        AssertSuccessResource(ResponseEntry(response, 4), 201, "after", "1");
+        AssertSuccessResource(ResponseEntry(response, 5), 200, "after", "1");
+        Assert.Equal("After", ResponseEntry(response, 5)["resource"]!["name"]![0]!["family"]!.GetValue<string>());
+        Assert.Equal(new[] { beforeId, "after" }.Order(), store["Patient"].Keys.Order());
+        Assert.Equal("Before", Stored(store, "Patient", beforeId)["name"]![0]!["family"]!.GetValue<string>());
+        Assert.Equal("After", Stored(store, "Patient", "after")["name"]![0]!["family"]!.GetValue<string>());
+        Assert.Equal(new[] { $"create:Patient/{beforeId}", "update:Patient/after" }, watch.Events);
+    }
+
+    /// <summary>Only the recognized create/update interactions require a body for transaction admission.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void BodylessNonWriteEntriesKeepExecutionOutcomes(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        SeedPatient(store, "readable");
+        SeedPatient(store, "remove");
+        MutationWatch watch = new(store);
+        JsonObject response = SendBundle(store, Bundle("transaction",
+            Entry("write", "PUT", "Patient/written", Patient("written", "Persisted")),
+            Entry("search", "POST", "Patient/_search"),
+            Entry("read", "GET", "Patient/readable"),
+            Entry("operation", "POST", "Patient/$not-installed"),
+            Entry("delete", "DELETE", "Patient/remove")),
+            Authorize(store, "Patient.u", "Patient.s", "Patient.r", "Patient.d"));
+
+        AssertOrder(response, "delete", "search", "operation", "write", "read");
+        Assert.Equal(new[] { 200, 200, 404, 201, 200 }, Statuses(response));
+        JsonObject search = NestedResponse(response, 1);
+        Assert.Equal("searchset", search["type"]!.GetValue<string>());
+        Assert.Equal(1, search["total"]!.GetValue<int>()); // DELETE has executed; PUT has not.
+        AssertOutcomeOnly(ResponseEntry(response, 2), 404,
+            ("not-found", "Operation $not-installed does not have an executable implementation on this server."),
+            ("not-supported", "Unsupported request: POST Patient/$not-installed, parsed interaction: TypeOperation"));
+        AssertSuccessResource(ResponseEntry(response, 3), 201, "written", "1");
+        AssertSuccessResource(ResponseEntry(response, 4), 200, "readable", "1");
+        Assert.Equal("Persisted", Stored(store, "Patient", "written")["name"]![0]!["family"]!.GetValue<string>());
+        Assert.DoesNotContain("remove", store["Patient"].Keys);
+        Assert.Equal(new[] { "delete:Patient/remove", "update:Patient/written" }, watch.Events);
+    }
+
     /// <summary>Reservation/admission never moves descendant reference searches ahead of earlier parent writes.</summary>
     [Theory]
     [MemberData(nameof(Versions))]
@@ -1211,6 +1470,24 @@ public class BundleAuthorizationTests
             Assert.NotEqual("401 Unauthorized", ResponseEntry(operation, 0)["response"]!["status"]!.GetValue<string>());
             Assert.Equal(before, Fingerprint(store));
             Assert.Equal(priorEvents, watch.Events.Count);
+
+            JsonObject structuralControl = SendBundle(store, Bundle(kind,
+                Entry("stored", "POST", "Bundle", Bundle("transaction", Entry("bodyless-create", "POST", "Patient"))),
+                Entry("operation", "POST", "Patient/$not-installed",
+                    Bundle("transaction", Entry("bodyless-update", "PUT", "Patient/absent")))),
+                Authorize(store, "Bundle.c", "Patient.c", "Patient.u"));
+            AssertOrder(structuralControl, "stored", "operation");
+            JsonObject createdWithBodylessEntry = ResponseEntry(structuralControl, 0);
+            string id = ResourceId(createdWithBodylessEntry);
+            AssertSuccessResource(createdWithBodylessEntry, 201, id, "1");
+            JsonNode payload = Stored(store, "Bundle", id)["entry"]![0]!;
+            Assert.Equal("POST", payload["request"]!["method"]!.GetValue<string>());
+            Assert.Null(payload["resource"]);
+            AssertOutcomeOnly(ResponseEntry(structuralControl, 1), 404,
+                ("not-found", "Operation $not-installed does not have an executable implementation on this server."),
+                ("not-supported", "Unsupported request: POST Patient/$not-installed, parsed interaction: TypeOperation"));
+            Assert.Empty(store["Patient"]);
+            Assert.Equal($"create:Bundle/{id}", Assert.Single(watch.Events.Skip(priorEvents)));
         }
     }
 
@@ -1257,26 +1534,24 @@ public class BundleAuthorizationTests
     [MemberData(nameof(Versions))]
     public void InitialLoadingRetainsBundleBypass(FhirReleases.FhirSequenceCodes version)
     {
+        DirectoryInfo root = new(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(root.FullName, "fhir-candle.sln")))
+        {
+            root = root.Parent ?? throw new InvalidOperationException("Repository root not found.");
+        }
+
         foreach (string kind in new[] { "batch", "transaction" })
         {
-            DirectoryInfo root = new(AppContext.BaseDirectory);
-            while (!File.Exists(Path.Combine(root.FullName, "fhir-candle.sln")))
+            JsonObject request = Bundle(kind,
+                Entry("parent", "PUT", "Patient/loaded-parent", Patient("loaded-parent", "LoadedParent")),
+                Entry("nested", "POST", "/", Bundle(kind == "batch" ? "transaction" : "batch",
+                    Entry("child", "PUT", "Patient/loaded-child", Patient("loaded-child", "LoadedChild")))),
+                Entry("literal-boundary", "POST", "/", Bundle("transaction",
+                    Entry("alias", "POST", "Patient", Patient("Patient", "LoadedAliased")),
+                    Entry("search", "GET", "Patient?name=LoadedAliased"))));
+            WithFixture(request, directory =>
             {
-                root = root.Parent ?? throw new InvalidOperationException("Repository root not found.");
-            }
-            string path = Path.Combine(root.FullName, "scratch", "1119-02", $"bundle-loading-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(path);
-            try
-            {
-                JsonObject request = Bundle(kind,
-                    Entry("parent", "PUT", "Patient/loaded-parent", Patient("loaded-parent", "LoadedParent")),
-                    Entry("nested", "POST", "/", Bundle(kind == "batch" ? "transaction" : "batch",
-                        Entry("child", "PUT", "Patient/loaded-child", Patient("loaded-child", "LoadedChild")))),
-                    Entry("literal-boundary", "POST", "/", Bundle("transaction",
-                        Entry("alias", "POST", "Patient", Patient("Patient", "LoadedAliased")),
-                        Entry("search", "GET", "Patient?name=LoadedAliased"))));
-                File.WriteAllText(Path.Combine(path, "bundle.json"), request.ToJsonString());
-                using IFhirStore store = CreateStore(version, smartRequired: true, smartAllowed: false, new DirectoryInfo(path));
+                using IFhirStore store = CreateStore(version, smartRequired: true, smartAllowed: false, loadDirectory: directory);
                 string aliasId = Assert.Single(store["Patient"].Keys, id => id is not ("loaded-child" or "loaded-parent"));
                 Assert.True(Guid.TryParse(aliasId, out _));
                 Assert.Equal(3, store["Patient"].Count);
@@ -1305,10 +1580,67 @@ public class BundleAuthorizationTests
                     AssertOwnDenial(ResponseEntry(literalResponse, 1), "GET", "Patient?name=LoadedAliased");
                 }
                 AssertUnchanged(store, before, watch);
+            });
+        }
+
+        foreach (bool nested in new[] { false, true })
+        {
+            const string earlier = "loaded-before-bodyless";
+            const string missing = "loaded-bodyless";
+            const string missingUrl = "Patient/" + missing;
+            JsonObject Transaction(string family) => Bundle("transaction",
+                Entry("valid", "PUT", "Patient/" + earlier, Patient(earlier, family)),
+                Entry("bodyless", "PUT", missingUrl));
+
+            // Null loader authorization must not be able to mask a structural refusal.
+            JsonObject load = nested ? Bundle("batch", Entry("wrapper", "POST", "/", Transaction("Loaded"))) : Transaction("Loaded");
+            WithFixture(load, directory =>
+            {
+                using IFhirStore store = CreateStore(version, smartRequired: false, loadDirectory: directory);
+                Assert.Single(store["Patient"]);
+                JsonObject loaded = Stored(store, "Patient", earlier);
+                Assert.Equal("Loaded", loaded["name"]![0]!["family"]!.GetValue<string>());
+                Assert.Equal("1", loaded["meta"]!["versionId"]!.GetValue<string>());
+                Assert.DoesNotContain(missing, store["Patient"].Keys);
+
+                string[] before = Fingerprint(store);
+                MutationWatch watch = new(store);
+                JsonObject runtime = SendBundle(store, Transaction("MustNotPersist"), Authorize(store, "*.*"));
+                AssertOrder(runtime, "valid", "bodyless");
+                AssertStructuralSkip(ResponseEntry(runtime, 0));
+                AssertMissingBody(ResponseEntry(runtime, 1), "PUT", missingUrl, "InstanceUpdate");
+                AssertUnchanged(store, before, watch);
+            });
+        }
+
+        void WithFixture(JsonObject request, Action<DirectoryInfo> verify)
+        {
+            string path = Path.Combine(root.FullName, "scratch", $"bundle-startup-load-{Guid.NewGuid():N}");
+            Assert.False(Directory.Exists(path), "A startup fixture must own a fresh load directory.");
+            DirectoryInfo directory = Directory.CreateDirectory(path);
+            string file = Path.Combine(path, "bundle.json");
+            bool ownsFile = false;
+            try
+            {
+                using (FileStream stream = new(file, FileMode.CreateNew, FileAccess.Write))
+                {
+                    ownsFile = true;
+                    using StreamWriter writer = new(stream);
+                    writer.Write(request.ToJsonString());
+                }
+
+                verify(directory);
             }
             finally
             {
-                Directory.Delete(path, recursive: true);
+                if (ownsFile)
+                {
+                    File.Delete(file);
+                }
+                if (!Directory.EnumerateFileSystemEntries(path).Any())
+                {
+                    Directory.Delete(path, recursive: false);
+                }
             }
         }
     }
@@ -1390,6 +1722,31 @@ public class BundleAuthorizationTests
     }
 
     private static JsonArray Issues(JsonObject entry) => entry["response"]!["outcome"]!["issue"]!.AsArray();
+
+    private static void AssertOutcomeOnly(JsonObject entry, int status, params (string Code, string Diagnostic)[] expected)
+    {
+        AssertStatus(entry, status);
+        Assert.Null(entry["resource"]);
+        JsonNode response = entry["response"]!;
+        Assert.Null(response["etag"]);
+        Assert.Null(response["location"]);
+        Assert.Null(response["lastModified"]);
+        JsonArray issues = Issues(entry);
+        Assert.Equal(expected, issues.Select(issue =>
+            (issue!["code"]!.GetValue<string>(), issue!["diagnostics"]!.GetValue<string>())));
+        Assert.All(issues, issue => Assert.Equal("error", issue!["severity"]!.GetValue<string>()));
+    }
+
+    private static void AssertMissingBody(JsonObject entry, string method, string url, string interaction) =>
+        AssertOutcomeOnly(entry, 400, ("structure", "Resource is required"),
+            ("not-supported", $"Unsupported request: {method} {url}, parsed interaction: {interaction}"));
+
+    private static void AssertStructuralSkip(JsonObject entry, params string[] descendants) =>
+        AssertOutcomeOnly(entry, 424,
+        [
+            ("processing", "Entry not executed because transaction structural validation failed"),
+            .. descendants.Select(diagnostic => ("structure", diagnostic)),
+        ]);
 
     private static void AssertRefusal(JsonObject entry)
     {

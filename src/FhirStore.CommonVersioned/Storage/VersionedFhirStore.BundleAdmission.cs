@@ -32,12 +32,19 @@ public partial class VersionedFhirStore
         Denied,
     }
 
-    /// <summary>Authorization facts only, never an executable command or a resource snapshot.</summary>
+    private enum TransactionRefusal
+    {
+        Authorization,
+        Structure,
+    }
+
+    /// <summary>Admission facts only, never an executable command or a resource snapshot.</summary>
     private sealed record BundleEntryDecision(
         BundleOccurrencePath Path,
         BundleEntryAdmission Admission,
         string? SubmittedUrl,
         string? DenialDiagnostic,
+        string? MissingBodyDiagnostic,
         BundleAdmissionScope? ChildScope);
 
     /// <summary>Private approval for one invocation's structural occurrences.</summary>
@@ -47,14 +54,35 @@ public partial class VersionedFhirStore
 
         public Dictionary<BundleOccurrencePath, BundleEntryDecision> Entries { get; } = [];
 
+        public bool HasMissingRequiredResource { get; set; }
+
         public BundleEntryDecision Entry(int index) => Entries[Path.Child(index)];
 
         public IEnumerable<BundleEntryDecision> Denials => Entries.Values
             .SelectMany(e => (e.Admission == BundleEntryAdmission.Denied ? new[] { e } : [])
                 .Concat(e.ChildScope?.Denials ?? []));
+
+        public IEnumerable<BundleEntryDecision> MissingRequiredResources()
+        {
+            foreach (BundleEntryDecision decision in Entries.Values)
+            {
+                if (decision.MissingBodyDiagnostic is not null)
+                {
+                    yield return decision;
+                }
+
+                if (decision.ChildScope is { HasMissingRequiredResource: true } childScope)
+                {
+                    foreach (BundleEntryDecision descendant in childScope.MissingRequiredResources())
+                    {
+                        yield return descendant;
+                    }
+                }
+            }
+        }
     }
 
-    /// <summary>Authorizes submitted occurrences without preparing resources or predicting execution outcomes.</summary>
+    /// <summary>Checks submitted occurrences without preparing resources or predicting execution outcomes.</summary>
     private static BundleAdmissionScope AdmitBundle(
         FhirRequestContext ctx,
         Bundle bundle,
@@ -71,6 +99,7 @@ public partial class VersionedFhirStore
             BundleOccurrencePath entryPath = path.Child(occurrence.InputIndex);
             BundleEntryAdmission admission = BundleEntryAdmission.Unparsed;
             string? diagnostic = null;
+            string? missingBodyDiagnostic = null;
             BundleAdmissionScope? childScope = null;
             if (entry.Request is not null)
             {
@@ -82,6 +111,16 @@ public partial class VersionedFhirStore
                     {
                         diagnostic = UnauthorizedBundleEntryDiagnostic(child);
                     }
+                    // PerformInteraction routes these to InstanceCreate or InstanceUpdate,
+                    // which require a resource before reaching conditional or write logic.
+                    else if ((entry.Resource is null) &&
+                        (child.Interaction is Common.StoreInteractionCodes.TypeCreate or
+                            Common.StoreInteractionCodes.TypeCreateConditional or
+                            Common.StoreInteractionCodes.InstanceUpdate or
+                            Common.StoreInteractionCodes.InstanceUpdateConditional))
+                    {
+                        missingBodyDiagnostic = $"Unsupported request: {child.HttpMethod} {child.Url}, parsed interaction: {child.Interaction}";
+                    }
 
                     if (IsExecutableBundle(child, out Bundle? nested))
                     {
@@ -90,7 +129,8 @@ public partial class VersionedFhirStore
                 }
             }
 
-            scope.Entries.Add(entryPath, new(entryPath, admission, entry.Request?.Url, diagnostic, childScope));
+            scope.Entries.Add(entryPath, new(entryPath, admission, entry.Request?.Url, diagnostic, missingBodyDiagnostic, childScope));
+            scope.HasMissingRequiredResource |= (missingBodyDiagnostic is not null) || (childScope?.HasMissingRequiredResource == true);
         }
 
         return scope;
@@ -125,7 +165,7 @@ public partial class VersionedFhirStore
     };
 
     /// <summary>Preserves the executor's supported positions and malformed errors without executing any entry.</summary>
-    private static void RefuseTransaction(Bundle transaction, Bundle response, BundleAdmissionScope scope)
+    private static void RefuseTransaction(Bundle transaction, Bundle response, BundleAdmissionScope scope, TransactionRefusal refusal)
     {
         foreach (TransactionEntryOccurrence occurrence in EnumerateTransactionEntryOccurrences(transaction))
         {
@@ -150,6 +190,12 @@ public partial class VersionedFhirStore
                 continue;
             }
 
+            if (refusal == TransactionRefusal.Structure)
+            {
+                response.Entry.Add(StructurallyRefusedBundleEntry(entry, decision));
+                continue;
+            }
+
             Bundle.EntryComponent refused = RefusedBundleEntry(entry, decision.DenialDiagnostic ??
                 "Entry not executed because transaction authorization failed");
             if (refused.Response?.Outcome is OperationOutcome outcome)
@@ -167,6 +213,48 @@ public partial class VersionedFhirStore
 
             response.Entry.Add(refused);
         }
+    }
+
+    private static Bundle.EntryComponent StructurallyRefusedBundleEntry(Bundle.EntryComponent entry, BundleEntryDecision decision)
+    {
+        bool missing = decision.MissingBodyDiagnostic is not null;
+        HttpStatusCode status = missing ? HttpStatusCode.BadRequest : HttpStatusCode.FailedDependency;
+        OperationOutcome outcome = SerializationUtils.BuildOutcomeForRequest(
+            status,
+            missing ? "Resource is required" : "Entry not executed because transaction structural validation failed",
+            missing ? OperationOutcome.IssueType.Structure : OperationOutcome.IssueType.Processing);
+
+        if (decision.MissingBodyDiagnostic is string diagnostic)
+        {
+            outcome.Issue.Add(new()
+            {
+                Severity = OperationOutcome.IssueSeverity.Error,
+                Code = OperationOutcome.IssueType.NotSupported,
+                Diagnostics = diagnostic,
+            });
+        }
+        else if (decision.ChildScope is { HasMissingRequiredResource: true } childScope)
+        {
+            foreach (BundleEntryDecision descendant in childScope.MissingRequiredResources())
+            {
+                outcome.Issue.Add(new()
+                {
+                    Severity = OperationOutcome.IssueSeverity.Error,
+                    Code = OperationOutcome.IssueType.Structure,
+                    Diagnostics = $"Structurally invalid descendant {descendant.Path.Value}: Resource is required; {descendant.MissingBodyDiagnostic}",
+                });
+            }
+        }
+
+        return new()
+        {
+            FullUrl = entry.FullUrl,
+            Response = new()
+            {
+                Status = getResponseStatus(status),
+                Outcome = outcome,
+            },
+        };
     }
 
     /// <summary>Ordinary batches admit singleton units at their original live-state positions.</summary>

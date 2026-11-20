@@ -87,6 +87,10 @@ public partial class Sdk6ContractTests
         }
     }
 
+    /// <summary>Transaction admission and capability documentation are checked over both hosted wire formats.</summary>
+    public static IEnumerable<object[]> TransactionAdmissionWireCases =>
+        ExchangeCases.Where(row => (CompatibilityTransport)row[2] == CompatibilityTransport.Http);
+
     /// <summary>Separate rows ensure a failed summary does not prevent the other format cases running.</summary>
     public static IEnumerable<object[]> ExchangeSerializationCases
     {
@@ -651,7 +655,7 @@ public partial class Sdk6ContractTests
             read, persisted, format, tenant, bindings);
     }
 
-    /// <summary>Pin existing per-entry processing, including failures, conditional results, and transaction ID references.</summary>
+    /// <summary>Pin independent ordered batch entries and characterize non-atomic transaction execution with persisted writes and references.</summary>
     [Theory]
     [MemberData(nameof(ExchangeBundleCases))]
     public async Task BundleEntriesPreserveOutcomes(
@@ -803,6 +807,113 @@ public partial class Sdk6ContractTests
             new(BundleFullUrl(17), HttpStatusCode.OK, updatedUpsert, updated),
         ]);
         await replay.StepAsync(BoundRead("transaction-conditional-update-persists", tenant, format, updatedUpsert, updated));
+    }
+
+    /// <summary>Only the hosted transaction interaction advertises the caveat, and a late required-body refusal never starts the writes.</summary>
+    [Theory]
+    [MemberData(nameof(TransactionAdmissionWireCases))]
+    public async Task TransactionAdmissionWire(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"transaction-admission-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label,
+            "VersionedFhirStore.DoProcessBundle/generateCapabilities; FhirController.PostSystemBundle/GetMetadata",
+            [tenant], []);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        CompatibilityResponse metadata = await replay.StepAsync(MetadataStep(tenant, format));
+        Assert.Equal(HttpStatusCode.OK, metadata.Status);
+        string rest = Assert.Single(ExchangeRepeated(ExchangeResource(metadata), format, "rest"));
+        string[] interactions = ExchangeRepeated(rest, format, "interaction");
+        Assert.Equal(new[] { "batch", "search-system", "transaction" },
+            interactions.Select(row => ExchangePrimitive(row, format, "code")));
+        Assert.False(ExchangeHasMember(interactions[0], format, "documentation"));
+        Assert.False(ExchangeHasMember(interactions[1], format, "documentation"));
+        Assert.Equal("Transactions are non-atomic and have no general rollback. " +
+            "Authorization and required-body checks can prevent execution; failures during execution can leave earlier writes in place.",
+            ExchangePrimitive(interactions[2], format, "documentation"));
+
+        await replay.AssertNoClinicalResourcesAsync(format);
+        const string earlierId = "m15-earlier-write";
+        const string missingId = "m15-bodyless-update";
+        const string earlierPath = "Patient/" + earlierId;
+        const string missingPath = "Patient/" + missingId;
+        string initial = format == CompatibilityFormat.Json
+            ? """{"resourceType":"Patient","id":"m15-earlier-write","active":false}"""
+            : """<Patient xmlns="http://hl7.org/fhir"><id value="m15-earlier-write"/><active value="false"/></Patient>""";
+        string changed = format == CompatibilityFormat.Json
+            ? """{"resourceType":"Patient","id":"m15-earlier-write","active":true}"""
+            : """<Patient xmlns="http://hl7.org/fhir"><id value="m15-earlier-write"/><active value="true"/></Patient>""";
+        GeneratedResourceExpectation seeded = new("m15-earlier-v1", "Patient", "1", earlierId);
+        await replay.StepAsync(new CompatibilityStep("m15-seed",
+            new CompatibilityRequest(tenant.Name, "PUT", earlierPath) { Format = format, Content = initial },
+            ResourceResponse("m15-seed", initial, seeded, HttpStatusCode.Created)));
+        AssertPatientState(await replay.StepAsync(BoundRead("m15-before", tenant, format, initial, seeded)), false, "1");
+        await replay.StepAsync(MissingPatient("m15-missing-before", tenant, format, missingId));
+
+        ExchangeBundleRequest firstPut = new(BundleFullUrl(1), "PUT", earlierPath, changed);
+        ExchangeBundleRequest latePut = new(BundleFullUrl(2), "PUT", missingPath);
+        IFhirStore store = replay.GetOwnedStore(tenant.Name);
+        List<string> writes = [];
+        void ObserveWrite(object? sender, StoreInstanceEventArgs args) => writes.Add($"{args.ResourceType}/{args.ResourceId}");
+        store.OnInstanceCreated += ObserveWrite;
+        store.OnInstanceUpdated += ObserveWrite;
+        store.OnInstanceDeleted += ObserveWrite;
+        try
+        {
+            CompatibilityResponse refused = await replay.SendAsync(new CompatibilityRequest(tenant.Name, "POST", string.Empty)
+            {
+                Format = format,
+                Content = ExchangeBundleContent("transaction", format, [firstPut, latePut]),
+            });
+            AssertExchangeBundle(replay, tenant, format, "m15-refused", refused, "transaction-response",
+            [
+                new(firstPut.FullUrl, HttpStatusCode.FailedDependency, Issues:
+                    [new("error", "processing", "Entry not executed because transaction structural validation failed")]),
+                new(latePut.FullUrl, HttpStatusCode.BadRequest, Issues:
+                [
+                    new("error", "structure", "Resource is required"),
+                    new("error", "not-supported", $"Unsupported request: PUT {missingPath}, parsed interaction: InstanceUpdate"),
+                ]),
+            ]);
+            AssertPatientState(await replay.StepAsync(BoundRead("m15-after-refusal", tenant, format, initial, seeded)), false, "1");
+            await replay.StepAsync(MissingPatient("m15-missing-after", tenant, format, missingId));
+            Assert.Empty(writes);
+        }
+        finally
+        {
+            store.OnInstanceCreated -= ObserveWrite;
+            store.OnInstanceUpdated -= ObserveWrite;
+            store.OnInstanceDeleted -= ObserveWrite;
+        }
+
+        GeneratedResourceExpectation updated = new("m15-earlier-v2", "Patient", "2", earlierId, PreviousBinding: seeded.Name);
+        CompatibilityResponse accepted = await replay.SendAsync(new CompatibilityRequest(tenant.Name, "POST", string.Empty)
+        {
+            Format = format,
+            Content = ExchangeBundleContent("transaction", format, [firstPut]),
+        });
+        AssertExchangeBundle(replay, tenant, format, "m15-accepted", accepted, "transaction-response",
+            [new(firstPut.FullUrl, HttpStatusCode.OK, changed, updated)]);
+        AssertPatientState(await replay.StepAsync(BoundRead("m15-after-update", tenant, format, changed, updated)), true, "2");
+
+        void AssertPatientState(CompatibilityResponse response, bool active, string versionId)
+        {
+            string content = ExchangeResource(response);
+            if (format == CompatibilityFormat.Json)
+            {
+                using JsonDocument document = JsonDocument.Parse(content);
+                Assert.Equal(active, document.RootElement.GetProperty("active").GetBoolean());
+            }
+            else
+            {
+                Assert.Equal(active ? "true" : "false", ExchangePrimitive(content, format, "active"));
+            }
+            Assert.Equal(versionId, ExchangePrimitive(ExchangeChild(content, format, "meta"), format, "versionId"));
+            Assert.Equal($"W/\"{versionId}\"", Assert.Single(response.HttpHeaders["ETag"]));
+        }
     }
 
     /// <summary>Exercise summary content, formatting, parser modes, aliases, and boundary-specific negotiation.</summary>
