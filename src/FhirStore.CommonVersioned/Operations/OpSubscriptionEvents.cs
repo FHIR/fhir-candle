@@ -140,20 +140,27 @@ public class OpSubscriptionEvents : IFhirOperation
             (bodyResource is Hl7.Fhir.Model.Parameters bodyParams) &&
             (bodyParams.Parameter?.Any() ?? false))
         {
-            eventsSince = bodyParams.Parameter
-                .Where(p => p.Name?.Equals("eventsSinceNumber", StringComparison.Ordinal) ?? false)?
-                .Select(p => p.Value?.ToString() ?? string.Empty)
-                .First() ?? string.Empty;
+            // Component presence, including a valueless component, controls body-over-query precedence.
+            Parameters.ParameterComponent? sinceParameter = bodyParams.Parameter
+                .FirstOrDefault(p => p.Name?.Equals("eventsSinceNumber", StringComparison.Ordinal) ?? false);
+            if (sinceParameter is not null)
+            {
+                eventsSince = sinceParameter.Value?.ToString() ?? string.Empty;
+            }
 
-            eventsUntil = bodyParams.Parameter
-                .Where(p => p.Name?.Equals("eventsUntilNumber", StringComparison.Ordinal) ?? false)?
-                .Select(p => p.Value?.ToString() ?? string.Empty)
-                .First() ?? string.Empty;
+            Parameters.ParameterComponent? untilParameter = bodyParams.Parameter
+                .FirstOrDefault(p => p.Name?.Equals("eventsUntilNumber", StringComparison.Ordinal) ?? false);
+            if (untilParameter is not null)
+            {
+                eventsUntil = untilParameter.Value?.ToString() ?? string.Empty;
+            }
 
-            contentLevel = bodyParams.Parameter
-                .Where(p => p.Name?.Equals("content", StringComparison.Ordinal) ?? false)?
-                .Select(p => p.Value?.ToString() ?? string.Empty)
-                .First() ?? string.Empty;
+            Parameters.ParameterComponent? contentParameter = bodyParams.Parameter
+                .FirstOrDefault(p => p.Name?.Equals("content", StringComparison.Ordinal) ?? false);
+            if (contentParameter is not null)
+            {
+                contentLevel = contentParameter.Value?.ToString() ?? string.Empty;
+            }
         }
 
         bool sinceParsed = long.TryParse(eventsSince, out long sinceNumber);

@@ -40,6 +40,7 @@ public partial class Sdk6ContractTests
         "SubscriptionTriggeredUpdateQuery. Synthetic local-only copies, independent JSON/XML literals.";
     private const string SubscriptionTopicUrl = "http://localhost/SubscriptionTopic/sdk6-encounter";
     private const string SubscriptionId = "local-subscription";
+    private const string SubscriptionEventsEmptyEnvelopeId = "events-empty-envelope";
     private const string SubscriptionEndpoint = "http://localhost/fhir/local-receiver/$subscription-hook";
     private const string BackportExtensionRoot = "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/";
     private const string TopicExtensionRoot = "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.";
@@ -110,6 +111,27 @@ public partial class Sdk6ContractTests
         OperationRows("events-defaults",
             ["omitted-both", "omitted-since", "omitted-until", "malformed-both", "malformed-since", "malformed-until",
              "alias-camel", "alias-lowercase", "alias-dashed", "default-content", "body-precedence", "unknown"]);
+
+    /// <summary>Optional POST members resolve independently across every version, format, and transport.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsOptionalBodyCases =>
+        OperationRows("events-optional-body",
+            ["no-query-none", "no-query-since", "no-query-until", "no-query-content", "no-query-bounds",
+             "no-query-since-content", "no-query-until-content", "no-query-complete",
+             "query-none", "query-since", "query-until", "query-content", "query-bounds",
+             "query-since-content", "query-until-content", "query-complete",
+             "unrelated-defaults", "unrelated-query", "mixed-default-since", "mixed-default-until", "mixed-default-content",
+             "valueless-since", "valueless-until", "valueless-bounds", "valueless-content", "literal-empty-content",
+             "fresh-history", "unmatched-partial-range", "partial-negative-since", "partial-negative-until"]);
+
+    /// <summary>Only R4/R4B string bounds carry nonnumeric literals through the wire parser.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsUnparseableBodyCases =>
+        OperationRows("events-unparseable-body", ["unparseable-since", "unparseable-until", "unparseable-bounds"])
+            .Where(row => (FhirReleases.FhirSequenceCodes)row[1] is
+                FhirReleases.FhirSequenceCodes.R4 or FhirReleases.FhirSequenceCodes.R4B);
+
+    /// <summary>Element-empty inputs and id-only envelopes exercise the same request boundary.</summary>
+    public static IEnumerable<object[]> SubscriptionEventsEmptyParametersEnvelopeCases =>
+        OperationRows("events-empty-envelope", ["empty-envelope-boundary"]);
 
     /// <summary>Ordinary negative bounds, including reversed combinations, run without extreme endpoints.</summary>
     public static IEnumerable<object[]> SubscriptionEventsNegativeCases =>
@@ -329,6 +351,219 @@ public partial class Sdk6ContractTests
         Assert.Empty(subscription.NotificationErrors);
     }
 
+    /// <summary>Body presence overrides only its own query value, including name-only fallback inputs.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsOptionalBodyCases))]
+    public async Task SubscriptionEventsOptionalBodyMembersResolveIndependently(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string kind)
+    {
+        const string ConflictingQuery = "eventsSinceNumber=2&eventsUntilNumber=2&content=empty";
+        const string IdOnlyQuery = "eventsSinceNumber=2&eventsUntilNumber=2&content=id-only";
+        const string NegativeQuery = "eventsSinceNumber=1&eventsUntilNumber=3&content=full-resource";
+        CompatibilityTenant tenant = Tenant(version, $"events-optional-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        Assert.Equal("full-resource", subscription.ContentLevel);
+        int total = kind == "fresh-history" ? 0 : 3;
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, total);
+        (string Query, (string Name, string? Value)[] Members, long[] ExpectedNumbers, string ContentLevel) testCase = kind switch
+        {
+            "no-query-none" => (string.Empty, [], [1, 2, 3], "full-resource"),
+            "no-query-since" => (string.Empty, [("eventsSinceNumber", "2")], [2, 3], "full-resource"),
+            "no-query-until" => (string.Empty, [("eventsUntilNumber", "2")], [1, 2], "full-resource"),
+            "no-query-content" => (string.Empty, [("content", "id-only")], [1, 2, 3], "id-only"),
+            "no-query-bounds" => (string.Empty, [("eventsSinceNumber", "2"), ("eventsUntilNumber", "2")], [2], "full-resource"),
+            "no-query-since-content" => (string.Empty, [("eventsSinceNumber", "2"), ("content", "id-only")], [2, 3], "id-only"),
+            "no-query-until-content" => (string.Empty, [("eventsUntilNumber", "2"), ("content", "id-only")], [1, 2], "id-only"),
+            "no-query-complete" => (string.Empty,
+                [("eventsSinceNumber", "2"), ("eventsUntilNumber", "2"), ("content", "id-only")], [2], "id-only"),
+            "query-none" => (ConflictingQuery, [], [2], "empty"),
+            "query-since" => (ConflictingQuery, [("eventsSinceNumber", "1")], [1, 2], "empty"),
+            "query-until" => (ConflictingQuery, [("eventsUntilNumber", "3")], [2, 3], "empty"),
+            "query-content" => (ConflictingQuery, [("content", "id-only")], [2], "id-only"),
+            "query-bounds" => (ConflictingQuery, [("eventsSinceNumber", "1"), ("eventsUntilNumber", "3")], [1, 2, 3], "empty"),
+            "query-since-content" => (ConflictingQuery, [("eventsSinceNumber", "1"), ("content", "id-only")], [1, 2], "id-only"),
+            "query-until-content" => (ConflictingQuery, [("eventsUntilNumber", "3"), ("content", "id-only")], [2, 3], "id-only"),
+            "query-complete" => (ConflictingQuery,
+                [("eventsSinceNumber", "1"), ("eventsUntilNumber", "3"), ("content", "id-only")], [1, 2, 3], "id-only"),
+            "unrelated-defaults" => (string.Empty, [("unrelated", "ignored")], [1, 2, 3], "full-resource"),
+            "unrelated-query" => (ConflictingQuery, [("unrelated", "ignored")], [2], "empty"),
+            "mixed-default-since" => ("eventsuntilnumber=2", [("content", "id-only")], [1, 2], "id-only"),
+            "mixed-default-until" => ("events-since-number=2", [("content", "id-only")], [2, 3], "id-only"),
+            "mixed-default-content" => ("eventsSinceNumber=2", [("eventsUntilNumber", "2")], [2], "full-resource"),
+            "valueless-since" => (IdOnlyQuery, [("eventsSinceNumber", null)], [1, 2], "id-only"),
+            "valueless-until" => (IdOnlyQuery, [("eventsUntilNumber", null)], [2, 3], "id-only"),
+            "valueless-bounds" => (IdOnlyQuery, [("eventsSinceNumber", null), ("eventsUntilNumber", null)], [1, 2, 3], "id-only"),
+            "valueless-content" => (ConflictingQuery, [("content", null)], [2], "full-resource"),
+            "literal-empty-content" => ("eventsSinceNumber=2&eventsUntilNumber=2&content=full-resource",
+                [("content", "empty")], [2], "empty"),
+            "fresh-history" => (string.Empty, [("content", "id-only")], [], "id-only"),
+            "unmatched-partial-range" => (string.Empty, [("eventsSinceNumber", "4")], [], "full-resource"),
+            "partial-negative-since" => (NegativeQuery, [("eventsSinceNumber", "-1")], [], "full-resource"),
+            "partial-negative-until" => (NegativeQuery, [("eventsUntilNumber", "-1")], [], "full-resource"),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        string path = $"Subscription/{SubscriptionId}/$events";
+        if (!string.IsNullOrEmpty(testCase.Query))
+        {
+            path += "?" + testCase.Query;
+        }
+        string content = SubscriptionEventsPartialParameters(graph, testCase.Members);
+        if (testCase.Members.Length == 0)
+        {
+            AssertSubscriptionEventsEmptyEnvelope(format, content, DeserializeSubscriptionEventsEnvelope(label, version, format, content));
+        }
+        CompatibilityResponse response = await replay.SendAsync(new(tenant.Name, "POST", path)
+        {
+            Format = format,
+            Content = content,
+        });
+        string context = CaptureSubscriptionEventsExchange(label, path, content, response);
+        if (kind is "partial-negative-since" or "partial-negative-until")
+        {
+            AssertOperationOutcome(replay, tenant, format, kind, response, HttpStatusCode.BadRequest,
+                success: false, resourceIsOutcome: true, [new("error", "exception", "Event number bounds must be nonnegative.")]);
+        }
+        else
+        {
+            AssertSubscriptionEventsPostSucceeded(response, context);
+            NotificationEventContract[] expected = testCase.ExpectedNumbers.Select(number => events[checked((int)number - 1)]).ToArray();
+            AssertSubscriptionEventsResponse(replay, graph, kind, response, testCase.ContentLevel, expected, total);
+        }
+        Assert.Equal(total, subscription.CurrentEventCount);
+        Assert.Equal(total, subscription.GeneratedEvents.Count);
+        Assert.Equal(events.Select(subscriptionEvent => subscriptionEvent.Number), subscription.GeneratedEvents.Keys.OrderBy(number => number));
+        Assert.Equal(total, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>Present nonnumeric string bounds discard query values before normal lower/upper fallback.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsUnparseableBodyCases))]
+    public async Task SubscriptionEventsUnparseableBodyBoundsKeepFallbackSemantics(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string kind)
+    {
+        Assert.True(version is FhirReleases.FhirSequenceCodes.R4 or FhirReleases.FhirSequenceCodes.R4B);
+        CompatibilityTenant tenant = Tenant(version, $"events-unparseable-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        Assert.Equal("full-resource", subscription.ContentLevel);
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, 3);
+        ((string Name, string? Value)[] Members, long[] ExpectedNumbers) testCase = kind switch
+        {
+            "unparseable-since" => ([("eventsSinceNumber", "not-a-number")], [1, 2]),
+            "unparseable-until" => ([("eventsUntilNumber", "not-a-number")], [2, 3]),
+            "unparseable-bounds" => ([("eventsSinceNumber", "not-a-number"), ("eventsUntilNumber", "not-a-number")], [1, 2, 3]),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        string path = $"Subscription/{SubscriptionId}/$events?eventsSinceNumber=2&eventsUntilNumber=2&content=id-only";
+        string content = SubscriptionEventsPartialParameters(graph, testCase.Members);
+        CompatibilityResponse response = await replay.SendAsync(new(tenant.Name, "POST", path)
+        {
+            Format = format,
+            Content = content,
+        });
+        string context = CaptureSubscriptionEventsExchange(label, path, content, response);
+        AssertSubscriptionEventsPostSucceeded(response, context);
+        NotificationEventContract[] expected = testCase.ExpectedNumbers.Select(number => events[checked((int)number - 1)]).ToArray();
+        AssertSubscriptionEventsResponse(replay, graph, kind, response, "id-only", expected, 3);
+        Assert.Equal(3, subscription.CurrentEventCount);
+        Assert.Equal(3, subscription.GeneratedEvents.Count);
+        Assert.Equal(new long[] { 1, 2, 3 }, subscription.GeneratedEvents.Keys.OrderBy(number => number));
+        Assert.Equal(3, capture.Sent.Count);
+        Assert.Empty(subscription.NotificationErrors);
+    }
+
+    /// <summary>Zero operation parameters are valid in an id-only envelope, not in the raw element-empty forms.</summary>
+    [Theory]
+    [MemberData(nameof(SubscriptionEventsEmptyParametersEnvelopeCases))]
+    public async Task SubscriptionEventsEmptyParametersEnvelopePreservesBoundaryPolicy(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format,
+        string kind)
+    {
+        CompatibilityTenant tenant = Tenant(version, $"events-envelope-{VersionName(version)}");
+        CompatibilityScenario scenario = new(label, SubscriptionEvidence, [tenant], [MetadataStep(tenant, format)]);
+        await using CompatibilityReplay replay = new(scenario, transport);
+        await replay.RunAsync();
+        using SubscriptionCapture capture = new(replay.GetOwnedStore(tenant.Name));
+        SubscriptionGraph graph = await SeedSubscriptionGraph(replay, tenant, format, "fhirpath");
+        ParsedSubscription subscription = AssertParsedSubscription(capture.Store, "fhirpath", version);
+        Assert.Equal("full-resource", subscription.ContentLevel);
+        NotificationEventContract[] events = await GenerateSubscriptionReplayEvents(replay, graph, capture, 3);
+
+        string raw = format == CompatibilityFormat.Json
+            ? """{"resourceType":"Parameters"}"""
+            : """<Parameters xmlns="http://hl7.org/fhir" />""";
+        string candidate = WithWireId(raw, format, SubscriptionEventsEmptyEnvelopeId);
+        (HttpStatusCode Status, Hl7.Fhir.Model.Resource? Resource, string Error) rawEnvelope =
+            DeserializeSubscriptionEventsEnvelope($"{label} / raw", version, format, raw);
+        (HttpStatusCode Status, Hl7.Fhir.Model.Resource? Resource, string Error) candidateEnvelope =
+            DeserializeSubscriptionEventsEnvelope($"{label} / candidate", version, format, candidate);
+
+        string path = $"Subscription/{SubscriptionId}/$events";
+        string queryPath = path + "?eventsSinceNumber=2&eventsUntilNumber=2&content=empty";
+        (CompatibilityResponse Response, string Context) rawDefault = await SendBoundaryPost("raw-default", path, raw);
+        (CompatibilityResponse Response, string Context) rawQuery = await SendBoundaryPost("raw-query", queryPath, raw);
+        (CompatibilityResponse Response, string Context) candidateDefault = await SendBoundaryPost("candidate-default", path, candidate);
+        (CompatibilityResponse Response, string Context) candidateQuery = await SendBoundaryPost("candidate-query", queryPath, candidate);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, rawEnvelope.Status);
+        Assert.Null(rawEnvelope.Resource);
+        Assert.NotEmpty(rawEnvelope.Error);
+        AssertSubscriptionEventsEmptyEnvelope(format, candidate, candidateEnvelope);
+
+        string diagnostics = "Operation $events does not consume non-FHIR content.";
+        if (!string.IsNullOrEmpty(rawEnvelope.Error))
+        {
+            diagnostics += "\n\nError:\n" + rawEnvelope.Error;
+        }
+        Assert.True(rawDefault.Response.Status == HttpStatusCode.UnsupportedMediaType, rawDefault.Context);
+        AssertExchangeFailureResponse(replay.Bindings, tenant, format, kind + "-raw-default", rawDefault.Response,
+            HttpStatusCode.UnsupportedMediaType, "invalid", diagnostics, checkMediaType: true);
+        Assert.True(rawQuery.Response.Status == HttpStatusCode.UnsupportedMediaType, rawQuery.Context);
+        AssertExchangeFailureResponse(replay.Bindings, tenant, format, kind + "-raw-query", rawQuery.Response,
+            HttpStatusCode.UnsupportedMediaType, "invalid", diagnostics, checkMediaType: true);
+        AssertSubscriptionEventsPostSucceeded(candidateDefault.Response, candidateDefault.Context);
+        AssertSubscriptionEventsResponse(replay, graph, kind + "-candidate-default", candidateDefault.Response, "full-resource", events, 3);
+        AssertSubscriptionEventsPostSucceeded(candidateQuery.Response, candidateQuery.Context);
+        AssertSubscriptionEventsResponse(replay, graph, kind + "-candidate-query", candidateQuery.Response, "empty", [events[1]], 3);
+
+        async Task<(CompatibilityResponse Response, string Context)> SendBoundaryPost(string name, string requestPath, string content)
+        {
+            CompatibilityResponse response = await replay.SendAsync(new(tenant.Name, "POST", requestPath)
+            {
+                Format = format,
+                Content = content,
+            });
+            string context = CaptureSubscriptionEventsExchange($"{label} / {name}", requestPath, content, response);
+            Assert.Equal(3, subscription.CurrentEventCount);
+            Assert.Equal(3, subscription.GeneratedEvents.Count);
+            Assert.Equal(new long[] { 1, 2, 3 }, subscription.GeneratedEvents.Keys.OrderBy(number => number));
+            Assert.Equal(3, capture.Sent.Count);
+            Assert.Empty(subscription.NotificationErrors);
+            return (response, context);
+        }
+    }
+
     /// <summary>Parsed negatives take precedence over empty or reversed interval handling.</summary>
     [Theory]
     [MemberData(nameof(SubscriptionEventsNegativeCases))]
@@ -424,6 +659,47 @@ public partial class Sdk6ContractTests
         AssertSubscriptionEventsMatrix(SubscriptionEventsNegativeCases,
             ["negative-since", "negative-until", "both-negative", "negative-reversed", "negative-upper-reversed"], methods: true);
         AssertSubscriptionEventsMatrix(SubscriptionEventsLegacyCases, ["query-event", "event-notification"], methods: false);
+        Assert.Equal(360, SubscriptionEventsOptionalBodyCases.Count());
+        Assert.Equal(24, SubscriptionEventsUnparseableBodyCases.Count());
+        Assert.Equal(384, SubscriptionEventsOptionalBodyCases.Count() + SubscriptionEventsUnparseableBodyCases.Count());
+        Assert.Equal(12, SubscriptionEventsEmptyParametersEnvelopeCases.Count());
+        Assert.Equal(396, SubscriptionEventsOptionalBodyCases.Count() + SubscriptionEventsUnparseableBodyCases.Count() +
+            SubscriptionEventsEmptyParametersEnvelopeCases.Count());
+        AssertSubscriptionEventsMatrix(SubscriptionEventsEmptyParametersEnvelopeCases, ["empty-envelope-boundary"], methods: false);
+        AssertSubscriptionEventsMatrix(SubscriptionEventsOptionalBodyCases,
+            ["no-query-none", "no-query-since", "no-query-until", "no-query-content", "no-query-bounds",
+             "no-query-since-content", "no-query-until-content", "no-query-complete",
+             "query-none", "query-since", "query-until", "query-content", "query-bounds",
+             "query-since-content", "query-until-content", "query-complete",
+             "unrelated-defaults", "unrelated-query", "mixed-default-since", "mixed-default-until", "mixed-default-content",
+             "valueless-since", "valueless-until", "valueless-bounds", "valueless-content", "literal-empty-content",
+             "fresh-history", "unmatched-partial-range", "partial-negative-since", "partial-negative-until"], methods: false);
+        object[][] unparseableRows = SubscriptionEventsUnparseableBodyCases.ToArray();
+        string[] unparseableKinds = ["unparseable-since", "unparseable-until", "unparseable-bounds"];
+        Assert.Equal(unparseableRows.Length, unparseableRows.Select(row => (string)row[0]).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(new[] { FhirReleases.FhirSequenceCodes.R4, FhirReleases.FhirSequenceCodes.R4B },
+            unparseableRows.Select(row => (FhirReleases.FhirSequenceCodes)row[1]).Distinct().OrderBy(version => version));
+        Assert.Equal(new[] { CompatibilityTransport.Http, CompatibilityTransport.Direct },
+            unparseableRows.Select(row => (CompatibilityTransport)row[2]).Distinct().OrderBy(transport => transport));
+        Assert.Equal(new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml },
+            unparseableRows.Select(row => (CompatibilityFormat)row[3]).Distinct().OrderBy(format => format));
+        Assert.Equal(unparseableKinds.OrderBy(kind => kind, StringComparer.Ordinal),
+            unparseableRows.Select(row => (string)row[4]).Distinct().OrderBy(kind => kind, StringComparer.Ordinal));
+        foreach (FhirReleases.FhirSequenceCodes version in new[] { FhirReleases.FhirSequenceCodes.R4, FhirReleases.FhirSequenceCodes.R4B })
+        {
+            foreach (CompatibilityTransport transport in new[] { CompatibilityTransport.Http, CompatibilityTransport.Direct })
+            {
+                foreach (CompatibilityFormat format in new[] { CompatibilityFormat.Json, CompatibilityFormat.Xml })
+                {
+                    foreach (string kind in unparseableKinds)
+                    {
+                        Assert.Single(unparseableRows, row => (FhirReleases.FhirSequenceCodes)row[1] == version &&
+                            (CompatibilityTransport)row[2] == transport && (CompatibilityFormat)row[3] == format &&
+                            (string)row[4] == kind);
+                    }
+                }
+            }
+        }
         Assert.Equal(240, SubscriptionEventsExtremeCases.Count());
         Assert.Equal(96, SubscriptionEventsConcurrentCases.Count());
         AssertSubscriptionEventsMatrix(SubscriptionEventsExtremeCases,
@@ -1251,6 +1527,125 @@ public partial class Sdk6ContractTests
         return graph.Format == CompatibilityFormat.Json
             ? $$$"""{"resourceType":"Parameters","parameter":[{"name":"eventsSinceNumber","{{{integerChoice}}}":"{{{lower}}}"},{"name":"eventsUntilNumber","{{{integerChoice}}}":"{{{upper}}}"},{"name":"content","valueCode":"{{{contentLevel}}}"}]}"""
             : $"""<Parameters xmlns="http://hl7.org/fhir"><parameter><name value="eventsSinceNumber"/><{integerChoice} value="{lower}"/></parameter><parameter><name value="eventsUntilNumber"/><{integerChoice} value="{upper}"/></parameter><parameter><name value="content"/><valueCode value="{contentLevel}"/></parameter></Parameters>""";
+    }
+
+    private static string SubscriptionEventsPartialParameters(
+        SubscriptionGraph graph, IReadOnlyList<(string Name, string? Value)> members)
+    {
+        string integerChoice = graph.Tenant.Version == FhirReleases.FhirSequenceCodes.R5 ? "valueInteger64" : "valueString";
+        if (graph.Format == CompatibilityFormat.Json)
+        {
+            JsonObject resource = new() { ["resourceType"] = "Parameters" };
+            JsonArray parameters = new();
+            foreach ((string name, string? value) in members)
+            {
+                JsonObject parameter = new() { ["name"] = name };
+                if (value is not null)
+                {
+                    string valueChoice = name switch
+                    {
+                        "eventsSinceNumber" or "eventsUntilNumber" => integerChoice,
+                        "content" => "valueCode",
+                        "unrelated" => "valueString",
+                        _ => throw new ArgumentOutOfRangeException(nameof(members)),
+                    };
+                    parameter[valueChoice] = value;
+                }
+                parameters.Add(parameter);
+            }
+            if (parameters.Count == 0)
+            {
+                return WithWireId(resource.ToJsonString(), graph.Format, SubscriptionEventsEmptyEnvelopeId);
+            }
+            resource["parameter"] = parameters;
+            return resource.ToJsonString();
+        }
+
+        XElement root = new(_exchangeFhir + "Parameters");
+        foreach ((string name, string? value) in members)
+        {
+            XElement parameter = new(_exchangeFhir + "parameter",
+                new XElement(_exchangeFhir + "name", new XAttribute("value", name)));
+            if (value is not null)
+            {
+                string valueChoice = name switch
+                {
+                    "eventsSinceNumber" or "eventsUntilNumber" => integerChoice,
+                    "content" => "valueCode",
+                    "unrelated" => "valueString",
+                    _ => throw new ArgumentOutOfRangeException(nameof(members)),
+                };
+                parameter.Add(new XElement(_exchangeFhir + valueChoice, new XAttribute("value", value)));
+            }
+            root.Add(parameter);
+        }
+        string xml = root.ToString(SaveOptions.DisableFormatting);
+        return members.Count == 0 ? WithWireId(xml, graph.Format, SubscriptionEventsEmptyEnvelopeId) : xml;
+    }
+
+    private (HttpStatusCode Status, Hl7.Fhir.Model.Resource? Resource, string Error) DeserializeSubscriptionEventsEnvelope(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityFormat format, string content)
+    {
+        string mediaType = WireContractAssertions.MediaType(format);
+        Hl7.Fhir.Model.Resource? resource;
+        string exMessage;
+        HttpStatusCode status = version switch
+        {
+            FhirReleases.FhirSequenceCodes.R4 => candleR4::FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
+                content, mediaType, out resource, out exMessage, lenient: false),
+            FhirReleases.FhirSequenceCodes.R4B => candleR4B::FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
+                content, mediaType, out resource, out exMessage, lenient: false),
+            FhirReleases.FhirSequenceCodes.R5 => candleR5::FhirCandle.Serialization.SerializationUtils.TryDeserializeFhir(
+                content, mediaType, out resource, out exMessage, lenient: false),
+            _ => throw new ArgumentOutOfRangeException(nameof(version)),
+        };
+        _subscriptionOutput.WriteLine($"{label} / {version} / {format} wrapper\nRequest: {content}\n" +
+            $"Status: {(int)status} {status}\nResource type: {resource?.GetType().FullName ?? "(null)"}\nError: {exMessage}");
+        return (status, resource, exMessage);
+    }
+
+    private static void AssertSubscriptionEventsEmptyEnvelope(
+        CompatibilityFormat format, string content, (HttpStatusCode Status, Hl7.Fhir.Model.Resource? Resource, string Error) envelope)
+    {
+        if (format == CompatibilityFormat.Json)
+        {
+            AssertExchangeMembers(content, format, ["resourceType", "id"]);
+            Assert.Equal("Parameters", ExchangeResourceType(content, format));
+            Assert.Equal(SubscriptionEventsEmptyEnvelopeId, ExchangePrimitive(content, format, "id"));
+        }
+        else
+        {
+            XElement expected = new(_exchangeFhir + "Parameters",
+                new XAttribute("xmlns", _exchangeFhir.NamespaceName),
+                new XElement(_exchangeFhir + "id", new XAttribute("value", SubscriptionEventsEmptyEnvelopeId)));
+            Assert.True(XNode.DeepEquals(expected, ExchangeXml(content)), $"Expected a Parameters root with only an id: {content}");
+        }
+        Assert.Equal(HttpStatusCode.OK, envelope.Status);
+        Assert.Empty(envelope.Error);
+        Hl7.Fhir.Model.Parameters parameters = Assert.IsType<Hl7.Fhir.Model.Parameters>(envelope.Resource);
+        Assert.Equal(SubscriptionEventsEmptyEnvelopeId, parameters.Id);
+        Assert.Empty(parameters.Parameter);
+    }
+
+    private string CaptureSubscriptionEventsExchange(string label, string path, string content, CompatibilityResponse response)
+    {
+        string body = response.Transport == CompatibilityTransport.Http
+            ? $"HTTP body: {response.HttpBody ?? "(null)"}"
+            : $"Direct success: {response.Direct?.Success.ToString() ?? "(null)"}\n" +
+              $"Direct resource: {response.Direct?.SerializedResource ?? "(null)"}\n" +
+              $"Direct outcome: {response.Direct?.SerializedOutcome ?? "(null)"}";
+        string context = $"{label}: POST {path}\nRequest: {content}\nStatus: {(int)response.Status} {response.Status}\n{body}";
+        _subscriptionOutput.WriteLine(context);
+        return context;
+    }
+
+    private static void AssertSubscriptionEventsPostSucceeded(CompatibilityResponse response, string context)
+    {
+        Assert.True(response.Status == HttpStatusCode.OK, context);
+        if (response.Transport == CompatibilityTransport.Direct)
+        {
+            Assert.True(response.Direct?.Success == true, context);
+        }
     }
 
     private static CompatibilityRequest SubscriptionEventsRequest(

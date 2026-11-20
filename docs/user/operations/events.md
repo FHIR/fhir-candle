@@ -24,6 +24,8 @@ range of events by event number. It is part of the FHIR Subscriptions framework
 
 - **Instance level** — `GET [base]/Subscription/{id}/$events` (optionally with
   the parameters below)
+- **Instance level** — `POST [base]/Subscription/{id}/$events` (optionally with
+  query parameters and a `Parameters` request body)
 
 It is not available at the system or type level.
 
@@ -36,12 +38,25 @@ It is not available at the system or type level.
 | `content` | in | `0..1` | `code` | Requested payload content style (e.g. `empty`, `id-only`, `full-resource`). A hint only; the server MAY ignore it. |
 | `return` | out | `1..1` | `Bundle` | A notification `Bundle` for the requested events. |
 
-The parameters may be supplied as URL query parameters or inside a `Parameters`
-request body. Complete body parameters override the corresponding query values.
-The query form also accepts `eventssincenumber` / `eventsuntilnumber` and the
-dashed spellings `events-since-number` / `events-until-number`.
-For POST, supply both bounds and `content` together; missing body-member parsing
-is not covered by the fallback behavior described here.
+The parameters may be supplied as URL query parameters or inside a POST
+`Parameters` request body. Each body member is independently optional: a present
+matching body member overrides only its corresponding query value. An absent
+body member retains that query value. A valid `Parameters` envelope with zero
+operation parameters or with only unrelated members adds no recognized
+overrides. Body names are case-sensitive and use the canonical names in the
+table. The query form also accepts `eventssincenumber` /
+`eventsuntilnumber` and the dashed spellings
+`events-since-number` / `events-until-number`.
+
+After resolving each source independently, the lower bound falls back to `0`,
+the upper bound falls back to the high-water event number `H` captured inside the
+store, and, when there is no effective content override, the subscription's
+configured content style applies. A present parser-accepted empty or unparseable
+body bound still overrides the query and invokes that bound's normal fallback;
+it does not revive the query value. This does not promise acceptance of invalid
+wire primitives.
+POST body bounds use `valueString` for R4/R4B and `valueInteger64` for R5;
+R5 `integer64` JSON values are strings.
 
 ## Behavior
 
@@ -62,6 +77,10 @@ nonnegative reversed range returns a successful status-only notification bundle:
 one status entry, no notification events, and no event resources, including with
 `content=full-resource`. Otherwise, content follows the requested style, or the
 subscription's configured content level when no override is supplied.
+
+The literal `content=empty` is a meaningful style: it retains selected event
+metadata but suppresses focus references, additional-context references, and
+event resource payloads. It does not suppress the selected events themselves.
 
 History selection and bundle construction share a per-subscription monitor with
 event registration and clearing. Replay has a finite selection bounded by the
@@ -107,6 +126,62 @@ curl "http://localhost:5826/fhir/r4/Subscription/example/\$events?eventsSinceNum
 
 Response — `200 OK`: a notification `Bundle` for retained events 5–10, clipped to
 the captured current highest event number.
+
+### POST with zero operation parameters
+
+These JSON and XML bodies contain no `parameter` components:
+
+```json
+{"resourceType":"Parameters","id":"events-empty-envelope"}
+```
+
+```xml
+<Parameters xmlns="http://hl7.org/fhir"><id value="events-empty-envelope"/></Parameters>
+```
+
+Both use any query parameters as supplied, or the normal defaults if the query
+is omitted. The `id` is ordinary resource metadata, not an operation parameter
+or the Subscription id; it is not required on every `Parameters` request.
+
+The current SDK deserialization path rejects the raw element-empty forms
+`{"resourceType":"Parameters"}` and `<Parameters xmlns="http://hl7.org/fhir" />`.
+`$events` returns `415 Unsupported Media Type` for those bodies, even with
+valid query parameters.
+
+### POST content only (JSON or XML)
+
+This JSON body requests ids only while both bounds use their defaults:
+
+```bash
+curl -X POST "http://localhost:5826/fhir/r4/Subscription/example/\$events" \
+  -H "Content-Type: application/fhir+json" -H "Accept: application/fhir+json" \
+  --data '{"resourceType":"Parameters","parameter":[{"name":"content","valueCode":"id-only"}]}'
+```
+
+The equivalent XML request is:
+
+```bash
+curl -X POST "http://localhost:5826/fhir/r4/Subscription/example/\$events" \
+  -H "Content-Type: application/fhir+xml" -H "Accept: application/fhir+xml" \
+  --data '<Parameters xmlns="http://hl7.org/fhir"><parameter><name value="content"/><valueCode value="id-only"/></parameter></Parameters>'
+```
+
+Both return `200 OK` with retained events from `0` through the captured `H`,
+including focus/context references but no event resource payloads. These bodies
+also work at R4B and R5 tenant endpoints.
+
+### POST content override with query bounds
+
+```bash
+curl -X POST "http://localhost:5826/fhir/r4/Subscription/example/\$events?eventsSinceNumber=5&eventsUntilNumber=10&content=full-resource" \
+  -H "Content-Type: application/fhir+json" -H "Accept: application/fhir+json" \
+  --data '{"resourceType":"Parameters","parameter":[{"name":"content","valueCode":"empty"}]}'
+```
+
+Only `content` is overridden: query bounds 5–10 remain effective, clipped to the
+captured `H`. The `200 OK` notification `Bundle` retains the selected event
+numbers and timestamps, but no focus/context references or event resources.
+If there are no retained matches, it contains only its native status entry.
 
 ### Unknown subscription
 
