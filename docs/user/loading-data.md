@@ -12,16 +12,43 @@ resources from the specified path.
 
 ## Automatic package version selection
 
-When a package version is omitted, empty, or `latest`, Candle selects the
-highest semantic precedence among eligible registry winners, including eligible
-prereleases. If winners have equal precedence across registries, Candle keeps
-the first registered winner's full version, including any build metadata.
+When a package version is omitted, empty, or `latest`, Candle checks registry
+listings in the package service's registration order:
 
-This intentionally replaces text ordering across registries, so `latest` can
-now select a version that no registry serves as an archive. Candle first checks
-the cache for the exact selected identity. On a cache miss, it tries that exact
-version in configured registry order, regardless of which registry listed it.
-If none can supply it, installation fails without falling back to a lower version.
+1. Official FHIR registries, if enabled, in built-in order:
+   `https://packages.fhir.org/`, then `https://packages2.fhir.org/packages/`.
+2. Additional FHIR registries, in configured order.
+3. Additional NPM registries, in configured order.
+
+Candle selects the highest semantic precedence among eligible registry winners,
+including eligible prereleases. When winners from different registries tie, it
+keeps the first winner's full version, including any build metadata. This
+replaces text ordering across registries. Listing and selection happen before
+the cache check, even on a warm cache or a repeat call.
+
+For a resolved package identity (name and version) not yet marked as processed,
+Candle checks for a cache hit for that exact identity. On an ordinary miss, it
+tries to download and install the selected exact version in the same registry
+order. The archive need not come from the registry that listed the winning
+version. If none of those attempts succeeds, installation fails without
+falling back to a lower version.
+
+Candle marks the resolved identity as processed before attempting acquisition.
+After those archive attempts are exhausted, a later automatic request on the
+same package service still queries the listings. If it resolves to the same
+identity, Candle skips it: no new archive request, no returned package reference
+for that directive, and no repeated archive-exhaustion error. This skip does not
+bypass listing or resolution failures or carry over to a different identity.
+
+For automatic selection only, Candle refuses to use or replace an existing
+cache entry if the requested `Name#Version` key resolves to it with a different
+version casing (for example, `10.0.0+abc` resolving to `10.0.0+ABC`). Candle
+checks the key before accepting a cache hit or requesting an archive, and
+again before publishing a downloaded archive. A later automatic directive can
+also validate a package already included in the same batch's results without
+reacquiring it. Use a separate cache root or deliberately relocate the
+conflicting entry. This is not a general cache integrity check or protection
+against concurrent writes.
 
 ## Package import limits
 

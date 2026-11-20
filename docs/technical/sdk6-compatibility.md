@@ -557,16 +557,22 @@ These executed results, not the release note, resolve the earlier author gate.
 - Configuration, registry order/URLs, directive syntax and characterized
   parser/local-build quirks remain unchanged. The migration also preserved
   `latest` quirks at the time; cross-registry `latest` now uses
-  [semantic precedence](../user/loading-data.md#automatic-package-version-selection)
-  instead of text ordering, without changing exact-version acquisition.
+  semantic precedence instead of text ordering. Explicit exact-version
+  acquisition remains unchanged. On an ordinary miss, automatic acquisition
+  still tries only the selected exact version in registry order. A cache key
+  that aliases a different version casing is an error on the automatic path,
+  not a hit or an ordinary miss. See
+  [Automatic package version selection](../user/loading-data.md#automatic-package-version-selection).
   Scope is bare and Name unscoped; equality/hash ignore Scope and compare
   Name/Version case-sensitively.
   CI keeps resolved download identities distinct from installed tags.
 - The physical content path remains
   `Path.Combine(configuredRoot, Name + "#" + Version, "package")`, ignoring
   Scope. An existing `packages` child does not change the selected root.
-  Directory existence, missing/corrupt manifest behavior, and Candle's raw
-  Newtonsoft manifest/version/date interpretation remain the lookup contract.
+  Explicit exact-version lookup still checks only for the content directory;
+  missing/corrupt manifest behavior and Candle's raw Newtonsoft
+  manifest/version/date interpretation remain unchanged. Automatic lookup also
+  checks the cache key for a version-case collision before accepting a hit.
 - Native import uses a unique `.candle-package-import-*` temporary root on
   the selected cache filesystem. Native cache/stream objects are disposed
   before publication; native download results/streams and the introduced
