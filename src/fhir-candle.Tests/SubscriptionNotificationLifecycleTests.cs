@@ -375,6 +375,252 @@ public sealed class SubscriptionNotificationLifecycleTests
     }
 
     [Theory]
+    [MemberData(nameof(Managers))]
+    public async Task CurrentRevisionRestFailuresRemainFailures(FhirReleases.FhirSequenceCodes version, bool restOnly)
+    {
+        const string HandlerFailure = "held current REST handler fault";
+        const string StatusFailure = "REST POST to https://receiver.unit.test/notify failed: InternalServerError";
+        foreach (bool queued in new[] { false, true })
+        {
+            ParsedSubscription.NotificationTypeCodes[] types = queued
+                ? [ParsedSubscription.NotificationTypeCodes.Handshake]
+                : [ParsedSubscription.NotificationTypeCodes.Handshake, ParsedSubscription.NotificationTypeCodes.Heartbeat,
+                    ParsedSubscription.NotificationTypeCodes.EventNotification];
+            foreach (ParsedSubscription.NotificationTypeCodes type in types)
+            {
+                foreach (string result in new[] { "http-500", "fault", "success" })
+                {
+                    using NotificationFixture fixture = new(version, restOnly);
+                    bool handshake = type == ParsedSubscription.NotificationTypeCodes.Handshake;
+                    string status = handshake ? "requested" : "active";
+                    if (handshake)
+                    {
+                        fixture.Store.PutSubscription(status);
+                    }
+                    else if (type == ParsedSubscription.NotificationTypeCodes.EventNotification)
+                    {
+                        fixture.Store.Match("current-rest-event");
+                    }
+                    ParsedSubscription subscription = fixture.Store.Subscription;
+                    long revision = subscription.Revision;
+                    long priorCommunication = LifecycleTestStore.Now.AddMinutes(-1).UtcTicks;
+                    subscription.LastCommunicationTicks = priorCommunication;
+                    TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    TaskCompletionSource<HttpResponseMessage> response = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    fixture.Handler.StartOperation = _ =>
+                    {
+                        reached.SetResult();
+                        return response.Task;
+                    };
+                    Task<Outcome>? direct = null;
+                    Task delivery;
+                    if (queued)
+                    {
+                        fixture.Start();
+                        Assert.Equal(1, fixture.QueuedCount);
+                        delivery = fixture.DrainOneAsync();
+                    }
+                    else
+                    {
+                        SubscriptionSendEventArgs args = type == ParsedSubscription.NotificationTypeCodes.EventNotification
+                            ? Assert.Single(fixture.Store.Sent) : fixture.Store.Args(type);
+                        direct = fixture.Notify(args);
+                        delivery = direct;
+                    }
+                    try
+                    {
+                        await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                        Assert.Equal(1, fixture.Handler.Starts);
+                        Assert.False(response.Task.IsCompleted);
+                        Assert.False(delivery.IsCompleted);
+                        Assert.Equal(priorCommunication, subscription.LastCommunicationTicks);
+                        Assert.Equal(revision, subscription.Revision);
+                        Assert.Equal(status, subscription.CurrentStatus);
+                        Assert.Empty(subscription.SerializedEvents);
+                        Assert.Empty(subscription.NotificationErrors);
+                        Assert.Empty(fixture.Log.Failures);
+                        fixture.Store.Clock.Advance(TimeSpan.FromSeconds(1));
+                    }
+                    finally
+                    {
+                        if (result == "fault")
+                        {
+                            response.TrySetException(new HttpRequestException(HandlerFailure));
+                        }
+                        else
+                        {
+                            response.TrySetResult(new HttpResponseMessage(result == "http-500"
+                                ? HttpStatusCode.InternalServerError : HttpStatusCode.NoContent));
+                        }
+                        await delivery.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                    bool succeeded = result == "success";
+                    string? expectedError = succeeded ? null : result == "fault" ? HandlerFailure : StatusFailure;
+                    if (direct is not null)
+                    {
+                        Outcome outcome = await direct;
+                        Assert.Equal(succeeded ? OutcomeKind.Delivered : OutcomeKind.Failed, outcome.Kind);
+                        Assert.Equal(succeeded, outcome.Succeeded);
+                        Assert.Equal(expectedError, outcome.Error);
+                        if (succeeded)
+                        {
+                            Assert.Equal(Assert.Single(subscription.SerializedEvents).Value, outcome.SerializedContent);
+                            Assert.False(string.IsNullOrEmpty(outcome.SerializedContent));
+                        }
+                        else
+                        {
+                            Assert.Null(outcome.SerializedContent);
+                        }
+                    }
+                    Assert.Equal(1, fixture.Handler.Starts);
+                    Assert.Same(subscription, fixture.Store.Subscription);
+                    Assert.Equal(succeeded ? fixture.Store.Clock.GetUtcNow().UtcTicks : priorCommunication, subscription.LastCommunicationTicks);
+                    if (succeeded)
+                    {
+                        Assert.Empty(subscription.NotificationErrors);
+                        Assert.False(string.IsNullOrEmpty(Assert.Single(subscription.SerializedEvents).Value));
+                    }
+                    else
+                    {
+                        Assert.Empty(subscription.SerializedEvents);
+                        Assert.Equal(expectedError, Assert.Single(subscription.NotificationErrors));
+                    }
+                    if (succeeded && handshake)
+                    {
+                        Assert.NotEqual(revision, subscription.Revision);
+                    }
+                    else
+                    {
+                        Assert.Equal(revision, subscription.Revision);
+                    }
+                    fixture.Store.AssertViews(succeeded && handshake ? "active" : status);
+                    if (queued && !succeeded)
+                    {
+                        Assert.Equal((LogLevel.Warning, $"Notification delivery failed for Subscription/{LifecycleTestStore.Id}"),
+                            Assert.Single(fixture.Log.Entries, entry => entry.Level >= LogLevel.Warning));
+                        Assert.Single(fixture.Log.Failures);
+                    }
+                    else
+                    {
+                        Assert.Empty(fixture.Log.Failures);
+                    }
+                    Assert.Equal(0, fixture.QueuedCount);
+                    if (queued)
+                    {
+                        Assert.Equal(succeeded ? 0 : 1, fixture.HandshakeRevisionCount);
+                    }
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task CurrentRevisionSmtpAuthenticationFailureDoesNotSend(FhirReleases.FhirSequenceCodes version)
+    {
+        const string AuthenticationFailure = "held current SMTP authentication rejected";
+        const string ExpectedError = "Email Handshake to recipient@unit.test failed: " + AuthenticationFailure;
+        foreach (bool queued in new[] { false, true })
+        {
+            using NotificationFixture fixture = new(version, false);
+            fixture.Email();
+            ParsedSubscription subscription = fixture.Store.Subscription;
+            long revision = subscription.Revision;
+            long priorCommunication = LifecycleTestStore.Now.AddMinutes(-1).UtcTicks;
+            subscription.LastCommunicationTicks = priorCommunication;
+            NotificationManager manager = (NotificationManager)fixture.Service;
+            TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource authentication = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            int connects = 0;
+            int authentications = 0;
+            int sends = 0;
+            int cleanups = 0;
+            manager.SmtpConnect = (_, _, _, _) =>
+            {
+                connects++;
+                return Task.CompletedTask;
+            };
+            manager.SmtpAuthenticate = (_, _, _, _) =>
+            {
+                authentications++;
+                reached.SetResult();
+                return authentication.Task;
+            };
+            manager.SmtpSend = (_, _, _) =>
+            {
+                sends++;
+                return Task.CompletedTask;
+            };
+            manager.SmtpDisconnect = (_, _) =>
+            {
+                cleanups++;
+                return Task.CompletedTask;
+            };
+            Task<Outcome>? direct = null;
+            Task delivery;
+            if (queued)
+            {
+                fixture.Start();
+                Assert.Equal(1, fixture.QueuedCount);
+                delivery = fixture.DrainOneAsync();
+            }
+            else
+            {
+                direct = fixture.Notify(fixture.Store.Args(ParsedSubscription.NotificationTypeCodes.Handshake));
+                delivery = direct;
+            }
+            try
+            {
+                await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.False(authentication.Task.IsCompleted);
+                Assert.False(delivery.IsCompleted);
+                Assert.Equal(1, connects);
+                Assert.Equal(1, authentications);
+                Assert.Equal(0, sends);
+                Assert.Equal(0, cleanups);
+                Assert.Equal(priorCommunication, subscription.LastCommunicationTicks);
+                Assert.Equal(revision, subscription.Revision);
+                Assert.Equal("requested", subscription.CurrentStatus);
+                Assert.Empty(subscription.SerializedEvents);
+                Assert.Empty(subscription.NotificationErrors);
+                Assert.Empty(fixture.Log.Failures);
+                fixture.Store.Clock.Advance(TimeSpan.FromSeconds(1));
+            }
+            finally
+            {
+                authentication.TrySetException(new MailKit.Security.AuthenticationException(AuthenticationFailure));
+                await delivery.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            if (direct is not null)
+            {
+                Outcome outcome = await direct;
+                Assert.Equal(OutcomeKind.Failed, outcome.Kind);
+                Assert.False(outcome.Succeeded);
+                Assert.Equal(ExpectedError, outcome.Error);
+                Assert.Null(outcome.SerializedContent);
+            }
+            Assert.Equal(1, connects);
+            Assert.Equal(1, authentications);
+            Assert.Equal(0, sends);
+            Assert.Equal(1, cleanups);
+            Assert.Equal(0, fixture.Handler.Starts);
+            Assert.Same(subscription, fixture.Store.Subscription);
+            Assert.Equal(revision, subscription.Revision);
+            Assert.Equal(priorCommunication, subscription.LastCommunicationTicks);
+            Assert.Empty(subscription.SerializedEvents);
+            Assert.Equal(ExpectedError, Assert.Single(subscription.NotificationErrors));
+            fixture.Store.AssertViews("requested");
+            (LogLevel Level, string Message) error = (LogLevel.Error, $"Email notification delivery failed for Subscription/{LifecycleTestStore.Id}");
+            (LogLevel Level, string Message) warning = (LogLevel.Warning, $"Notification delivery failed for Subscription/{LifecycleTestStore.Id}");
+            Assert.Equal(queued ? new[] { error, warning } : [error],
+                fixture.Log.Entries.Where(entry => entry.Level >= LogLevel.Warning));
+            Assert.Equal(queued ? 2 : 1, fixture.Log.Failures.Count);
+            Assert.Equal(0, fixture.QueuedCount);
+            Assert.Equal(queued ? 1 : 0, fixture.HandshakeRevisionCount);
+        }
+    }
+
+    [Theory]
     [MemberData(nameof(Versions))]
     public async Task EmailRechecksAfterConnectAndAuthentication(FhirReleases.FhirSequenceCodes version)
     {
