@@ -1371,3 +1371,78 @@ post-commit final gate**, phase completion, a full-suite rerun, other-OS or
 browser evidence, live-provider qualification, or migration-wide acceptance.
 The parent retains integration, commit identity checks and post-commit final
 verification. No M5 or unrelated acceptance claim is included.
+
+## Original-review M7: zero-safe decimal approximation (2026-11-20)
+
+This bounded accepted-behavior repair is **not an SDK-causation claim**.
+Decimal-number and Quantity `ap` now share one internal predicate implementing
+Candle's closed, query-centered interval with tolerance 10% of the requested
+magnitude. Zero matches exactly zero, negative requests reflect the positive
+window, and both endpoints match. Zero/opposite-sign guards precede
+same-sign subtraction, avoiding division and overflowing endpoint construction.
+FHIR permits a server-defined approximation degree; it does not universally
+mandate this local 10% policy.
+
+Decimal-number evaluation intentionally corrects integer-spelled `ap` requests
+against native decimal nodes (`ap0` agrees with `ap0.0`), widening only eligible
+already-parsed integer alternatives. Standalone integer-spelled **non-ap**
+decimal-node requests remain ineligible. The parser still selects a typed array
+for the whole request: `ap0,eq100` matches only zero, but `ap0.0,eq100` matches
+zero and hundred. Ignored alternatives cannot contribute default zero; existing
+request-literal self links remain exact. Quantity still checks units/system
+before the predicate. Integer/date approximation, every other prefix/equality
+rounding rule, missing-scalar handling, parser/dispatch, comparator TODOs and
+unit-conversion exclusions are unchanged.
+
+The additive isolated partial has **84 decimal-number + 84 Quantity + 12
+retained integer/date rows + one inventory fact per framework**. Both affected
+numeric families have seven fresh-graph groups across R4/R4B/R5 × JSON/XML × HTTP/direct.
+Independently authored raw inputs are seeded by ordinary public PUT; the custom
+number definition precedes native-decimal Observation candidates. Every probe
+completes GET and form POST with exact memberships and complete raw resource,
+metadata, mode and URL assertions. No historical graph/provider/expectation,
+replay helper or wire normalization was changed.
+
+See the [M7 corpus, exact commands and execution evidence](../../src/fhir-candle.Tests/data/sdk6-compatibility/README.md#original-review-m7-decimal-number-and-quantity-approximation-2026-11-20)
+for all seven groups, literal memberships, command repetitions and timings,
+warnings, first failing requests, per-family discovery and qualification limits.
+Observed local Windows results before this documentation append:
+
+| Gate | net11.0 | net10.0 |
+|---|---|---|
+| Unchanged-production focused RED | 181 discovered: 13 passed, 168 failed, 0 skipped; exit 1, reproduced after inventory-warning correction | 181 discovered: 13 passed, 168 failed, 0 skipped; exit 1 |
+| Corrected focused GREEN | 181/181 passed, 0 failed/skipped; exit 0 | 181/181 passed, 0 failed/skipped; exit 0 |
+| Bounded H1/H2/M1–M7 protection union | 1,592/1,592 passed; exit 0; 4.5075 min test time | 1,592/1,592 passed; exit 0; 4.4512 min test time |
+
+Both scoped application builds passed without restore, warnings or errors.
+GREEN and the corrected RED baseline have zero compiler/analyzer warnings or
+errors. The initial net11 RED introduced two xUnit2031 inventory warnings;
+using the existing predicate overload corrected them without suppression.
+An intermediate repaired net11 run passed 169/181: twelve new self-link
+expectations incorrectly removed an invalid alternative despite the unchanged
+parser's request-literal echo. Only those two new expected self paths were
+corrected; memberships and complete-content assertions were not relaxed.
+One PowerShell union-summary wrapper parse failure preceded dotnet invocation
+and discovered no tests; the unchanged sanctioned union then ran successfully.
+
+RED reached the first explicit decimal GET in six groups per family:
+direct `DivideByZeroException` (“Attempted to divide by zero.”), or HTTP 500.
+No completed Bundle membership or failure-body contract was established for
+those requests; subsequent POST/signed probes were not reached. Lexical rows
+first completed eighteen non-ap GET/POST controls; the next number GET
+`ap0,eq100` returned 200 with no entries instead of zero, while Quantity failed
+on zero. Range RED observed division by zero, not overflow. GREEN completes
+every probe: **60 M7 theory rows per version, fifteen per each of twelve
+tuples**, plus the fact, and **2,424 search requests per framework**.
+
+All retained protection families have nonzero observed discovery on both
+frameworks; exact counts are in the linked corpus. Expected negative
+notification diagnostics (invalid URI, rejected SMTP authentication and REST
+InternalServerError) remain distinct from compiler diagnostics or test failures.
+Existing H1/H2/M1–M6 code/tests and earlier evidence remain unchanged.
+
+These are pre-commit, pre-documentation-final-gate results. The implementer will
+rerun the exact final four commands on the documented tree and return that
+evidence; parent integration and post-commit gates remain outstanding.
+No full-suite, other-OS, browser, live-provider, numeric-precision, performance
+or migration-wide qualification is inferred. No M8 work is included.

@@ -150,8 +150,7 @@ public static class EvalQuantitySearch
 
                 case SearchPrefixCodes.Approximately:
 
-                    // values within 10% should match
-                    if ((decimal.Abs(value - sp.ValueDecimals[i]) / decimal.Abs(value)) < 0.1m)
+                    if (DecimalSearchApproximation.IsMatch(value, sp.ValueDecimals[i]))
                     {
                         return true;
                     }

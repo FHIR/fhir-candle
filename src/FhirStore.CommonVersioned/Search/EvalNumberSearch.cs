@@ -158,13 +158,14 @@ public static class EvalNumberSearch
             return false;
         }
 
-        if (sp.ValueDecimals is null)
+        if ((sp.ValueDecimals is null) && (sp.ValueInts is null))
         {
             return false;
         }
 
         // traverse values and possibly prefixes
-        for (int i = 0; i < sp.ValueDecimals.Length; i++)
+        int valueCount = sp.ValueDecimals?.Length ?? sp.ValueInts!.Length;
+        for (int i = 0; i < valueCount; i++)
         {
             if (sp.IgnoredValueFlags[i])
             {
@@ -177,6 +178,20 @@ public static class EvalNumberSearch
                 ? sp.Prefixes![i] ?? SearchPrefixCodes.Equal
                 : SearchPrefixCodes.Equal;
 
+            decimal requestedValue;
+            if (sp.ValueDecimals is not null)
+            {
+                requestedValue = sp.ValueDecimals[i];
+            }
+            else if (prefix == SearchPrefixCodes.Approximately)
+            {
+                requestedValue = sp.ValueInts![i];
+            }
+            else
+            {
+                continue;
+            }
+
             switch (prefix)
             {
                 case SearchPrefixCodes.Equal:
@@ -186,7 +201,7 @@ public static class EvalNumberSearch
 
                     //int digits = testValue.GetSignificantDigitCount();
 
-                    if (decimal.Abs(decimal.Round(elementValue - sp.ValueDecimals[i], 0)) == 0)
+                    if (decimal.Abs(decimal.Round(elementValue - requestedValue, 0)) == 0)
                     {
                         return true;
                     }
@@ -196,49 +211,49 @@ public static class EvalNumberSearch
                 case SearchPrefixCodes.NotEqual:
 
                     // TODO: This is not proper decimal comparison as defined in the spec.
-                    if (decimal.Abs(decimal.Round(elementValue - sp.ValueDecimals[i], 0)) != 0)
+                    if (decimal.Abs(decimal.Round(elementValue - requestedValue, 0)) != 0)
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.GreaterThan:
-                    if (elementValue > sp.ValueDecimals[i])
+                    if (elementValue > requestedValue)
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.LessThan:
-                    if (elementValue < sp.ValueDecimals[i])
+                    if (elementValue < requestedValue)
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.GreaterThanOrEqual:
-                    if (elementValue >= sp.ValueDecimals[i])
+                    if (elementValue >= requestedValue)
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.LessThanOrEqual:
-                    if (elementValue <= sp.ValueDecimals[i])
+                    if (elementValue <= requestedValue)
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.StartsAfter:
-                    if (elementValue > sp.ValueDecimals[i])
+                    if (elementValue > requestedValue)
                     {
                         return true;
                     }
                     break;
 
                 case SearchPrefixCodes.EndsBefore:
-                    if (elementValue < sp.ValueDecimals[i])
+                    if (elementValue < requestedValue)
                     {
                         return true;
                     }
@@ -246,8 +261,7 @@ public static class EvalNumberSearch
 
                 case SearchPrefixCodes.Approximately:
 
-                    // values within 10% should match
-                    if ((decimal.Abs(elementValue - sp.ValueDecimals[i]) / decimal.Abs(elementValue)) < 0.1m)
+                    if (DecimalSearchApproximation.IsMatch(elementValue, requestedValue))
                     {
                         return true;
                     }

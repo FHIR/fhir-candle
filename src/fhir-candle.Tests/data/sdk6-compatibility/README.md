@@ -1827,3 +1827,217 @@ Those actual results are to be recorded by the runner in
 `scratch/1119-09/plan.md` and retained scratch logs; neither gate is claimed
 executed here. The observed RED/GREEN evidence above is focused local Windows
 coverage, not full-suite, non-Windows, browser or migration-wide qualification.
+
+## Original-review M7: decimal-number and Quantity approximation (2026-11-20)
+
+This additive repair concerns the original review's M7, not a new SDK-origin
+claim. `Sdk6ContractTests.ApproximateSearch.cs` supplies independently authored
+raw JSON/XML and literal memberships. It reuses the unchanged public PUT
+seeding, `SearchScenario`, `SearchRequest`, and `AssertSearchProbe` helpers;
+there is no evaluator-only substitute, expected-side SDK conversion, numeric
+normalization, or historical graph/provider/expectation change.
+
+### Settled local policy and corpus
+
+The server's decimal `ap` policy is a **closed, query-centered 10% interval**,
+using the magnitude of the request, not the candidate. Thus `ap100.0` includes
+90 through 110 and `ap-100.0` includes -110 through -90, endpoints included.
+A zero request matches exactly zero; zero candidates do not match nonzero
+requests. This is Candle's chosen approximation degree, not a universal FHIR
+10% mandate or evidence that Firely SDK 6 caused the defect.
+
+One internal decimal predicate guards zero and opposite signs before
+same-sign subtraction. It neither divides nor constructs potentially
+overflowing outer endpoints. Decimal-number evaluation selects the existing
+whole-request decimal array when present; otherwise only integer-backed
+`ap` alternatives are widened losslessly. Consequently `ap0`/`ap0.0` agree
+against native decimal nodes. **Standalone integer-spelled non-`ap` requests
+against decimal nodes intentionally remain ineligible.** `ap0,eq100` and
+its reverse return only zero, whereas `ap0.0,eq100` and its reverse return
+zero and hundred because the unchanged parser types the whole list as decimal.
+Ignored alternatives retain their indices and cannot contribute default zero.
+The existing request-literal self-link echo retains `apbad,ap0` even though
+only the valid alternative affects membership.
+
+Quantity still applies the existing units/system gate first. Integer/date
+approximation, default prefixes, all other operators and equality rounding,
+native missing-scalar checks, parser/dispatch, comparator TODOs and unit
+conversion exclusions remain unchanged. This is not a general equality
+precision or numeric parse-range repair.
+
+| Test / data source | Exact inventory per framework |
+|---|---|
+| `ApproximateSearchDecimalNumberReturnsExpectedIds` / `ApproximateSearchDecimalCases` | **84 rows**: seven fresh-graph groups × R4/R4B/R5 × JSON/XML × HTTP/direct |
+| `ApproximateSearchQuantityReturnsExpectedIds` / `ApproximateSearchQuantityCases` | **84 rows**, the same complete matrix |
+| `ApproximateSearchUnchangedIntegerAndDatePolicies` / `ApproximateSearchPolicyCases` | **12 rows**, the original unchanged 14-resource graph |
+| `ApproximateSearchTheoryDataIsNonEmptyAndLabeled` | **One fact**: counts, unique family/group/version/format/transport labels, every Cartesian tuple, declared graph identities, and definition-first insertion |
+
+Each numeric graph first PUTs active `SearchParameter/m7-decimal`, with
+version-qualified canonical, base Observation, number type and expression
+`Observation.value.ofType(Quantity).value`. Only R5 includes
+`processingMode=normal`. Every numeric candidate is an Observation Quantity's
+native FHIR decimal, including resource tokens spelled `0`. Values carry
+UCUM `mg` code/system except the explicit absent-scalar controls.
+
+| Fresh group | Independently authored candidates and oracle |
+|---|---|
+| `isolated-zero` | Only `zero=0.0`; requests in order `ap0.0`, `ap1.0`, `ap-1.0`, `ap0`, `ap1`, `ap-1`. Only the two zero requests match `Observation/zero`. Explicit decimal request is first. |
+| `positive-window` | `p899=89.9,p900=90,p901=90.1,p905=90.5,p1000=100,p1099=109.9,p1100=110,p1101=110.1,p1110=111`, zero and opposite -100. Both request spellings of ap100 return exactly `p900,p901,p905,p1000,p1099,p1100`. |
+| `negative-window` | Reflected values with `n...` IDs, zero and opposite +100. Both spellings of ap-100 return exactly `n900,n901,n905,n1000,n1099,n1100`. |
+| `zero-window` | `minus-one=-1,minus-tenth=-0.1,zero=0,plus-tenth=0.1,plus-one=1`; `ap0.0` and `ap0` return only zero. |
+| `lexical-prefix-isolation` | `negative-hundred=-100,negative-one=-1,zero=0,one=1,hundred=100,two-hundred=200`. All nine decimal-spelled default/eq/ne/gt/ge/lt/le/sa/eb controls, their integer-spelled counterparts, mixed-prefix lists, number-only invalid alternatives and whole-request decimal typing have literal memberships. Quantity retains integer/decimal non-ap equivalence; malformed Quantity parsing is not broadened. |
+| `presence-units` | `zero,hundred,absent,extension-only`. Only scalar values match. Quantity additionally checks unitless, `||mg`, full UCUM matching, wrong `g` code and wrong system for both zero/nonzero request spellings. Number matches the scalar independently of units. |
+| `range-safety` | `p78,p79,n78,n79,zero`, magnitudes 78000000000000000000000000000 and 79000000000000000000000000000. Decimal-spelled positive/negative requests return the two same-sign IDs; zero returns only zero. Exact raw content/precision round-trips are retained. |
+
+All abbreviated candidate IDs above are `Observation/<id>`. Retained policy
+probes require `multiplebirth=ap3` → Patient alpha/beta,
+`birthdate=ap1981` → alpha/gamma, and `birthdate=ap2030` → empty.
+Every passing probe completes **both GET and form POST**, asserting successful
+searchset status, exact totals/IDs, modes, self/full URLs, no duplicates and
+complete authored resource content with reused generated metadata. The
+181-test set comprises 180 version-labeled rows (60 per version, 15 per each
+of the twelve version/format/boundary tuples) plus the fact. It executes
+**2,424 search requests per framework**: 1,032 decimal-number, 1,320 Quantity
+and 72 retained-policy requests, not extra discovered tests.
+
+### Observed RED, corrections and reached-probe limits
+
+Canonical root `AGENTS.md` and the phase plan supplied the exact commands
+below. All ran synchronously on Windows with the existing .NET 11.0.100 SDK
+and net11/net10 assets; there was no install, restore, manifest change or
+warning suppression. Results were summarized in memory and returned through
+tool output, not redirected into repository log files.
+
+The first observed failing row in the initial net11 run was R4B/XML/HTTP
+`presence-units`, actual request:
+
+```text
+GET http://localhost/fhir/m7-number-presence-units-r4b/Observation?m7-decimal=ap0.0
+```
+
+It returned **500 InternalServerError**, not the expected successful Bundle.
+Direct rows threw **System.DivideByZeroException: Attempted to divide by
+zero.** HTTP runtime output also reported that exception. The unchanged helper
+stopped at status, so no HTTP OperationOutcome body/diagnostics or actual
+membership was asserted or retained; this does not establish a failure-body
+contract.
+
+Both unchanged-production framework runs discovered 181 tests, **13 passed /
+168 failed / zero skipped**. A warning-free net11 confirmation reproduced
+the exact same matrix: every one of the fourteen family/group combinations
+had twelve failures, covering all versions, formats and boundaries. The
+net10 row-by-row evidence agrees:
+
+| First reached failing GET, both families unless noted | Expected IDs | Actual boundary result |
+|---|---|---|
+| `isolated-zero`: `ap0.0` | zero | Direct divide-by-zero; HTTP 500; membership unavailable |
+| `positive-window`: `ap100.0` | p900,p901,p905,p1000,p1099,p1100 | Same; no completed membership |
+| `negative-window`: `ap-100.0` | n900,n901,n905,n1000,n1099,n1100 | Same |
+| `zero-window`: `ap0.0` | zero | Same |
+| `presence-units`: `ap0.0` | zero | Same |
+| `range-safety`: `ap78000000000000000000000000000.0` | p78,p79 | Same; RED observed division by zero, **not** an overflow |
+| Number `lexical-prefix-isolation`: `ap0,eq100` | zero | Successful 200 Bundle, actual empty entries/total 0 versus expected 1 |
+| Quantity `lexical-prefix-isolation`: `ap0,eq100` | zero,hundred | Direct divide-by-zero; HTTP 500 |
+
+Number paths use `Observation?m7-decimal=...`; Quantity uses
+`Observation?value-quantity=...`, with `|http://unitsofmeasure.org|mg` on
+each alternative, encoded by unchanged `SearchRequest` (pipes `%7C`, comma
+`%2C`, colon `%3A`, slash `%2F`). In each lexical row, all eighteen preceding
+non-ap probes completed GET **and POST** before this nineteenth GET failed.
+No failing GET's POST or later probe ran. All other affected groups stopped
+on their first GET, so RED does not establish later signed/lexical/window
+memberships or the range-overflow mechanism. All twelve retained-policy rows
+completed, as did the fact. Setup PUTs, including near-limit complete content,
+succeeded before these search failures.
+
+Two introduced xUnit2031 warnings at new inventory assertions (initial lines
+113 and 118) were corrected by using `Assert.Single`'s predicate overload;
+they were not baseline production warnings or suppressed diagnostics.
+Net10 RED and the repeated net11 RED then had zero warnings/errors.
+
+The first repaired net11 run was **169 passed / 12 failed**, zero skips,
+warnings or compiler errors. Only the new number lexical rows failed:
+`apbad,ap0` returned the correct zero resource but the authored self-link
+expectation wrongly removed `apbad`. Inspection confirmed the unchanged
+`GetAppliedQueryString` request-literal early return, also documented for
+existing date-list controls. Removing only the two new `AppliedPath` overrides
+retains exact self-link checking; no membership, raw assertion, parser or
+harness changed. Later invalid-alternative and whole-request-type probes
+were not reached by that failed run; GREEN below executes them.
+
+One initial final-union **PowerShell summary wrapper** failed parsing
+`foreach (...) { ... } | Format-Table` (“An empty pipe element is not
+allowed”), exit 1 **before dotnet ran**: no discovery or tests. Assigning the
+loop's result before piping corrected only shell reporting, not the sanctioned
+test command or repository code.
+
+### Exact commands and measured GREEN qualification
+
+```powershell
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net11.0 --no-restore
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0 --no-restore
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ApproximateSearch"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ApproximateSearch"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~Sdk6ContractTests.ApproximateSearch|FullyQualifiedName~Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~Sdk6ContractTests.CompositeComponentsRemainWithinOneRoot|FullyQualifiedName~Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.IdentifierMutation|FullyQualifiedName~Sdk6ContractTests.ValueSetMembership|FullyQualifiedName~Sdk6ContractTests.UpdateRejection|FullyQualifiedName~Sdk6ContractTests.SubscriptionEvents|FullyQualifiedName~fhir.candle.Tests.SubscriptionLifecycle|FullyQualifiedName~fhir.candle.Tests.SubscriptionNotificationLifecycleTests|FullyQualifiedName~BundleAuthorization"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~Sdk6ContractTests.ApproximateSearch|FullyQualifiedName~Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~Sdk6ContractTests.CompositeComponentsRemainWithinOneRoot|FullyQualifiedName~Sdk6ContractTests.MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions|FullyQualifiedName~Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~Sdk6ContractTests.IdentifierMutation|FullyQualifiedName~Sdk6ContractTests.ValueSetMembership|FullyQualifiedName~Sdk6ContractTests.UpdateRejection|FullyQualifiedName~Sdk6ContractTests.SubscriptionEvents|FullyQualifiedName~fhir.candle.Tests.SubscriptionLifecycle|FullyQualifiedName~fhir.candle.Tests.SubscriptionNotificationLifecycleTests|FullyQualifiedName~BundleAuthorization"
+```
+
+These six literal commands identify the repeated invocations below; builds
+have no test-discovery count. The first three RED invocations precede **all**
+production edits.
+
+| Invocation in execution order | Exit | Discovered / passed / failed / skipped | Test time / command elapsed |
+|---|---:|---|---|
+| Initial focused net11 RED | 1 | 181 / 13 / 168 / 0 | 25.73 s / 37.01 s; two introduced xUnit2031 warnings |
+| Focused net10 RED, inventory warning corrected | 1 | 181 / 13 / 168 / 0 | 24.85 s / 57.32 s |
+| Confirmed net11 RED, inventory warning corrected | 1 | 181 / 13 / 168 / 0 | 25.13 s / 64.28 s |
+| Initial repaired builds net11 / net10 | 0 / 0 | n/a | 27.05 s / 21.14 s; zero warnings/errors |
+| First repaired focused net11, new self-link expectation error | 1 | 181 / 169 / 12 / 0 | 25.52 s / 68.28 s |
+| Corrected four-command sequence: builds net11 / net10 | 0 / 0 | n/a | 29.28 s / 31.75 s; zero warnings/errors |
+| Corrected focused net11 GREEN | 0 | 181 / 181 / 0 / 0 | 25.99 s / 82.92 s |
+| Focused net10 GREEN | 0 | 181 / 181 / 0 / 0 | 25.20 s / 68.26 s |
+| First bounded final builds net11 / net10 | 0 / 0 | n/a | 13.57 s / 24.84 s; zero warnings/errors |
+| Initial net11 union summary-wrapper parse error | 1 | Not invoked; zero tests | n/a |
+| Bounded final union net11 | 0 | 1,592 / 1,592 / 0 / 0 | 4.5075 min / 5:16.37 |
+| Bounded final union net10 | 0 | 1,592 / 1,592 / 0 / 0 | 4.4512 min / 5:10.13 |
+
+All invocations other than the explicitly identified initial warnings have
+zero compiler/analyzer warnings and errors. The successful unions reconcile
+these **observed** counts independently on each framework, not just a
+successful runner exit:
+
+| Protection family | Discovered and passed per framework |
+|---|---:|
+| M7 decimal-number / Quantity / retained integer-date / inventory fact | 84 / 84 / 12 / 1 |
+| Original `SearchFamiliesReturnExpectedIds` | 96 |
+| `CompositeComponentsRemainWithinOneRoot` | 12 |
+| `MissingSearchDistinguishesComplexValuesAndPrimitiveExtensions` | 84 |
+| Original search inventory / recovery inventory | 1 / 1 |
+| M4 `IdentifierMutation*` | 151 |
+| M5 `ValueSetMembership*` | 31 |
+| M3 `UpdateRejection*` | 64 |
+| H2 `SubscriptionEvents*` | 483 |
+| M2 `SubscriptionLifecycleTests` / `SubscriptionLifecyclePolicyTests` | 49 / 6 |
+| `SubscriptionNotificationLifecycleTests` | 97 |
+| H1/M1 `BundleAuthorizationTests` / controller routing tests | 273 / 63 |
+| **Total** | **1,592** |
+
+Each of M7's fourteen family/group sets has exactly twelve passing rows.
+All twelve version/format/boundary tuples have exactly fifteen passing M7
+theory rows, with 60 per FHIR version plus the unversioned fact. Both methods
+of every new probe now finish, including exact near-limit raw content,
+signed inclusive endpoints, ignored-alternative index guards and unit controls.
+H2's existing isolated child-process facts pass as part of the 483 top-level
+results; internal child inventories are not extra discovered rows.
+Passing negative notification controls emitted invalid-URI, rejected SMTP
+authentication and REST InternalServerError messages, not build diagnostics
+or test failures.
+
+These measurements precede this documentation append. Final documented-tree
+verification is still to be rerun and reported to the parent; no post-commit
+gate is claimed here. Parent integration, commit review/identity checks and
+post-commit verification remain outstanding. This is bounded Windows local
+qualification only: no full suite, other OS, browser, live provider, performance,
+general numeric precision/unit conversion or migration-wide acceptance claim.
+H1/H2/M1–M6 source/tests and all earlier inventories remain unchanged; M8 is
+out of scope.
