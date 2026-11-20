@@ -563,7 +563,7 @@ public sealed class SubscriptionLifecycleTests
     [MemberData(nameof(Versions))]
     public async Task DelayedExpiryCallbackCannotExposeOrDeliverActiveState(FhirReleases.FhirSequenceCodes version)
     {
-        foreach (string entry in new[] { "get", "search", "nested", "status", "id-status", "match", "dispatch" })
+        foreach (string entry in new[] { "get", "search", "nested", "status", "id-status", "instance-status", "match", "dispatch" })
         {
             using LifecycleTestStore fixture = new(version, 1);
             fixture.Seed();
@@ -572,11 +572,27 @@ public sealed class SubscriptionLifecycleTests
             fixture.Clock.Advance(TimeSpan.FromMinutes(1));
             switch (entry)
             {
-                case "get": fixture.Get("Subscription/" + LifecycleTestStore.Id); break;
-                case "search": fixture.Get("Subscription?status=active"); break;
+                case "get":
+                    JsonObject resource = fixture.Get("Subscription/" + LifecycleTestStore.Id);
+                    Assert.Equal("off", resource["status"]!.GetValue<string>());
+                    break;
+                case "search":
+                    JsonObject search = fixture.Get("Subscription?status=active");
+                    Assert.Equal(0, fixture.Entries(search));
+                    break;
                 case "nested": Assert.Empty(fixture.NestedActiveSearch()); break;
-                case "status": fixture.Get("Subscription/$status?status=active"); break;
-                case "id-status": fixture.Get("Subscription/$status?id=" + LifecycleTestStore.Id + "&status=active"); break;
+                case "status":
+                    JsonObject status = fixture.Get("Subscription/$status?status=active");
+                    Assert.Equal(0, fixture.Entries(status));
+                    break;
+                case "id-status":
+                    JsonObject idStatus = fixture.Get("Subscription/$status?id=" + LifecycleTestStore.Id + "&status=active");
+                    Assert.Equal(0, fixture.Entries(idStatus));
+                    break;
+                case "instance-status":
+                    JsonObject instanceStatus = fixture.Get("Subscription/" + LifecycleTestStore.Id + "/$status");
+                    Assert.Equal("off", fixture.StatusLiteral(instanceStatus));
+                    break;
                 case "match": fixture.Match("due"); break;
                 case "dispatch":
                     Assert.False(fixture.Store.TryDispatchSubscriptionNotification(args, () => throw new Xunit.Sdk.XunitException("stale start"), out Task<SubscriptionNotificationOutcome> task));
