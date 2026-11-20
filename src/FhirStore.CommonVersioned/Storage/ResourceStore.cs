@@ -732,6 +732,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                     _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
                 }
                 ReconcileIdentifierKeysLocked(source.Id, GetIdentifierKeys(null), currentIdentifierKeys);
+                if (source is ValueSet createdValueSet)
+                {
+                    _store.Terminology.ApplyStoredValueSetChange(null, createdValueSet);
+                }
             }
             finally
             {
@@ -769,10 +773,6 @@ public class ResourceStore<T> : IVersionedResourceStore
 
             case SearchParameter sp:
                 SetExecutableSearchParameter(sp);
-                break;
-
-            case ValueSet vs:
-                _ = _store.Terminology.StoreProcessValueSet(vs);
                 break;
         }
 
@@ -969,6 +969,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                     _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
                 }
                 ReconcileIdentifierKeysLocked(source.Id, previousIdentifierKeys, currentIdentifierKeys);
+                if (source is ValueSet replacementValueSet)
+                {
+                    _store.Terminology.ApplyStoredValueSetChange(previous as ValueSet, replacementValueSet);
+                }
             }
             finally
             {
@@ -1021,10 +1025,6 @@ public class ResourceStore<T> : IVersionedResourceStore
 
             case SearchParameter sp:
                 SetExecutableSearchParameter(sp);
-                break;
-
-            case ValueSet vs:
-                _ = _store.Terminology.StoreProcessValueSet(vs);
                 break;
         }
         
@@ -1088,6 +1088,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                 if (previous is not null)
                 {
                     ReconcileIdentifierKeysLocked(id, GetIdentifierKeys(previous), GetIdentifierKeys(null));
+                    if (previous is ValueSet removedValueSet)
+                    {
+                        _store.Terminology.ApplyStoredValueSetChange(removedValueSet, null);
+                    }
                 }
             }
             finally
@@ -1145,10 +1149,6 @@ public class ResourceStore<T> : IVersionedResourceStore
                 break;
 
             case "Subscription":
-                break;
-
-            case "ValueSet":
-                _ = _store.Terminology.StoreProcessValueSet((ValueSet)(Resource)previous, true);
                 break;
         }
 

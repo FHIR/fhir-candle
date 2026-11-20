@@ -13,7 +13,7 @@ namespace FhirCandle.Storage;
 public class StoreTerminologyService : ITerminologyService
 {
     /// <summary>A value set contents.</summary>
-    internal record class ValueSetContents
+    private record class ValueSetContents
     {
         /// <summary>Set containing bare code values.</summary>
         public HashSet<string> Codes { get; init; } = new();
@@ -23,7 +23,7 @@ public class StoreTerminologyService : ITerminologyService
     }
 
     /// <summary>(Immutable) The value set contents.</summary>
-    internal readonly ConcurrentDictionary<string, ValueSetContents> _valueSetContents = new();
+    private readonly ConcurrentDictionary<string, ValueSetContents> _valueSetContents = new();
 
     /// <summary>Vs contains.</summary>
     /// <param name="vsUrl"> URL of the vs.</param>
@@ -37,45 +37,65 @@ public class StoreTerminologyService : ITerminologyService
             return false;
         }
 
-        if (!_valueSetContents.ContainsKey(vsUrl))
+        if (!_valueSetContents.TryGetValue(vsUrl, out ValueSetContents? contents))
         {
             return false;
         }
 
         if (string.IsNullOrEmpty(system))
         {
-            return _valueSetContents[vsUrl].Codes.Contains(code);
+            return contents.Codes.Contains(code);
         }
 
-        return _valueSetContents[vsUrl].SystemAndCodes.Contains($"{system}|{code}");
+        return contents.SystemAndCodes.Contains($"{system}|{code}");
     }
 
-    /// <summary>Stores process value set.</summary>
-    /// <param name="vs">    The vs.</param>
-    /// <param name="remove">(Optional) True to remove.</param>
-    /// <returns>True if it succeeds, false if it fails.</returns>
-    internal bool StoreProcessValueSet(ValueSet vs, bool remove = false)
+    /// <summary>Reconciles membership at a successful stored ValueSet mutation.</summary>
+    /// <param name="previous">The previous stored definition, or null for create.</param>
+    /// <param name="current">The current stored definition, or null for delete.</param>
+    internal void ApplyStoredValueSetChange(ValueSet? previous, ValueSet? current)
     {
-        if (remove)
+        ValueSetContents? contents = current?.Url is not null ? BuildValueSetContents(current) : null;
+
+        if ((previous?.Url is not null) &&
+            !string.Equals(previous.Url, current?.Url, StringComparison.Ordinal))
         {
-            if (vs.Url is null)
-            {
-                return true;
-            }
-
-            if (_valueSetContents.ContainsKey(vs.Url))
-            {
-                _ = _valueSetContents.TryRemove(vs.Url, out _);
-            }
-
-            return true;
+            _ = _valueSetContents.TryRemove(previous.Url, out _);
         }
 
+        if (current?.Url is null)
+        {
+            return;
+        }
+
+        if (previous is null)
+        {
+            _ = _valueSetContents.TryAdd(current.Url, contents!);
+        }
+        else
+        {
+            _valueSetContents[current.Url] = contents!;
+        }
+    }
+
+    /// <summary>Retains the first inline definition registered at an exact URL.</summary>
+    /// <param name="vs">The inline definition.</param>
+    private void RegisterInlineValueSet(ValueSet vs)
+    {
         if (vs.Url is null)
         {
-            return false;
+            return;
         }
 
+        ValueSetContents contents = BuildValueSetContents(vs);
+        _ = _valueSetContents.TryAdd(vs.Url, contents);
+    }
+
+    /// <summary>Builds a complete membership snapshot without publishing or mutating it later.</summary>
+    /// <param name="vs">The definition.</param>
+    /// <returns>The explicitly supported codes.</returns>
+    private static ValueSetContents BuildValueSetContents(ValueSet vs)
+    {
         HashSet<string> codes = new();
         HashSet<string> systemAndCodes = new();
 
@@ -114,9 +134,7 @@ public class StoreTerminologyService : ITerminologyService
             }
         }
 
-        _ = _valueSetContents.TryAdd(vs.Url, new() { Codes = codes, SystemAndCodes = systemAndCodes });
-
-        return true;
+        return new() { Codes = codes, SystemAndCodes = systemAndCodes };
 
         void AddContains(IEnumerable<ValueSet.ContainsComponent> contains, HashSet<string> codes, HashSet<string> systemAndCodes)
         {
@@ -179,7 +197,7 @@ public class StoreTerminologyService : ITerminologyService
             }
 
             vsUrl = vs.Url;
-            StoreProcessValueSet(vs);
+            RegisterInlineValueSet(vs);
         }
 
         string system = parameters.GetSingleValue<FhirUri>("system")?.Value?.ToString() ?? string.Empty;

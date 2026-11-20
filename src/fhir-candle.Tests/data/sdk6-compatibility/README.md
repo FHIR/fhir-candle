@@ -1524,3 +1524,96 @@ These are pre-commit scoped results before this documentation append, not a
 post-commit final gate or migration-wide/full-suite qualification. The parent
 retains integration and final verification; no other OS, browser, live-state
 index rebuild, atomic reader snapshot or performance qualification is claimed.
+
+## Original-review M5: stored ValueSet membership lifecycle
+
+The M5 oracle is the independently authored two-coded-Observation example from
+the M5 report and its selected commit-local reconciliation plan. It is not
+captured SDK output or a second terminology extractor. The new isolated partial
+`Sdk6ContractTests.ValueSetMembership.cs` leaves H1/H2/M1-M4 tests and helpers
+unchanged and does not call the M4-specific helpers.
+
+| Test | Authored inventory / boundary | Required observations |
+|---|---|---|
+| `ValueSetMembershipLifecycleIsFresh` | **24 HTTP/JSON rows**: R4/R4B/R5 × compose/expansion × replace-rename-delete / ordinary-delete / remove-url / empty-membership | Same-URL codeA→codeB replacement; unchanged PUT followed by stale If-Match 412 and unchanged full content/version/membership; U→V rename and deletion; ordinary deletion followed by same-ID PUT-as-create (201/version 1) and another deletion; URL omission/restoration and URL-less deletion; empty replacement/restoration. |
+| `ValueSetMembershipCommitsBeforePublication` | **Three direct/JSON rows**, one per version | Create callback can already search U/codeA; the update callback reads version 2/codeB and synchronously searches it, then performs one nested rename to version 3. Exactly two update notifications, one nested write, a separate outer version-2 response, and an ordinary current version-3 read are required. A separate throwing callback preserves exception identity/count while a subsequent read binds committed version 4/codeA under V. Delete callback already sees both keys absent. Every handler is removed in `finally`. |
+| `ValueSetMembershipInlineRegistrationKeepsFirstDefinition` | **Three direct-SDK rows**, one per version; each exercises both representations on fresh standalone services and owned tenants | Repeated inline registration retains the first snapshot; qualified/bare/null/empty-system and exact-key/null-code controls; null versus empty URL; expansion precedence, empty-expansion compose fallback, coded-parent recursion and skipped code-less-parent subtree. An actual tenant's inline codeA survives POST of its sole stored codeB definition, but same-ID PUT replaces it. Separate SourceObject-only stored empty-string→replacement→null→empty-string→delete controls use new shared SDK ValueSet objects, never mutate stored/readback objects, and never serialize invalid empty URLs. |
+| `ValueSetMembershipTheoryDataIsNonEmptyAndLabeled` | **One inventory fact** | Exact Cartesian lifecycle coverage, all three publication and inline versions, boundaries/formats, unique labels and representation/kind labels. |
+
+These are **31 new cases per framework**, not pass counts merely because they
+are authored. Each lifecycle owns unseeded fresh sibling tenants A and B. Each
+tenant receives exactly two ordinary POST-created Observations (`status: final`,
+codes `codeA` and `codeB`, system `https://example.org/m5/codes`) and one
+POST-created ValueSet (`status: active`). Server IDs are validated/bound rather
+than seeded or hard-coded. U is `https://example.org/ValueSet/m5`; V is
+`https://example.org/ValueSet/m5-renamed`. Compose uses explicit include concepts;
+expansion uses explicit contains and timestamp `2026-01-02T03:04:05Z`, with no
+compose fallback content. Empty compose-derived membership omits both
+representations; empty expansion has that timestamp and total 0, without
+contains or compose. No empty JSON arrays or remote terminology are submitted.
+
+Baseline and every mutation/rejection boundary probe A→B→A with GET only, both
+`:in`/`:not-in` modifiers, and both U/V (V stays absent in B). For these two coded
+Observations an absent canonical means exactly **no positive matches and both
+negative matches**, not an error, fallback, or count-only success. The existing
+BCL wire oracle checks complete Bundle structure, totals, exact identities,
+modes, self/full URLs, duplicate absence and all matched content/metadata.
+Expected content comes only from authored requests and validated bindings.
+Ordinary readbacks reuse the original B ValueSet/Observation bindings and A
+Observation bindings at every boundary, preserving content, versions and exact
+timestamps. Callback searches use the same explicit identity/content oracle
+through synchronous direct store searches, never sync-over-async replay.
+
+Stored replacements publish a complete snapshot before synchronous callbacks
+under the existing resource-store mutation lock. Inline registration and
+create-time insertion remain first-publication-only. Lookup stays ordinal and
+exact, with no ID/version/alternate-canonical resolution, false for missing
+keys/null codes, and bare-code matching for null/empty systems. The empty-string
+SDK key remains distinct from null.
+
+This is not duplicate-stored-canonical arbitration, retrospective repair of
+historical orphan keys, remote expansion, additional terminology support,
+conformance-index repair, cross-key/full-search snapshot isolation, or
+concurrency/large-expansion throughput qualification. M5 adds no XML lifecycle
+axis, form-POST lifecycle axis, browser, non-Windows, full-suite, or release
+qualification. M6 remains parent-gated.
+
+### M5 implementation validation
+
+Canonical commands/conventions came from root `AGENTS.md`, with the plan's
+existing-assets `--no-restore` build adaptation and net10.0 repetition. Only
+the four commands below were used for build/test iterations, sequentially:
+
+```powershell
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net11.0 --no-restore
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0 --no-restore
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ValueSetMembership|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReferenceChainsAndIncludesStayTenantLocal"
+dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ValueSetMembership|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReferenceChainsAndIncludesStayTenantLocal"
+```
+
+Initial implementation iterations: both app builds passed with zero warnings
+and errors. The first net11.0 test command stopped at test-source compilation
+with CS1513/CS1022 (a misplaced closing brace), zero warnings and no discovery or
+execution. After correction it discovered/passed **103/103**, zero failed or
+skipped, but reported three new nullable warnings (CS8600 and two CS8602).
+Those were corrected with explicit ID/metadata assertions, not suppressions;
+the warning-bearing pass is not the final clean gate.
+
+The final four-command sequence on Windows, 2026-11-19, used the supplied
+SDK **11.0.100**, installed runtimes **11.0.0 / 10.0.15**, Firely **6.9.0** and
+existing assets, with no restore/install:
+
+| Final gate | Exit | Discovered / passed / failed / skipped | Compiler/analyzer warnings / errors |
+|---|---:|---|---|
+| Release application build, net11.0 | 0 | Not a test run | **0 / 0** |
+| Release application build, net10.0 | 0 | Not a test run | **0 / 0** |
+| M5 + unchanged reference/membership/tenant union, net11.0 | 0 | **103 / 103 / 0 / 0** | **0 / 0** |
+| Same union, net10.0 | 0 | **103 / 103 / 0 / 0** | **0 / 0** |
+
+Both test outputs contain all **24 unique lifecycle tuples**, three publication
+rows, three inline-SDK rows, the inventory fact and all **72 unchanged**
+`ReferenceChainsAndIncludesStayTenantLocal` rows. Each version contributes
+eight lifecycle + one publication + one inline row and 24 existing controls
+(34 version-labeled results each); the inventory fact is version-independent.
+This is scoped local pre-integration evidence, not the runner's independent
+verification or any broader qualification listed above.
