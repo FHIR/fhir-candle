@@ -389,14 +389,99 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         string version,
         string umbrellaPackageName);
 
-    public async Task<List<PackageReference>> InstallPackages(
+    public Task<List<PackageReference>> InstallPackages(
+        string[]? packageDirectives,
+        string[]? ciLiterals,
+        List<FhirReleases.FhirSequenceCodes>? fhirVersions) =>
+        InstallPackagesCore(packageDirectives, ciLiterals, fhirVersions);
+
+    internal async Task<List<PackageReference>> InstallPackagesForTenantLoad(
         string[]? packageDirectives,
         string[]? ciLiterals,
         List<FhirReleases.FhirSequenceCodes>? fhirVersions)
     {
+        List<(VersionHandlingTypes Mode, PackageReference Reference)> directPublished = [];
+        List<PackageReference> packages = await InstallPackagesCore(packageDirectives, ciLiterals, fhirVersions, directPublished);
+        return OrderForTenantLoad(packages, directPublished);
+    }
+
+    internal static List<PackageReference> OrderForTenantLoad(
+        IEnumerable<PackageReference> packages,
+        IEnumerable<(VersionHandlingTypes Mode, PackageReference Reference)> directPublished)
+    {
+        List<PackageReference> ordered = packages.OrderBy(r => r.Version).ToList();
+        HashSet<(string? Name, string? Version)> latest = [];
+        HashSet<(string? Name, string? Version)> explicitVersions = [];
+        foreach ((VersionHandlingTypes mode, PackageReference reference) in directPublished)
+        {
+            if (mode == VersionHandlingTypes.Latest)
+            {
+                latest.Add((reference.Name, reference.Version));
+            }
+            else if (mode == VersionHandlingTypes.Passthrough)
+            {
+                explicitVersions.Add((reference.Name, reference.Version));
+            }
+        }
+
+        // Only returned references with matching direct provenance can supply slots.
+        Dictionary<string, List<(int Index, SemVer Precedence, bool IsLatest, bool IsExplicit)>> groups = new(StringComparer.Ordinal);
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            PackageReference reference = ordered[i];
+            if (reference.Name is not string name || reference.Version is not string version)
+            {
+                continue;
+            }
+
+            bool isLatest = latest.Contains((name, version));
+            bool isExplicit = explicitVersions.Contains((name, version));
+            if ((!isLatest && !isExplicit) || !SemVer.TryParse(version, out SemVer? precedence) || precedence is null)
+            {
+                continue;
+            }
+
+            if (!groups.TryGetValue(name, out List<(int Index, SemVer Precedence, bool IsLatest, bool IsExplicit)>? slots))
+            {
+                slots = [];
+                groups.Add(name, slots);
+            }
+            slots.Add((i, precedence, isLatest, isExplicit));
+        }
+
+        foreach (List<(int Index, SemVer Precedence, bool IsLatest, bool IsExplicit)> slots in groups.Values)
+        {
+            // Each slot has at least one mode. Both modes and two exact versions
+            // guarantee a latest and explicit pair with distinct identities.
+            if (!slots.Any(slot => slot.IsLatest) ||
+                !slots.Any(slot => slot.IsExplicit) ||
+                !slots.Any(slot => ordered[slot.Index].Version != ordered[slots[0].Index].Version))
+            {
+                continue;
+            }
+
+            // Keep the text order on precedence ties and leave all other slots alone.
+            PackageReference[] sorted = slots.OrderBy(slot => slot.Precedence)
+                .Select(slot => ordered[slot.Index]).ToArray();
+            for (int i = 0; i < slots.Count; i++)
+            {
+                ordered[slots[i].Index] = sorted[i];
+            }
+        }
+
+        return ordered;
+    }
+
+    private async Task<List<PackageReference>> InstallPackagesCore(
+        string[]? packageDirectives,
+        string[]? ciLiterals,
+        List<FhirReleases.FhirSequenceCodes>? fhirVersions,
+        List<(VersionHandlingTypes Mode, PackageReference Reference)>? directPublished = null)
+    {
         List<PackageReference> localPackages = [];
 
         List<string> directives = packageDirectives?.ToList() ?? new();
+        int publishedDirectiveCount = directives.Count;
 
         directives.AddRange(await ResolveCiLiterals(ciLiterals));
 
@@ -412,8 +497,10 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         }
 
         // traverse our package directives
-        foreach (string inputDirective in directives)
+        for (int i = 0; i < directives.Count; i++)
         {
+            string inputDirective = directives[i];
+
             // TODO(ginoc): PR in to Parse FHIR-style directives, remove when added.
             string directive = inputDirective.Contains('@')
                 ? inputDirective
@@ -468,6 +555,13 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 default:
                     needsInstall = !await _cache.IsInstalled(packageReference);
                     break;
+            }
+
+            // A direct directive can identify a package already returned by this batch.
+            if (directPublished is not null && i < publishedDirectiveCount &&
+                vht is (VersionHandlingTypes.Latest or VersionHandlingTypes.Passthrough))
+            {
+                directPublished.Add((vht, packageReference));
             }
 
             // skip if we have already loaded this package

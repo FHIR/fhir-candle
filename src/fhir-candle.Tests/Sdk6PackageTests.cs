@@ -2704,6 +2704,113 @@ public sealed class Sdk6PackageTests
         }
     }
 
+    /// <summary>The same tenant loads an older pin before the selected latest, even when both were requested in the opposite order.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagerLoadsSemanticLatestAfterOlderExplicitVersion(bool pinLatestVersion)
+    {
+        const string Name = "example.test.manager-order";
+        const string TenantName = "semantic-order-r5";
+        const FhirReleases.FhirSequenceCodes Version = FhirReleases.FhirSequenceCodes.R5;
+        using LocalPackageFixture files = new();
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        LocalHttpFixture.RawResponse newestArchive = new(HttpStatusCode.OK, "application/octet-stream",
+            LocalPackageFixture.Archive(AuthoredManifest(Name, "10.0.0", Version),
+                new Dictionary<string, string> { ["Patient-ordered.json"] = AuthoredPatientJson("ordered", "Newest", false) }));
+        LocalHttpFixture.RawResponse olderArchive = new(HttpStatusCode.OK, "application/octet-stream",
+            LocalPackageFixture.Archive(AuthoredManifest(Name, "2.0.0", Version),
+                new Dictionary<string, string> { ["Patient-ordered.json"] = AuthoredPatientJson("ordered", "Older", true) }));
+        List<LocalHttpFixture.ExpectedRequest> routes = [];
+        if (pinLatestVersion)
+        {
+            routes.Add(registry.Expect("GET", "/high/" + Name + "/10.0.0", newestArchive));
+        }
+        routes.Add(registry.Expect("GET", "/high/" + Name,
+            LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(Name, "10.0.0"))));
+        routes.Add(registry.Expect("GET", "/low/" + Name,
+            LocalHttpFixture.RawResponse.Text(HttpStatusCode.OK, "application/json", RegistryListing(Name, "9.0.0"))));
+        if (!pinLatestVersion)
+        {
+            routes.Add(registry.Expect("GET", "/high/" + Name + "/10.0.0", newestArchive));
+        }
+        routes.Add(registry.Expect("GET", "/high/" + Name + "/2.0.0", olderArchive));
+
+        CandleConfig config = files.Configuration(root + "/high", root + "/low") with
+        {
+            PublishedPackages = pinLatestVersion
+                ? [Name + "@10.0.0", Name + "@latest", Name + "@2.0.0"]
+                : [Name + "@latest", Name + "@2.0.0"],
+        };
+        using FhirPackageService packages = PackageService(config);
+        FhirStoreManager manager = new(new() { [TenantName] = Tenant(Version, TenantName) },
+            NullLogger<FhirStoreManager>.Instance, config, packages);
+        try
+        {
+            manager.Init();
+            await AssertRoutes(registry, routes);
+            IFhirStore store = ((IFhirStoreManager)manager)[TenantName];
+            Assert.Equal(2, store.LoadedPackageDirectives.Count);
+            Assert.Contains(Name + "@10.0.0", store.LoadedPackageDirectives);
+            Assert.Contains(Name + "@2.0.0", store.LoadedPackageDirectives);
+            _output.WriteLine($"Asserted all {routes.Count} exact routes and both loaded monikers: {string.Join(", ", store.LoadedPackageDirectives)}");
+
+            CompatibilityBindings bindings = new();
+            WireContractAssertions.BindBaseUrl(bindings, TenantName, store.Config.BaseUrl);
+            FhirRequestContext request = new(store, "GET", "Patient/ordered") { DestinationFormat = WireContractAssertions.MediaType(CompatibilityFormat.Json) };
+            Assert.True(store.PerformInteraction(request, out FhirResponseContext response, serializeReturn: true));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            _output.WriteLine($"Expected (resource version 2): {AuthoredPatientJson("ordered", "Newest", false)}");
+            _output.WriteLine($"Actual: {response.SerializedResource}");
+            AssertAuthoredPatient(store, bindings, "ordered", "Newest", false, resourceVersion: "2");
+        }
+        finally
+        {
+            await StopAndDispose(manager);
+        }
+    }
+
+    /// <summary>Semantic ordering only permutes direct versions of the exact name, retaining legacy order on ties.</summary>
+    [Fact]
+    public void TenantLoadOrderKeepsLegacySlotsAndPrecedenceTies()
+    {
+        const string Name = "example.test.order";
+        const string ExplicitOnlyName = "Example.test.order";
+        PackageReference older = new("older-scope", Name, "2.0.0");
+        PackageReference latest = new("latest-scope", Name, "10.0.0+z");
+        PackageReference tiedPin = new("pin-scope", Name, "10.0.0+a");
+        PackageReference nonSemantic = new(Name, "15.x");
+        PackageReference recursiveOnly = new(Name, "3.0.0");
+        PackageReference explicitOnlyOlder = new(ExplicitOnlyName, "3.0.0");
+        PackageReference explicitOnlyNewer = new(ExplicitOnlyName, "11.0.0");
+
+        List<PackageReference> ordered = FhirPackageService.OrderForTenantLoad(
+            [latest, explicitOnlyOlder, nonSemantic, older, recursiveOnly, tiedPin, explicitOnlyNewer],
+            [
+                (FhirPackageService.VersionHandlingTypes.Latest, new(Name, "10.0.0+z")),
+                (FhirPackageService.VersionHandlingTypes.Passthrough, new(Name, "2.0.0")),
+                (FhirPackageService.VersionHandlingTypes.Passthrough, new(Name, "10.0.0+a")),
+                (FhirPackageService.VersionHandlingTypes.Passthrough, nonSemantic),
+                (FhirPackageService.VersionHandlingTypes.Passthrough, explicitOnlyOlder),
+                (FhirPackageService.VersionHandlingTypes.Passthrough, explicitOnlyNewer),
+            ]);
+
+        Assert.Equal(new[]
+        {
+            "example.test.order@2.0.0",
+            "example.test.order@10.0.0+a",
+            "Example.test.order@11.0.0",
+            "example.test.order@15.x",
+            "example.test.order@10.0.0+z",
+            "Example.test.order@3.0.0",
+            "example.test.order@3.0.0",
+        }, ordered.Select(reference => reference.Moniker));
+        Assert.Equal("older-scope", ordered[0].Scope);
+        Assert.Equal("pin-scope", ordered[1].Scope);
+        Assert.Equal("latest-scope", ordered[4].Scope);
+    }
+
     /// <summary>Variant recursion, preference, examples, supplements, and ordering retain the existing named-store boundary.</summary>
     [Theory]
     [MemberData(nameof(VersionCases))]
