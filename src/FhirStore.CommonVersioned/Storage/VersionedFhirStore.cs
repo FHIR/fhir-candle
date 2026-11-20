@@ -2689,10 +2689,8 @@ public partial class VersionedFhirStore : IFhirStore
         {
             response = new()
             {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.InternalServerError,
-                    "Failed to update resource"),
-                StatusCode = HttpStatusCode.InternalServerError,
+                Outcome = outcome,
+                StatusCode = sc,
             };
             return false;
         }

@@ -7,17 +7,23 @@ extern alias candleR4;
 extern alias candleR4B;
 extern alias candleR5;
 
+using System.Collections;
 using System.Globalization;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+using fhir.candle.Services;
+using fhir.candle.Tests.Controllers;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
+using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace fhir.candle.Tests;
 
@@ -61,6 +67,10 @@ public partial class Sdk6ContractTests
     /// <summary>The explicit-ID override exists on the store interface, not as an HTTP header.</summary>
     public static IEnumerable<object[]> ExchangeExplicitCreateCases =>
         ExchangePolicyCases.Where(row => (CompatibilityTransport)row[2] == CompatibilityTransport.Direct);
+
+    /// <summary>Only native-topic versions have these converter rejection contracts.</summary>
+    public static IEnumerable<object[]> ExchangeUpdateTopicCases =>
+        ExchangeCases.Where(row => (FhirReleases.FhirSequenceCodes)row[1] != FhirReleases.FhirSequenceCodes.R4);
 
     /// <summary>Both existing bundle processors receive independent JSON and XML requests.</summary>
     public static IEnumerable<object[]> ExchangeBundleCases
@@ -1146,11 +1156,259 @@ public partial class Sdk6ContractTests
         await AssertEmptyExchangeSearches(replay, tenant, format, "invalid-input-has-no-side-effects");
     }
 
+    /// <summary>Storage's stale precondition survives the explicit update overload and hosted PUT.</summary>
+    [Theory]
+    [MemberData(nameof(ExchangeCases))]
+    public async Task UpdateRejectionStaleIfMatchPreservesResponseAndState(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        using CandleWebApplicationFactory factory = new([UpdateRejectionTenant(version)]);
+        IFhirStore store = factory.Services.GetRequiredService<IFhirStoreManager>()["update-rejection"];
+        (string original, string etag) = await WriteUpdateFixture(factory, store, transport, format,
+            PatientContent(format, null, "en"), post: true);
+        string id = ExchangePrimitive(original, format, "id");
+        await WriteUpdateFixture(factory, store, transport, format,
+            PatientContent(format, id, "en-US"), ifMatch: etag);
+        string path = "Patient/" + id;
+        (string accepted, _, _) = await ReadUpdateSnapshot(factory, store, transport, format, path);
+        Assert.Equal("2", ExchangePrimitive(ExchangeChild(accepted, format, "meta"), format, "versionId"));
+        string replacement = PatientContent(format, id, "de");
+        const string Diagnostic = "Conditional update query returned a match with version: 2, If-Match: ";
+        // Firely's unchanged XML primitive serializer calls String.Trim before writing value attributes.
+        string wireDiagnostic = format == CompatibilityFormat.Xml
+            ? "Conditional update query returned a match with version: 2, If-Match:"
+            : Diagnostic;
+        await AssertUpdateRejected(factory, store, transport, format, path, replacement,
+            HttpStatusCode.PreconditionFailed, Diagnostic, ifMatch: etag, wireDiagnostic: wireDiagnostic);
+        if (transport == CompatibilityTransport.Http)
+        {
+            foreach (string preference in new[] { "return=minimal", "return=OperationOutcome", "return=representation" })
+            {
+                await AssertUpdateRejected(factory, store, transport, format, path, replacement,
+                    HttpStatusCode.PreconditionFailed, Diagnostic, ifMatch: etag, preference: preference, wireDiagnostic: wireDiagnostic);
+            }
+        }
+    }
+
+    /// <summary>A loaded transaction POST establishes real protected content, not an authorization failure.</summary>
+    [Theory]
+    [MemberData(nameof(ExchangeCases))]
+    public async Task UpdateRejectionProtectedPatientPreservesResponseAndState(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        string directory = Path.Combine(Path.GetTempPath(), "fhir-candle-m3-" + Guid.NewGuid().ToString("N"));
+        CandleWebApplicationFactory? factory = null;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            string identifier = "protected-" + Guid.NewGuid().ToString("N");
+            string bundle = format == CompatibilityFormat.Json
+                ? $$$"""{"resourceType":"Bundle","type":"transaction","entry":[{"resource":{"resourceType":"Patient","id":"proposed-id","identifier":[{"system":"https://example.test/m3","value":"{{{identifier}}}"}],"active":true},"request":{"method":"POST","url":"Patient"}}]}"""
+                : $"""<Bundle xmlns="http://hl7.org/fhir"><type value="transaction"/><entry><resource><Patient><id value="proposed-id"/><identifier><system value="https://example.test/m3"/><value value="{identifier}"/></identifier><active value="true"/></Patient></resource><request><method value="POST"/><url value="Patient"/></request></entry></Bundle>""";
+            File.WriteAllText(Path.Combine(directory, format == CompatibilityFormat.Json ? "protected.json" : "protected.xml"), bundle);
+            factory = new([UpdateRejectionTenant(version, new DirectoryInfo(directory))]);
+            IFhirStore store = factory.Services.GetRequiredService<IFhirStoreManager>()["update-rejection"];
+            (string search, _, _) = await ReadUpdateSnapshot(factory, store, transport, format,
+                "Patient?identifier=" + Uri.EscapeDataString("https://example.test/m3|" + identifier), instance: false);
+            string entry = Assert.Single(ExchangeRepeated(search, format, "entry"));
+            string patient = ExchangeNestedResource(entry, format, "resource");
+            string id = ExchangePrimitive(patient, format, "id");
+            (string accepted, _, _) = await ReadUpdateSnapshot(factory, store, transport, format, "Patient/" + id);
+            Assert.Equal(identifier, ExchangePrimitive(Assert.Single(ExchangeRepeated(accepted, format, "identifier")), format, "value"));
+            string replacement = PatientContent(format, id, "de");
+            await AssertUpdateRejected(factory, store, transport, format, "Patient/" + id, replacement,
+                HttpStatusCode.Unauthorized, $"Resource Patient/{id} is protected and cannot be changed");
+        }
+        finally
+        {
+            try
+            {
+                factory?.Dispose();
+            }
+            finally
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+            }
+        }
+    }
+
+    /// <summary>Parseable off-status input must reach the non-HTTP criteria/topic converter guard.</summary>
+    [Theory]
+    [MemberData(nameof(ExchangeCases))]
+    public async Task UpdateRejectionInvalidSubscriptionPreservesResponseAndState(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        using CandleWebApplicationFactory factory = new([UpdateRejectionTenant(version)]);
+        IFhirStore store = factory.Services.GetRequiredService<IFhirStoreManager>()["update-rejection"];
+        string[] paths = await SeedUpdateSubscription(factory, store, transport, format, version);
+        string replacement = SubscriptionFixture(version, format, "subscription");
+        replacement = format == CompatibilityFormat.Json
+            ? ReplaceFixtureValue(replacement, "\"active\"", "\"off\"")
+            : ReplaceFixtureValue(replacement, """<status value="active"/>""", """<status value="off"/>""");
+        replacement = ReplaceFixtureValue(replacement, SubscriptionTopicUrl, "urn:invalid-topic");
+        await AssertUpdateGraphRejected(factory, store, transport, format, paths, "Subscription/" + SubscriptionId,
+            replacement, "Subscription could not be parsed!");
+    }
+
+    /// <summary>The required URL primitive is present but valueless, reaching the native converter.</summary>
+    [Theory]
+    [MemberData(nameof(ExchangeUpdateTopicCases))]
+    public async Task UpdateRejectionNativeTopicPreservesResponseAndState(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        using CandleWebApplicationFactory factory = new([UpdateRejectionTenant(version)]);
+        IFhirStore store = factory.Services.GetRequiredService<IFhirStoreManager>()["update-rejection"];
+        string[] paths = await SeedUpdateSubscription(factory, store, transport, format, version);
+        string replacement = SubscriptionFixture(version, format, "topic-fhirpath");
+        const string AbsentReason = "http://hl7.org/fhir/StructureDefinition/data-absent-reason";
+        if (format == CompatibilityFormat.Json)
+        {
+            using JsonDocument document = JsonDocument.Parse(replacement);
+            using MemoryStream buffer = new();
+            using (Utf8JsonWriter writer = new(buffer))
+            {
+                writer.WriteStartObject();
+                foreach (JsonProperty property in document.RootElement.EnumerateObject())
+                {
+                    if (property.Name == "url")
+                    {
+                        writer.WritePropertyName("_url");
+                        using JsonDocument absent = JsonDocument.Parse(
+                            $$$"""{"extension":[{"url":"{{{AbsentReason}}}","valueCode":"unknown"}]}""");
+                        absent.RootElement.WriteTo(writer);
+                    }
+                    else
+                    {
+                        property.WriteTo(writer);
+                    }
+                }
+                writer.WriteEndObject();
+            }
+            replacement = Encoding.UTF8.GetString(buffer.ToArray());
+            Assert.False(ExchangeHasMember(replacement, format, "url"));
+            Assert.True(ExchangeHasMember(replacement, format, "_url"));
+        }
+        else
+        {
+            replacement = ReplaceFixtureValue(replacement, $"""<url value="{SubscriptionTopicUrl}"/>""",
+                $"""<url><extension url="{AbsentReason}"><valueCode value="unknown"/></extension></url>""");
+        }
+        await AssertUpdateGraphRejected(factory, store, transport, format, paths, "SubscriptionTopic/sdk6-encounter",
+            replacement, "SubscriptionTopic could not be parsed!");
+    }
+
+    /// <summary>Native-only converters reject a fresh Basic topic marker without replacing ordinary Basic content.</summary>
+    [Theory]
+    [MemberData(nameof(ExchangeUpdateTopicCases))]
+    public async Task UpdateRejectionBasicTopicPreservesResponseAndState(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        using CandleWebApplicationFactory factory = new([UpdateRejectionTenant(version)]);
+        IFhirStore store = factory.Services.GetRequiredService<IFhirStoreManager>()["update-rejection"];
+        string[] paths = await SeedUpdateSubscription(factory, store, transport, format, version);
+        string basic = format == CompatibilityFormat.Json
+            ? """{"resourceType":"Basic","id":"ordinary-basic","code":{"text":"Ordinary synthetic Basic"}}"""
+            : """<Basic xmlns="http://hl7.org/fhir"><id value="ordinary-basic"/><code><text value="Ordinary synthetic Basic"/></code></Basic>""";
+        await WriteUpdateFixture(factory, store, transport, format, basic);
+        string replacement = format == CompatibilityFormat.Json
+            ? """{"resourceType":"Basic","id":"ordinary-basic","code":{"coding":[{"system":"http://hl7.org/fhir/fhir-types","code":"SubscriptionTopic"}]}}"""
+            : """<Basic xmlns="http://hl7.org/fhir"><id value="ordinary-basic"/><code><coding><system value="http://hl7.org/fhir/fhir-types"/><code value="SubscriptionTopic"/></coding></code></Basic>""";
+        await AssertUpdateGraphRejected(factory, store, transport, format, [.. paths, "Basic/ordinary-basic"],
+            "Basic/ordinary-basic", replacement, "Basic-wrapped SubscriptionTopic could not be parsed!");
+    }
+
+    /// <summary>A public callback exception occurs after assignment: boundary behavior and committed state are retained.</summary>
+    [Theory]
+    [MemberData(nameof(ExchangeCases))]
+    public async Task UpdateRejectionUnexpectedExceptionRetainsBoundaryBehavior(
+        string label, FhirReleases.FhirSequenceCodes version, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        using CandleWebApplicationFactory factory = new([UpdateRejectionTenant(version)]);
+        IFhirStore store = factory.Services.GetRequiredService<IFhirStoreManager>()["update-rejection"];
+        (string original, string etag) = await WriteUpdateFixture(factory, store, transport, format,
+            PatientContent(format, null, "en"), post: true);
+        string id = ExchangePrimitive(original, format, "id");
+        string path = "Patient/" + id;
+        (string before, _, _) = await ReadUpdateSnapshot(factory, store, transport, format, path);
+        string replacement = PatientContent(format, id, "de");
+        InvalidOperationException expected = new("M3 synthetic post-assignment update callback");
+        int callbacks = 0;
+        void ThrowAfterAssignment(object? sender, StoreInstanceEventArgs args)
+        {
+            if (args.ResourceType == "Patient" && args.ResourceId == id)
+            {
+                callbacks++;
+                throw expected;
+            }
+        }
+        CompatibilityBindings bindings = new();
+        store.OnInstanceUpdated += ThrowAfterAssignment;
+        try
+        {
+            if (transport == CompatibilityTransport.Direct)
+            {
+                InvalidOperationException actual = Assert.Throws<InvalidOperationException>(() =>
+                    store.InstanceUpdate(UpdateRequest(store, format, path, replacement, etag), out _));
+                Assert.Same(expected, actual);
+            }
+            else
+            {
+                using HttpRequestMessage request = new(HttpMethod.Put, store.Config.BaseUrl + "/" + path);
+                request.Headers.Accept.ParseAdd(WireContractAssertions.MediaType(format));
+                request.Headers.TryAddWithoutValidation("If-Match", etag);
+                request.Content = new StringContent(replacement, Encoding.UTF8, WireContractAssertions.MediaType(format));
+                using HttpResponseMessage response = await factory.Client.SendAsync(request);
+                Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+                Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
+                Assert.Equal("PutResourceInstance <<< caught: " + expected.Message, await response.Content.ReadAsStringAsync());
+                Assert.False(response.Headers.Contains("ETag"));
+                Assert.False(response.Headers.Contains("Location"));
+                Assert.Null(response.Content.Headers.LastModified);
+            }
+        }
+        finally
+        {
+            store.OnInstanceUpdated -= ThrowAfterAssignment;
+        }
+        Assert.Equal(1, callbacks);
+        (string committed, string committedEtag, _) = await ReadUpdateSnapshot(factory, store, transport, format, path);
+        Assert.Equal("1", ExchangePrimitive(ExchangeChild(before, format, "meta"), format, "versionId"));
+        Assert.Equal("2", ExchangePrimitive(ExchangeChild(committed, format, "meta"), format, "versionId"));
+        Assert.NotEqual(etag, committedEtag);
+        // The resource was committed before this read; this binding is not used as a rollback oracle.
+        Assert.Equal("de", ExchangePrimitive(committed, format, "language"));
+        WireContractAssertions.Body(new ResourceBodyExpectation(replacement, new("committed", "Patient", "2", id)),
+            committed, format, store.Config.BaseUrl, bindings);
+    }
+
     /// <summary>Pin the non-empty matrix, including the store-only explicit-ID override.</summary>
     [Fact]
     public void ExchangeTheoryDataIsNonEmptyAndLabeled()
     {
         Assert.Equal(12, ExchangeCases.Count());
+        Assert.Equal(8, ExchangeUpdateTopicCases.Count());
+        Assert.DoesNotContain(ExchangeUpdateTopicCases, row => (FhirReleases.FhirSequenceCodes)row[1] == FhirReleases.FhirSequenceCodes.R4);
+        foreach (FhirReleases.FhirSequenceCodes version in _versions.Where(version => version != FhirReleases.FhirSequenceCodes.R4))
+        {
+            foreach (CompatibilityTransport transport in Enum.GetValues<CompatibilityTransport>())
+            {
+                foreach (CompatibilityFormat format in Enum.GetValues<CompatibilityFormat>())
+                {
+                    Assert.Single(ExchangeUpdateTopicCases, row =>
+                        (FhirReleases.FhirSequenceCodes)row[1] == version &&
+                        (CompatibilityTransport)row[2] == transport && (CompatibilityFormat)row[3] == format);
+                }
+            }
+        }
         Assert.Equal(24, ExchangePolicyCases.Count());
         Assert.Equal(12, ExchangeExplicitCreateCases.Count());
         Assert.Equal(24, ExchangeBundleCases.Count());
@@ -1162,7 +1420,7 @@ public partial class Sdk6ContractTests
         foreach (IEnumerable<object[]> rows in new[]
         {
             ExchangeCases, ExchangePolicyCases, ExchangeExplicitCreateCases, ExchangeBundleCases,
-            ExchangeSerializationCases, ExchangeConversionCases, ExchangeInvalidCases,
+            ExchangeSerializationCases, ExchangeConversionCases, ExchangeInvalidCases, ExchangeUpdateTopicCases,
         })
         {
             object[][] cases = rows.ToArray();
@@ -1173,6 +1431,342 @@ public partial class Sdk6ContractTests
                 Assert.Contains(row[2].ToString()!, (string)row[0], StringComparison.Ordinal);
                 Assert.Contains(row[3].ToString()!, (string)row[0], StringComparison.Ordinal);
             });
+        }
+    }
+
+    private static TenantConfiguration UpdateRejectionTenant(
+        FhirReleases.FhirSequenceCodes version, DirectoryInfo? input = null) => new()
+    {
+        FhirVersion = version,
+        ControllerName = "update-rejection",
+        BaseUrl = "http://localhost/fhir/update-rejection",
+        AllowExistingId = true,
+        AllowCreateAsUpdate = true,
+        Strict = false,
+        SmartRequired = false,
+        MaxSubscriptionExpirationMinutes = 0,
+        LoadDirectory = input,
+        ProtectLoadedContent = input is not null,
+    };
+
+    private static FhirRequestContext UpdateRequest(
+        IFhirStore store, CompatibilityFormat format, string path, string content, string ifMatch = "") => new()
+    {
+        TenantName = store.Config.ControllerName,
+        Store = store,
+        Authorization = null,
+        HttpMethod = "PUT",
+        Url = store.Config.BaseUrl + "/" + path,
+        Interaction = Common.StoreInteractionCodes.InstanceUpdate,
+        ResourceType = path.Split('/')[0],
+        Id = path.Split('/')[1],
+        SourceContent = content,
+        SourceFormat = WireContractAssertions.MediaType(format),
+        DestinationFormat = WireContractAssertions.MediaType(format),
+        IfMatch = ifMatch,
+        IfNoneMatch = string.Empty,
+    };
+
+    private static async Task<(string Content, string ETag)> WriteUpdateFixture(
+        CandleWebApplicationFactory factory, IFhirStore store, CompatibilityTransport transport,
+        CompatibilityFormat format, string content, bool post = false, string ifMatch = "")
+    {
+        string type = ExchangeResourceType(content, format);
+        string? id = post ? null : ExchangePrimitive(content, format, "id");
+        string path = post ? type : type + "/" + id;
+        HttpStatusCode expected = string.IsNullOrEmpty(ifMatch) ? HttpStatusCode.Created : HttpStatusCode.OK;
+        CompatibilityBindings bindings = new();
+        string body;
+        string etag;
+        if (transport == CompatibilityTransport.Direct)
+        {
+            FhirRequestContext request = new(store, post ? "POST" : "PUT", path)
+            {
+                SourceContent = content,
+                SourceFormat = WireContractAssertions.MediaType(format),
+                DestinationFormat = WireContractAssertions.MediaType(format),
+                IfMatch = ifMatch,
+            };
+            FhirResponseContext response;
+            bool success = post ? store.InstanceCreate(request, out response) : store.InstanceUpdate(request, out response);
+            Assert.True(success, response.SerializedOutcome);
+            Assert.Equal(expected, response.StatusCode);
+            body = response.SerializedResource;
+            etag = response.ETag;
+        }
+        else
+        {
+            using HttpRequestMessage request = new(post ? HttpMethod.Post : HttpMethod.Put, store.Config.BaseUrl + "/" + path);
+            request.Headers.Accept.ParseAdd(WireContractAssertions.MediaType(format));
+            request.Headers.Add("Prefer", "return=representation");
+            if (!string.IsNullOrEmpty(ifMatch))
+            {
+                request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+            }
+            request.Content = new StringContent(content, Encoding.UTF8, WireContractAssertions.MediaType(format));
+            using HttpResponseMessage response = await factory.Client.SendAsync(request);
+            body = await response.Content.ReadAsStringAsync();
+            Assert.True(response.StatusCode == expected, $"Seed/update expected {expected}, got {response.StatusCode}: {body}");
+            Assert.Equal(WireContractAssertions.MediaType(format), response.Content.Headers.ContentType?.MediaType);
+            etag = Assert.Single(response.Headers.GetValues("ETag"));
+        }
+        WireContractAssertions.Body(new ResourceBodyExpectation(content,
+            new("accepted", type, expected == HttpStatusCode.Created ? "1" : "2", id)),
+            body, format, store.Config.BaseUrl, bindings);
+        Assert.Equal($"W/\"{bindings.Resources["accepted"].Version}\"", etag);
+        return (body, etag);
+    }
+
+    private static async Task<(string Content, string ETag, string LastModified)> ReadUpdateSnapshot(
+        CandleWebApplicationFactory factory, IFhirStore store, CompatibilityTransport transport,
+        CompatibilityFormat format, string path, bool instance = true)
+    {
+        string body;
+        string etag;
+        string modified;
+        if (transport == CompatibilityTransport.Direct)
+        {
+            Assert.True(store.PerformInteraction(new FhirRequestContext(store, "GET", path)
+            {
+                DestinationFormat = WireContractAssertions.MediaType(format),
+            }, out FhirResponseContext response, serializeReturn: true), response.SerializedOutcome);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(WireContractAssertions.MediaType(format), response.MimeType);
+            body = response.SerializedResource;
+            etag = response.ETag;
+            modified = response.LastModified;
+        }
+        else
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, store.Config.BaseUrl + "/" + path);
+            request.Headers.Accept.ParseAdd(WireContractAssertions.MediaType(format));
+            using HttpResponseMessage response = await factory.Client.SendAsync(request);
+            body = await response.Content.ReadAsStringAsync();
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"GET {path}: {response.StatusCode}: {body}");
+            Assert.Equal(WireContractAssertions.MediaType(format), response.Content.Headers.ContentType?.MediaType);
+            etag = response.Headers.ETag?.ToString() ?? string.Empty;
+            modified = response.Content.Headers.LastModified?.ToString("r") ?? string.Empty;
+        }
+        if (instance)
+        {
+            Assert.Equal(path.Split('/')[0], ExchangeResourceType(body, format));
+            Assert.Equal(path.Split('/')[1], ExchangePrimitive(body, format, "id"));
+            string meta = ExchangeChild(body, format, "meta");
+            string version = ExchangePrimitive(meta, format, "versionId");
+            Assert.Matches("^[1-9][0-9]*$", version);
+            Assert.Equal($"W/\"{version}\"", etag);
+            DateTimeOffset instant = DateTimeOffset.Parse(ExchangePrimitive(meta, format, "lastUpdated"), CultureInfo.InvariantCulture);
+            if (!string.IsNullOrEmpty(modified))
+            {
+                Assert.Equal(instant.UtcDateTime.ToString("r"), modified);
+            }
+        }
+        // Strings detach the complete representation and full-precision metadata from the live POCO.
+        return (body, etag, modified);
+    }
+
+    private static void AssertUpdateSnapshotUnchanged(
+        (string Content, string ETag, string LastModified) before,
+        (string Content, string ETag, string LastModified) after, CompatibilityFormat format)
+    {
+        WireContractAssertions.Content(before.Content, after.Content, format);
+        Assert.Equal(ExchangePrimitive(before.Content, format, "id"), ExchangePrimitive(after.Content, format, "id"));
+        foreach (string field in new[] { "versionId", "lastUpdated" })
+        {
+            Assert.Equal(ExchangePrimitive(ExchangeChild(before.Content, format, "meta"), format, field),
+                ExchangePrimitive(ExchangeChild(after.Content, format, "meta"), format, field));
+        }
+        Assert.Equal(before.ETag, after.ETag);
+        Assert.Equal(before.LastModified, after.LastModified);
+    }
+
+    private static void AssertUpdateOutcome(string body, CompatibilityFormat format, string diagnostic, string baseUrl)
+    {
+        WireContractAssertions.Body(new OutcomeBodyExpectation("rejected", [new("error", "exception", diagnostic)]),
+            body, format, baseUrl, new CompatibilityBindings());
+        AssertExchangeMembers(body, format, ["resourceType", "id", "issue"]);
+        AssertExchangeMembers(Assert.Single(ExchangeRepeated(body, format, "issue")), format, ["severity", "code", "diagnostics"]);
+        Assert.DoesNotContain("Failed to update resource", body, StringComparison.Ordinal);
+    }
+
+    private static async Task AssertUpdateRejected(
+        CandleWebApplicationFactory factory, IFhirStore store, CompatibilityTransport transport,
+        CompatibilityFormat format, string path, string replacement, HttpStatusCode status, string diagnostic,
+        string ifMatch = "", string? preference = null, string? wireDiagnostic = null)
+    {
+        (string Content, string ETag, string LastModified) before =
+            await ReadUpdateSnapshot(factory, store, transport, format, path);
+        int publications = 0;
+        int updates = 0;
+        void SubscriptionChanged(object? sender, SubscriptionChangedEventArgs args) => publications++;
+        void InstanceUpdated(object? sender, StoreInstanceEventArgs args) => updates++;
+        store.OnSubscriptionsChanged += SubscriptionChanged;
+        store.OnInstanceUpdated += InstanceUpdated;
+        try
+        {
+            if (transport == CompatibilityTransport.Direct)
+            {
+                bool success = store.InstanceUpdate(UpdateRequest(store, format, path, replacement, ifMatch),
+                    out FhirResponseContext response);
+                Assert.False(success);
+                Hl7.Fhir.Model.OperationOutcome outcome = Assert.IsType<Hl7.Fhir.Model.OperationOutcome>(response.Outcome);
+                Hl7.Fhir.Model.OperationOutcome.IssueComponent issue = Assert.Single(outcome.Issue);
+                Assert.True(response.StatusCode == status,
+                    $"Expected {(int)status} {status}; actual {(int?)response.StatusCode} {response.StatusCode}; " +
+                    $"native {outcome.GetType().FullName}: {issue.Severity}/{issue.Code}/{issue.Diagnostics}; body: {response.SerializedOutcome}");
+                Assert.Null(response.Resource);
+                Assert.Empty(response.SerializedResource);
+                Assert.Empty(response.ResourceType);
+                Assert.Empty(response.Id);
+                Assert.Empty(response.ETag);
+                Assert.Empty(response.LastModified);
+                Assert.Empty(response.Location);
+                Assert.Equal(WireContractAssertions.MediaType(format), response.MimeType);
+                Assert.Equal(Hl7.Fhir.Model.OperationOutcome.IssueSeverity.Error, issue.Severity);
+                Assert.Equal(Hl7.Fhir.Model.OperationOutcome.IssueType.Exception, issue.Code);
+                Assert.Equal(diagnostic, issue.Diagnostics);
+                Assert.Null(issue.Details);
+                Assert.Null(issue.ElementId);
+                Assert.Empty(issue.Extension);
+                Assert.Empty(issue.ModifierExtension);
+                Assert.Empty(issue.Location);
+                Assert.Empty(issue.Expression);
+                AssertUpdateOutcome(response.SerializedOutcome, format, wireDiagnostic ?? diagnostic, store.Config.BaseUrl);
+                Assert.Equal(outcome.Id, ExchangePrimitive(response.SerializedOutcome, format, "id"));
+            }
+            else
+            {
+                using HttpRequestMessage request = new(HttpMethod.Put, store.Config.BaseUrl + "/" + path);
+                request.Headers.Accept.ParseAdd(WireContractAssertions.MediaType(format));
+                if (!string.IsNullOrEmpty(ifMatch))
+                {
+                    request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+                }
+                if (preference is not null)
+                {
+                    request.Headers.Add("Prefer", preference);
+                }
+                request.Content = new StringContent(replacement, Encoding.UTF8, WireContractAssertions.MediaType(format));
+                using HttpResponseMessage response = await factory.Client.SendAsync(request);
+                string body = await response.Content.ReadAsStringAsync();
+                Assert.True(response.StatusCode == status,
+                    $"Expected {(int)status} {status}; actual {(int)response.StatusCode} {response.StatusCode}; body: {body}");
+                Assert.Equal(WireContractAssertions.MediaType(format), response.Content.Headers.ContentType?.MediaType);
+                Assert.False(response.Headers.Contains("ETag"));
+                Assert.False(response.Headers.Contains("Location"));
+                Assert.Null(response.Content.Headers.LastModified);
+                if (preference == "return=minimal")
+                {
+                    Assert.Empty(body);
+                }
+                else
+                {
+                    AssertUpdateOutcome(body, format, wireDiagnostic ?? diagnostic, store.Config.BaseUrl);
+                }
+            }
+            AssertUpdateSnapshotUnchanged(before, await ReadUpdateSnapshot(factory, store, transport, format, path), format);
+            Assert.Equal(0, publications);
+            Assert.Equal(0, updates);
+        }
+        finally
+        {
+            store.OnSubscriptionsChanged -= SubscriptionChanged;
+            store.OnInstanceUpdated -= InstanceUpdated;
+        }
+    }
+
+    private static async Task<string[]> SeedUpdateSubscription(
+        CandleWebApplicationFactory factory, IFhirStore store, CompatibilityTransport transport,
+        CompatibilityFormat format, FhirReleases.FhirSequenceCodes version)
+    {
+        string[] kinds = ["patient", "topic-fhirpath", "subscription"];
+        List<string> paths = [];
+        foreach (string kind in kinds)
+        {
+            string content = SubscriptionFixture(version, format, kind);
+            Assert.False(ExchangeHasMember(content, format, "end"));
+            await WriteUpdateFixture(factory, store, transport, format, content);
+            paths.Add(ExchangeResourceType(content, format) + "/" + ExchangePrimitive(content, format, "id"));
+        }
+        AssertParsedSubscription(store, "fhirpath", version);
+        return paths.ToArray();
+    }
+
+    private static async Task AssertUpdatePublicStatus(
+        CandleWebApplicationFactory factory, IFhirStore store, CompatibilityTransport transport, CompatibilityFormat format)
+    {
+        (string bundle, _, _) = await ReadUpdateSnapshot(factory, store, transport, format,
+            "Subscription/" + SubscriptionId + "/$status", instance: false);
+        string entry = Assert.Single(ExchangeRepeated(bundle, format, "entry"));
+        AssertSubscriptionStatus(new(store.Config.ControllerName, store.Config.FhirVersion, store.Config.BaseUrl),
+            format, ExchangeNestedResource(entry, format, "resource"), "query-status", "empty", [], 0);
+    }
+
+    private static async Task AssertUpdateGraphRejected(
+        CandleWebApplicationFactory factory, IFhirStore store, CompatibilityTransport transport,
+        CompatibilityFormat format, string[] paths, string target, string replacement, string diagnostic)
+    {
+        ParsedSubscription subscription = Assert.Single(store.CurrentSubscriptions);
+        ParsedSubscriptionTopic topic = Assert.Single(store.CurrentTopics);
+        Assert.Equal("active", subscription.CurrentStatus);
+        Assert.Equal(SubscriptionTopicUrl, subscription.TopicUrl);
+        Assert.Equal(SubscriptionLifecyclePolicy.UnlimitedExpirationTicks, subscription.ExpirationTicks);
+        Assert.Equal(0, subscription.CurrentEventCount);
+        Assert.Empty(subscription.GeneratedEvents);
+        Assert.Empty(subscription.SerializedEvents);
+        // BCL serialization copies all public descriptor scalars and collections, not a FHIR wire oracle.
+        string subscriptionValues = JsonSerializer.Serialize(subscription);
+        string topicValues = JsonSerializer.Serialize(topic);
+        (object Executable, object Binding, long Revision, string Values) registration = UpdateRegistrationSnapshot(store);
+        Assert.Equal(subscription.Revision, registration.Revision);
+        Dictionary<string, (string Content, string ETag, string LastModified)> snapshots = [];
+        foreach (string path in paths)
+        {
+            snapshots.Add(path, await ReadUpdateSnapshot(factory, store, transport, format, path));
+        }
+        await AssertUpdatePublicStatus(factory, store, transport, format);
+        await AssertUpdateRejected(factory, store, transport, format, target, replacement, HttpStatusCode.BadRequest, diagnostic);
+        foreach (string path in paths)
+        {
+            AssertUpdateSnapshotUnchanged(snapshots[path], await ReadUpdateSnapshot(factory, store, transport, format, path), format);
+        }
+        await AssertUpdatePublicStatus(factory, store, transport, format);
+        Assert.Same(subscription, Assert.Single(store.CurrentSubscriptions));
+        Assert.Same(topic, Assert.Single(store.CurrentTopics));
+        Assert.Equal(subscriptionValues, JsonSerializer.Serialize(subscription));
+        Assert.Equal(topicValues, JsonSerializer.Serialize(topic));
+        (object Executable, object Binding, long Revision, string Values) after = UpdateRegistrationSnapshot(store);
+        Assert.Same(registration.Executable, after.Executable);
+        Assert.Same(registration.Binding, after.Binding);
+        Assert.Equal(registration.Revision, after.Revision);
+        Assert.Equal(registration.Values, after.Values);
+    }
+
+    private static (object Executable, object Binding, long Revision, string Values) UpdateRegistrationSnapshot(IFhirStore store)
+    {
+        object resourceStore = store["Encounter"];
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        object registrationLock = resourceStore.GetType().GetField("_subscriptionRegistrationLock", Flags)!.GetValue(resourceStore)!;
+        lock (registrationLock)
+        {
+            IDictionary topics = (IDictionary)resourceStore.GetType().GetField("_executableSubscriptions", Flags)!.GetValue(resourceStore)!;
+            Assert.Equal(SubscriptionTopicUrl, Assert.Single(topics.Keys.Cast<string>()));
+            object executable = topics[SubscriptionTopicUrl]!;
+            IDictionary bindings = (IDictionary)executable.GetType().GetProperty("FiltersBySubscription")!.GetValue(executable)!;
+            Assert.Equal(SubscriptionId, Assert.Single(bindings.Keys.Cast<string>()));
+            object binding = bindings[SubscriptionId]!;
+            long revision = (long)binding.GetType().GetProperty("Revision")!.GetValue(binding)!;
+            object filter = Assert.Single(((IEnumerable)binding.GetType().GetProperty("Filters")!.GetValue(binding)!).Cast<object>());
+            Assert.Equal("patient", filter.GetType().GetProperty("Name")!.GetValue(filter));
+            Assert.Equal(new[] { "Patient/sub-patient" }, (string[])filter.GetType().GetProperty("Values")!.GetValue(filter)!);
+            string[] properties =
+            [
+                "ResourceType", "Name", "Values", "IgnoredValueFlags", "IgnoredParameter", "Modifier", "ModifierLiteral",
+                "ParamType", "SelectExpression", "RequestedKeyLiteral", "RequestedValueLiteral", "ValueReferences", "Prefixes",
+            ];
+            string values = JsonSerializer.Serialize(properties.ToDictionary(name => name,
+                name => filter.GetType().GetProperty(name)!.GetValue(filter)));
+            return (executable, binding, revision, values);
         }
     }
 

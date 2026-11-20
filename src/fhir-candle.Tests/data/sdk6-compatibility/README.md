@@ -231,6 +231,70 @@ all resource arrays, narrative text, decimal tokens, choice names and references
 remain exact. Full reads/searches after summaries reject stored mutation or
 tag accumulation. No native output is recorded as an expected snapshot.
 
+### M3 PUT rejection inventory (authored 2026-11-19)
+
+This M3 coverage is **authored, pending final qualification on net11.0 and
+net10.0**; no new passes are claimed here. All earlier execution records remain
+historical. Four 12-row `ExchangeCases` matrices and two 8-row
+`ExchangeUpdateTopicCases` matrices add **64 labeled rows per target framework**.
+The original **360 retained exchange replay rows** remain unchanged, for
+**424 authored replay rows per target framework** in total. The **40 pure
+summary-metadata controls** and `ExchangeTheoryDataIsNonEmptyAndLabeled`
+inventory fact are separate from that total; the 47 legacy R4 summary rows
+also remain unchanged.
+
+Direct rows explicitly call
+`store.InstanceUpdate(FhirRequestContext, out FhirResponseContext)` and retain
+the Boolean and native response, rather than substituting replay dispatch or
+storage-only calls. HTTP rows issue actual hosted PUT requests through
+TestServer. Each row uses a fresh host and that host's tenant store, with
+public setup/read operations at its selected boundary.
+
+| Test | Versions / formats / boundaries | Input and original response contract | State/control assertions |
+|---|---|---|---|
+| `UpdateRejectionStaleIfMatchPreservesResponseAndState` | 12: R4/R4B/R5 × JSON/XML × direct/HTTP | POST a Patient, update with ETag 1, then reject fresh changed content using stale ETag 1 against version 2. Preserve 412 and the exact format-specific diagnostic below. | Complete detached before/after reads for every rejection, including each HTTP preference probe. |
+| `UpdateRejectionProtectedPatientPreservesResponseAndState` | 12: R4/R4B/R5 × JSON/XML × direct/HTTP | Load a test-owned transaction POST bundle with protection enabled; publicly find the Patient by its unique authored identifier and bind the assigned ID. Preserve 401 and exactly `Resource Patient/<id> is protected and cannot be changed`, not a bare authorization rejection. | The protected Patient's complete content/metadata remain unchanged; dispose the host before deleting only its test-owned input directory. |
+| `UpdateRejectionInvalidSubscriptionPreservesResponseAndState` | 12: R4/R4B/R5 × JSON/XML × direct/HTTP | Seed a valid topic and active Subscription; replace with parseable `off` status and non-HTTP criteria (R4/R4B) or topic (R5). Preserve 400 and exactly `Subscription could not be parsed!`, not a parser error. | Accepted resources, descriptors, public status, and Encounter registration remain unchanged, with no rejected-update publication. |
+| `UpdateRejectionNativeTopicPreservesResponseAndState` | 8: R4B/R5 × JSON/XML × direct/HTTP | Retain the required URL primitive with a data-absent-reason extension but no value, reaching the native converter. Preserve 400 and exactly `SubscriptionTopic could not be parsed!`. | Accepted topic, dependent Subscription, descriptors, public status, and registration remain unchanged. |
+| `UpdateRejectionBasicTopicPreservesResponseAndState` | 8: R4B/R5 × JSON/XML × direct/HTTP | Replace an ordinary Basic with fresh matching-ID content bearing coding system `http://hl7.org/fhir/fhir-types` / code `SubscriptionTopic`. Preserve 400 and exactly `Basic-wrapped SubscriptionTopic could not be parsed!`. | Original Basic and unrelated accepted topic/Subscription content, descriptors, public status, and registration remain unchanged. |
+| `UpdateRejectionUnexpectedExceptionRetainsBoundaryBehavior` | 12: R4/R4B/R5 × JSON/XML × direct/HTTP | An `OnInstanceUpdated` callback throws a distinctive `InvalidOperationException`. Direct propagates that same exception; HTTP retains 500, `text/plain`, and exactly `PutResourceInstance <<< caught: <message>`, not a routine rejection outcome. | Assignment commits before the callback throws: GET must show the submitted content and version 2, not rollback. Always unsubscribe the callback. |
+
+The stale diagnostic's native and JSON wire literal is exactly
+`"Conditional update query returned a match with version: 2, If-Match: "`
+(69 characters, including the final space). Its XML wire literal is exactly
+`"Conditional update query returned a match with version: 2, If-Match:"`
+(68 characters, no final space). Firely's unchanged XML primitive serializer
+calls `String.Trim` before writing the value attribute; this is a narrowly
+authored format-specific oracle, not normalization or a serializer repair.
+The direct serialized outcome and HTTP default, `return=OperationOutcome`,
+and `return=representation` bodies pin these literals independently of the
+native issue assertion. Stale HTTP `return=minimal` retains 412 with an empty
+body. Preferences add requests within rows, not extra rows.
+
+For the first five theories, direct returns false with the exact status, null
+resource, empty serialized resource/identity/header fields, and exactly one
+native OperationOutcome issue: `error` / `exception`, the original exact
+diagnostic, and no invented details/extensions. Independent JSON/XML outcome
+checks retain the generated ID's agreement with the native outcome for that
+response and reject `Failed to update resource`. HTTP pins the original
+status and canonical negotiated FHIR media type, with no successful resource
+representation, ETag, Last-Modified, or Location.
+
+Before each rejected write, detached complete public GET snapshots preserve
+all content semantically, ID, full `meta.versionId` / `meta.lastUpdated`, ETag,
+and available Last-Modified for comparison after rejection. Subscription and
+topic cases additionally copy descriptor scalar/collection values and require
+unchanged object identity, revision, accepted status/topic, filters, expiry,
+event counts/history, and topic values. Public `$status` and read-only locked
+Encounter registration snapshots pin the accepted revision/filters with no
+added or replaced registration; rejected writes publish neither subscription
+changes nor instance updates.
+
+Both topic matrices exclude R4 by applicability, not by skipping required
+rows: R4's Basic-wrapper converter has no corresponding reachable rejection
+under the valid-ID/marker setup. Existing R4 topic/lifecycle controls and
+earlier H1/H2/M1/M2 coverage are retained.
+
 ## Search inventory (phase 4)
 
 `Sdk6ContractTests.Search.cs` and the three `search-resources.json` files were
