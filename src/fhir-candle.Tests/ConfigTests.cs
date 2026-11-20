@@ -3,6 +3,7 @@
 //     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // </copyright>
 
+using System.Collections.Concurrent;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.ComponentModel.Design;
@@ -11,6 +12,7 @@ using System.Net;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using fhir.candle.Tests.Extensions;
 using fhir.candle.Tests.Models;
@@ -1032,23 +1034,33 @@ public class ConfigTests
         const string CaughtHostException = "fhir-candle <<< caught exception:";
         string runId = Guid.NewGuid().ToString("N");
         string cacheSentinel = $"m13-missing-cache-{runId}";
-        string[] control = ["--port", "8080"];
+        string[] portOnly = ["--port", "8080"];
+        string[] control = [..portOnly, "--fhir-package-cache", cacheSentinel];
         CliRootCommand command = new();
-        ParseResult parsed = command.Parse(control, new ParserConfiguration() { ResponseFileTokenReplacer = null });
-        parsed.Errors.ShouldBeEmpty();
+        ParserConfiguration parser = new() { ResponseFileTokenReplacer = null };
+        ParseResult parsedPort = command.Parse(portOnly, parser);
+        ParseResult parsedControl = command.Parse(control, parser);
+        parsedPort.Errors.ShouldBeEmpty();
+        parsedControl.Errors.ShouldBeEmpty();
 
-        // Check the two pre-host guards independently before arming both in every child.
+        // Check both environment guards without a CLI cache value that could mask the environment fallback.
         IConfiguration invalidSmtp = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { [SmtpPortKey] = InvalidSmtpPort }).Build();
         InvalidOperationException smtpFailure = Should.Throw<InvalidOperationException>(
-            () => new CandleConfig(command.CommandCliOptions, parsed, invalidSmtp));
+            () => new CandleConfig(command.CommandCliOptions, parsedPort, invalidSmtp));
         Assert.Contains(SmtpPortKey, smtpFailure.Message, StringComparison.Ordinal);
 
         IConfiguration missingCache = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { [SmtpPortKey] = "465", ["Fhir_Package_Cache"] = cacheSentinel }).Build();
         DirectoryNotFoundException cacheFailure = Should.Throw<DirectoryNotFoundException>(
-            () => new CandleConfig(command.CommandCliOptions, parsed, missingCache));
+            () => new CandleConfig(command.CommandCliOptions, parsedPort, missingCache));
         Assert.Contains(cacheSentinel, cacheFailure.Message, StringComparison.Ordinal);
+
+        // The first child also has a fallback independent of the environment provider.
+        IConfiguration empty = new ConfigurationBuilder().Build();
+        DirectoryNotFoundException cliCacheFailure = Should.Throw<DirectoryNotFoundException>(
+            () => new CandleConfig(command.CommandCliOptions, parsedControl, empty));
+        Assert.Contains(cacheSentinel, cliCacheFailure.Message, StringComparison.Ordinal);
 
         // The child's relative cache lookup starts at the application base, not its working directory.
         for (DirectoryInfo? directory = new(appDirectory); directory is not null; directory = directory.Parent)
@@ -1165,21 +1177,24 @@ public class ConfigTests
                 start.Environment[name] = value;
             }
         }
+        start.Environment["TEMP"] = workingDirectory;
+        start.Environment["TMP"] = workingDirectory;
+        start.Environment["TMPDIR"] = workingDirectory;
+        start.Environment["DOTNET_EnableDiagnostics"] = "0";
         start.Environment["SMTP_Port"] = smtpGuard;
         start.Environment["Fhir_Package_Cache"] = cacheSentinel;
 
-        using Process process = new() { StartInfo = start };
-        using CancellationTokenSource childCancellation = new();
+        Process process = new() { StartInfo = start };
+        CancellationTokenSource childCancellation = new();
         using CancellationTokenSource exitDeadline = new(TimeSpan.FromSeconds(30));
-        StreamReader? outputReader = null;
-        StreamReader? errorReader = null;
-        Task<string> stdout = Task.FromResult(string.Empty);
-        Task<string> stderr = Task.FromResult(string.Empty);
+        CliOutputCapture outputCapture = new();
+        CliOutputCapture errorCapture = new();
+        TaskCompletionSource<int> confirmedExit = new();
         bool started = false;
+        bool timedOut = false;
         int? pid = null;
-        int? exitCode = null;
         Exception? runFailure = null;
-        string? cleanupFailure = null;
+        ConcurrentQueue<string> cleanupFailures = new();
         try
         {
             started = process.Start();
@@ -1189,76 +1204,213 @@ public class ConfigTests
             }
 
             pid = process.Id;
-            outputReader = process.StandardOutput;
-            errorReader = process.StandardError;
-            stdout = outputReader.ReadToEndAsync(childCancellation.Token);
-            stderr = errorReader.ReadToEndAsync(childCancellation.Token);
-            await Task.WhenAll(process.WaitForExitAsync(childCancellation.Token), stdout, stderr)
-                .WaitAsync(exitDeadline.Token);
+            Task stdout = outputCapture.StartDrain(process.StandardOutput, childCancellation.Token);
+            Task stderr = errorCapture.StartDrain(process.StandardError, childCancellation.Token);
+            Task exit = process.WaitForExitAsync(childCancellation.Token);
+            await foreach (Task completed in Task.WhenEach(exit, stdout, stderr).WithCancellation(exitDeadline.Token))
+            {
+                // Surface a read fault even when another read or the exit wait is still pending.
+                await completed;
+            }
             exitDeadline.Token.ThrowIfCancellationRequested();
-            exitCode = process.ExitCode;
+            confirmedExit.SetResult(process.ExitCode);
         }
         catch (Exception ex)
         {
+            timedOut = ex is OperationCanceledException && exitDeadline.IsCancellationRequested;
             runFailure = ex;
         }
         finally
         {
-            if (started && runFailure is not null)
-            {
-                using CancellationTokenSource cleanupDeadline = new(TimeSpan.FromSeconds(10));
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                }
-                catch (InvalidOperationException) when (process.HasExited)
-                {
-                    // The child exited between the liveness check and the kill attempt.
-                }
-                catch (Exception ex)
-                {
-                    cleanupFailure = $"\nCould not terminate the owned child tree: {ex}";
-                }
+            using CancellationTokenSource cleanupDeadline = new(TimeSpan.FromSeconds(10));
+            CancellationToken cleanupToken = cleanupDeadline.Token;
 
+            // Synchronous kill/close operations must not keep the caller past the teardown deadline.
+            Task processCleanup = Task.Run(async () =>
+            {
                 try
                 {
-                    await process.WaitForExitAsync(cleanupDeadline.Token);
-                    exitCode = process.ExitCode;
-                    await Task.WhenAll(stdout, stderr).WaitAsync(cleanupDeadline.Token);
-                    cleanupDeadline.Token.ThrowIfCancellationRequested();
-                }
-                catch (Exception ex)
-                {
-                    cleanupFailure += $"\nCould not confirm child exit and pipe cleanup within 10 seconds: {ex}";
+                    if (started && !confirmedExit.Task.IsCompletedSuccessfully)
+                    {
+                        try
+                        {
+                            if (!process.HasExited)
+                            {
+                                cleanupToken.ThrowIfCancellationRequested();
+                                process.Kill(entireProcessTree: true);
+                            }
+                        }
+                        catch (InvalidOperationException) when (process.HasExited)
+                        {
+                            // The child exited between the liveness check and the kill attempt.
+                        }
+                        catch (Exception ex)
+                        {
+                            cleanupFailures.Enqueue($"Could not terminate the owned child tree: {ex}");
+                        }
+
+                        // Pipe completion or cancellation is not evidence that the process exited.
+                        try
+                        {
+                            await process.WaitForExitAsync(cleanupToken);
+                            confirmedExit.SetResult(process.ExitCode);
+                        }
+                        catch (Exception ex)
+                        {
+                            cleanupFailures.Enqueue($"Could not confirm child exit: {ex}");
+                        }
+                    }
                 }
                 finally
                 {
-                    childCancellation.Cancel();
+                    process.Dispose();
                 }
+            });
+
+            Task cancelChildWaits = CancelChildWaitsAsync();
+            Task closeOutput = outputCapture.CloseAsync(cleanupToken);
+            Task closeError = errorCapture.CloseAsync(cleanupToken);
+            try
+            {
+                await foreach (Task _ in Task.WhenEach(processCleanup, cancelChildWaits, closeOutput, closeError,
+                    outputCapture.Drain ?? Task.CompletedTask, errorCapture.Drain ?? Task.CompletedTask).WithCancellation(cleanupToken))
+                {
+                    // Inspect each operation and the two captures separately after the bounded wait.
+                }
+                cleanupToken.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException) when (cleanupToken.IsCancellationRequested)
+            {
+                cleanupFailures.Enqueue("Child teardown did not complete within 10 seconds.");
             }
 
-            outputReader?.Dispose();
-            errorReader?.Dispose();
+            RecordCleanupFailure(processCleanup, "Process teardown");
+            RecordCleanupFailure(cancelChildWaits, "Child wait cancellation");
+            RecordCleanupFailure(closeOutput, "Stdout close");
+            RecordCleanupFailure(closeError, "Stderr close");
         }
 
-        string output = stdout.IsCompletedSuccessfully ? await stdout : "<read did not complete successfully>";
-        string errors = stderr.IsCompletedSuccessfully ? await stderr : "<read did not complete successfully>";
+        int? exitCode = confirmedExit.Task.IsCompletedSuccessfully ? await confirmedExit.Task : null;
+        if (started && exitCode is null)
+        {
+            cleanupFailures.Enqueue("Owned child exit was not confirmed.");
+        }
+        (string output, string stdoutState, bool stdoutTruncated) = outputCapture.Snapshot();
+        (string errors, string stderrState, bool stderrTruncated) = errorCapture.Snapshot();
         string tfm = Path.GetFileName(Path.GetDirectoryName(appDll))!;
         string details = $"CLI case '{string.Join(' ', arguments)}', DLL '{appDll}', TFM {tfm}, " +
             $"PID {pid?.ToString() ?? "not available"}, exit {exitCode?.ToString() ?? "unconfirmed"}\n" +
-            $"stdout:\n{output}\nstderr:\n{errors}";
-        if (runFailure is not null)
+            $"stdout ({stdoutState}{(stdoutTruncated ? ", truncated" : string.Empty)}):\n{output}\n" +
+            $"stderr ({stderrState}{(stderrTruncated ? ", truncated" : string.Empty)}):\n{errors}";
+        string[] cleanupErrors = cleanupFailures.ToArray();
+        if (runFailure is not null || stdoutTruncated || stderrTruncated || cleanupErrors.Length != 0)
         {
-            string reason = runFailure is OperationCanceledException && exitDeadline.IsCancellationRequested
-                ? "Child exit and output did not complete within 30 seconds."
-                : "Child launch or output capture failed.";
-            throw new InvalidOperationException($"{reason}\n{details}{cleanupFailure}", runFailure);
+            string reason = timedOut ? "Child exit and output did not complete within 30 seconds."
+                : runFailure is not null ? "Child launch or output capture failed."
+                : stdoutTruncated || stderrTruncated ? "Child output exceeded 64 Ki characters per stream."
+                : "Child cleanup failed.";
+            string cleanup = cleanupErrors.Length == 0 ? string.Empty : "\n" + string.Join('\n', cleanupErrors);
+            throw new InvalidOperationException($"{reason}\n{details}{cleanup}", runFailure);
         }
 
         return (exitCode!.Value, output, errors, details);
+
+        async Task CancelChildWaitsAsync()
+        {
+            try
+            {
+                if (runFailure is not null)
+                {
+                    await childCancellation.CancelAsync();
+                }
+            }
+            finally
+            {
+                childCancellation.Dispose();
+            }
+        }
+
+        void RecordCleanupFailure(Task task, string operation)
+        {
+            if (!task.IsCompletedSuccessfully)
+            {
+                cleanupFailures.Enqueue($"{operation}: {DescribeCliTask(task)}");
+            }
+        }
+    }
+
+    private static string DescribeCliTask(Task? task) => task?.Status switch
+    {
+        null => "not started",
+        TaskStatus.RanToCompletion => "complete",
+        TaskStatus.Faulted => $"faulted: {task?.Exception}",
+        TaskStatus.Canceled => "canceled",
+        _ => "unfinished",
+    };
+
+    private sealed class CliOutputCapture
+    {
+        private const int CaptureLimit = 64 * 1024;
+        private readonly object _gate = new();
+        private readonly StringBuilder _text = new();
+        private StreamReader? _reader;
+        private bool _truncated;
+
+        public Task? Drain { get; private set; }
+
+        public Task StartDrain(StreamReader reader, CancellationToken token)
+        {
+            _reader = reader;
+            return Drain = Task.Run(async () =>
+            {
+                char[] buffer = new char[4096];
+                int count;
+                while ((count = await reader.ReadAsync(buffer.AsMemory(), token)) != 0)
+                {
+                    lock (_gate)
+                    {
+                        int retained = Math.Min(count, CaptureLimit - _text.Length);
+                        _text.Append(buffer, 0, retained);
+                        _truncated |= retained < count;
+                    }
+                }
+            });
+        }
+
+        public Task CloseAsync(CancellationToken deadline)
+        {
+            if (_reader is not StreamReader reader)
+            {
+                return Task.CompletedTask;
+            }
+
+            return Task.Run(async () =>
+            {
+                if (Drain is { IsCompleted: false } drain)
+                {
+                    // Abort the pipe without modifying the reader's buffers during a pending read.
+                    reader.BaseStream.Dispose();
+                    try
+                    {
+                        await drain.WaitAsync(deadline);
+                    }
+                    catch (Exception) when (drain.IsCompleted)
+                    {
+                        // The capture snapshot reports the read outcome.
+                    }
+                }
+
+                reader.Dispose();
+            });
+        }
+
+        public (string Text, string State, bool Truncated) Snapshot()
+        {
+            lock (_gate)
+            {
+                return (_text.ToString(), DescribeCliTask(Drain), _truncated);
+            }
+        }
     }
 
     private static Option<string[]?> GetTenantOption(CliOptions options, string optionName)

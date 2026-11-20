@@ -77,7 +77,9 @@ dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0 -- -
 If fhir-candle rejects its command-line arguments, it exits with a nonzero
 status. `--help` and `--version` exit with status zero without starting the
 host. Startup failures reported by the host action are separate from
-argument rejection and retain the host action's exit status.
+argument rejection. The executable forwards the host action's result in the
+platform's exit-code representation; on Unix, the caller observes only the
+low eight bits.
 
 To build a release version of the project:
 
