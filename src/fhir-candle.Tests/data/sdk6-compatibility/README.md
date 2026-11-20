@@ -1617,3 +1617,213 @@ eight lifecycle + one publication + one inline row and 24 existing controls
 (34 version-labeled results each); the inventory fact is version-independent.
 This is scoped local pre-integration evidence, not the runner's independent
 verification or any broader qualification listed above.
+
+## Original-review M6: composite conjunction and same-root matching
+
+**Initial inventory: authored/unexecuted when added.** This is the inventory for
+original-review finding M6, not historical migration phase 6. The reviewed synthetic inputs
+and exact expected identities come from `scratch/1119-09/bugreport.md`, selected
+Approach A (`scratch/1119-09/approach-a.md`), and its implementation plan. They
+are not generated from actual responses or SDK models. The planned counts and
+predicted failure below describe that initial inventory; subsequent observed
+baseline/after-repair results are appended below. Final documented-tree and
+post-commit gates remain runner-owned and are not claimed here. Earlier
+H1/H2/M1-M5 evidence and historical gate statements above remain unchanged.
+
+### Composite-family conjunction inventory
+
+`SearchFamiliesReturnExpectedIds` retains its 96 rows. Its 12 composite rows
+(R4/R4B/R5 × JSON/XML × HTTP/direct) now declare **13 probes**: the original
+six, unchanged and in their original order, followed by seven conjunction
+controls. Every probe uses the unchanged `AssertSearchProbe`/`SearchRequest`
+helpers for GET and form POST, preserving ordered repeated query pairs.
+
+In the table, `{root}` is `SearchCanonicalRoot(tenant.Version)`:
+`https://example.test/search/r4`, `/r4b`, or `/r5` with the same authority/path
+prefix. `C10` means
+`code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg`;
+`C20` substitutes `20` and `Cge10` substitutes `ge10`. These are documentation
+shorthand only; requests contain the expanded parameter names and values.
+
+| Probe ID, in execution order | Predicates after `Observation?` | Exact expected identities |
+|---|---|---|
+| `composite-equal` (retained) | `C10` | `Observation/early` |
+| `composite-second` (retained) | `code-value-quantity={root}/codes\|weight$30\|http://unitsofmeasure.org\|g` | `Observation/late` |
+| `composite-no-cross-resource-match` (retained) | `code-value-quantity={root}/codes\|pulse$10\|http://unitsofmeasure.org\|mg` | none |
+| `composite-negative` (retained) | `C20` | none |
+| `composite-or-component` (retained) | `code-value-quantity={root}/codes\|weight,{root}/codes\|pulse$20\|http://unitsofmeasure.org\|mg` | `Observation/twin` |
+| `composite-absent-components` (retained) | `_id=missing&C10` | none |
+| `composite-then-ordinary-negative` | `C10&_id=doesnotexist` | none |
+| `ordinary-then-composite-negative` | `_id=doesnotexist&C10` | none |
+| `composite-then-ordinary-positive` | `C10&_id=early` | `Observation/early` |
+| `ordinary-then-composite-positive` | `_id=early&C10` | `Observation/early` |
+| `composite-then-failing-composite` | `C10&C20` | none |
+| `failing-composite-then-composite` | `C20&C10` | none |
+| `composite-all-matching` | `C10&Cge10` | `Observation/early` |
+
+Two composite occurrences are two ordered pairs with the same key, not comma-OR
+or a dictionary overwrite. Grouped probes remain fail-fast. A baseline failure
+at `composite-then-ordinary-negative` would not prove the later probes or that
+row's form POST executed. Returning `Observation/early` for that first added GET
+is the predicted M6 defect, not an observed result in this authored inventory.
+
+### Isolated same-root inventory
+
+`CompositeComponentsRemainWithinOneRoot` adds **12 rows**, reusing the unchanged
+`SearchCases` version/format/boundary matrix. `CompositeRootControlGraph` holds
+four ordinary Observations as independently authored complete JSON and XML
+literals, seeded through the existing helpers. Each has `status=final` and a
+text-only mandatory top-level `code`. Component coding uses `{root}/codes`;
+quantities have the literal numeric values below, `unit=mg`,
+`system=http://unitsofmeasure.org`, and `code=mg`.
+
+| Identity | Ordered component code / quantity pairs |
+|---|---|
+| `Observation/component-first` | `weight / 10 mg`, `pulse / 20 mg` |
+| `Observation/component-later` | `pulse / 20 mg`, `weight / 10 mg` |
+| `Observation/component-split` | `weight / 20 mg`, `pulse / 10 mg` |
+| `Observation/component-empty` | no components; the `component` member is omitted |
+
+Each row declares these four probes in order, each through GET and form POST:
+
+| Probe ID | Exact relative path with `{root}` expanded | Exact expected identities |
+|---|---|---|
+| `component-root-correlated` | `Observation?component-code-value-quantity={root}/codes\|weight$10\|http://unitsofmeasure.org\|mg` | `Observation/component-first`, `Observation/component-later` |
+| `component-split-code-present` | `Observation?_id=component-split&component-code={root}/codes\|weight` | `Observation/component-split` |
+| `component-split-quantity-present` | `Observation?_id=component-split&component-value-quantity=10\|http://unitsofmeasure.org\|mg` | `Observation/component-split` |
+| `component-root-no-match` | `Observation?component-code-value-quantity={root}/codes\|weight$99\|http://unitsofmeasure.org\|mg` | none |
+
+The first probe requires first/later-root success and split/empty-root rejection.
+The ordinary split-resource controls independently require both sought values
+to exist; the final probe requires failure despite nonempty candidate roots.
+Standard built-in component parameters must be applied on every SDK: exact self
+links and exact positive/negative membership are required, not ignored-parameter
+success. No custom SearchParameters are added.
+
+The unchanged helpers still check complete resource content, bound generated
+metadata, total, status/outcome, applied self/full URLs, match modes, exact
+identities and duplicate absence. `LoadSearchGraph`, `SearchGraphXml`, all three
+raw `search-resources.json` files, their 14-resource/seven-sibling-override
+inventories, and the original **384-row** search matrix remain unchanged. The
+new root graph is isolated from those fixtures; no provider or assertion changes
+are required.
+
+The planned focused gate inventory is **254 tests per framework**: 96 existing
+family rows + 12 new root rows + 144 unchanged reverse-chain rows + two existing
+inventory facts. The 252 version-labeled rows are 84 per FHIR version, equally
+split JSON/XML and HTTP/direct. At complete execution, the seven added family
+probes contribute 168 searches and the four root probes contribute 96 searches
+per framework; these are requests within rows, not extra discovered tests.
+These counts are authored expectations, not pass counts or qualification of
+either target framework.
+
+### Observed baseline and after-repair validation
+
+On Windows, 2026-11-20, the runner executed this exact four-command sequence
+twice, sequentially: first with the new tests and unchanged production, then
+after the surgical composite repair. These are observed pre-documentation
+RED/GREEN gates, not final documented-tree or post-commit gates. The supplied
+toolchain was .NET SDK **11.0.100**, with runtimes **11.0.0 / 10.0.15**. Application
+builds performed their normal restore; no explicit restore or install was run.
+Command authority is root `AGENTS.md`; commands ran from
+`E:\ai\git\fhir-candle`:
+
+```powershell
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net11.0
+dotnet build src\fhir-candle\fhir-candle.csproj --configuration Release --framework net10.0
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.CompositeComponentsRemainWithinOneRoot|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReverseChainUsesExistentialMatchesAndDistinctFilters|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.CompositeComponentsRemainWithinOneRoot|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.ReverseChainUsesExistentialMatchesAndDistinctFilters|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchTheoryDataIsNonEmptyAndLabeled|FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.SearchRecoveryTheoryDataIsNonEmptyAndLabeled"
+```
+
+| Observed stage | Command / framework | Exit | Discovered / passed / failed / skipped | Compiler/analyzer warnings / errors |
+|---|---|---:|---|---|
+| RED, unchanged production | Application build, net11.0 | 0 | Not a test run | **0 / 0** |
+| RED, unchanged production | Application build, net10.0 | 0 | Not a test run | **0 / 0** |
+| RED, unchanged production | Focused test union, net11.0 | 1 | **254 / 242 / 12 / 0** | **0 / 0** |
+| RED, unchanged production | Focused test union, net10.0 | 1 | **254 / 242 / 12 / 0** | **0 / 0** |
+| GREEN, after repair | Application build, net11.0 | 0 | Not a test run | **0 / 0** |
+| GREEN, after repair | Application build, net10.0 | 0 | Not a test run | **0 / 0** |
+| GREEN, after repair | Focused test union, net11.0 | 0 | **254 / 254 / 0 / 0** | **0 / 0** |
+| GREEN, after repair | Focused test union, net10.0 | 0 | **254 / 254 / 0 / 0** | **0 / 0** |
+
+For RED, `SearchTester.cs` was byte-identical to the planning baseline, SHA256
+`4B57477970532E1271EF4018660B86BC15D4537F84991081ADA1686C6B4EF832`.
+All 12 failures per framework were the first added
+`composite-then-ordinary-negative` GET, across R4/R4B/R5 × JSON/XML × HTTP/direct.
+Each reported `expected matches [], includes [] / actual entries [Observation/early]`.
+Thus the predicted M6 false positive was actually observed, not an
+authoring/environment failure. The RED test exits reflect those failed
+assertions, not compiler/analyzer errors.
+
+Those grouped rows stopped at that GET. RED does **not** prove that later
+reversed-order or repeated-composite probes, or the failing probe's form POST,
+executed. The independent root controls already passed on the unchanged
+baseline, as did the other families, adjacent reverse-chain controls and facts:
+
+| Selected method | Rows per framework | RED passed / failed, each TFM | GREEN passed / failed, each TFM |
+|---|---:|---|---|
+| `SearchFamiliesReturnExpectedIds` | 96 | 84 / 12 | 96 / 0 |
+| `CompositeComponentsRemainWithinOneRoot` | 12 | 12 / 0 | 12 / 0 |
+| `ReverseChainUsesExistentialMatchesAndDistinctFilters` | 144 | 144 / 0 | 144 / 0 |
+| `SearchTheoryDataIsNonEmptyAndLabeled` | 1 | 1 / 0 | 1 / 0 |
+| `SearchRecoveryTheoryDataIsNonEmptyAndLabeled` | 1 | 1 / 0 | 1 / 0 |
+| **Total** | **254** | **242 / 12** | **254 / 0** |
+
+Each RED/GREEN test output reconciles the exact unique 254-row set, not just a
+summary count. The 252 version-labeled rows are **84 per FHIR version**, with
+**21 per version/format/boundary tuple**; the two facts are version-independent.
+On RED each version had 80 passes and four failures; on GREEN all 84 passed.
+This holds separately for net11.0 and net10.0, with no missing or duplicate rows
+and no skips.
+
+After the parameter-local composite repair, all grouped probes completed GET
+and form POST: all 13 probes in each of the 12 composite-family rows and all
+four probes in each root row. GREEN therefore observes both predicate orders,
+positive conjunctions, repeated composite pairs, same-root correlation,
+later-root success, split/empty-root rejection and nonempty-root mismatch.
+Standard built-in component metadata was applied in all three FHIR versions:
+exact self links, positive/negative membership and the unchanged full assertions
+passed, rather than accepting ignored parameters.
+
+The added searches per framework are **168 conjunction + 96 root-control
+requests**, not additional discovered tests. The original **384-row** matrix,
+14-resource fixtures, raw versioned graphs, providers and assertion/replay
+helpers remain unchanged. No test expectations were obtained from either
+run's outputs or generated SDK models.
+
+### Retained evidence and qualification limits
+
+Evidence is retained in project-local `scratch/1119-09/`:
+
+- `dev-do-preflight.log` and `m6-baseline-patch.log`: preflight and the full
+  baseline patch/source state; the runner's `plan.md` also records the supplied
+  SDK/runtime versions and observed build summaries.
+- `m6-red-build-net11.log`, `m6-red-build-net10.log`,
+  `m6-red-test-net11.log` and `m6-red-test-net10.log`: RED command/exit records.
+- `m6-red-test-net11-output.log` and `m6-red-test-net10.log`: full native RED
+  test output, including version/format/boundary/probe and expected/actual
+  identities.
+- `m6-green-build-net11.log`, `m6-green-build-net10.log`,
+  `m6-green-test-net11.log` and `m6-green-test-net10.log`: full after-repair
+  command output.
+- `m6-matrix-red-green-v2.log`: exact RED/GREEN row-set reconciliation using
+  explicit family/kind, version, format and transport arguments because VSTest
+  truncates some display labels. This evidence-only parser correction changed
+  no tests, expectations, verification commands or outcomes and required no
+  verification rerun.
+
+The initial RED build transcripts retain commands/exits only, **not full native
+build output**. Their zero-warning/error results above are the runner-observed
+summaries recorded in `plan.md`, not summaries recoverable from those two logs.
+The initial net11.0 test transcript also omitted native output; its full returned
+output was separately retained in `m6-red-test-net11-output.log`. Subsequent
+transcript capture used `Out-Host` without changing the verification commands
+or selector.
+
+This documentation slice ran no builds or tests. After this edit the runner
+still owns the unchanged four-command Final Verification gate on the exact
+final deliverable tree, and its repeat after the verified local phase commit.
+Those actual results are to be recorded by the runner in
+`scratch/1119-09/plan.md` and retained scratch logs; neither gate is claimed
+executed here. The observed RED/GREEN evidence above is focused local Windows
+coverage, not full-suite, non-Windows, browser or migration-wide qualification.

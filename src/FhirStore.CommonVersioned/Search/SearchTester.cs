@@ -119,17 +119,13 @@ public class SearchTester
                 IEnumerable<PocoNode> compositeRoots = sp.CompiledExpression.Invoke(rootNode, fpContext);
 
                 // test for matches against all composite components
-                foreach (PocoNode compositeRoot in compositeRoots)
+                if (!compositeRoots.Any(compositeRoot => TestForMatch(compositeRoot, sp.CompositeComponents, fpContext)))
                 {
-                    // test the composite component against the composite root
-                    if (TestForMatch(compositeRoot, sp.CompositeComponents, fpContext))
-                    {
-                        return true;
-                    }
+                    return false;
                 }
 
-                // if we did not find a tree that matches all components, this is not a match
-                return false;
+                // Each composite needs one root matching all components; subsequent parameters still apply independently.
+                continue;
             }
 
             // check for unsupported modifiers

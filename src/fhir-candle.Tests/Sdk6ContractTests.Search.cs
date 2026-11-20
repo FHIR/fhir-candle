@@ -155,6 +155,36 @@ public partial class Sdk6ContractTests
         }
     }
 
+    /// <summary>Composite components must match within one repeated root, including a later candidate root.</summary>
+    [Theory]
+    [MemberData(nameof(SearchCases))]
+    public async Task CompositeComponentsRemainWithinOneRoot(
+        string label,
+        FhirReleases.FhirSequenceCodes version,
+        CompatibilityTransport transport,
+        CompatibilityFormat format)
+    {
+        Assert.NotEmpty(label);
+        CompatibilityTenant tenant = Tenant(version, $"composite-roots-{VersionName(version)}");
+        SearchGraph graph = CompositeRootControlGraph(tenant, format);
+        await using CompatibilityReplay replay = new(SearchScenario("composite-root-control", graph), transport);
+        await replay.RunAsync();
+
+        string root = SearchCanonicalRoot(tenant.Version);
+        SearchProbe[] probes =
+        [
+            new("component-root-correlated", $"Observation?component-code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg",
+                ["Observation/component-first", "Observation/component-later"]),
+            new("component-split-code-present", $"Observation?_id=component-split&component-code={root}/codes|weight", ["Observation/component-split"]),
+            new("component-split-quantity-present", "Observation?_id=component-split&component-value-quantity=10|http://unitsofmeasure.org|mg", ["Observation/component-split"]),
+            new("component-root-no-match", $"Observation?component-code-value-quantity={root}/codes|weight$99|http://unitsofmeasure.org|mg", []),
+        ];
+        foreach (SearchProbe probe in probes)
+        {
+            await AssertSearchProbe(replay, graph, probe);
+        }
+    }
+
     /// <summary>Overlapping logical IDs must resolve to this tenant's resources and this tenant's ValueSet contents.</summary>
     [Theory]
     [MemberData(nameof(SearchReferenceCases))]
@@ -799,6 +829,64 @@ public partial class Sdk6ContractTests
         return await content.ReadAsStringAsync();
     }
 
+    private static SearchGraph CompositeRootControlGraph(CompatibilityTenant tenant, CompatibilityFormat format)
+    {
+        SearchGraph graph = new(tenant, format, new(StringComparer.Ordinal), new(StringComparer.Ordinal));
+        string root = SearchCanonicalRoot(tenant.Version);
+        AddSearchControl(graph,
+            $$$"""
+            {"resourceType":"Observation","id":"component-first","status":"final","code":{"text":"First component matches"},
+             "component":[
+              {"code":{"coding":[{"system":"{{{root}}}/codes","code":"weight"}]},
+               "valueQuantity":{"value":10,"unit":"mg","system":"http://unitsofmeasure.org","code":"mg"}},
+              {"code":{"coding":[{"system":"{{{root}}}/codes","code":"pulse"}]},
+               "valueQuantity":{"value":20,"unit":"mg","system":"http://unitsofmeasure.org","code":"mg"}}]}
+            """,
+            $"""
+            <Observation xmlns="http://hl7.org/fhir"><id value="component-first"/><status value="final"/><code><text value="First component matches"/></code>
+            <component><code><coding><system value="{root}/codes"/><code value="weight"/></coding></code>
+            <valueQuantity><value value="10"/><unit value="mg"/><system value="http://unitsofmeasure.org"/><code value="mg"/></valueQuantity></component>
+            <component><code><coding><system value="{root}/codes"/><code value="pulse"/></coding></code>
+            <valueQuantity><value value="20"/><unit value="mg"/><system value="http://unitsofmeasure.org"/><code value="mg"/></valueQuantity></component></Observation>
+            """);
+        AddSearchControl(graph,
+            $$$"""
+            {"resourceType":"Observation","id":"component-later","status":"final","code":{"text":"Later component matches"},
+             "component":[
+              {"code":{"coding":[{"system":"{{{root}}}/codes","code":"pulse"}]},
+               "valueQuantity":{"value":20,"unit":"mg","system":"http://unitsofmeasure.org","code":"mg"}},
+              {"code":{"coding":[{"system":"{{{root}}}/codes","code":"weight"}]},
+               "valueQuantity":{"value":10,"unit":"mg","system":"http://unitsofmeasure.org","code":"mg"}}]}
+            """,
+            $"""
+            <Observation xmlns="http://hl7.org/fhir"><id value="component-later"/><status value="final"/><code><text value="Later component matches"/></code>
+            <component><code><coding><system value="{root}/codes"/><code value="pulse"/></coding></code>
+            <valueQuantity><value value="20"/><unit value="mg"/><system value="http://unitsofmeasure.org"/><code value="mg"/></valueQuantity></component>
+            <component><code><coding><system value="{root}/codes"/><code value="weight"/></coding></code>
+            <valueQuantity><value value="10"/><unit value="mg"/><system value="http://unitsofmeasure.org"/><code value="mg"/></valueQuantity></component></Observation>
+            """);
+        AddSearchControl(graph,
+            $$$"""
+            {"resourceType":"Observation","id":"component-split","status":"final","code":{"text":"Values split across components"},
+             "component":[
+              {"code":{"coding":[{"system":"{{{root}}}/codes","code":"weight"}]},
+               "valueQuantity":{"value":20,"unit":"mg","system":"http://unitsofmeasure.org","code":"mg"}},
+              {"code":{"coding":[{"system":"{{{root}}}/codes","code":"pulse"}]},
+               "valueQuantity":{"value":10,"unit":"mg","system":"http://unitsofmeasure.org","code":"mg"}}]}
+            """,
+            $"""
+            <Observation xmlns="http://hl7.org/fhir"><id value="component-split"/><status value="final"/><code><text value="Values split across components"/></code>
+            <component><code><coding><system value="{root}/codes"/><code value="weight"/></coding></code>
+            <valueQuantity><value value="20"/><unit value="mg"/><system value="http://unitsofmeasure.org"/><code value="mg"/></valueQuantity></component>
+            <component><code><coding><system value="{root}/codes"/><code value="pulse"/></coding></code>
+            <valueQuantity><value value="10"/><unit value="mg"/><system value="http://unitsofmeasure.org"/><code value="mg"/></valueQuantity></component></Observation>
+            """);
+        AddSearchControl(graph,
+            """{"resourceType":"Observation","id":"component-empty","status":"final","code":{"text":"No components"}}""",
+            """<Observation xmlns="http://hl7.org/fhir"><id value="component-empty"/><status value="final"/><code><text value="No components"/></code></Observation>""");
+        return graph;
+    }
+
     private static SearchGraph FormSearchControlGraph(CompatibilityTenant tenant, CompatibilityFormat format)
     {
         SearchGraph graph = new(tenant, format, new(StringComparer.Ordinal), new(StringComparer.Ordinal));
@@ -1102,6 +1190,13 @@ public partial class Sdk6ContractTests
                 new("composite-negative", $"Observation?code-value-quantity={root}/codes|weight$20|http://unitsofmeasure.org|mg", []),
                 new("composite-or-component", $"Observation?code-value-quantity={root}/codes|weight,{root}/codes|pulse$20|http://unitsofmeasure.org|mg", ["Observation/twin"]),
                 new("composite-absent-components", $"Observation?_id=missing&code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg", []),
+                new("composite-then-ordinary-negative", $"Observation?code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg&_id=doesnotexist", []),
+                new("ordinary-then-composite-negative", $"Observation?_id=doesnotexist&code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg", []),
+                new("composite-then-ordinary-positive", $"Observation?code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg&_id=early", ["Observation/early"]),
+                new("ordinary-then-composite-positive", $"Observation?_id=early&code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg", ["Observation/early"]),
+                new("composite-then-failing-composite", $"Observation?code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg&code-value-quantity={root}/codes|weight$20|http://unitsofmeasure.org|mg", []),
+                new("failing-composite-then-composite", $"Observation?code-value-quantity={root}/codes|weight$20|http://unitsofmeasure.org|mg&code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg", []),
+                new("composite-all-matching", $"Observation?code-value-quantity={root}/codes|weight$10|http://unitsofmeasure.org|mg&code-value-quantity={root}/codes|weight$ge10|http://unitsofmeasure.org|mg", ["Observation/early"]),
             ],
             _ => throw new ArgumentOutOfRangeException(nameof(family)),
         };
