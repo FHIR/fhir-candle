@@ -3,8 +3,6 @@
 
 @inject IHttpContextAccessor HttpContextAccessor
 
-@implements IDisposable
-
 <FluentAccordion>
     <FluentAccordionItem Header="Patient Selection" Expanded="true">
          <FluentAutocomplete Id="patient-selector"
@@ -381,30 +379,13 @@
 
     private void configureStores()
     {
-        if (_patientStore is not null)
-        {
-            _patientStore.OnInstanceCreated -= PatientStore_OnChanged;
-            _patientStore.OnInstanceDeleted -= PatientStore_OnChanged;
-        }
-
-        if (Store.TryGetValue("Patient", out _patientStore))
-        {
-            _patientStore.OnInstanceCreated += PatientStore_OnChanged;
-            _patientStore.OnInstanceDeleted += PatientStore_OnChanged;
-        }
-
+        Store.TryGetValue("Patient", out _patientStore);
     }
 
     private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         configureStores();
 
-        // _filteredItems = GetFilteredItems();
-    }
-
-    private void PatientStore_OnChanged(object? sender, EventArgs e)
-    {
-        // reset our filtered items
         // _filteredItems = GetFilteredItems();
     }
 
@@ -576,16 +557,5 @@
         }
 
         return o.ToString() ?? string.Empty;
-    }
-
-    public void Dispose()
-    {
-        // debounceTimer?.Dispose();
-
-        // if (_taskStore is not null)
-        // {
-        //     _taskStore.OnInstanceCreated -= ResourceStore_OnChanged;
-        //     _taskStore.OnInstanceDeleted -= ResourceStore_OnChanged;
-        // }
     }
 }

@@ -19,6 +19,7 @@ using FhirCandle.Smart;
 using FhirCandle.Storage;
 using FhirCandle.Ui;
 using FhirCandle.Ui.Common.Components;
+using FhirCandle.Ui.R4.Subscriptions;
 using FhirCandle.Utils;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
@@ -256,106 +257,157 @@ public class FluentUiIntegrationTests
             Assert.True(store.InstanceCreate(request, out _, forceAllowExistingId: true));
         }
 
+        IResourceStore patientStore = store["Patient"];
         RecordingJs js = new();
         using ServiceProvider services = Services(js);
-        await using ManagedRenderer renderer = new(services);
+        await using ManagedRenderer pickerRenderer = new(services);
         List<string[]> selections = [];
-        await renderer.MountAsync<ResourcePicker>(new()
+        await pickerRenderer.MountAsync<ResourcePicker>(new()
         {
             [nameof(ResourcePicker.Store)] = store,
-            [nameof(ResourcePicker.ResourceStore)] = store["Patient"],
+            [nameof(ResourcePicker.ResourceStore)] = patientStore,
             [nameof(ResourcePicker.ResourceType)] = "Patient",
             [nameof(ResourcePicker.SelectedIdsChanged)] = EventCallback.Factory.Create<HashSet<string>>(
                 this, ids => selections.Add(ids.Order().ToArray())),
         });
-        FluentDataGrid<InstanceTableRec> grid = Assert.Single(renderer.Components<FluentDataGrid<InstanceTableRec>>());
+        FluentDataGrid<InstanceTableRec> grid = Assert.Single(pickerRenderer.Components<FluentDataGrid<InstanceTableRec>>());
         Assert.True(grid.OnRowClick.HasDelegate);
         Assert.False(grid.OnRowFocus.HasDelegate);
         await Activate("alpha");
         await HeaderPreservesSelection();
         await Activate("bravo");
         Assert.Equal(["bravo"], selections.Last());
-        await renderer.UpdateAsync(new() { [nameof(ResourcePicker.AllowMultipleSelection)] = true });
+        await pickerRenderer.UpdateAsync(new() { [nameof(ResourcePicker.AllowMultipleSelection)] = true });
         await Activate("alpha");
         Assert.Equal(["alpha", "bravo"], selections.Last());
         await Activate("bravo");
         Assert.Equal(["alpha"], selections.Last());
         await HeaderPreservesSelection();
 
-        await renderer.Dispatcher.InvokeAsync(() => grid.ShowColumnOptionsAsync(0));
-        FluentTextInput search = renderer.Components<FluentTextInput>()
+        await pickerRenderer.Dispatcher.InvokeAsync(() => grid.ShowColumnOptionsAsync(0));
+        FluentTextInput search = pickerRenderer.Components<FluentTextInput>()
             .Single(input => input.Placeholder == "Resource ID...");
         Assert.True(search.Immediate);
         Assert.Equal(0, search.ImmediateDelay);
         Assert.Equal(TextInputType.Search, search.TextInputType);
         Assert.True(search.ValueChanged.HasDelegate);
-        await renderer.Dispatcher.InvokeAsync(() => search.ValueChanged.InvokeAsync("ALPHA"));
-        await EventuallyAsync(renderer, () => grid.Items?.Count() == 1);
+        await pickerRenderer.Dispatcher.InvokeAsync(() => search.ValueChanged.InvokeAsync("ALPHA"));
+        await EventuallyAsync(pickerRenderer, () => grid.Items?.Count() == 1);
         Assert.Equal("alpha", Assert.Single(grid.Items!).Id);
-        await renderer.Dispatcher.InvokeAsync(() => search.ValueChanged.InvokeAsync(string.Empty));
+        await pickerRenderer.Dispatcher.InvokeAsync(() => search.ValueChanged.InvokeAsync(string.Empty));
         // Clear is immediate, not another debounce interval.
         Assert.Equal(2, grid.Items!.Count());
         Assert.Equal(["alpha"], selections.Last());
 
-        await using ManagedRenderer autocompleteRenderer = new(services);
-        await autocompleteRenderer.MountAsync<CandleUiRoot>(new()
+        ResourcePicker mountedPicker = Assert.Single(pickerRenderer.Components<ResourcePicker>());
+        const string createdEvent = nameof(IResourceStore.OnInstanceCreated);
+        const string deletedEvent = nameof(IResourceStore.OnInstanceDeleted);
+        Delegate[] createdBaseline = GetPatientEventHandlers(createdEvent);
+        Delegate[] deletedBaseline = GetPatientEventHandlers(deletedEvent);
+        Assert.Contains(createdBaseline, handler => ReferenceEquals(handler.Target, mountedPicker));
+        Assert.Contains(deletedBaseline, handler => ReferenceEquals(handler.Target, mountedPicker));
+
+        Dictionary<string, object?> hti2Parameters = new()
         {
             [nameof(CandleUiRoot.ChildContent)] = LayoutContent(builder =>
             {
-                builder.OpenComponent<FhirCandle.Ui.R4.Subscriptions.UsCoreHti2ContentsR4>(0);
-                builder.AddAttribute(1, "Store", store);
-                builder.AddAttribute(2, "StoreName", "picker");
+                builder.OpenComponent<UsCoreHti2ContentsR4>(0);
+                builder.AddAttribute(1, nameof(UsCoreHti2ContentsR4.Store), store);
+                builder.AddAttribute(2, nameof(UsCoreHti2ContentsR4.StoreName), "picker");
                 builder.CloseComponent();
             }),
-        });
-        FluentAutocomplete<PatientR4, string> patients =
-            Assert.Single(autocompleteRenderer.Components<FluentAutocomplete<PatientR4, string>>());
-        Assert.False(patients.Multiple);
-        Assert.True(patients.OnOptionsSearch.HasDelegate);
-        Assert.True(patients.SelectedItemsChanged.HasDelegate);
-        OptionsSearchEventArgs<PatientR4> patientSearch = new() { Text = "ALP" };
-        await autocompleteRenderer.Dispatcher.InvokeAsync(() => patients.OnOptionsSearch.InvokeAsync(patientSearch));
-        PatientR4 patient = Assert.Single(patientSearch.Items!);
-        Assert.Equal("alpha", patient.Id);
-        await autocompleteRenderer.Dispatcher.InvokeAsync(() => patients.SelectedItemsChanged.InvokeAsync([patient]));
-        Assert.Equal("alpha", Assert.Single(patients.SelectedItems).Id);
-        await autocompleteRenderer.Dispatcher.InvokeAsync(() => patients.SelectedItemsChanged.InvokeAsync([]));
-        Assert.Empty(patients.SelectedItems);
-        FluentAutocomplete<ParsedSubscription, string> subscriptions =
-            Assert.Single(autocompleteRenderer.Components<FluentAutocomplete<ParsedSubscription, string>>());
-        OptionsSearchEventArgs<ParsedSubscription> subscriptionSearch = new() { Text = "missing" };
-        await autocompleteRenderer.Dispatcher.InvokeAsync(() => subscriptions.OnOptionsSearch.InvokeAsync(subscriptionSearch));
-        Assert.Empty(subscriptionSearch.Items!);
-        FluentSelect<string, string> status = autocompleteRenderer.Components<FluentSelect<string, string>>()
-            .Single(select => select.Label == "Status");
-        await autocompleteRenderer.Dispatcher.InvokeAsync(() => status.ValueChanged.InvokeAsync("active"));
-        Assert.Equal("active", status.Value);
+        };
+        UsCoreHti2ContentsR4 firstPage;
+        await using (ManagedRenderer firstHti2Renderer = new(services))
+        {
+            await firstHti2Renderer.MountAsync<CandleUiRoot>(hti2Parameters);
+            firstPage = Assert.Single(firstHti2Renderer.Components<UsCoreHti2ContentsR4>());
+            FluentAutocomplete<PatientR4, string> patients =
+                Assert.Single(firstHti2Renderer.Components<FluentAutocomplete<PatientR4, string>>());
+            Assert.False(patients.Multiple);
+            Assert.True(patients.OnOptionsSearch.HasDelegate);
+            Assert.True(patients.SelectedItemsChanged.HasDelegate);
+            OptionsSearchEventArgs<PatientR4> patientSearch = new() { Text = "ALP" };
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => patients.OnOptionsSearch.InvokeAsync(patientSearch));
+            PatientR4 patient = Assert.Single(patientSearch.Items!);
+            Assert.Equal("alpha", patient.Id);
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => patients.SelectedItemsChanged.InvokeAsync([patient]));
+            Assert.Equal("alpha", Assert.Single(patients.SelectedItems).Id);
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => patients.SelectedItemsChanged.InvokeAsync([]));
+            Assert.Empty(patients.SelectedItems);
+            FluentAutocomplete<ParsedSubscription, string> subscriptions =
+                Assert.Single(firstHti2Renderer.Components<FluentAutocomplete<ParsedSubscription, string>>());
+            OptionsSearchEventArgs<ParsedSubscription> subscriptionSearch = new() { Text = "missing" };
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => subscriptions.OnOptionsSearch.InvokeAsync(subscriptionSearch));
+            Assert.Empty(subscriptionSearch.Items!);
+            FluentSelect<string, string> status = firstHti2Renderer.Components<FluentSelect<string, string>>()
+                .Single(select => select.Label == "Status");
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => status.ValueChanged.InvokeAsync("active"));
+            Assert.Equal("active", status.Value);
+        }
+        AssertPatientEventsAfterDisposal(1, firstPage);
+
+        UsCoreHti2ContentsR4 secondPage;
+        await using (ManagedRenderer secondHti2Renderer = new(services))
+        {
+            await secondHti2Renderer.MountAsync<CandleUiRoot>(hti2Parameters);
+            Assert.Single(secondHti2Renderer.Components<FluentAutocomplete<PatientR4, string>>());
+            secondPage = Assert.Single(secondHti2Renderer.Components<UsCoreHti2ContentsR4>());
+            Assert.NotSame(firstPage, secondPage);
+        }
+        AssertPatientEventsAfterDisposal(2, firstPage, secondPage);
+
+        Delegate[] GetPatientEventHandlers(string eventName)
+        {
+            Type publisherType = patientStore.GetType();
+            FieldInfo field = publisherType.GetField(eventName, BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException($"Missing {eventName} backing field on {publisherType}.");
+            Assert.Equal(typeof(EventHandler<StoreInstanceEventArgs>), field.FieldType);
+            object? value = field.GetValue(patientStore);
+            return value is null ? [] : Assert.IsType<EventHandler<StoreInstanceEventArgs>>(value).GetInvocationList();
+        }
+
+        void AssertPatientEventsAfterDisposal(int cycle, params UsCoreHti2ContentsR4[] disposedPages)
+        {
+            Delegate[] createdHandlers = GetPatientEventHandlers(createdEvent);
+            Delegate[] deletedHandlers = GetPatientEventHandlers(deletedEvent);
+            for (int i = 0; i < disposedPages.Length; i++)
+            {
+                UsCoreHti2ContentsR4 page = disposedPages[i];
+                Assert.False(createdHandlers.Any(handler => ReferenceEquals(handler.Target, page)),
+                    $"Cycle {cycle} after disposal: Patient {createdEvent} still targets the HTI-2 page from cycle {i + 1}.");
+                Assert.False(deletedHandlers.Any(handler => ReferenceEquals(handler.Target, page)),
+                    $"Cycle {cycle} after disposal: Patient {deletedEvent} still targets the HTI-2 page from cycle {i + 1}.");
+            }
+            Assert.Equal<Delegate>(createdBaseline, createdHandlers);
+            Assert.Equal<Delegate>(deletedBaseline, deletedHandlers);
+        }
 
         async Task Activate(string id)
         {
-            await EventuallyAsync(renderer, () =>
-                renderer.Components<FluentDataGridRow<InstanceTableRec>>().Any(row => row.Item?.Id == id));
-            await renderer.Dispatcher.InvokeAsync(() => grid.OnRowClick.InvokeAsync(
-                renderer.Components<FluentDataGridRow<InstanceTableRec>>().Single(row => row.Item?.Id == id)));
+            await EventuallyAsync(pickerRenderer, () =>
+                pickerRenderer.Components<FluentDataGridRow<InstanceTableRec>>().Any(row => row.Item?.Id == id));
+            await pickerRenderer.Dispatcher.InvokeAsync(() => grid.OnRowClick.InvokeAsync(
+                pickerRenderer.Components<FluentDataGridRow<InstanceTableRec>>().Single(row => row.Item?.Id == id)));
         }
 
         async Task HeaderPreservesSelection()
         {
-            ResourcePicker picker = Assert.Single(renderer.Components<ResourcePicker>());
+            ResourcePicker picker = Assert.Single(pickerRenderer.Components<ResourcePicker>());
             string[] selected = picker.SelectedIds.Order().ToArray();
             int callbacks = selections.Count;
-            FluentDataGridRow<InstanceTableRec> header = renderer.Components<FluentDataGridRow<InstanceTableRec>>()
+            FluentDataGridRow<InstanceTableRec> header = pickerRenderer.Components<FluentDataGridRow<InstanceTableRec>>()
                 .Single(row => row.RowType == DataGridRowType.Header);
             Assert.Null(header.Item);
             // The real sortable button click bubbles through the real header row's onclick.
-            await renderer.ClickAsync(header, "fluent-button", "title", "Id");
-            string[] firstOrder = renderer.Components<FluentDataGridRow<InstanceTableRec>>()
+            await pickerRenderer.ClickAsync(header, "fluent-button", "title", "Id");
+            string[] firstOrder = pickerRenderer.Components<FluentDataGridRow<InstanceTableRec>>()
                 .Where(row => row.Item is not null).Select(row => row.Item!.Id).ToArray();
             Assert.Equal(selected, picker.SelectedIds.Order().ToArray());
             Assert.Equal(callbacks, selections.Count);
             Assert.NotEmpty(picker.SelectedIds); // The Login consumer's selected-ID availability is retained.
-            await renderer.ClickAsync(header, "fluent-button", "title", "Id");
-            string[] secondOrder = renderer.Components<FluentDataGridRow<InstanceTableRec>>()
+            await pickerRenderer.ClickAsync(header, "fluent-button", "title", "Id");
+            string[] secondOrder = pickerRenderer.Components<FluentDataGridRow<InstanceTableRec>>()
                 .Where(row => row.Item is not null).Select(row => row.Item!.Id).ToArray();
             Assert.Equal(firstOrder.Reverse(), secondOrder);
             Assert.Equal(selected, picker.SelectedIds.Order().ToArray());
