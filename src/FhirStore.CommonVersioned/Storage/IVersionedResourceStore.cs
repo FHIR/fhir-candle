@@ -83,7 +83,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// Performs a type search in this resource store.
     /// </summary>
     /// <param name="parameters">The search parameters.</param>
-    /// <param name="isNestedSearch">If this search has been triggered from inside another search request (for locking)</param>
+    /// <param name="isNestedSearch">Indicates a nested call but does not select different locking or traversal.</param>
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>

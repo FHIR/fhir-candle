@@ -358,18 +358,26 @@ public partial class Sdk6ContractTests
         await Put("Observation/o1", observation.Replace("\"final\"", "\"preliminary\"", StringComparison.Ordinal), HttpStatusCode.OK);
         await Check(finalPath, [], finalCall);
 
-        Assert.Contains(store.GetSearchParameters("Observation"),
-            parameter => parameter.Name == "has-member" && parameter.SearchType == "reference");
+        foreach (string name in new[] { "subject", "patient", "has-member" })
+        {
+            Assert.Contains(store.GetSearchParameters("Observation"),
+                parameter => parameter.Name == name && parameter.SearchType == "reference");
+        }
         await Put("Observation/panel", """
             {"resourceType":"Observation","id":"panel","status":"final","code":{"text":"Panel"},
              "hasMember":[{"reference":"Observation/o1"}]}
             """, HttpStatusCode.Created);
         const string member = "_has:Observation:has-member:_id=";
         const string panelPath = $"Patient?{has}{member}panel";
-        await Check(panelPath, ["Patient/p1"], "Observation?" + member + "panel", "Observation?_id=panel");
+        const string panelCall = "Observation?" + member + "panel";
+        const string panelLeafCall = "Observation?_id=panel";
+        await Check(panelPath, ["Patient/p1"], panelCall, panelLeafCall);
         await Check($"{panelPath}&{has}{member}absent", [],
-            "Observation?" + member + "panel", "Observation?_id=panel",
+            panelCall, panelLeafCall,
             "Observation?" + member + "absent", "Observation?_id=absent");
+        // Distinct outer links must dispatch separate child searches even with identical effective filters.
+        await Check($"{panelPath}&_has:Observation:patient:{member}panel", ["Patient/p1"],
+            panelCall, panelCall, panelLeafCall, panelLeafCall);
 
         // Report every tally discrepancy, but only after the probes have verified their exact results.
         Assert.True(tallyMismatches.Count == 0, string.Join(Environment.NewLine, tallyMismatches));
@@ -415,37 +423,60 @@ public partial class Sdk6ContractTests
     {
         using LifecycleTestStore fixture = new(version);
         fixture.Seed(subscription: false);
-        foreach (string id in new[] { "s1", "s2" })
+        foreach ((string id, string status) in new[] { ("s1", "off"), ("s2", "off"), ("s3", "active") })
         {
-            JsonObject subscription = fixture.SubscriptionJson("off");
+            JsonObject subscription = fixture.SubscriptionJson(status);
             subscription["id"] = id;
             fixture.Put(subscription);
         }
-        fixture.Put(JsonNode.Parse("""
-            {"resourceType":"Provenance","id":"prov","target":[{"reference":"Subscription/s1"}],
-             "recorded":"2025-01-02T03:04:05Z","agent":[{"who":{"reference":"Practitioner/author"}}]}
-            """)!.AsObject());
+        AssertCountedSearchMatches(fixture.Get("Subscription?status=off"), ["Subscription/s1", "Subscription/s2"]);
+        AssertCountedSearchMatches(fixture.Get("Subscription?status=active"), ["Subscription/s3"]);
         Assert.Contains(fixture.Store.GetSearchParameters("Provenance"),
             parameter => parameter.Name == "target" && parameter.SearchType == "reference");
-        AssertCountedSearchMatches(fixture.Get("Subscription?status=off"), ["Subscription/s1", "Subscription/s2"]);
 
-        const string path = "Subscription?status=off&_has:Provenance:target:_id=prov";
-        Dictionary<string, int> calls = new(StringComparer.Ordinal);
-        JsonObject bundle;
-        Action clearObserver = ObserveNestedTypeSearch(fixture.Store, calls);
-        try
+        const string has = "_has:Provenance:target:_id=prov";
+        const string path = $"Subscription?status=off&{has}";
+        JsonObject provenance = JsonNode.Parse("""
+            {"resourceType":"Provenance","id":"prov","target":[{"reference":"Subscription/s1"},{"reference":"Subscription/s3"}],
+             "recorded":"2025-01-02T03:04:05Z","agent":[{"who":{"reference":"Practitioner/author"}}]}
+            """)!.AsObject();
+        PutProvenance(HttpStatusCode.Created);
+        Check(["Subscription/s1"]);
+
+        provenance["target"]![0]!["reference"] = "Subscription/s2";
+        PutProvenance(HttpStatusCode.OK);
+        Check(["Subscription/s2"]);
+
+        AssertCountedSearchMatches(fixture.Get($"Subscription?{has}"), ["Subscription/s2", "Subscription/s3"]);
+
+        void PutProvenance(HttpStatusCode status)
         {
-            bundle = fixture.Get(path);
-        }
-        finally
-        {
-            clearObserver();
+            (bool success, FhirResponseContext response) = fixture.Interact("PUT", "Provenance/prov", provenance);
+            Assert.True(success, response.SerializedOutcome);
+            Assert.Equal(status, response.StatusCode);
         }
 
-        string[] expectedIds = ["Subscription/s1"];
-        string[] actualIds = AssertCountedSearchMatches(bundle, expectedIds);
-        string? mismatch = NestedSearchTallyMismatch(version, path, expectedIds, actualIds, ["Provenance?_id=prov"], calls);
-        Assert.True(mismatch is null, mismatch);
+        void Check(string[] expectedIds)
+        {
+            Dictionary<string, int> calls = new(StringComparer.Ordinal);
+            bool success;
+            FhirResponseContext response;
+            Action clearObserver = ObserveNestedTypeSearch(fixture.Store, calls);
+            try
+            {
+                (success, response) = fixture.Interact("GET", path);
+            }
+            finally
+            {
+                clearObserver();
+            }
+
+            Assert.True(success, response.SerializedOutcome);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            string[] actualIds = AssertCountedSearchMatches(JsonNode.Parse(response.SerializedResource)!.AsObject(), expectedIds);
+            string? mismatch = NestedSearchTallyMismatch(version, path, expectedIds, actualIds, ["Provenance?_id=prov"], calls);
+            Assert.True(mismatch is null, mismatch);
+        }
     }
 
     private static string[] AssertCountedSearchMatches(JsonObject bundle, string[] expectedIds)
@@ -468,7 +499,8 @@ public partial class Sdk6ContractTests
         FhirReleases.FhirSequenceCodes version, string path, string[] expectedIds, string[] actualIds,
         string[] expectedCalls, Dictionary<string, int> calls)
     {
-        (string Signature, int Count)[] expected = expectedCalls.Order(StringComparer.Ordinal).Select(signature => (signature, 1)).ToArray();
+        (string Signature, int Count)[] expected = expectedCalls.GroupBy(signature => signature, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal).Select(group => (group.Key, group.Count())).ToArray();
         (string Signature, int Count)[] actual = calls.OrderBy(call => call.Key, StringComparer.Ordinal).Select(call => (call.Key, call.Value)).ToArray();
         return expected.SequenceEqual(actual)
             ? null

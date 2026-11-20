@@ -1954,7 +1954,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// Performs a type search in this resource store.
     /// </summary>
     /// <param name="parameters">The search parameters.</param>
-    /// <param name="isNestedSearch">If this search has been triggered from inside another search request (for locking)</param>
+    /// <param name="isNestedSearch">Indicates a nested call but does not select different locking or traversal.</param>
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
@@ -1964,13 +1964,10 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         if (typeof(T) == typeof(Subscription))
         {
-            // Normalize and detach before either branch evaluates status filters.
+            // Normalize and detach before evaluating status filters.
             foreach (Subscription resource in _store.SubscriptionResourceSnapshots())
             {
-                bool matches = isNestedSearch
-                    ? _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache)
-                    : _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache);
-                if (matches)
+                if (_searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache))
                 {
                     yield return resource;
                 }
@@ -1985,38 +1982,18 @@ public class ResourceStore<T> : IVersionedResourceStore
             keys = _resourceStore.Keys.ToArray();
         }
 
-        if (isNestedSearch)
+        foreach (string key in keys)
         {
-            foreach (string key in keys)
+            if (!_resourceStore.TryGetValue(key, out T? resource))
             {
-                if (!_resourceStore.TryGetValue(key, out T? resource))
-                {
-                    continue;
-                }
-
-                PocoNode r = resource.ToPocoNode();
-
-                if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
-                {
-                    yield return resource;
-                }
+                continue;
             }
-        }
-        else
-        {
-            foreach (string key in keys)
+
+            PocoNode r = resource.ToPocoNode();
+
+            if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
             {
-                if (!_resourceStore.TryGetValue(key, out T? resource))
-                {
-                    continue;
-                }
-
-                PocoNode r = resource.ToPocoNode();
-
-                if (_searchTester.TestForMatch(r, parameters, reverseChainCache: reverseChainCache))
-                {
-                    yield return resource;
-                }
+                yield return resource;
             }
         }
     }

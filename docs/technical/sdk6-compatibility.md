@@ -175,12 +175,19 @@ the underlying defect**:
   tenant-safe local-reference matching; and existential, filter-distinct
   reverse-chain behavior/cache isolation. These repair existing searches, not
   a new conformance surface.
-- **M10:** default type searches, including Subscription snapshots, run one
-  inner `_has` search per reached key in each enumeration, reusing even empty
-  result arrays. Reference matching still runs for each candidate. Recursive
-  inner searches use separate child enumerations, and new requests start fresh.
-  Direct GET regressions count inner search entries and verify exact Bundle
-  identities across R4, R4B, and R5.
+- **M10:** reached `_has` predicates evaluated with the `TypeSearch`
+  enumeration's dictionary, including in Subscription snapshot searches, reuse
+  the first materialized related-result array per key, even if it is empty.
+  References are checked separately for each candidate. This is not an atomic
+  snapshot across candidates or keys: later candidates reuse that first array,
+  and different keys may first be evaluated at different times. Child
+  `TypeSearch` enumerations apply the same rule with their own dictionaries, and
+  new requests start fresh. Forward-reference recursion through
+  `SearchTester.TestForMatch` does not receive the enumeration's dictionary.
+  Direct GET regressions verify exact Bundle identities and complete inner-search
+  tallies across R4, R4B, and R5, including status exclusion, the first Subscription
+  search after a `Provenance.target` update, and identical filters in separate
+  child enumerations.
 - **U1:** direct compartment tests call the existing `CompartmentSearch` /
   `CompartmentTypeSearch` methods. Generic `PerformInteraction` still has its
   separately tested unsupported boundary; no new generic compartment dispatch
