@@ -26,7 +26,11 @@ names the override.
 Search handling honors the standard `Prefer: handling=strict` /
 `Prefer: handling=lenient` header. An explicit header wins over the tenant
 default, so a strict tenant can still accept a lenient request, and a lenient
-tenant can still serve a strict request, by client choice.
+tenant can still serve a strict request, by client choice. For date searches,
+strict handling reports malformed values. Lenient handling ignores an invalid
+date filter or drops its invalid alternatives while keeping valid ones. Valid
+date precision ranges are compared in UTC, including the first and last
+representable ticks; only a nonempty portion within those bounds is retained.
 
 Strict mode is **not** advertised in `CapabilityStatement` — clients running
 conformance tests should not have to read out-of-band metadata to know the server

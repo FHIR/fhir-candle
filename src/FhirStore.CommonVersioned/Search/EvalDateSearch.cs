@@ -7,7 +7,6 @@ using FhirCandle.Models;
 using Hl7.Fhir.ElementModel;
 using Hl7.Fhir.FhirPath;
 using Hl7.Fhir.Model;
-using System.Globalization;
 using static FhirCandle.Search.SearchDefinitions;
 
 namespace FhirCandle.Search;
@@ -184,7 +183,7 @@ public static class EvalDateSearch
                     // match if the target interval overlaps the expanded search interval.
                     // FHIR R4 leaves the window semantics to the implementation; window sizes
                     // are derived from the granularity of the search string in
-                    // ParsedSearchParameter.TryParseDateString.
+                    // DateSearchLiteral.TryParse.
                     //
                     // ValueDateApproxDeltas is invariably allocated alongside
                     // ValueDateStarts / ValueDateEnds at parse time (see
@@ -197,10 +196,9 @@ public static class EvalDateSearch
                             "ValueDateApproxDeltas length mismatch in EvalDateSearch.Approximately; producer invariant violated.");
                         TimeSpan delta = sp.ValueDateApproxDeltas![i];
 
-                        DateTimeOffset expandedStart = sp.ValueDateStarts[i] - delta;
-                        DateTimeOffset expandedEnd = sp.ValueDateEnds[i] + delta;
+                        DateSearchRange expanded = DateSearchRange.Expand(sp.ValueDateStarts[i], sp.ValueDateEnds[i], delta);
 
-                        if ((valueStart <= expandedEnd) && (valueEnd >= expandedStart))
+                        if ((valueStart <= expanded.End) && (valueEnd >= expanded.Start))
                         {
                             return true;
                         }
