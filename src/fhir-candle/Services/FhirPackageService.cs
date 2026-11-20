@@ -479,6 +479,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
         List<(VersionHandlingTypes Mode, PackageReference Reference)>? directPublished = null)
     {
         List<PackageReference> localPackages = [];
+        HashSet<PackageReference> latestValidated = [];
 
         List<string> directives = packageDirectives?.ToList() ?? new();
         int publishedDirectiveCount = directives.Count;
@@ -517,6 +518,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             bool needsInstall = true;
 
             VersionHandlingTypes vht = GetVersionHandlingType(packageReference.Version);
+            bool isLatest = vht == VersionHandlingTypes.Latest;
 
             // do special handling for versions if necessary
             switch (vht)
@@ -532,7 +534,6 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                         }
 
                         packageReference = pr;
-                        needsInstall = !await _cache.IsInstalled(packageReference);
                     }
                     break;
 
@@ -564,8 +565,18 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 directPublished.Add((vht, packageReference));
             }
 
+            bool processed = _processedMonikers.Contains(packageReference.Moniker);
+            // A deduplicated latest directive can still expose a legacy hit
+            // returned earlier in this batch under the same exact identity.
+            if (isLatest && (!processed ||
+                (!latestValidated.Contains(packageReference) && localPackages.Contains(packageReference))))
+            {
+                needsInstall = !_cache.IsInstalledForLatest(packageReference);
+                latestValidated.Add(packageReference);
+            }
+
             // skip if we have already loaded this package
-            if (_processedMonikers.Contains(packageReference.Moniker))
+            if (processed)
             {
                 _logger.LogInformation($"Skipping already loaded dependency: {packageReference.Moniker}");
                 continue;
@@ -575,11 +586,20 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
             _logger.LogInformation($"Processing {packageReference.Moniker}...");
 
             // check to see if this package needs to be installed
-            if (needsInstall &&
-                (await InstallPackage(packageReference) == false))
+            if (needsInstall)
             {
-                // failed to install
-                throw new Exception($"Failed to install package {packageReference.Moniker} as requested by {inputDirective}");
+                try
+                {
+                    if (!await InstallPackage(packageReference, isLatest))
+                    {
+                        throw new Exception($"Failed to install package {packageReference.Moniker} as requested by {inputDirective}");
+                    }
+                }
+                catch (LatestCacheIdentityException)
+                {
+                    _processedMonikers.Remove(packageReference.Moniker);
+                    throw;
+                }
             }
 
             // add this package
@@ -671,8 +691,9 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
     /// Installs a package.
     /// </summary>
     /// <param name="packageReference">The package reference.</param>
+    /// <param name="isLatest">Whether the version was selected automatically.</param>
     /// <returns>A task representing the asynchronous operation. The task result contains a boolean value indicating whether the package was installed successfully.</returns>
-    private async Task<bool> InstallPackage(PackageReference packageReference)
+    private async Task<bool> InstallPackage(PackageReference packageReference, bool isLatest)
     {
         if (_cache is null)
         {
@@ -716,7 +737,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 await download.Content.CopyToAsync(buffer);
 
                 // try to install this package
-                await _cache.Install(packageReference, buffer.ToArray());
+                await _cache.Install(packageReference, buffer.ToArray(), validateLatestIdentity: isLatest);
 
                 // only need to install from first hit
                 return true;
@@ -726,7 +747,7 @@ public partial class FhirPackageService : IFhirPackageService, IDisposable
                 _logger.LogWarning("Package import limit exceeded: {Code}; configure {Setting}.",
                     exception.ErrorCode, LimitSetting(exception.ErrorCode));
             }
-            catch (Exception)
+            catch (Exception exception) when (exception is not LatestCacheIdentityException)
             {
                 // ignore
             }

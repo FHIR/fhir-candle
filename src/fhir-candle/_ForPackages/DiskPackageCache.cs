@@ -67,11 +67,89 @@ public class DiskPackageCache
     public Task<bool> IsInstalled(PackageReference reference) =>
         Task.FromResult(Directory.Exists(PackageContentFolder(reference)));
 
+    internal bool IsInstalledForLatest(PackageReference reference)
+    {
+        string content = PackageContentFolder(reference);
+        return ValidateLatestIdentity(Path.GetDirectoryName(content)!) && Directory.Exists(content);
+    }
+
+    private static bool ValidateLatestIdentity(string identity)
+    {
+        string key = Path.GetFileName(identity);
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(identity);
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            throw new LatestCacheIdentityException($"Unable to inspect automatic package cache key '{key}' at '{identity}'.", exception);
+        }
+
+        if ((attributes & FileAttributes.Directory) == 0)
+        {
+            throw new LatestCacheIdentityException($"Cannot verify automatic package cache key '{key}': '{identity}' is not a directory.");
+        }
+
+        // A successful path lookup may have used a different spelling. Inspect
+        // the stored leaves rather than inferring a match from the requested path.
+        string? alias = null;
+        bool multipleAliases = false;
+        try
+        {
+            string parent = Path.GetDirectoryName(Path.GetFullPath(identity))!;
+            foreach (string entry in Directory.EnumerateFileSystemEntries(parent, "*",
+                new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 }))
+            {
+                string leaf = Path.GetFileName(entry);
+                if (string.Equals(key, leaf, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+                if (string.Equals(key, leaf, StringComparison.OrdinalIgnoreCase))
+                {
+                    multipleAliases = alias is not null;
+                    alias = leaf;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            throw new LatestCacheIdentityException($"Unable to enumerate the parent of automatic package cache key '{key}' at '{identity}'.", exception);
+        }
+
+        if (alias is null || multipleAliases)
+        {
+            throw new LatestCacheIdentityException($"Cannot verify a unique stored leaf for automatic package cache key '{key}' at '{identity}'.");
+        }
+
+        int versionStart = key.LastIndexOf('#') + 1;
+        if (!key.AsSpan(versionStart).SequenceEqual(alias.AsSpan(versionStart)))
+        {
+            throw new LatestCacheIdentityException(
+                $"Automatic package cache key '{key}' resolves to stored key '{alias}' with a different version spelling. " +
+                "Use a separate cache root or arrange operator-managed relocation of the stored key.");
+        }
+
+        return true;
+    }
+
     /// <summary>Imports with the native installer and publishes the distributed tree at the requested legacy identity.</summary>
     /// <param name="reference">The requested identity, which need not match the concrete manifest version.</param>
     /// <param name="data">The downloaded archive.</param>
     /// <returns>The installation operation.</returns>
-    public async Task Install(PackageReference reference, byte[] data)
+    public Task Install(PackageReference reference, byte[] data) =>
+        Install(reference, data, validateLatestIdentity: false);
+
+    internal async Task Install(PackageReference reference, byte[] data, bool validateLatestIdentity)
     {
         Directory.CreateDirectory(Root);
         string operationRoot = Path.Combine(Root, ".candle-package-import-" + Guid.NewGuid().ToString("N"));
@@ -95,6 +173,10 @@ public class DiskPackageCache
             // journals and locks remain in this operation's disposable cache.
             string content = PackageContentFolder(reference);
             string target = Path.GetDirectoryName(content)!;
+            if (validateLatestIdentity)
+            {
+                ValidateLatestIdentity(target);
+            }
             Directory.CreateDirectory(target);
             if (Directory.Exists(content))
             {
@@ -166,4 +248,9 @@ public class DiskPackageCache
         return Task.CompletedTask;
     }
 
+}
+
+internal sealed class LatestCacheIdentityException(string message, Exception? innerException = null)
+    : IOException(message, innerException)
+{
 }

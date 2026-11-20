@@ -328,6 +328,248 @@ public sealed class Sdk6PackageTests
         await AssertRoutes(registry, routes);
     }
 
+    private const string UpperCacheVersion = "10.0.0+ABC";
+    private const string LowerCacheVersion = "10.0.0+abc";
+    private const string UpperCachePayload = "authored +ABC payload";
+    private const string LowerCachePayload = "authored +abc payload";
+
+    /// <summary>A reordered latest tie must not return another exact version's bytes, even after an explicit cache hit.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CrossRegistryLatestDoesNotReuseCaseAliasedCacheEntry(bool explicitFirst)
+    {
+        const string Name = "example.test.cross-registry.warm-case";
+        const string UpperKey = Name + "#" + UpperCacheVersion;
+        const string LowerKey = Name + "#" + LowerCacheVersion;
+        using LocalPackageFixture files = new();
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        string upperPath = Path.Combine(files.CacheDirectory, UpperKey);
+        string lowerPath = Path.Combine(files.CacheDirectory, LowerKey);
+        string upperManifest = CaseAliasManifest(Name, UpperCacheVersion);
+        string lowerManifest = CaseAliasManifest(Name, LowerCacheVersion);
+        List<LocalHttpFixture.ExpectedRequest> routes =
+        [
+            ExpectCaseAliasListing(registry, "/upper", Name, UpperCacheVersion),
+            ExpectCaseAliasListing(registry, "/lower", Name, LowerCacheVersion),
+            registry.Expect("GET", $"/upper/{Name}/{UpperCacheVersion}", CaseAliasArchive(upperManifest, UpperCachePayload)),
+        ];
+        AssertCacheLeaves(files.CacheDirectory);
+        using (FhirPackageService first = PackageService(files.Configuration(root + "/upper", root + "/lower")))
+        {
+            first.Init();
+            AssertCaseAliasReference(await first.InstallPackages([Name + "@latest"], null, null)
+                .WaitAsync(LocalHttpFixture.Deadline), Name, UpperCacheVersion);
+            await AssertRoutes(registry, routes);
+        }
+
+        bool aliases = Directory.Exists(lowerPath);
+        AssertCacheLeaves(files.CacheDirectory, UpperKey);
+        AssertCaseAliasContents(upperPath, upperManifest, UpperCachePayload);
+        _output.WriteLine($"M2 warm explicitFirst={explicitFirst}: alias={aliases}; only literal key is {UpperKey}.");
+
+        if (!aliases && explicitFirst)
+        {
+            routes.Add(registry.Expect("GET", $"/lower/{Name}/{LowerCacheVersion}", CaseAliasArchive(lowerManifest, LowerCachePayload)));
+        }
+        routes.Add(ExpectCaseAliasListing(registry, "/lower", Name, LowerCacheVersion));
+        routes.Add(ExpectCaseAliasListing(registry, "/upper", Name, UpperCacheVersion));
+        if (!aliases && !explicitFirst)
+        {
+            routes.Add(registry.Expect("GET", $"/lower/{Name}/{LowerCacheVersion}", CaseAliasArchive(lowerManifest, LowerCachePayload)));
+        }
+        using (FhirPackageService reversed = PackageService(files.Configuration(root + "/lower", root + "/upper")))
+        {
+            reversed.Init();
+            string[] directives = explicitFirst ? [Name + "@" + LowerCacheVersion, Name + "@latest"] : [Name + "@latest"];
+            List<PackageReference>? installed = null;
+            Exception? error = await Record.ExceptionAsync(async () =>
+            {
+                installed = await reversed.InstallPackages(directives, null, null).WaitAsync(LocalHttpFixture.Deadline);
+            });
+            await AssertRoutes(registry, routes);
+            AssertCaseAliasContents(upperPath, upperManifest, UpperCachePayload);
+            if (aliases)
+            {
+                AssertCacheLeaves(files.CacheDirectory, UpperKey);
+                if (error is null)
+                {
+                    AssertCaseAliasReference(installed!, Name, LowerCacheVersion);
+                    AssertCaseAliasContents(lowerPath, upperManifest, UpperCachePayload);
+                    Assert.Fail($"M2 stale cache: returned literal {LowerCacheVersion} with stale {UpperCacheVersion} bytes after exactly two reversed listings and no archive GET (explicitFirst={explicitFirst}, alias={aliases}).");
+                }
+                AssertCaseAliasRefusal(error, LowerKey, UpperKey);
+                Assert.Null(installed);
+            }
+            else
+            {
+                Assert.Null(error);
+                AssertCaseAliasReference(installed!, Name, LowerCacheVersion);
+                AssertCacheLeaves(files.CacheDirectory, UpperKey, LowerKey);
+                AssertCaseAliasContents(lowerPath, lowerManifest, LowerCachePayload);
+            }
+        }
+
+        string warmVersion = aliases ? UpperCacheVersion : LowerCacheVersion;
+        string warmEndpoint = aliases ? "/upper" : "/lower";
+        string otherVersion = aliases ? LowerCacheVersion : UpperCacheVersion;
+        string otherEndpoint = aliases ? "/lower" : "/upper";
+        routes.Add(ExpectCaseAliasListing(registry, warmEndpoint, Name, warmVersion));
+        routes.Add(ExpectCaseAliasListing(registry, otherEndpoint, Name, otherVersion));
+        using FhirPackageService warm = PackageService(files.Configuration(root + warmEndpoint, root + otherEndpoint));
+        warm.Init();
+        AssertCaseAliasReference(await warm.InstallPackages([Name + "@latest"], null, null)
+            .WaitAsync(LocalHttpFixture.Deadline), Name, warmVersion);
+        await AssertRoutes(registry, routes);
+        AssertCacheLeaves(files.CacheDirectory, aliases ? [UpperKey] : [UpperKey, LowerKey]);
+        AssertCaseAliasContents(upperPath, upperManifest, UpperCachePayload);
+        if (!aliases)
+        {
+            AssertCaseAliasContents(lowerPath, lowerManifest, LowerCachePayload);
+        }
+    }
+
+    /// <summary>An empty identity or one created during acquisition must not receive another version's files.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CrossRegistryLatestProtectsCaseAliasBeforePromotion(bool inFlight)
+    {
+        const string Name = "example.test.cross-registry.promotion-case";
+        const string UpperKey = Name + "#" + UpperCacheVersion;
+        const string LowerKey = Name + "#" + LowerCacheVersion;
+        using LocalPackageFixture files = new();
+        string upperPath = Path.Combine(files.CacheDirectory, UpperKey);
+        string lowerPath = Path.Combine(files.CacheDirectory, LowerKey);
+        string upperManifest = CaseAliasManifest(Name, UpperCacheVersion);
+        string lowerManifest = CaseAliasManifest(Name, LowerCacheVersion);
+
+        string probe = Path.Combine(files.CacheDirectory, "case-Probe");
+        Directory.CreateDirectory(probe);
+        bool aliases = Directory.Exists(Path.Combine(files.CacheDirectory, "case-probe"));
+        AssertCacheLeaves(files.CacheDirectory, "case-Probe");
+        Directory.Delete(probe);
+        AssertCacheLeaves(files.CacheDirectory);
+        _output.WriteLine($"M2 guard inFlight={inFlight}: sibling probe alias={aliases}.");
+
+        if (!inFlight)
+        {
+            Directory.CreateDirectory(upperPath);
+            AssertCacheLeaves(files.CacheDirectory, UpperKey);
+            AssertCacheLeaves(upperPath);
+            Assert.Equal(aliases, Directory.Exists(lowerPath));
+            Assert.False(Directory.Exists(Path.Combine(lowerPath, "package")));
+        }
+
+        await using LocalHttpFixture registry = await LocalHttpFixture.StartAsync();
+        string root = registry.Address.AbsoluteUri.TrimEnd('/');
+        List<LocalHttpFixture.ExpectedRequest> routes =
+        [
+            ExpectCaseAliasListing(registry, "/lower", Name, LowerCacheVersion),
+            ExpectCaseAliasListing(registry, "/upper", Name, UpperCacheVersion),
+        ];
+        if (!aliases || inFlight)
+        {
+            routes.Add(registry.Expect("GET", $"/lower/{Name}/{LowerCacheVersion}", (_, _) =>
+            {
+                if (inFlight)
+                {
+                    AssertCacheLeaves(files.CacheDirectory);
+                    string content = Path.Combine(upperPath, "package");
+                    Directory.CreateDirectory(content);
+                    File.WriteAllBytes(Path.Combine(content, "package.json"), Encoding.UTF8.GetBytes(upperManifest));
+                    File.WriteAllBytes(Path.Combine(content, "payload.txt"), Encoding.UTF8.GetBytes(UpperCachePayload));
+                    AssertCacheLeaves(files.CacheDirectory, UpperKey);
+                    Assert.Equal(aliases, Directory.Exists(lowerPath));
+                }
+                return Task.FromResult(CaseAliasArchive(lowerManifest, LowerCachePayload));
+            }));
+        }
+        using FhirPackageService service = PackageService(files.Configuration(root + "/lower", root + "/upper"));
+        service.Init();
+        List<PackageReference>? installed = null;
+        Exception? error = await Record.ExceptionAsync(async () =>
+        {
+            installed = await service.InstallPackages([Name + "@latest"], null, null).WaitAsync(LocalHttpFixture.Deadline);
+        });
+        await AssertRoutes(registry, routes);
+        AssertCacheLeaves(files.CacheDirectory, aliases ? [UpperKey] : [UpperKey, LowerKey]);
+        if (inFlight)
+        {
+            AssertCaseAliasContents(upperPath, upperManifest, UpperCachePayload);
+        }
+        else
+        {
+            AssertCacheLeaves(upperPath);
+        }
+
+        if (!aliases)
+        {
+            Assert.Null(error);
+            AssertCaseAliasReference(installed!, Name, LowerCacheVersion);
+            AssertCaseAliasContents(lowerPath, lowerManifest, LowerCachePayload);
+        }
+        else
+        {
+            AssertCaseAliasRefusal(error, LowerKey, UpperKey);
+            Assert.Null(installed);
+            if (inFlight)
+            {
+                routes.Add(ExpectCaseAliasListing(registry, "/lower", Name, LowerCacheVersion));
+                routes.Add(ExpectCaseAliasListing(registry, "/upper", Name, UpperCacheVersion));
+                Exception? retryError = await Record.ExceptionAsync(() =>
+                    service.InstallPackages([Name + "@latest"], null, null).WaitAsync(LocalHttpFixture.Deadline));
+                await AssertRoutes(registry, routes);
+                AssertCaseAliasRefusal(retryError, LowerKey, UpperKey);
+                AssertCacheLeaves(files.CacheDirectory, UpperKey);
+                AssertCaseAliasContents(upperPath, upperManifest, UpperCachePayload);
+            }
+        }
+    }
+
+    private static LocalHttpFixture.ExpectedRequest ExpectCaseAliasListing(
+        LocalHttpFixture registry, string endpoint, string name, string version) =>
+        registry.Expect("GET", endpoint + "/" + name, LocalHttpFixture.RawResponse.Text(
+            HttpStatusCode.OK, "application/json", RegistryListing(name, version)));
+
+    private static string CaseAliasManifest(string name, string version) =>
+        $$$"""{"name":"{{{name}}}","version":"{{{version}}}","fhirVersions":["5.0.0"]}""";
+
+    private static LocalHttpFixture.RawResponse CaseAliasArchive(string manifest, string payload) =>
+        new(HttpStatusCode.OK, "application/octet-stream", LocalPackageFixture.Archive(manifest,
+            new Dictionary<string, string> { ["payload.txt"] = payload }));
+
+    private static void AssertCaseAliasReference(List<PackageReference> installed, string name, string version)
+    {
+        PackageReference resolved = Assert.Single(installed);
+        Assert.Equal(name, resolved.Name);
+        Assert.Equal(version, resolved.Version);
+        Assert.Null(resolved.Scope);
+    }
+
+    private static void AssertCaseAliasRefusal(Exception? error, string requestedKey, string storedKey)
+    {
+        IOException refusal = Assert.IsAssignableFrom<IOException>(error);
+        Assert.Contains(requestedKey, refusal.Message);
+        Assert.Contains(storedKey, refusal.Message);
+        Assert.Contains("separate cache root", refusal.Message);
+        Assert.Contains("relocation", refusal.Message);
+    }
+
+    private static void AssertCacheLeaves(string directory, params string[] expected) =>
+        Assert.Equal(expected.Order(StringComparer.Ordinal),
+            Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+
+    private static void AssertCaseAliasContents(string identity, string manifest, string payload)
+    {
+        AssertCacheLeaves(identity, "package");
+        string content = Path.Combine(identity, "package");
+        AssertCacheLeaves(content, "package.json", "payload.txt");
+        Assert.Equal(Encoding.UTF8.GetBytes(manifest), File.ReadAllBytes(Path.Combine(content, "package.json")));
+        Assert.Equal(Encoding.UTF8.GetBytes(payload), File.ReadAllBytes(Path.Combine(content, "payload.txt")));
+    }
+
     private static void AssertLatestInstallation(LocalPackageFixture files, PackageReference resolved, string name, string expectedVersion)
     {
         Assert.Equal(name, resolved.Name);
