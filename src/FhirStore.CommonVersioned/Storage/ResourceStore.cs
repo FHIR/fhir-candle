@@ -458,18 +458,51 @@ public class ResourceStore<T> : IVersionedResourceStore
     public Subscription? ReadRawSubscription(string id) =>
         _resourceStore.TryGetValue(id, out T? resource) ? resource as Subscription : null;
 
-    /// <summary>Interface for has identifier.</summary>
-    internal interface IHasIdentifier
-    {
-        List<Hl7.Fhir.Model.Identifier> Identifier { get; }
-    }
-
     /// <summary>Gets identifier key.</summary>
     /// <param name="id">[out] The identifier.</param>
     /// <returns>The identifier key.</returns>
     internal string GetIdentifierKey(Hl7.Fhir.Model.Identifier id)
     {
         return $"{id.System}|{id.Value}";
+    }
+
+    /// <summary>Gets the SDK list or scalar identifier keys without changing their representation.</summary>
+    private HashSet<string> GetIdentifierKeys(Resource? resource)
+    {
+        HashSet<string> keys = new(StringComparer.Ordinal);
+        if (resource is IIdentifiable<List<Identifier>> list && list.Identifier is not null)
+        {
+            foreach (Identifier identifier in list.Identifier)
+            {
+                if (identifier is not null)
+                {
+                    keys.Add(GetIdentifierKey(identifier));
+                }
+            }
+        }
+        else if (resource is IIdentifiable<Identifier> scalar && scalar.Identifier is not null)
+        {
+            keys.Add(GetIdentifierKey(scalar.Identifier));
+        }
+        return keys;
+    }
+
+    /// <summary>Reconciles ownership after a successful write. All identifier writers must hold _lockObject.</summary>
+    private void ReconcileIdentifierKeysLocked(string resourceId, HashSet<string> previousKeys, HashSet<string> currentKeys)
+    {
+        foreach (string key in previousKeys)
+        {
+            if (!currentKeys.Contains(key) &&
+                _identifierToId.TryGetValue(key, out string? owner) &&
+                string.Equals(owner, resourceId, StringComparison.Ordinal))
+            {
+                _ = _identifierToId.TryRemove(key, out _);
+            }
+        }
+        foreach (string key in currentKeys)
+        {
+            _ = _identifierToId.TryAdd(key, resourceId);
+        }
     }
 
     /// <summary>Attempts to resolve identifier.</summary>
@@ -684,6 +717,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 }
                 source.Meta.VersionId = "1";
                 source.Meta.LastUpdated = DateTimeOffset.UtcNow;
+                HashSet<string> currentIdentifierKeys = GetIdentifierKeys(source);
 
                 if (!_resourceStore.TryAdd(source.Id, (T)source))
                 {
@@ -697,6 +731,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 {
                     _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
                 }
+                ReconcileIdentifierKeysLocked(source.Id, GetIdentifierKeys(null), currentIdentifierKeys);
             }
             finally
             {
@@ -716,24 +751,6 @@ public class ResourceStore<T> : IVersionedResourceStore
             if (!string.IsNullOrEmpty(cr.Url))
             {
                 _ = _conformanceUrlToId.TryAdd(cr.Url, source.Id);
-            }
-        }
-
-        if (source is IIdentifiable<List<Identifier>> sil)
-        {
-            foreach (Identifier i in sil.Identifier)
-            {
-                if (sil.Identifier is not null)
-                {
-                    _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
-                }
-            }
-        }
-        else if (source is IIdentifiable<Identifier> si)
-        {
-            if (si.Identifier is not null)
-            {
-                _ = _identifierToId.TryAdd(GetIdentifierKey(si.Identifier), source.Id);
             }
         }
 
@@ -942,6 +959,8 @@ public class ResourceStore<T> : IVersionedResourceStore
                     _store.ValidateSubscriptionCommitLocked();
                 }
                 source.Meta.LastUpdated = DateTimeOffset.UtcNow;
+                HashSet<string> previousIdentifierKeys = GetIdentifierKeys(previous);
+                HashSet<string> currentIdentifierKeys = GetIdentifierKeys(source);
 
                 // store
                 _resourceStore[source.Id] = (T)source;
@@ -949,6 +968,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                 {
                     _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
                 }
+                ReconcileIdentifierKeysLocked(source.Id, previousIdentifierKeys, currentIdentifierKeys);
             }
             finally
             {
@@ -976,22 +996,6 @@ public class ResourceStore<T> : IVersionedResourceStore
             if (!string.IsNullOrEmpty(cr.Url))
             {
                 _ = _conformanceUrlToId.TryAdd(cr.Url, source.Id);
-            }
-        }
-
-        if (source is IHasIdentifier hasId)
-        {
-            if (previous is IHasIdentifier pId)
-            {
-                foreach (Identifier i in pId.Identifier)
-                {
-                    _ = _identifierToId.TryRemove(GetIdentifierKey(i), out _);
-                }
-            }
-
-            foreach (Identifier i in hasId.Identifier)
-            {
-                _ = _identifierToId.TryAdd(GetIdentifierKey(i), source.Id);
             }
         }
 
@@ -1081,6 +1085,10 @@ public class ResourceStore<T> : IVersionedResourceStore
                         _store.CommitSubscriptionLocked(subscription, null, true, subscriptionChanges, subscriptionDiagnostics);
                     }
                 }
+                if (previous is not null)
+                {
+                    ReconcileIdentifierKeysLocked(id, GetIdentifierKeys(previous), GetIdentifierKeys(null));
+                }
             }
             finally
             {
@@ -1105,14 +1113,6 @@ public class ResourceStore<T> : IVersionedResourceStore
             if (!string.IsNullOrEmpty(pcr.Url))
             {
                 _ = _conformanceUrlToId.TryRemove(pcr.Url, out _);
-            }
-        }
-
-        if (previous is IHasIdentifier pId)
-        {
-            foreach (Identifier i in pId.Identifier)
-            {
-                _ = _identifierToId.TryRemove(GetIdentifierKey(i), out _);
             }
         }
 

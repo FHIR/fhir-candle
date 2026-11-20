@@ -109,8 +109,8 @@ public class BundleAuthorizationTests
 
                 JsonObject stale = Entry("stale", "PUT", "Patient/conditional", Patient("conditional", "MustNotPersist"));
                 stale["request"]!["ifMatch"] = "W/\"1\"";
-                // Failed updates retain the executor's existing 500 envelope.
-                AssertStatus(ResponseEntry(SendBundle(store, Bundle(kind, stale), authorization), 0), 500);
+                // Stale updates retain M3's classified 412 precondition response.
+                AssertStatus(ResponseEntry(SendBundle(store, Bundle(kind, stale), authorization), 0), 412);
                 Assert.Equal("Updated", Stored(store, "Patient", "conditional")["name"]![0]!["family"]!.GetValue<string>());
                 Assert.Equal("2", Stored(store, "Patient", "conditional")["meta"]!["versionId"]!.GetValue<string>());
 

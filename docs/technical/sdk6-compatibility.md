@@ -1201,3 +1201,173 @@ qualification, Linux/macOS, live/operator caches and registries, browser/RI,
 and precompiled CLR/ABI limitations remain; these Windows synthetic tests do
 not establish those claims. The existing source-rebinding requirement and
 historical prefix/platform records above are preserved.
+
+## Original-review M4 identifier mutation ownership (2026-11-19)
+
+This bounded addition addresses **original-review M4**, not the historical
+migration phase-4 labels or unrelated package-remediation findings above.
+It preserves completed H1/H2/M1/M2/M3 contracts and does not qualify the
+remaining migration/platform/browser gates.
+
+### Successful-write ownership before publication
+
+The shared `ResourceStore<T>` extracts ordinal key sets from Firely's
+`IIdentifiable<List<Identifier>>` and `IIdentifiable<Identifier>` SDK shapes.
+Null/absent identifiers and empty lists contribute no keys. The existing
+`GetIdentifierKey` representation remains exactly `system|value`, without
+normalization, validation or filtering of empty components; duplicate keys
+coalesce locally.
+
+All three successful CRUD paths reconcile ownership inside the existing
+resource writer lock, after primary assignment/removal and subscription commit
+work, but **before publication or instance callbacks**. Update uses the actual
+in-lock previous resource and runs only after precondition checks; delete uses
+the resource actually removed. Departed keys (old minus current) are removed
+only when their current mapped ID still equals the mutated resource ID.
+Retained keys and another resource's live mapping are not evicted. Current keys
+use insertion-only `TryAdd`: owner removal does not scan/promote surviving
+duplicates, although an explicit later successful write can claim an unowned
+key.
+
+This replaces the dead local-interface checks and post-callback identifier
+maintenance. Resource-then-subscription lock order and release, publication,
+event order/count, evaluators and exception/response behavior remain unchanged;
+no observer or evaluator moved into the writer lock. There is no resolver,
+search, terminology, duplicate-policy or production M3 repair.
+
+The guarantee is for successful quiescent writes and index state committed
+before publication, not an atomic lock-free reader snapshot. Readers racing an
+in-flight write retain the existing concurrency envelope; a callback can see a
+later writer's content. Synchronous reentrancy cannot replay an outer write's
+obsolete key tail. Key-set work is O(identifier count), with per-mutation
+allocations and no resource-count scan; no performance benchmark was run.
+Already populated stale maps are not rebuilt retrospectively: use fresh or
+reloaded in-memory tenants. No persistence migration, rollback-on-callback
+exception or automatic duplicate promotion is promised.
+
+### Independent lifecycle and ordering proof
+
+The [corpus inventory](../../src/fhir-candle.Tests/data/sdk6-compatibility/README.md#original-review-m4-identifier-mutation-inventory-2026-11-19)
+documents **144 authored lifecycle rows**: `replace`, `put-create`,
+`delete-reuse`, `non-owner-update`, `non-owner-delete`, and `remove` across
+Patient/Observation list and collection Bundle/Provenance scalar shapes,
+R4/R4B/R5, JSON/XML, and HTTP/direct. Six direct reentrant rows and one
+Cartesian inventory fact bring the authored focused inventory to 151, not
+proof of execution by themselves.
+
+Primary mutation subjects are explicitly POST-created with initial ordinary
+read/include proof and generated-ID capture; collection Bundles use the
+resource-type endpoint. Only the explicit missing-ID PUT-as-create case uses
+PUT for creation. Same-ID sibling setup uses the existing direct ingest
+override, not an HTTP feature. Independently authored JSON/XML and the BCL
+oracle retain complete submitted content and locally bound ID/version/time,
+with stable identity, progressing versions, reused timestamps and matching
+headers. GET/form POST searches check exact membership/modes, fullUrls, self
+URLs and deduplication.
+
+Controls cover retained identifiers, unchanged keys, destination collisions,
+non-owner writes/deletes, no promotion and later explicit reclamation,
+same-ID/key sibling isolation, literal references, untyped fallback, ordinary
+identifier/reference-identifier search and empty key components. Deletion
+alone can hide stale keys because lookup also requires a live resource;
+different-generated-ID reuse proves cleanup. Stale If-Match must leave the
+old content/version/ownership intact. Explicit JSON `identifier: []` remains
+a 422/structure negative control; successful clearing uses omission with
+independently authored XML absence expectations, not empty/missing
+normalization.
+
+Direct callbacks prove A→B→C ordering: the outer callback sees only B/version
+2 before synchronously writing C/version 3, with exactly two update
+notifications and one nested write. The outer response may still describe
+B/version 2 while a later read observes C/version 3. A subsequent throwing
+C→D callback preserves the exact direct exception; an ordinary read then binds
+committed D/version 4 and only D includes the target. No successful response is
+fabricated after that exception.
+
+### Narrow dependent M3 expectation synchronization
+
+The stale-If-Match assertion and adjacent comment in
+`BundleAuthorizationTests.AuthorizedConditionalAndHeaderSemanticsRemainStable`
+now require exact **412 PreconditionFailed**, not obsolete 500. The preexisting
+resource-store rejection precedes assignment; committed M3 forwards that
+classified status/outcome and both bundle failure branches retain it. The old
+expectation predates M3. The exact status helper, `MustNotPersist` request,
+stored `Updated` family/version 2, both bundle kinds, authorization/null cases,
+all versions and every unrelated 500 expectation are preserved.
+
+This is dependent-test consistency, not a new production response contract or
+an observed response used as its own oracle. Attempt 1's focused gates passed
+151/151 on both TFMs, but its net11.0 protection union executed 1,558, passed
+1,555 and failed only the three R4/R4B/R5 occurrences at that stale assertion.
+**No pre-repair protection-union run exists**; the earlier result is not an
+old-baseline runtime reproduction. Those failures remain history; the fresh
+green results below qualify the amended tree before commit.
+
+### Actual resumed verification
+
+Environment: **SDK 11.0.100**, **Windows 10.0.26300 win-x64**; **net11.0 /
+.NET 11.0.0** and **net10.0 / .NET 10.0.15**, with **Firely 6.9.0** in all
+three product libraries. This identifies this M4 run without rewriting older
+dependency prose. Canonical root `AGENTS.md` and the owning phase plan supplied
+these exact commands, run from the repository root in this order:
+
+```powershell
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.IdentifierMutation"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~fhir.candle.Tests.Sdk6ContractTests.IdentifierMutation"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net11.0 --no-restore --verbosity normal --filter "FullyQualifiedName~Sdk6ContractTests.IdentifierMutation|FullyQualifiedName~Sdk6ContractTests.ReferenceChainsAndIncludesStayTenantLocal|FullyQualifiedName~Sdk6ContractTests.IncludedFullUrlsIdentifyReturnedResources|FullyQualifiedName~Sdk6ContractTests.LocalReferenceEquivalenceRejectsForeignBases|FullyQualifiedName~Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~Sdk6ContractTests.UpdateRejection|FullyQualifiedName~Sdk6ContractTests.SubscriptionEvents|FullyQualifiedName~fhir.candle.Tests.SubscriptionLifecycle|FullyQualifiedName~fhir.candle.Tests.SubscriptionNotificationLifecycleTests|FullyQualifiedName~BundleAuthorization"
+dotnet test src\fhir-candle.Tests\fhir-candle.Tests.csproj --configuration Release --framework net10.0 --no-restore --verbosity normal --filter "FullyQualifiedName~Sdk6ContractTests.IdentifierMutation|FullyQualifiedName~Sdk6ContractTests.ReferenceChainsAndIncludesStayTenantLocal|FullyQualifiedName~Sdk6ContractTests.IncludedFullUrlsIdentifyReturnedResources|FullyQualifiedName~Sdk6ContractTests.LocalReferenceEquivalenceRejectsForeignBases|FullyQualifiedName~Sdk6ContractTests.SearchFamiliesReturnExpectedIds|FullyQualifiedName~Sdk6ContractTests.UpdateRejection|FullyQualifiedName~Sdk6ContractTests.SubscriptionEvents|FullyQualifiedName~fhir.candle.Tests.SubscriptionLifecycle|FullyQualifiedName~fhir.candle.Tests.SubscriptionNotificationLifecycleTests|FullyQualifiedName~BundleAuthorization"
+```
+
+| Command | Exit | Executed | Passed | Failed | Skipped | Compiler/analyzer warnings / errors |
+|---|---:|---:|---:|---:|---:|---:|
+| Focused net11.0 | 0 | 151 | 151 | 0 | 0 | 0 / 0 |
+| Focused net10.0 | 0 | 151 | 151 | 0 | 0 | 0 / 0 |
+| Protection union net11.0 | 0 | 1,558 | 1,558 | 0 | 0 | 0 / 0 |
+| Protection union net10.0 | 0 | 1,558 | 1,558 | 0 | 0 | 0 / 0 |
+
+Normal compilation remained enabled, building the test project and all three
+shared-source store imports. No restore/install, logger switch, filter
+exclusion or assertion relaxation was added. Output was summarized in memory,
+not saved as new result files. The unions emitted the negative notification
+controls' invalid-URI, rejected SMTP authentication and REST
+InternalServerError diagnostics; these were not compiler errors or failed
+tests.
+
+Each focused run discovered **144 lifecycle + six reentrant + one fact**,
+with 50 theory rows per product version, 78 direct/72 HTTP and 75 JSON/75 XML.
+Every required protection family had nonzero observed discovery on **each**
+TFM; the counts below were identical between the two unions:
+
+| Required family | Executed and passed per TFM |
+|---|---:|
+| `IdentifierMutation*` | 151 |
+| `ReferenceChainsAndIncludesStayTenantLocal` | 72 |
+| `IncludedFullUrlsIdentifyReturnedResources` | 36 |
+| `LocalReferenceEquivalenceRejectsForeignBases` | 168 |
+| `SearchFamiliesReturnExpectedIds` | 96 |
+| `UpdateRejection*` | 64 |
+| `SubscriptionEvents*` | 483 |
+| `SubscriptionLifecycleTests` | 49 |
+| `SubscriptionLifecyclePolicyTests` | 6 |
+| `SubscriptionNotificationLifecycleTests` | 97 |
+| `BundleAuthorizationTests` | 273 |
+| `Controllers.BundleAuthorizationRoutingTests` | 63 |
+
+Version-labeled union results were **R4 510, R4B 518, R5 518**, plus twelve
+unversioned facts. The corrected bundle theory passed all three version rows,
+retaining its twelve internal version/kind/authorization combinations.
+H2's 483 top-level results comprise 72 replay, 120 empty-range, 144
+defaults/aliases/body-precedence, 120 negative-bound and 24 legacy-fallback
+rows, plus two isolation facts and one inventory fact. The passing isolation
+facts require **240 internal extreme rows** and **96 internal concurrency
+rows** (72 gated conversions and 24 four-pair rendezvous rows). Their existing
+owned deadline-bounded child mechanism verifies exactly one intended
+executed/passed child test per fact; these internal inventories are not extra
+top-level result rows. Normal console verbosity did not expose successful
+child inventory text.
+
+All four results precede this documentation-only append. They are **not a
+post-commit final gate**, phase completion, a full-suite rerun, other-OS or
+browser evidence, live-provider qualification, or migration-wide acceptance.
+The parent retains integration, commit identity checks and post-commit final
+verification. No M5 or unrelated acceptance claim is included.

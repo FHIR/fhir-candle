@@ -1434,3 +1434,93 @@ replace the remaining matrix/browser gates, final-tree verification, or
 conductor-managed review. See the updated
 [compatibility evidence](../../../../docs/technical/sdk6-compatibility.md)
 for separate OS/framework cells and browser prerequisites.
+
+## Original-review M4 identifier mutation inventory (2026-11-19)
+
+This additive inventory concerns **original-review M4 (identifier mutation
+ownership)**, not the historical migration phase-4 labels above.
+`Sdk6ContractTests.IdentifierMutations.cs` contains independently authored
+synthetic JSON and XML; the existing BCL `WireContractAssertions` oracle and
+search assertions compare submitted expectations, not captured SDK output or
+expected-side Firely models/parsers.
+
+| Test / cases | Authored matrix | Contract and provenance |
+|---|---|---|
+| `IdentifierMutationLifecyclePreservesLogicalIncludes` | **144 rows**: six kinds × two shapes × R4/R4B/R5 × JSON/XML × HTTP/direct | Kinds are `replace`, `put-create`, `delete-reuse`, `non-owner-update`, `non-owner-delete`, and `remove`. List identifiers use Patient with identifier-only Observation.subject; scalar identifiers use an ordinary collection Bundle with identifier-only Provenance.target. Logical edges contain no literal reference. |
+| `IdentifierMutationReentrantWriteCommitsLatestKeysBeforePublication` | **Six direct rows**: R4/R4B/R5 × JSON/XML | A synchronous one-shot callback observes A departed/B current at version 2, then completes B→C; the final read/include requires only C/version 3. A separately attached throwing C→D callback preserves exception identity while a subsequent ordinary read binds D/version 4 and only D resolves. The outer response remains B/version 2; no response is fabricated after the exception. |
+| `IdentifierMutationTheoryDataIsNonEmptyAndLabeled` | **One inventory fact** | Requires unique labels and every Cartesian lifecycle/shape/version/boundary/format combination, plus all six direct reentrant combinations. Counts describe authored coverage, not results by themselves. |
+
+Each lifecycle row starts fresh with empty seeds and explicitly **POSTs** the
+primary target and referrers, captures generated IDs, and verifies ordinary
+read-back and initial inclusion. Collection Bundles are POSTed to the `Bundle`
+resource endpoint, not the system batch/transaction endpoint. Provenance has
+independently authored recorded/agent content. Only `put-create` uses a known
+missing target ID and PUT-as-create (201/version 1); it never seeds that target
+first. Only the same-ID sibling setup uses the existing direct explicit-ID
+create override, not a claimed HTTP feature.
+
+Expected graph content changes only after successful writes. Generated
+ID/version/time bindings require stable identity, version progression and
+nondecreasing time; repeated reads/includes reuse exact bindings and check
+header relationships. GET and form POST include probes assert exact matches,
+includes, modes, self/full URLs, duplicate-free identities and complete content,
+not merely counts. Two logical matches must deduplicate their included target.
+
+Controls retain a second list identifier, unchanged-key ownership, destination
+collisions, non-owner update/delete, no automatic duplicate promotion, and an
+explicit later write claiming an unowned key. Literal inclusion, type-omitted
+logical fallback, ordinary identifier and reference-identifier search, empty
+system/value components, and unchanged same-ID/key sibling content remain
+checked. A stale-If-Match identifier change must retain 412 and the old
+content/version/inclusion before the accepted replacement. Deletion alone can
+mask a stale key because resolution also requires a stored resource: the
+delete/reuse case therefore POSTs a different generated ID with the old key and
+requires inclusion of only that new resource.
+
+Explicit JSON `identifier: []` is a **422/structure negative control** with
+unchanged stored content; the parser diagnostic includes “An array needs to
+have at least one element.” Successful list/scalar clearing uses omission,
+with separately authored XML absence expectations. There is no global
+empty-array/missing normalization.
+
+### Observed resumed M4 gates
+
+On Windows **10.0.26300 win-x64**, SDK **11.0.100**, Firely **6.9.0**, the
+four exact commands reproduced in the
+[M4 technical evidence](../../../../docs/technical/sdk6-compatibility.md#original-review-m4-identifier-mutation-ownership-2026-11-19)
+ran in order with Release compilation and `--no-restore --verbosity normal`:
+
+| Gate | TFM / runtime | Exit | Executed / passed / failed / skipped |
+|---|---|---:|---|
+| M4 focused | net11.0 / 11.0.0 | 0 | **151 / 151 / 0 / 0** |
+| M4 focused | net10.0 / 10.0.15 | 0 | **151 / 151 / 0 / 0** |
+| Complete M4/H1/H2/M1/M2/M3 protection union | net11.0 / 11.0.0 | 0 | **1,558 / 1,558 / 0 / 0** |
+| Same complete protection union | net10.0 / 10.0.15 | 0 | **1,558 / 1,558 / 0 / 0** |
+
+Every command reported **zero compiler/analyzer warnings and errors**; no
+restore/install was needed. Each focused run discovered 144 lifecycle rows,
+six reentrant rows and the fact: 50 theory rows per version, 78 direct/72 HTTP,
+75 JSON/75 XML. Each union discovered every required family, including both
+direct and controller bundle authorization; its version-labeled rows were
+R4 510, R4B 518 and R5 518. H2 contributed 483 top-level results; its passing
+isolated facts additionally require 240 extreme rows and 96 concurrency rows
+(72 gated conversions, 24 four-pair rendezvous rows), not extra discovery rows.
+Normal console verbosity did not print the successful child inventory text.
+Negative notification controls emitted invalid-URI, rejected SMTP
+authentication and REST InternalServerError diagnostics while passing.
+
+The only dependent existing-test correction changes the stale-If-Match
+expectation/comment in
+`BundleAuthorizationTests.AuthorizedConditionalAndHeaderSemanticsRemainStable`
+from obsolete 500 to exact `412 PreconditionFailed`, enforcing preexisting
+M3 status forwarding. Its batch/transaction, authorization, stored-content and
+version controls and exact status helper are unchanged; no production M3
+behavior changed. Attempt 1's net11.0 union remains historical
+1,558 executed / 1,555 passed / three failures at that assertion across
+R4/R4B/R5. **No pre-repair protection union was run**; source/history, not those
+observed values, justified the narrow synchronization.
+
+These are pre-commit scoped results before this documentation append, not a
+post-commit final gate or migration-wide/full-suite qualification. The parent
+retains integration and final verification; no other OS, browser, live-state
+index rebuild, atomic reader snapshot or performance qualification is claimed.
