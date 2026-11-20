@@ -266,6 +266,195 @@ public sealed class SubscriptionLifecycleTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public void EmptyExecutionSnapshotPreservesCrudAndLifecycleControls(FhirReleases.FhirSequenceCodes version)
+    {
+        string[] scenarios = ["empty", "topic-only", "initial-off", "off", "remove", "expire"];
+        Assert.Equal(6, scenarios.Length);
+        foreach (string scenario in scenarios)
+        {
+            using LifecycleTestStore fixture = new(version, maximum: 1);
+            bool hasTopic = scenario != "empty";
+            bool initiallyActive = scenario is "off" or "remove" or "expire";
+            if (hasTopic)
+            {
+                fixture.Put(fixture.Fixture("patient"));
+                fixture.Put(fixture.Fixture("other-patient"));
+                fixture.Put(fixture.Fixture("topic-interaction"));
+                if (scenario != "topic-only")
+                {
+                    fixture.PutSubscription(initiallyActive ? "active" : "off");
+                }
+            }
+            ParsedSubscription? subscription = fixture.Store.CurrentSubscriptions.SingleOrDefault();
+            Dictionary<long, SubscriptionEvent>? history = subscription?.GeneratedEvents;
+            long revision = subscription?.Revision ?? 0;
+            List<SubscriptionEvent> events = [];
+            List<SubscriptionSendEventArgs> sends = [];
+            if (subscription is not null)
+            {
+                ParsedSubscription.SubscriptionFilter filter = Assert.Single(subscription.Filters["Encounter"]);
+                Assert.Equal("patient", filter.Name);
+                Assert.Equal("Patient/sub-patient", filter.Value);
+            }
+            AssertSnapshot(initiallyActive ? revision : null);
+            if (initiallyActive)
+            {
+                Crud("sub-patient", accepted: true);
+                Assert.Equal(3, subscription!.CurrentEventCount);
+                Crud("other-patient", accepted: false);
+                Assert.Equal(revision, subscription.Revision);
+                if (scenario == "off")
+                {
+                    fixture.Store.ChangeSubscriptionStatus(LifecycleTestStore.Id, "off");
+                    fixture.AssertViews("off");
+                }
+                else if (scenario == "remove")
+                {
+                    fixture.Delete();
+                    Assert.Empty(fixture.Store.CurrentSubscriptions);
+                    Assert.False(fixture.Interact("GET", "Subscription/" + LifecycleTestStore.Id).Success);
+                }
+                else
+                {
+                    fixture.Clock.Advance(TimeSpan.FromTicks(subscription.ExpirationTicks - fixture.Clock.GetUtcNow().UtcTicks));
+                    Assert.Equal(subscription.ExpirationTicks, fixture.Clock.GetUtcNow().UtcTicks);
+                    Assert.Equal(fixture.Clock.GetUtcNow(), fixture.Clock.NextDueTime);
+                    // Leave the due timer uninvoked: the first Encounter admission must expire this revision.
+                    Assert.Equal("active", subscription.CurrentStatus);
+                    Assert.Equal(revision, subscription.Revision);
+                    AssertSnapshot(revision);
+                }
+            }
+            if (scenario != "expire")
+            {
+                AssertSnapshot(null);
+            }
+            Crud("sub-patient", accepted: false);
+            AssertSnapshot(null);
+            Crud("other-patient", accepted: false);
+            if (subscription is not null && scenario != "remove")
+            {
+                Assert.Same(subscription, fixture.Subscription);
+                fixture.AssertViews("off");
+            }
+            if (initiallyActive)
+            {
+                Assert.True(subscription!.Revision > revision);
+                Assert.All(fixture.Sent, send => Assert.Equal(revision, send.Revision));
+            }
+
+            void AssertSnapshot(long? expectedRevision)
+            {
+                object resourceStore = fixture.Store["Encounter"];
+                object registration = resourceStore.GetType()
+                    .GetField("_subscriptionRegistrationLock", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(resourceStore)!;
+                IDictionary snapshot;
+                lock (registration)
+                {
+                    snapshot = (IDictionary)resourceStore.GetType()
+                        .GetMethod("SubscriptionExecutionSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(resourceStore, null)!;
+                }
+                if (!hasTopic)
+                {
+                    Assert.Empty(snapshot.Keys.Cast<string>());
+                    return;
+                }
+                string topicUrl = Assert.Single(snapshot.Keys.Cast<string>());
+                Assert.Equal(LifecycleTestStore.Topic, topicUrl);
+                object topic = snapshot[topicUrl]!;
+                IDictionary bindings = (IDictionary)topic.GetType().GetProperty("FiltersBySubscription")!.GetValue(topic)!;
+                if (expectedRevision is null)
+                {
+                    Assert.Empty(bindings.Keys.Cast<string>());
+                    return;
+                }
+                string subscriptionId = Assert.Single(bindings.Keys.Cast<string>());
+                Assert.Equal(LifecycleTestStore.Id, subscriptionId);
+                object binding = bindings[subscriptionId]!;
+                Assert.Equal(expectedRevision.Value, (long)binding.GetType().GetProperty("Revision")!.GetValue(binding)!);
+                Assert.NotEmpty(((IEnumerable)binding.GetType().GetProperty("Filters")!.GetValue(binding)!).Cast<object>());
+            }
+
+            void Crud(string patient, bool accepted)
+            {
+                JsonObject create = fixture.Fixture("planned");
+                create.Remove("id");
+                create["subject"]!["reference"] = "Patient/" + patient;
+                FhirResponseContext created = Interaction("POST", "Encounter", create, HttpStatusCode.Created);
+                Assert.False(string.IsNullOrEmpty(created.Id));
+                Assert.Equal("1", JsonNode.Parse(created.SerializedResource)!["meta"]!["versionId"]!.GetValue<string>());
+                AssertEvents(created, accepted);
+
+                JsonObject update = fixture.Fixture("complete");
+                update["id"] = created.Id;
+                update["subject"]!["reference"] = "Patient/" + patient;
+                string path = "Encounter/" + created.Id;
+                FhirResponseContext updated = Interaction("PUT", path, update, HttpStatusCode.OK);
+                Assert.Equal(created.Id, updated.Id);
+                Assert.Equal("2", JsonNode.Parse(updated.SerializedResource)!["meta"]!["versionId"]!.GetValue<string>());
+                AssertEvents(updated, accepted);
+
+                FhirResponseContext deleted = Interaction("DELETE", path, null, HttpStatusCode.OK);
+                Assert.Equal(created.Id, deleted.Id);
+                AssertEvents(deleted, accepted);
+                Assert.Equal(HttpStatusCode.NotFound, fixture.Interact("GET", path).Response.StatusCode);
+            }
+
+            FhirResponseContext Interaction(string method, string path, JsonObject? content, HttpStatusCode expected)
+            {
+                (bool success, FhirResponseContext response) = fixture.Interact(method, path, content);
+                Assert.True(success, response.SerializedOutcome);
+                Assert.Equal(expected, response.StatusCode);
+                return response;
+            }
+
+            void AssertEvents(FhirResponseContext response, bool accepted)
+            {
+                if (accepted)
+                {
+                    SubscriptionSendEventArgs send = Assert.Single(fixture.Sent.Skip(sends.Count));
+                    Assert.Same(subscription, send.Subscription);
+                    Assert.Same(fixture.Store.Config, send.Tenant);
+                    Assert.Equal(revision, send.Revision);
+                    Assert.Equal(ParsedSubscription.NotificationTypeCodes.EventNotification, send.NotificationType);
+                    SubscriptionEvent subscriptionEvent = Assert.Single(send.NotificationEvents);
+                    Assert.Equal(events.Count + 1L, subscriptionEvent.EventNumber);
+                    Assert.Equal(LifecycleTestStore.Id, subscriptionEvent.SubscriptionId);
+                    Assert.Equal(LifecycleTestStore.Topic, subscriptionEvent.TopicUrl);
+                    Assert.Equal(response.Id, subscriptionEvent.Focus.GetType().GetProperty("Id")!.GetValue(subscriptionEvent.Focus));
+                    object patient = Assert.Single(subscriptionEvent.AdditionalContext!);
+                    Assert.Equal("Patient", patient.GetType().Name);
+                    Assert.Equal("sub-patient", patient.GetType().GetProperty("Id")!.GetValue(patient));
+                    events.Add(subscriptionEvent);
+                    sends.Add(send);
+                }
+                Assert.Equal(sends.Count, fixture.Sent.Count);
+                for (int i = 0; i < sends.Count; i++)
+                {
+                    Assert.Same(sends[i], fixture.Sent[i]);
+                }
+                if (subscription is not null)
+                {
+                    lock (fixture.Field("SubscriptionLifecycleLock"))
+                    {
+                        lock (history!)
+                        {
+                            Assert.Same(history, subscription.GeneratedEvents);
+                            Assert.Equal(events.Count, subscription.CurrentEventCount);
+                            Assert.Equal(events.Count, history.Count);
+                            foreach (SubscriptionEvent subscriptionEvent in events)
+                            {
+                                Assert.Same(subscriptionEvent, history[subscriptionEvent.EventNumber]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public async Task ReplacementAndRecreationRejectCapturedExecution(FhirReleases.FhirSequenceCodes version)
     {
         foreach (string transition in new[] { "cycle", "replace", "topic", "filter", "delete" })
@@ -1243,6 +1432,7 @@ internal sealed class LifecycleTestStore : IDisposable
     {
         ParsedSubscription prior = Subscription;
         object history = prior.GeneratedEvents;
+        int sendCount = Sent.Count;
         using ManualResetEventSlim reached = new();
         using ManualResetEventSlim release = new();
         using ManualResetEventSlim mutationAttempted = new();
@@ -1263,28 +1453,50 @@ internal sealed class LifecycleTestStore : IDisposable
         }
         AsyncLocal<bool> replaying = new();
         int admissionReads = 0;
-        ClockRead = _ =>
-        {
-            if (replaying.Value)
-            {
-                // The real operation has lifecycle protection before it ever takes history.
-                Assert.True(Monitor.IsEntered(Field("SubscriptionLifecycleLock")));
-                Assert.False(Monitor.IsEntered(history));
-                admissionReads++;
-            }
-        };
-        Task<JsonObject> replay = Task.Run(() =>
-        {
-            replaying.Value = true;
-            return Get("Subscription/" + Id + "/$events?eventsSinceNumber=0&eventsUntilNumber=9223372036854775807&content=full-resource");
-        });
+        Task<JsonObject>? replay = null;
         Task? mutation = null;
         Task? match = null;
         try
         {
+            if (!replace)
+            {
+                AssertViews("off");
+                Store.ChangeSubscriptionStatus(Id, "active");
+                Assert.Same(prior, Subscription);
+                long capturedRevision = prior.Revision;
+                Assert.Equal(capturedRevision, ExecutableRevision(prior));
+                // Capture real bound work before off makes a new matcher return without evaluation.
+                match = Task.Run(() => Match("during-replay"));
+                Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)));
+                Store.ChangeSubscriptionStatus(Id, "off");
+                AssertViews("off");
+                Assert.Same(prior, Subscription);
+                Assert.Same(history, prior.GeneratedEvents);
+                Assert.True(prior.Revision > capturedRevision);
+                Assert.Null(ExecutableRevision(prior));
+                Assert.Equal(1, prior.CurrentEventCount);
+            }
+            ClockRead = _ =>
+            {
+                if (replaying.Value)
+                {
+                    // The real operation has lifecycle protection before it ever takes history.
+                    Assert.True(Monitor.IsEntered(Field("SubscriptionLifecycleLock")));
+                    Assert.False(Monitor.IsEntered(history));
+                    admissionReads++;
+                }
+            };
+            replay = Task.Run(() =>
+            {
+                replaying.Value = true;
+                return Get("Subscription/" + Id + "/$events?eventsSinceNumber=0&eventsUntilNumber=9223372036854775807&content=full-resource");
+            });
             Assert.True(reached.Wait(TimeSpan.FromSeconds(10)));
-            match = Task.Run(() => Match("during-replay"));
-            Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)));
+            if (replace)
+            {
+                match = Task.Run(() => Match("during-replay"));
+                Assert.True(gate.Reached.Wait(TimeSpan.FromSeconds(10)));
+            }
             gate.Release.Set();
             mutation = Task.Run(() =>
             {
@@ -1312,20 +1524,38 @@ internal sealed class LifecycleTestStore : IDisposable
         {
             gate.Release.Set();
             release.Set();
-            await Task.WhenAll(new Task?[] { replay, match, mutation }.OfType<Task>()).WaitAsync(TimeSpan.FromSeconds(10));
-            ClockRead = null;
+            try
+            {
+                await Task.WhenAll(new Task?[] { replay, match, mutation }.OfType<Task>()).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                ClockRead = null;
+                lock (Field("SubscriptionLifecycleLock"))
+                {
+                    lock (prior.GeneratedEvents)
+                    {
+                        prior.GeneratedEvents[1] = original;
+                    }
+                }
+            }
+        }
+        Assert.Equal(2, Entries(await replay!));
+        Assert.True(admissionReads > 0);
+        Assert.Equal(replace ? 0 : 1, Subscription.CurrentEventCount);
+        Assert.Same(history, prior.GeneratedEvents);
+        if (!replace)
+        {
+            Assert.Same(prior, Subscription);
+            Assert.Equal(sendCount, Sent.Count);
             lock (Field("SubscriptionLifecycleLock"))
             {
                 lock (prior.GeneratedEvents)
                 {
-                    prior.GeneratedEvents[1] = original;
+                    Assert.Same(original, Assert.Single(prior.GeneratedEvents.Values));
                 }
             }
         }
-        Assert.Equal(2, Entries(await replay));
-        Assert.True(admissionReads > 0);
-        Assert.Equal(replace ? 0 : 1, Subscription.CurrentEventCount);
-        Assert.Same(history, prior.GeneratedEvents);
     }
 
     // Observe the existing manual clock's reads/changes/disposal without changing phase-1 infrastructure.

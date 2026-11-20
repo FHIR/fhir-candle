@@ -1258,6 +1258,7 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="currentPN">The current resource ITypedElement.</param>
     /// <param name="fpContext">The FHIRPath evaluation context.</param>
     private void PerformSubscriptionTest(
+        Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions,
         T? current,
         PocoNode? currentPN,
         T? previous,
@@ -1299,7 +1300,6 @@ public class ResourceStore<T> : IVersionedResourceStore
         List<string> matchedTopics = new();
 
         Dictionary<string, List<string>> topicErrors = new();
-        Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
 
         foreach ((string topicUrl, ExecutableSubscriptionInfo executable) in executableSubscriptions)
         {
@@ -1596,6 +1596,13 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         try
         {
+            Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
+            if (executableSubscriptions.Count == 0 ||
+                executableSubscriptions.Values.All(executable => executable.FiltersBySubscription.Count == 0))
+            {
+                return;
+            }
+
             PocoNode currentPN = current.ToPocoNode();
 
             FhirEvaluationContext fpContext = new FhirEvaluationContext()
@@ -1611,6 +1618,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             };
 
             PerformSubscriptionTest(
+                executableSubscriptions,
                 current,
                 currentPN,
                 null,
@@ -1637,6 +1645,13 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         try
         {
+            Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
+            if (executableSubscriptions.Count == 0 ||
+                executableSubscriptions.Values.All(executable => executable.FiltersBySubscription.Count == 0))
+            {
+                return;
+            }
+
             PocoNode currentPN = current.ToPocoNode();
             PocoNode previousPN = previous.ToPocoNode();
 
@@ -1656,6 +1671,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             //bool evalRes = current.IsTrue(test, fpContext);
 
             PerformSubscriptionTest(
+                executableSubscriptions,
                 current,
                 currentPN,
                 previous,
@@ -1680,6 +1696,13 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         try
         {
+            Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
+            if (executableSubscriptions.Count == 0 ||
+                executableSubscriptions.Values.All(executable => executable.FiltersBySubscription.Count == 0))
+            {
+                return;
+            }
+
             PocoNode previousPN = previous.ToPocoNode();
 
             FhirEvaluationContext fpContext = new FhirEvaluationContext()
@@ -1695,6 +1718,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             };
 
             PerformSubscriptionTest(
+                executableSubscriptions,
                 null,
                 null,
                 previous,
