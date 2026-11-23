@@ -630,6 +630,20 @@ public class BundleAuthorizationTests
             JsonObject search = Assert.IsType<JsonObject>(ResponseEntry(later, 1)["resource"]);
             Assert.Single(Entries(search));
             Assert.Equal(secondId, ResourceId(ResponseEntry(search, 0)));
+            string next = search["link"]!.AsArray().Single(l => (string?)l!["relation"] == "next")!["url"]!.GetValue<string>();
+            FhirRequestContext nextRequest = new(store, "GET", "Patient" + new Uri(next).Query)
+            {
+                Authorization = Authorize(store, "Patient.s"),
+                DestinationFormat = JsonFormat,
+            };
+            Assert.True(store.TypeSearch(nextRequest, out FhirResponseContext nextResponse), nextResponse.SerializedOutcome);
+            JsonObject last = JsonNode.Parse(nextResponse.SerializedResource)!.AsObject();
+            Assert.Equal(2, (int?)last["total"]);
+            Assert.Single(Entries(last));
+            Assert.Equal(secondId, ResourceId(ResponseEntry(last, 0)));
+            Assert.DoesNotContain(last["link"]!.AsArray(), l => (string?)l!["relation"] == "next");
+            Assert.Equal(new[] { firstId, secondId }.Order(), new[] { search, last }
+                .Select(p => new Uri(ResponseEntry(p, 0)["fullUrl"]!.GetValue<string>()).Segments.Last()).Order());
             Assert.Equal("Patient", ModelBundle(EntryResource(request, 0)).Entry[0].Request!.Url);
             Assert.Equal("Patient", ModelBundle(EntryResource(request, 1)).Entry[0].Request!.Url);
             Assert.Equal("Patient?name=Aliased&_count=1", ModelBundle(EntryResource(request, 1)).Entry[1].Request!.Url);

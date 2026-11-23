@@ -11,14 +11,15 @@ namespace FhirCandle.Storage;
 
 internal sealed class SearchPageSelector
 {
-    internal readonly record struct Identity(string Type, string Id);
+    internal readonly record struct Identity(string Type, string StoreKey);
+    internal readonly record struct Candidate(Identity Identity, Resource Body);
     private sealed record Row(Identity Identity, int Ordinal, FhirSortComparer.Key?[] Keys);
 
     internal List<Identity> Matches { get; } = [];
     internal int? Total { get; }
     internal int? NextOffset { get; }
 
-    internal SearchPageSelector(IEnumerable<Resource> candidates, ParsedResultParameters parameters, VersionedFhirStore store,
+    internal SearchPageSelector(IEnumerable<Candidate> candidates, ParsedResultParameters parameters, VersionedFhirStore store,
         ParsedResultParameters.SortRequest[] sort, IReadOnlyDictionary<string, ParsedResultParameters> byType)
     {
         int offset = parameters.Offset ?? 0;
@@ -38,13 +39,8 @@ internal sealed class SearchPageSelector
         }
         List<Row> ordered = [];
         HashSet<Identity> seen = [];
-        foreach (Resource resource in candidates)
+        foreach ((Identity id, Resource resource) in candidates)
         {
-            if (string.IsNullOrEmpty(resource.Id))
-            {
-                continue;
-            }
-            Identity id = new(resource.TypeName, resource.Id);
             if (!seen.Add(id) || countOnly)
             {
                 continue;

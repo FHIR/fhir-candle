@@ -580,12 +580,14 @@ public partial class Sdk6ContractTests
         {
             case "repeated":
                 await Check("single", [("_id", "early")], [], ["Observation/early"], "_id=early");
-                await Check("comma-or", [("_id", "early,twin")], [], both, "_id=early,twin");
+                await Check("comma-or", [("_id", "early,twin")], [], both, "_id=early%2Ctwin");
                 await Check("repeated-and", [("_id", "early"), ("_id", "twin")], [], [], "_id=early&_id=twin");
+                await Check("repeated-same", [("_id", "early"), ("_id", "early")], [],
+                    ["Observation/early"], "_id=early&_id=early");
                 break;
             case "encoding":
-                await Check("value-delimiters-unicode", [("_tag", tag)], [], ["Observation/early"], "_tag=" + tag);
-                await Check("encoded-modifier", [("_tag:not", tag)], [], ["Observation/twin"], "_tag:not=" + tag);
+                await Check("value-delimiters-unicode", [("_tag", tag)], [], ["Observation/early"], "_tag=" + Uri.EscapeDataString(tag));
+                await Check("encoded-modifier", [("_tag:not", tag)], [], ["Observation/twin"], "_tag%3Anot=" + Uri.EscapeDataString(tag));
                 await Check("encoded-key-no-injection", [("ignored&_id", "early"), ("_id", "twin")], [],
                     ["Observation/twin"], "_id=twin");
                 await Check("encoded-key-delimiters-unicode", [("ignored&+%=Québec", "unused"), ("_id", "early")], [],
@@ -595,9 +597,9 @@ public partial class Sdk6ContractTests
                 await Check("body-before-query", [("_id", "early")], [("_id", "twin")], [], "_id=early&_id=twin");
                 await Check("body-before-query-reversed", [("_id", "twin")], [("_id", "early")], [], "_id=twin&_id=early");
                 await Check("body-or-query-and", [("_id", "early,twin")], [("_id", "twin")],
-                    ["Observation/twin"], "_id=early,twin&_id=twin");
+                    ["Observation/twin"], "_id=early%2Ctwin&_id=twin");
                 await Check("encoded-body-with-query", [("_tag", tag)], [("_id", "early")],
-                    ["Observation/early"], "_tag=" + tag + "&_id=early");
+                    ["Observation/early"], "_tag=" + Uri.EscapeDataString(tag) + "&_id=early");
                 break;
             case "empty":
                 await Check("empty-form", [], [], both, string.Empty);
@@ -627,20 +629,13 @@ public partial class Sdk6ContractTests
                     bodyPairs = [("_type", "Observation"), .. bodyPairs];
                 }
 
-                // Preserve the existing system self-link projection (one literal per parameter name).
-                // Membership, unlike that projection, must apply every repeated occurrence.
-                string[] appliedParts = applied.Length == 0 ? [] : applied.Split('&');
-                if ((kind is "repeated" or "merge") && applied.StartsWith("_id=", StringComparison.Ordinal))
-                {
-                    applied = appliedParts[0];
-                }
                 applied = "_type=Observation" + (applied.Length == 0 ? string.Empty : "&" + applied);
             }
             string appliedPath = path + (applied.Length == 0 ? string.Empty : "?" + applied);
             SearchProbe probe = new($"{route}-{kind}-{id}", path, matches) { AppliedPath = appliedPath };
             string combined = await EncodeSearchPairs([.. bodyPairs, .. queryPairs]);
             await AssertSearchRequest(replay, graph, probe, new CompatibilityRequest(graph.Tenant.Name, "GET",
-                path + (combined.Length == 0 ? string.Empty : "?" + combined)) { Format = format });
+                path + (combined.Length == 0 ? string.Empty : "?" + combined)) { Format = format }, encodedSelfLink: true);
 
             string postPath = path.Length == 0 ? "_search"
                 : (path.EndsWith("/*", StringComparison.Ordinal) ? path[..^2] : path) + "/_search";
@@ -656,7 +651,7 @@ public partial class Sdk6ContractTests
                 postPath + (query.Length == 0 ? string.Empty : "?" + query))
             {
                 Format = format, SourceMediaType = "application/x-www-form-urlencoded", Content = body,
-            });
+            }, encodedSelfLink: true);
         }
     }
 
@@ -1559,7 +1554,8 @@ public partial class Sdk6ContractTests
         SearchProbe probe,
         CompatibilityRequest request,
         bool ordered = false,
-        string? responseRoot = null)
+        string? responseRoot = null,
+        bool encodedSelfLink = false)
     {
         string context = SearchDiagnostic(replay, graph, probe.Id, request);
         string name = $"{graph.Tenant.Name}-{probe.Id}-{request.Method}";
@@ -1587,8 +1583,9 @@ public partial class Sdk6ContractTests
             Assert.Equal("self", ExchangePrimitive(link, graph.Format, "relation"));
             string appliedPath = probe.AppliedPath ?? probe.Path;
             string root = responseRoot ?? graph.Tenant.BaseUrl;
+            string url = ExchangePrimitive(link, graph.Format, "url");
             Assert.Equal(root + (appliedPath.StartsWith('?') ? string.Empty : "/") + appliedPath,
-                Uri.UnescapeDataString(ExchangePrimitive(link, graph.Format, "url")));
+                encodedSelfLink ? url : Uri.UnescapeDataString(url));
 
             List<SearchEntry> entries = [];
             foreach (string entry in rawEntries)

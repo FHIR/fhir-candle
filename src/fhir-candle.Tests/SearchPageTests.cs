@@ -239,6 +239,44 @@ public class SearchPageTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public void AliasedBodyIdsFetchEachSelectedStoreKey(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        SeedObservations(fixture);
+        // Distinct values make a repeated fetch of the same body observable, even across pages.
+        foreach (string key in new[] { "o1", "o2", "o5" })
+        {
+            ((Hl7.Fhir.Model.Resource)fixture.Store["Observation"][key]).Id = "o1";
+        }
+        AuthorizationInfo auth = Grant();
+        const string Path = "Observation?_id=o1&_sort=value-quantity";
+        static void CheckEntry(JsonNode entry, string key, decimal value)
+        {
+            Assert.EndsWith("/Observation/" + key, (string?)entry["fullUrl"]);
+            Assert.Equal("o1", (string?)entry["resource"]!["id"]);
+            Assert.Equal(value, (decimal?)entry["resource"]!["valueQuantity"]!["value"]);
+        }
+        JsonObject all = Page(fixture.Store, Path, _ => { }, auth);
+        Assert.Equal(2, (int?)all["total"]);
+        Assert.Collection(all["entry"]!.AsArray(), e => CheckEntry(e!, "o2", 2), e => CheckEntry(e!, "o1", 10));
+
+        string? link = Path + "&_count=1&_include=Observation:subject";
+        foreach ((string key, int value) in new[] { ("o2", 2), ("o1", 10) })
+        {
+            Assert.NotNull(link);
+            List<string> events = [];
+            JsonObject page = Page(fixture.Store, link, events.Add, auth);
+            Assert.Equal(2, (int?)page["total"]);
+            CheckEntry(Assert.Single(page["entry"]!.AsArray(), e => (string?)e!["search"]!["mode"] == "match")!, key, value);
+            Assert.Equal(new[] { "a" }, Ids(page, "include"));
+            Assert.Equal(new[] { "selected", "detached", "expanded" }, events);
+            link = Next(page);
+        }
+        Assert.Null(link);
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public void RecheckPrecedesBundleAndExpansion(FhirReleases.FhirSequenceCodes version)
     {
         using LifecycleTestStore fixture = new(version);

@@ -1543,7 +1543,7 @@ public partial class VersionedFhirStore : IFhirStore
         if (isConditionalCreate)
         {
             if (ResolveConditionalMatches(ctx, conditionalQuery, [resourceType],
-                    out int count, out Resource? match, out FhirResponseContext searchResp))
+                    out int count, out string matchedKey, out Resource? match, out FhirResponseContext searchResp))
             {
                 switch (count)
                 {
@@ -1560,13 +1560,13 @@ public partial class VersionedFhirStore : IFhirStore
                             {
                                 Resource = r,
                                 ResourceType = r.TypeName,
-                                Id = r.Id!,
+                                Id = matchedKey,
                                 ETag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"",
                                 LastModified = r.Meta?.LastUpdated is null ? string.Empty : r.Meta.LastUpdated.Value.UtcDateTime.ToString("r"),
-                                Location = $"{getBaseUrl(ctx)}/{resourceType}/{r.Id}",
+                                Location = $"{getBaseUrl(ctx)}/{resourceType}/{matchedKey}",
                                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.OK,
-                                    $"Created {resourceType}/{r.Id}"),
+                                    $"Created {resourceType}/{matchedKey}"),
                                 StatusCode = HttpStatusCode.OK,
                             };
                             return true;
@@ -2642,7 +2642,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
 
             if (ResolveConditionalMatches(ctx, ctx.UrlQuery, [ctx.ResourceType],
-                    out int count, out Resource? match, out FhirResponseContext searchResp))
+                    out int count, out string matchedId, out _, out FhirResponseContext searchResp))
             {
                 switch (count)
                 {
@@ -2662,8 +2662,6 @@ public partial class VersionedFhirStore : IFhirStore
                     // one match - check extra conditions and continue with update if they pass
                     case 1:
                         {
-                            string matchedId = match!.Id!;
-
                             if (!string.IsNullOrEmpty(id))
                             {
                                 // explicit id was provided — verify it matches
@@ -4362,7 +4360,7 @@ public partial class VersionedFhirStore : IFhirStore
         out FhirResponseContext response)
     {
         string[] types = System.Web.HttpUtility.ParseQueryString(ctx.UrlQuery)["_type"]?.Split(',') ?? [];
-        if (!ResolveConditionalMatches(ctx, ctx.UrlQuery, types, out int count, out Resource? match,
+        if (!ResolveConditionalMatches(ctx, ctx.UrlQuery, types, out int count, out string matchedKey, out Resource? match,
                 out FhirResponseContext searchResp))
         {
             response = new()
@@ -4416,6 +4414,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        string? selectedBodyId = match.Id;
         IFhirInteractionHook[] hooks = GetHooks(ctx.ResourceType, Common.StoreInteractionCodes.SystemDeleteConditional);
         foreach (IFhirInteractionHook hook in hooks)
         {
@@ -4445,7 +4444,7 @@ public partial class VersionedFhirStore : IFhirStore
             }
         }
 
-        string id = match.Id!;
+        string id = match.Id == selectedBodyId ? matchedKey : match.Id!;
 
         // attempt delete
         Resource? resource = rs.InstanceDelete(id, _protectedResources);
@@ -4585,7 +4584,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        if (!ResolveConditionalMatches(ctx, ctx.UrlQuery, [ctx.ResourceType], out int count, out Resource? match,
+        if (!ResolveConditionalMatches(ctx, ctx.UrlQuery, [ctx.ResourceType], out int count, out string matchedKey, out Resource? match,
                 out FhirResponseContext searchResp))
         {
             response = new()
@@ -4625,6 +4624,7 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
+        string? selectedBodyId = match!.Id;
         IFhirInteractionHook[] hooks = GetHooks(
             ctx.ResourceType,
             [
@@ -4661,7 +4661,7 @@ rs,
         }
 
         string resourceType = match!.TypeName;
-        string id = match.Id!;
+        string id = match.Id == selectedBodyId ? matchedKey : match.Id!;
 
         // attempt delete
         Resource? resource = rs.InstanceDelete(id, _protectedResources);
@@ -4876,9 +4876,10 @@ rs,
     internal System.Runtime.CompilerServices.ConditionalWeakTable<FhirRequestContext, Action<string>> PageObservers { get; } = new();
 
     private bool ResolveConditionalMatches(FhirRequestContext ctx, string query, string[] types,
-        out int count, out Resource? match, out FhirResponseContext response)
+        out int count, out string matchedKey, out Resource? match, out FhirResponseContext response)
     {
         count = 0;
+        matchedKey = string.Empty;
         match = null;
         if (types.Length == 0)
         {
@@ -4909,11 +4910,11 @@ rs,
             {
                 return false;
             }
-            foreach (Resource r in rs.SearchCandidates(parameters, instant))
+            foreach (SearchPageSelector.Candidate candidate in rs.SearchCandidates(parameters, instant))
             {
-                if (!string.IsNullOrEmpty(r.Id) && CanReturn(ctx, r, 's'))
+                if (CanReturn(ctx, candidate.Body, 's'))
                 {
-                    ids.Add(new(type, r.Id));
+                    ids.Add(candidate.Identity);
                 }
             }
         }
@@ -4921,7 +4922,8 @@ rs,
         if (count == 1)
         {
             SearchPageSelector.Identity id = ids.Single();
-            match = _store[id.Type].DetachMatch(id.Id, instant, null);
+            matchedKey = id.StoreKey;
+            match = _store[id.Type].DetachMatch(id.StoreKey, instant, null);
             if (match is null || !CanReturn(ctx, match, 's'))
             {
                 return DenyVisibility(out response);
@@ -5164,7 +5166,7 @@ rs,
     }
 
     private sealed record SearchSource(string Type, ParsedSearchParameter[] Parameters,
-        ParsedResultParameters Result, IEnumerable<Resource> Candidates);
+        ParsedResultParameters Result, IEnumerable<SearchPageSelector.Candidate> Candidates);
 
     private static string SearchQuery(FhirRequestContext ctx) =>
         !string.IsNullOrEmpty(ctx.SourceContent) && string.Equals(ctx.SourceFormat?.Split(';', 2)[0].Trim(),
@@ -5181,7 +5183,7 @@ rs,
             v.Split(',').Where(sortByLiteral.ContainsKey).ToArray()).Where(v => v.Length != 0).ToArray();
         ParsedResultParameters.SortRequest[] sort = sortOccurrences.SelectMany(v => v).Distinct()
             .Select(literal => sortByLiteral[literal]).ToArray();
-        SearchPageSelector page = new(sources.SelectMany(s => s.Candidates).Where(r => CanReturn(ctx, r, 's')),
+        SearchPageSelector page = new(sources.SelectMany(s => s.Candidates).Where(c => CanReturn(ctx, c.Body, 's')),
             controls, this, sort, byType);
         string root = getBaseUrl(ctx);
         // Replay each applied input occurrence once, even when several types parsed it.
@@ -5218,10 +5220,12 @@ rs,
         HashSet<string> addedIds = [];
         foreach (SearchPageSelector.Identity id in page.Matches)
         {
-            Resource? resource = _store[id.Type].DetachMatch(id.Id, instant, observe is null ? null : () => observe("detached"));
+            Resource? resource = _store[id.Type].DetachMatch(id.StoreKey, instant, observe is null ? null : () => observe("detached"));
             if (resource is not null && CanReturn(ctx, resource, 's'))
             {
-                AddSearchMatch(bundle, resource, root, addedIds);
+                string relativeUrl = $"{id.Type}/{id.StoreKey}";
+                addedIds.Add(relativeUrl);
+                bundle.AddSearchEntry(resource, $"{root}/{relativeUrl}", Bundle.SearchEntryMode.Match);
             }
         }
         if (page.NextOffset is int next && bundle.Entry.Count != 0)
@@ -5588,7 +5592,7 @@ rs,
         return FinishSearch(ctx, hooks, compartmentRS, bundle, "Compartment search successful", out response);
     }
 
-    private IEnumerable<Resource> CompartmentCandidates(FhirRequestContext ctx, string type, IVersionedResourceStore rs,
+    private IEnumerable<SearchPageSelector.Candidate> CompartmentCandidates(FhirRequestContext ctx, string type, IVersionedResourceStore rs,
         ParsedCompartment.IncludedResource member, ParsedSearchParameter[] parameters, DateTimeOffset instant)
     {
         ParsedSearchParameter[] filters = member.SearchParamCodes.SelectMany(code =>
@@ -5599,7 +5603,7 @@ rs,
             0 => [],
             1 => rs.SearchCandidates([.. parameters, filters[0]], instant),
             _ => rs.SearchCandidates(parameters, instant)
-                .Where(r => filters.Any(f => _searchTester.TestForMatch(r.ToPocoNode(), [f]))),
+                .Where(c => filters.Any(f => _searchTester.TestForMatch(c.Body.ToPocoNode(), [f]))),
         };
     }
 
@@ -5896,21 +5900,6 @@ rs,
 
         Bundle bundle = BuildSearchPage(ctx, string.Empty, instant, sources[0].Result, sources);
         return FinishSearch(ctx, hooks, null, bundle, "System search successful", out response);
-    }
-
-    private static void AddSearchMatch(Bundle bundle, Resource resource, string rootUrl, HashSet<string> addedIds)
-    {
-        string id = $"{resource.TypeName}/{resource.Id}";
-        string url = $"{rootUrl}/{id}";
-        if (!addedIds.Add(id))
-        {
-            // The primary may already be present as an include.
-            Bundle.EntryComponent existing = bundle.Entry.First(e => e.FullUrl == url);
-            existing.Resource = resource;
-            existing.Search!.Mode = Bundle.SearchEntryMode.Match;
-            return;
-        }
-        bundle.AddSearchEntry(resource, url, Bundle.SearchEntryMode.Match);
     }
 
     private void AddVisibleInclusions(FhirRequestContext ctx, Bundle bundle, IEnumerable<Resource> inclusions,

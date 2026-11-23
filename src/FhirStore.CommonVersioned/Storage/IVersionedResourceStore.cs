@@ -90,10 +90,10 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     IEnumerable<Hl7.Fhir.Model.Resource> TypeSearch(ParsedSearchParameter[] parameters, bool isNestedSearch = false);
 
     /// <summary>Internal candidate evaluation. Values are borrowed, not bundle or hook resources.</summary>
-    internal IEnumerable<Resource> SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant);
+    internal IEnumerable<SearchPageSelector.Candidate> SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant);
 
     /// <summary>Detach the current version of a selected identity.</summary>
-    internal Resource? DetachMatch(string id, DateTimeOffset instant, Action? onDetach);
+    internal Resource? DetachMatch(string storeKey, DateTimeOffset instant, Action? onDetach);
 
     /// <summary>
     /// Tests for the presence of any resources matching the given search parameter.

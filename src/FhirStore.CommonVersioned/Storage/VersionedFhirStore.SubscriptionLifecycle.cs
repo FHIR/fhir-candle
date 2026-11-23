@@ -254,7 +254,7 @@ public partial class VersionedFhirStore
     internal Subscription? SubscriptionResourceSnapshot(string id)
         => SubscriptionForSearch(id, _clock.GetUtcNow(), detach: true);
 
-    internal Subscription? SubscriptionForSearch(string id, DateTimeOffset instant, bool detach = false, Action? onDetach = null)
+    internal Subscription? SubscriptionForSearch(string storeKey, DateTimeOffset instant, bool detach = false, Action? onDetach = null)
     {
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
@@ -263,12 +263,12 @@ public partial class VersionedFhirStore
         {
             lock (SubscriptionLifecycleLock)
             {
-                if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+                if (_subscriptions.TryGetValue(storeKey, out ParsedSubscription? subscription))
                 {
                     NormalizeSubscriptionLocked(subscription, instant, changes, diagnostics);
                 }
                 snapshot = _store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore)
-                    ? resourceStore.ReadRawSubscription(id)
+                    ? resourceStore.ReadRawSubscription(storeKey)
                     : null;
                 if (detach && snapshot is not null)
                 {

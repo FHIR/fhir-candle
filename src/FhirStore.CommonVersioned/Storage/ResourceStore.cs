@@ -1999,7 +1999,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
     }
 
-    IEnumerable<Resource> IVersionedResourceStore.SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant)
+    IEnumerable<SearchPageSelector.Candidate> IVersionedResourceStore.SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant)
     {
         Dictionary<string, Resource[]> reverseChainCache = [];
         foreach ((string id, T stored) in _resourceStore)
@@ -2007,20 +2007,21 @@ public class ResourceStore<T> : IVersionedResourceStore
             Resource? resource = typeof(T) == typeof(Subscription)
                 ? _store.SubscriptionForSearch(id, instant)
                 : stored;
-            if (resource is not null && _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache))
+            if (resource is not null && !string.IsNullOrEmpty(resource.Id) &&
+                _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache))
             {
-                yield return resource;
+                yield return new(new(resource.TypeName, id), resource);
             }
         }
     }
 
-    Resource? IVersionedResourceStore.DetachMatch(string id, DateTimeOffset instant, Action? onDetach)
+    Resource? IVersionedResourceStore.DetachMatch(string storeKey, DateTimeOffset instant, Action? onDetach)
     {
         if (typeof(T) == typeof(Subscription))
         {
-            return _store.SubscriptionForSearch(id, instant, detach: true, onDetach);
+            return _store.SubscriptionForSearch(storeKey, instant, detach: true, onDetach);
         }
-        if (!_resourceStore.TryGetValue(id, out T? resource))
+        if (!_resourceStore.TryGetValue(storeKey, out T? resource))
         {
             return null;
         }
