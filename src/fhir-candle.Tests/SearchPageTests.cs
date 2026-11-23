@@ -35,7 +35,16 @@ public class SearchPageTests
             _ => throw new ArgumentException(nameof(store)),
         };
         observers.Add(ctx, observe);
-        Assert.True(store.TypeSearch(ctx, out FhirResponseContext response), response.SerializedOutcome);
+        FhirResponseContext response;
+        bool success = ctx.Interaction switch
+        {
+            StoreInteractionCodes.TypeSearch => store.TypeSearch(ctx, out response),
+            StoreInteractionCodes.CompartmentSearch => store.CompartmentSearch(ctx, out response),
+            StoreInteractionCodes.CompartmentTypeSearch => store.CompartmentTypeSearch(ctx, out response),
+            StoreInteractionCodes.SystemSearch => store.SystemSearch(ctx, out response),
+            _ => throw new ArgumentException(path),
+        };
+        Assert.True(success, response.SerializedOutcome);
         return JsonNode.Parse(response.SerializedResource)!.AsObject();
     }
 
@@ -57,7 +66,8 @@ public class SearchPageTests
     {
         fixture.Put(JsonNode.Parse("""
             {"resourceType":"CompartmentDefinition","id":"membership","url":"urn:test:membership","name":"Membership",
-             "status":"active","code":"Patient","search":true,"resource":[{"code":"Observation","param":["subject"]}]}
+             "status":"active","code":"Patient","search":true,"resource":[{"code":"Observation","param":["subject"]},
+             {"code":"Encounter","param":["subject"]}]}
             """)!.AsObject());
         fixture.Put(new() { ["resourceType"] = "Patient", ["id"] = "a" });
         fixture.Put(new() { ["resourceType"] = "Practitioner", ["id"] = "doctor" });
@@ -78,6 +88,72 @@ public class SearchPageTests
                 row["subject"]!["reference"] = "Patient/b";
             }
             fixture.Put(row);
+        }
+    }
+
+    /// <summary>Global offsets count visible primaries, not includes, hidden rows, or per-type windows.</summary>
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void CrossTypePagesMatchUnpagedPrimaries(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        SeedObservations(fixture);
+        AuthorizationInfo auth = Grant();
+        auth.UserScopes.Add("Encounter.s");
+        foreach ((string id, string patient) in new[] { ("o0a", "a"), ("o2a", "b") })
+        {
+            JsonObject encounter = fixture.Fixture("planned");
+            encounter["id"] = id;
+            encounter["subject"]!["reference"] = "Patient/" + patient;
+            fixture.Put(encounter);
+        }
+
+        static string[] Keys(JsonObject bundle, string mode) =>
+            (bundle["entry"]?.AsArray() ?? []).Where(e => (string?)e!["search"]!["mode"] == mode)
+                .Select(e => $"{e!["resource"]!["resourceType"]}/{e["resource"]!["id"]}").ToArray();
+
+        string[] observations = ["Observation/o0", "Observation/o1", "Observation/o2", "Observation/o3", "Observation/o4"];
+        (string Route, string[] Expected)[] cases =
+        [
+            ("Observation?", observations),
+            ("Patient/a/Observation?", observations),
+            ("Patient/a/*?", [observations[0], "Encounter/o0a", .. observations.Skip(1)]),
+            ("?_type=Observation,Encounter&", [observations[0], "Encounter/o0a", observations[1],
+                observations[2], "Encounter/o2a", .. observations.Skip(3)]),
+        ];
+        foreach ((string route, string[] expected) in cases)
+        {
+            string path = route + "_sort=_id";
+            JsonObject unpaged = Page(fixture.Store, path, _ => { }, auth);
+            Assert.Equal(expected, Keys(unpaged, "match"));
+            path += "&_include=Observation:has-member";
+            foreach ((string controls, int limit) in new[]
+            {
+                ("", expected.Length), ("&_maxresults=3", 3), ("&_total=accurate", expected.Length),
+                ("&_total=estimate", expected.Length), ("&_total=none&_maxresults=3", 3),
+            })
+            {
+                string? link = path + "&_count=1" + controls;
+                foreach (string primary in expected.Take(limit))
+                {
+                    Assert.NotNull(link);
+                    JsonObject page = Page(fixture.Store, link, _ => { }, auth);
+                    Assert.Equal(controls.Contains("_total=none") ? (int?)null : expected.Length, (int?)page["total"]);
+                    Assert.Equal(new[] { primary }, Keys(page, "match"));
+                    string[] includes = primary.StartsWith("Observation/") && primary != "Observation/o1"
+                        ? ["Observation/o1"] : [];
+                    Assert.Equal(includes, Keys(page, "include"));
+                    link = Next(page);
+                }
+                Assert.Null(link);
+            }
+            foreach (string controls in new[] { "_offset=99", "_count=0&_total=none", "_summary=count&_maxresults=1" })
+            {
+                JsonObject empty = Page(fixture.Store, path + "&" + controls, _ => { }, auth);
+                Assert.Equal(expected.Length, (int?)empty["total"]);
+                Assert.Empty(empty["entry"]?.AsArray() ?? []);
+                Assert.Null(Next(empty));
+            }
         }
     }
 

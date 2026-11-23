@@ -4764,9 +4764,7 @@ rs,
             out response);
 
         // Direct requests and form searches may carry _summary only in the search parameters.
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
         string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
             ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
             : ctx.SerializeSummaryFlag;
@@ -4998,9 +4996,7 @@ rs,
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
 
         if (string.IsNullOrEmpty(ctx.ResourceType))
         {
@@ -5073,20 +5069,54 @@ rs,
         }
 
         DateTimeOffset instant = _clock.GetUtcNow();
-        SearchPageSelector page = new(rs.SearchCandidates(parameters, instant).Where(r => CanReturn(ctx, r, 's')), resultParameters, this);
+        Bundle bundle = BuildSearchPage(ctx, $"/{ctx.ResourceType}", instant, resultParameters,
+            [new(ctx.ResourceType, parameters, resultParameters, rs.SearchCandidates(parameters, instant))]);
+        return FinishSearch(ctx, hooks, rs, bundle, "Type search successful", out response);
+    }
+
+    private sealed record SearchSource(string Type, ParsedSearchParameter[] Parameters,
+        ParsedResultParameters Result, IEnumerable<Resource> Candidates);
+
+    private static string SearchQuery(FhirRequestContext ctx) =>
+        !string.IsNullOrEmpty(ctx.SourceContent) && string.Equals(ctx.SourceFormat?.Split(';', 2)[0].Trim(),
+            "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase) ? ctx.SourceContent : ctx.UrlQuery;
+
+    private Bundle BuildSearchPage(FhirRequestContext ctx, string path, DateTimeOffset instant,
+        ParsedResultParameters controls, List<SearchSource> sources)
+    {
+        System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(SearchQuery(ctx));
+        Dictionary<string, ParsedResultParameters> byType = sources.ToDictionary(s => s.Type, s => s.Result);
+        Dictionary<string, ParsedResultParameters.SortRequest> sortByLiteral = sources.SelectMany(s => s.Result.SortRequests)
+            .DistinctBy(s => s.RequestLiteral).ToDictionary(s => s.RequestLiteral);
+        string[][] sortOccurrences = (query.GetValues("_sort") ?? []).Select(v =>
+            v.Split(',').Where(sortByLiteral.ContainsKey).ToArray()).Where(v => v.Length != 0).ToArray();
+        ParsedResultParameters.SortRequest[] sort = sortOccurrences.SelectMany(v => v).Distinct()
+            .Select(literal => sortByLiteral[literal]).ToArray();
+        SearchPageSelector page = new(sources.SelectMany(s => s.Candidates).Where(r => CanReturn(ctx, r, 's')),
+            controls, this, sort, byType);
         string root = getBaseUrl(ctx);
+        // Replay each applied input occurrence once, even when several types parsed it.
+        HashSet<(string?, string?)> accepted = sources.SelectMany(s => s.Parameters).Where(p => !p.IgnoredParameter)
+            .Select(p => (p.RequestedKeyLiteral, p.RequestedValueLiteral)).ToHashSet();
+        List<(string key, string value)> occurrences = [];
+        foreach (string? key in query.AllKeys)
+        {
+            if (key is not null)
+            {
+                occurrences.AddRange((query.GetValues(key) ?? []).Where(v => accepted.Contains((key, v))).Select(v => (key, v)));
+            }
+        }
+        occurrences.AddRange(controls.RawParameters.Where(p => p.key != "_sort"));
+        occurrences.AddRange(sortOccurrences.Select(v => ("_sort", string.Join(',', v))));
         string Link(int? offset)
         {
-            IEnumerable<(string key, string value)> applied = parameters.Where(p => !p.IgnoredParameter)
-                .Select(p => p.GetAppliedQueryString().Split('=', 2))
-                .Where(parts => parts.Length == 2).Select(parts => (parts[0], parts[1]))
-                .Concat(resultParameters.RawParameters.Where(p => offset is null || p.key != "_offset"));
+            IEnumerable<(string key, string value)> applied = occurrences.Where(p => offset is null || p.key != "_offset");
             if (offset is not null)
             {
                 applied = applied.Append(("_offset", offset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             }
-            string query = string.Join('&', applied.Select(p => $"{Uri.EscapeDataString(p.key)}={Uri.EscapeDataString(p.value)}"));
-            return $"{root}/{ctx.ResourceType}" + (query.Length == 0 ? string.Empty : "?" + query);
+            string encoded = string.Join('&', applied.Select(p => $"{Uri.EscapeDataString(p.key)}={Uri.EscapeDataString(p.value)}"));
+            return root + path + (encoded.Length == 0 ? string.Empty : "?" + encoded);
         }
         Bundle bundle = new()
         {
@@ -5099,7 +5129,7 @@ rs,
         HashSet<string> addedIds = [];
         foreach (SearchPageSelector.Identity id in page.Matches)
         {
-            Resource? resource = rs.DetachMatch(id.Id, instant, observe is null ? null : () => observe("detached"));
+            Resource? resource = _store[id.Type].DetachMatch(id.Id, instant, observe is null ? null : () => observe("detached"));
             if (resource is not null && CanReturn(ctx, resource, 's'))
             {
                 AddSearchMatch(bundle, resource, root, addedIds);
@@ -5111,11 +5141,12 @@ rs,
         }
         foreach (Bundle.EntryComponent entry in bundle.Entry.ToArray())
         {
+            ParsedResultParameters resultParameters = byType[entry.Resource!.TypeName];
             AddInclusions(ctx, bundle, entry.Resource!, resultParameters, root, addedIds);
             AddReverseInclusions(ctx, bundle, entry.Resource!, resultParameters, root, addedIds);
         }
 
-        return FinishSearch(ctx, hooks, rs, bundle, "Type search successful", out response);
+        return bundle;
     }
 
     /// <summary>Compartment search.</summary>
@@ -5130,9 +5161,7 @@ rs,
             ctx,
             out response);
 
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
         string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
             ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
             : ctx.SerializeSummaryFlag;
@@ -5223,6 +5252,7 @@ rs,
         Bundle bundle, string diagnostic, out FhirResponseContext response)
     {
         bool checkBundle = false;
+        string? trustedNext = bundle.NextLink?.OriginalString;
         foreach (IFhirInteractionHook hook in hooks)
         {
             if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
@@ -5241,11 +5271,13 @@ rs,
             if (hr.Resource is Bundle replacement)
             {
                 bundle = replacement;
+                trustedNext = null;
             }
             else if (checkBundle && hr.Resource is not null)
             {
                 return DenyVisibility(out response);
             }
+            bundle.Link.RemoveAll(link => link.Relation == "next" && (trustedNext is null || link.Url != trustedNext));
         }
 
         response = new()
@@ -5262,7 +5294,11 @@ rs,
     {
         if (!RequiresHookCheck(ctx))
         {
-            response = hook;
+            if (action == 's' && hook.Resource is Bundle searchBundle)
+            {
+                searchBundle.Link.RemoveAll(link => link.Relation == "next");
+            }
+            response = action == 's' ? hook with { SerializedResource = string.Empty } : hook;
             return true;
         }
 
@@ -5316,9 +5352,9 @@ rs,
     private Bundle CheckedHookBundle(FhirRequestContext ctx, Bundle source)
     {
         Bundle result = new() { Type = Bundle.BundleType.Searchset, Total = 0 };
-        string query = ctx.SourceFormat == "application/x-www-form-urlencoded" && !string.IsNullOrEmpty(ctx.SourceContent)
-            ? ctx.SourceContent : ctx.UrlQuery;
-        bool countOnly = ctx.SerializeSummaryFlag == "count" || System.Web.HttpUtility.ParseQueryString(query)["_summary"] == "count";
+        System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(SearchQuery(ctx));
+        bool countOnly = ctx.SerializeSummaryFlag == "count" || query["_summary"] == "count" ||
+            (int.TryParse(query["_count"], out int count) && count == 0);
         foreach (Bundle.EntryComponent entry in source.Entry)
         {
             if (entry.Resource is not Resource resource || !CanReturn(ctx, resource, 's'))
@@ -5349,9 +5385,7 @@ rs,
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
 
         // check to see if we have a compartment type
         if (string.IsNullOrEmpty(ctx.CompartmentType))
@@ -5417,13 +5451,17 @@ rs,
             }
         }
 
-        List<Resource> results = [];
-        List<ParsedSearchParameter> appliedParameters = [];
-
+        List<SearchSource> sources = [];
+        DateTimeOffset instant = _clock.GetUtcNow();
+        ParsedResultParameters controls = new(searchQueryParams, this, compartmentRS, ctx.CompartmentType);
+        if (controls.InvalidOffset && TryBuildStrictSearchOutcome(EffectiveSearchHandling(ctx), [], [], out response, true))
+        {
+            return false;
+        }
         SearchParameterHandling effectiveHandling = EffectiveSearchHandling(ctx);
 
         // iterate across the compartment resources
-        foreach ((string resourceType, ParsedCompartment.IncludedResource ir) in compartment.IncludedResources)
+        foreach ((string resourceType, ParsedCompartment.IncludedResource ir) in compartment.IncludedResources.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {
             // check to see if we support this resource type
             if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
@@ -5453,116 +5491,27 @@ rs,
                 return false;
             }
 
-            List<ParsedSearchParameter> compartmentFilters = [];
-
-            // parse the relevant compartment type parameters
-            foreach (string spCode in ir.SearchParamCodes)
-            {
-                ParsedSearchParameter[] psps = ParsedSearchParameter.Parse(
-                    $"?{spCode}={ctx.CompartmentType}/{ctx.Id}",
-                    this,
-                    rs,
-                    resourceType);
-
-                if (psps.Length == 0)
-                {
-                    continue;
-                }
-
-                compartmentFilters.AddRange(psps);
-            }
-
-            // do not add anything that does not have a valid filter
-            if (compartmentFilters.Count == 0)
-            {
-                continue;
-            }
-
-            // execute search - if there is only one compartment criteria, add it here
-            IEnumerable<Resource> compartmentResults = (compartmentFilters.Count() == 1)
-                ? rs.TypeSearch([.. parameters, .. compartmentFilters])
-                : rs.TypeSearch(parameters);
-
-            if (compartmentFilters.Count() == 1)
-            {
-                results.AddRange(compartmentResults);
-            }
-            else
-            {
-                // reduce based on compartment filters (OR)
-                results.AddRange(compartmentResults.Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToPocoNode(), [cf]))));
-            }
-
-            appliedParameters.AddRange(parameters.Where(p => !p.IgnoredParameter));
+            ParsedResultParameters result = new(searchQueryParams, this, rs, resourceType);
+            sources.Add(new(resourceType, parameters, result, CompartmentCandidates(ctx, resourceType, rs, ir, parameters, instant)));
         }
 
-        if (ctx.Authorization is not null)
-        {
-            results.RemoveAll(r => !CanReturn(ctx, r, 's'));
-        }
-
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(
-            searchQueryParams,
-            this,
-            compartmentRS,
-            ctx.CompartmentType);
-
-        string selfLink = $"{getBaseUrl(ctx)}/{ctx.CompartmentType}/{ctx.Id}/*";
-        string selfSearchParams = string.Join('&', appliedParameters.Select(p => p.GetAppliedQueryString()).Distinct());
-        string selfResultParams = resultParameters.GetAppliedQueryString();
-
-        if (!string.IsNullOrEmpty(selfSearchParams))
-        {
-            selfLink = selfLink + "?" + selfSearchParams;
-        }
-
-        if (!string.IsNullOrEmpty(selfResultParams))
-        {
-            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
-        }
-
-        // create our bundle for results
-        Bundle bundle = new Bundle
-        {
-            Type = Bundle.BundleType.Searchset,
-            Total = results.Count(),
-            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
-        };
-
-        if (resultParameters.SummaryFlag != "count")
-        {
-            // create our sort comparer, if necessary
-            FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
-                ? null
-                : new(this, resultParameters.SortRequests);
-
-            HashSet<string> addedIds = new();
-            int resultCount = 0;
-
-            foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
-            {
-                if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
-                    (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
-                {
-                    break;
-                }
-
-                resultCount++;
-
-                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
-
-                // add any included resources
-                AddInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-
-                // TODO: check for include:iterate directives
-
-                // add any reverse included resources
-                AddReverseInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-            }
-        }
-
+        Bundle bundle = BuildSearchPage(ctx, $"/{ctx.CompartmentType}/{ctx.Id}/*", instant, controls, sources);
         return FinishSearch(ctx, hooks, compartmentRS, bundle, "Compartment search successful", out response);
+    }
+
+    private IEnumerable<Resource> CompartmentCandidates(FhirRequestContext ctx, string type, IVersionedResourceStore rs,
+        ParsedCompartment.IncludedResource member, ParsedSearchParameter[] parameters, DateTimeOffset instant)
+    {
+        ParsedSearchParameter[] filters = member.SearchParamCodes.SelectMany(code =>
+            ParsedSearchParameter.Parse($"?{code}={ctx.CompartmentType}/{ctx.Id}", this, rs, type))
+            .Where(p => !p.IgnoredParameter && p.CompiledExpression is not null).ToArray();
+        return filters.Length switch
+        {
+            0 => [],
+            1 => rs.SearchCandidates([.. parameters, filters[0]], instant),
+            _ => rs.SearchCandidates(parameters, instant)
+                .Where(r => filters.Any(f => _searchTester.TestForMatch(r.ToPocoNode(), [f]))),
+        };
     }
 
     /// <summary>Compartment search, restricted to a single type.</summary>
@@ -5577,9 +5526,7 @@ rs,
             ctx,
             out response);
 
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
         string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
             ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
             : ctx.SerializeSummaryFlag;
@@ -5610,9 +5557,7 @@ rs,
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
 
         // check to see if we have a compartment type
         if (string.IsNullOrEmpty(ctx.CompartmentType))
@@ -5726,95 +5671,16 @@ rs,
             searchQueryParams,
             this,
             rs,
-            ctx.ResourceType);
-
-        ParsedSearchParameter[] compartmentFilters = compartmentIR.SearchParamCodes.SelectMany(
-            code => ParsedSearchParameter.Parse(
-            $"?{code}={ctx.CompartmentType}/{ctx.Id}",
-            this,
-            rs,
-            ctx.ResourceType)).Where(p => !p.IgnoredParameter && p.CompiledExpression is not null).ToArray();
-
-        // execute search - if there is only one compartment criteria, add it here
-        List<Resource> results = (compartmentFilters.Length == 1)
-            ? rs.TypeSearch([..parameters, ..compartmentFilters]).ToList()
-            : rs.TypeSearch(parameters).ToList();
-
-        // reduce based on compartment filters if there was more than one
-        if (compartmentFilters.Length != 1)
+            ctx.ResourceType, out List<string> unknownSearchKeys);
+        ParsedResultParameters result = new(searchQueryParams, this, rs, ctx.ResourceType);
+        if (TryBuildStrictSearchOutcome(EffectiveSearchHandling(ctx), unknownSearchKeys, parameters, out response, result.InvalidOffset))
         {
-            // reduce based on compartment filters (OR)
-            results = results
-                .Where(r => compartmentFilters.Any(cf => _searchTester.TestForMatch(r.ToPocoNode(), [cf])))
-                .ToList();
+            return false;
         }
 
-        if (ctx.Authorization is not null)
-        {
-            results.RemoveAll(r => !CanReturn(ctx, r, 's'));
-        }
-
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(
-            searchQueryParams,
-            this,
-            rs,
-            ctx.ResourceType);
-
-        string selfLink = $"{getBaseUrl(ctx)}/{ctx.CompartmentType}/{ctx.Id}/{ctx.ResourceType}";
-        string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
-        string selfResultParams = resultParameters.GetAppliedQueryString();
-
-        if (!string.IsNullOrEmpty(selfSearchParams))
-        {
-            selfLink = selfLink + "?" + selfSearchParams;
-        }
-
-        if (!string.IsNullOrEmpty(selfResultParams))
-        {
-            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
-        }
-
-        // create our bundle for results
-        Bundle bundle = new Bundle
-        {
-            Type = Bundle.BundleType.Searchset,
-            Total = results.Count(),
-            Link = [new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
-        };
-
-        if (resultParameters.SummaryFlag != "count")
-        {
-            // create our sort comparer, if necessary
-            FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
-                ? null
-                : new(this, resultParameters.SortRequests);
-
-            HashSet<string> addedIds = new();
-            int resultCount = 0;
-
-            foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
-            {
-                if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
-                    (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
-                {
-                    break;
-                }
-
-                resultCount++;
-
-                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
-
-                // add any included resources
-                AddInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-
-                // TODO: check for include:iterate directives
-
-                // add any reverse included resources
-                AddReverseInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-            }
-        }
-
+        DateTimeOffset instant = _clock.GetUtcNow();
+        Bundle bundle = BuildSearchPage(ctx, $"/{ctx.CompartmentType}/{ctx.Id}/{ctx.ResourceType}", instant, result,
+            [new(ctx.ResourceType, parameters, result, CompartmentCandidates(ctx, ctx.ResourceType, rs, compartmentIR, parameters, instant))]);
         return FinishSearch(ctx, hooks, rs, bundle, "Compartment type search successful", out response);
     }
 
@@ -5832,9 +5698,7 @@ rs,
             ctx,
             out response);
 
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
+        string searchQueryParams = SearchQuery(ctx);
         string summaryFlag = string.IsNullOrEmpty(ctx.SerializeSummaryFlag)
             ? System.Web.HttpUtility.ParseQueryString(searchQueryParams)["_summary"] ?? string.Empty
             : ctx.SerializeSummaryFlag;
@@ -5860,24 +5724,11 @@ rs,
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        string searchQueryParams = string.IsNullOrEmpty(ctx.SourceContent) || (ctx.SourceFormat != "application/x-www-form-urlencoded")
-            ? ctx.UrlQuery
-            : ctx.SourceContent;
-
-        string[] resourceTypes = Array.Empty<string>();
+        string searchQueryParams = SearchQuery(ctx);
 
         // check for _type parameter
         System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(searchQueryParams);
-
-        foreach (string key in query)
-        {
-            if (!key.Equals("_type", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            resourceTypes = query[key]!.Split(',');
-        }
+        string[] resourceTypes = (query["_type"] ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries);
 
         if (!resourceTypes.Any())
         {
@@ -5914,113 +5765,47 @@ rs,
             }
         }
 
-        List<(string resourceType, IEnumerable<ParsedSearchParameter> searchParams, IEnumerable<Resource> results, ParsedResultParameters resultParameters)> byResource = [];
-
+        List<SearchSource> sources = [];
+        DateTimeOffset instant = _clock.GetUtcNow();
         SearchParameterHandling effectiveHandling = EffectiveSearchHandling(ctx);
 
-        foreach (string resourceType in resourceTypes)
+        foreach (string resourceType in resourceTypes.Distinct(StringComparer.Ordinal))
         {
+            if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
+            {
+                response = new()
+                {
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.BadRequest,
+                        $"Resource type: {resourceType} is not supported", OperationOutcome.IssueType.NotSupported),
+                    StatusCode = HttpStatusCode.BadRequest,
+                };
+                return false;
+            }
             // parse search parameters
             ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(
                 searchQueryParams,
                 this,
-                _store[resourceType],
+                rs,
                 resourceType,
                 out List<string> unknownSearchKeys);
 
             // Strict search handling per resource type — _type=A,B,C must
             // produce parameters that all parse against every requested type.
+            ParsedResultParameters result = new(searchQueryParams, this, rs, resourceType);
             if (TryBuildStrictSearchOutcome(
                     effectiveHandling,
                     unknownSearchKeys,
                     parameters,
-                    out FhirResponseContext strictResponse))
+                    out FhirResponseContext strictResponse, result.InvalidOffset))
             {
                 response = strictResponse;
                 return false;
             }
 
-            // execute search
-            IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters).Where(r => CanReturn(ctx, r, 's'));
-
-            // parse search result parameters
-            ParsedResultParameters resultParameters = new ParsedResultParameters(searchQueryParams, this, _store[resourceType], resourceType);
-
-            byResource.Add((resourceType, parameters, results, resultParameters));
+            sources.Add(new(resourceType, parameters, result, rs.SearchCandidates(parameters, instant)));
         }
 
-        // filter parameters from use across all performed searches
-        IEnumerable<ParsedSearchParameter> filteredParameters = byResource.SelectMany(br => br.searchParams.Select(p => p)).DistinctBy(p => p.Name);
-
-        string selfLink = $"{getBaseUrl(ctx)}";
-        string selfSearchParams = string.Join('&', filteredParameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
-        string selfResultParams = string.Join('&', byResource.SelectMany(br => br.resultParameters.GetAppliedQueryString().Split('&')).Distinct());
-
-        if (!string.IsNullOrEmpty(selfSearchParams))
-        {
-            selfLink = selfLink + "?" + selfSearchParams;
-        }
-
-        if (!string.IsNullOrEmpty(selfResultParams))
-        {
-            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
-        }
-
-        // create our bundle for results
-        Bundle bundle = new()
-        {
-            Type = Bundle.BundleType.Searchset,
-            Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, }, ],
-        };
-
-        HashSet<string> addedIds = new();
-        int resultCount = 0;
-
-        if (byResource.Any(br => br.resultParameters.SummaryFlag == "count"))
-        {
-            resultCount = byResource.Sum(br => br.results.Count());
-        }
-        else
-        {
-            ParsedResultParameters.SortRequest[] sortRequests = byResource.SelectMany(br => br.resultParameters.SortRequests).DistinctBy(sr => sr.RequestLiteral).ToArray();
-
-            // create our sort comparer, if necessary
-            FhirSortComparer? comparer = sortRequests.Length == 0
-                ? null
-                : new(this, sortRequests);
-
-            foreach (Resource resource in (comparer is null ? byResource.SelectMany(br => br.results) : byResource.SelectMany(br => br.results).OrderBy(r => r, comparer)))
-            {
-                ParsedResultParameters rpForResource = byResource.FirstOrDefault(br => br.resourceType == resource.TypeName).resultParameters
-                    ?? byResource.First().resultParameters;
-
-                if (((rpForResource.MaxResults is not null) && (resultCount >= rpForResource.MaxResults)) ||
-                    ((rpForResource.PageMatchCount is not null) && (resultCount >= rpForResource.PageMatchCount)))
-                {
-                    // flag that we cannot use this total
-                    resultCount = -1;
-                    break;
-                }
-
-                resultCount++;
-
-                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
-
-                // add any included resources
-                AddInclusions(ctx, bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
-
-                // check for include:iterate directives
-
-                // add any reverse included resources
-                AddReverseInclusions(ctx, bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
-            }
-        }
-
-        if (resultCount != -1)
-        {
-            bundle.Total = resultCount;
-        }
-
+        Bundle bundle = BuildSearchPage(ctx, string.Empty, instant, sources[0].Result, sources);
         return FinishSearch(ctx, hooks, null, bundle, "System search successful", out response);
     }
 
