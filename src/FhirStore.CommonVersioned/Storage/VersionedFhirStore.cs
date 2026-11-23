@@ -149,8 +149,14 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>Number of maximum resources.</summary>
     private int _maxResourceCount = 0;
 
-    /// <summary>Queue of identifiers of resources (used for max resource cleaning).</summary>
-    private readonly ConcurrentQueue<string> _resourceQ = [];
+    private readonly object _writeGate = new();
+    private readonly LinkedList<(string Type, string Id)> _liveOrder = [];
+    private readonly Dictionary<(string Type, string Id), LinkedListNode<(string Type, string Id)>> _liveNodes = [];
+    private readonly Queue<(Action Publish, bool Diagnostic)> _publications = [];
+    private List<Action>? _pendingDiagnostics;
+    private int _publishingThread;
+    private int _mutationDepth;
+    private int _loadingThread;
 
     /// <summary>The received notifications.</summary>
     private readonly ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = [];
@@ -160,6 +166,7 @@ public partial class VersionedFhirStore : IFhirStore
 
     /// <summary>True if this store has protected content.</summary>
     private bool _hasProtected = false;
+    private bool _hasGeneratedCache;
 
     /// <summary>List of identifiers for the protected.</summary>
     private readonly HashSet<string> _protectedResources = [];
@@ -234,6 +241,8 @@ public partial class VersionedFhirStore : IFhirStore
         config.ResolveStrict();
 
         _config = config;
+        _maxResourceCount = config.MaxResourceCount;
+        _hasProtected = config.ProtectLoadedContent;
         //_baseUri = new Uri(config.ControllerName);
 
         if (_subscriptionConverter is null)
@@ -300,7 +309,7 @@ public partial class VersionedFhirStore : IFhirStore
         // check for a load directory
         if ((config.LoadDirectory is not null) && _loadedSupplements.Add(config.LoadDirectory.FullName))
         {
-            _hasProtected = config.ProtectLoadedContent;
+            _loadingThread = Environment.CurrentManagedThreadId;
             _loadReprocess = new();
             _loadState = LoadStateCodes.Read;
 
@@ -411,8 +420,7 @@ public partial class VersionedFhirStore : IFhirStore
         // generate our initial capability statement
         _ = generateCapabilities(new FhirRequestContext(this, "GET", _config.BaseUrl + "/metadata"));
 
-        // create a timer to check max resource count if we are monitoring that
-        _maxResourceCount = config.MaxResourceCount;
+        // Retain the existing receipt maintenance schedule.
         if (_maxResourceCount > 0)
         {
             _capacityMonitor = new System.Threading.Timer(
@@ -584,13 +592,7 @@ public partial class VersionedFhirStore : IFhirStore
             // iterate over the resources in the store
             foreach (string resourceId in ((IReadOnlyDictionary<string, Resource>)rs).Keys)
             {
-                // skip protected resources
-                if (_hasProtected && _protectedResources.Contains(resourceId))
-                {
-                    continue;
-                }
-
-                // delete the resource (use the InstanceDelete method so that executables like SearchParameters and SubscriptionTopics are processed)
+                // The typed delete checks the full protected identity under the tenant gate.
                 _ = rs.InstanceDelete(resourceId, _protectedResources);
             }
         }
@@ -607,6 +609,7 @@ public partial class VersionedFhirStore : IFhirStore
         string packageSupplements,
         bool includeExamples)
     {
+        _loadingThread = Environment.CurrentManagedThreadId;
         _loadReprocess = [];
         _loadState = LoadStateCodes.Read;
 
@@ -913,49 +916,141 @@ public partial class VersionedFhirStore : IFhirStore
         }
     }
 
-    /// <summary>Check resource usage.</summary>
-    private void CheckResourceUsage()
+    internal readonly struct MutationScope : IDisposable
     {
-        // check for total resources
-        if ((_maxResourceCount == 0) ||
-            (_resourceQ.Count <= _maxResourceCount))
+        private readonly VersionedFhirStore _owner;
+        private readonly int _pendingAtEntry;
+
+        internal MutationScope(VersionedFhirStore owner)
+        {
+            _owner = owner;
+            Monitor.Enter(owner._writeGate);
+            _pendingAtEntry = owner._publications.Count;
+            owner._mutationDepth++;
+        }
+
+        public void Dispose() => _owner.EndMutation(_pendingAtEntry);
+    }
+
+    internal MutationScope BeginMutation() => new(this);
+
+    internal void AfterMutation(Action action, bool diagnostic = false)
+    {
+        if (Monitor.IsEntered(_writeGate))
+        {
+            _publications.Enqueue((action, diagnostic));
+        }
+        else
+        {
+            action();
+        }
+    }
+
+    // A nested victim delete contributes to the inserting mutation's batch. A callback
+    // may reenter synchronously; other writers can commit while publication is blocked.
+    private void EndMutation(int pendingAtEntry)
+    {
+        try
+        {
+            // Typed and lifecycle locks have been released; the tenant gate still
+            // excludes replacements until the normal delete has reconciled the victim.
+            if (_mutationDepth == 1 && _maxResourceCount > 0 && _liveOrder.Count > _maxResourceCount)
+            {
+                (string type, string id) = _liveOrder.First!.Value;
+                _store[type].InstanceDelete(id, _protectedResources);
+            }
+        }
+        finally
+        {
+            UnlockAndPublish(pendingAtEntry);
+        }
+    }
+
+    private void UnlockAndPublish(int pendingAtEntry)
+    {
+        int thread = Environment.CurrentManagedThreadId;
+        bool outerPublisher = _publishingThread == 0;
+        if (--_mutationDepth != 0 || _publications.Count == pendingAtEntry || (!outerPublisher && _publishingThread != thread))
+        {
+            Monitor.Exit(_writeGate);
+            return;
+        }
+        _publishingThread = thread;
+        Exception? failure = null;
+        while (_publications.TryDequeue(out (Action Publish, bool Diagnostic) work))
+        {
+            // A slow diagnostic sink must not block later resource or delivery events.
+            if (work.Diagnostic)
+            {
+                (_pendingDiagnostics ??= []).Add(work.Publish);
+                continue;
+            }
+            Monitor.Exit(_writeGate);
+            try
+            {
+                work.Publish();
+            }
+            catch (Exception ex)
+            {
+                failure ??= ex;
+            }
+            finally
+            {
+                Monitor.Enter(_writeGate);
+            }
+        }
+        List<Action>? diagnostics = null;
+        if (outerPublisher)
+        {
+            _publishingThread = 0;
+            diagnostics = _pendingDiagnostics;
+            _pendingDiagnostics = null;
+        }
+        Monitor.Exit(_writeGate);
+        if (diagnostics is not null)
+        {
+            foreach (Action write in diagnostics)
+            {
+                write();
+            }
+        }
+        if (failure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
+        }
+    }
+
+    internal bool IsProtected(string type, string id, bool generatedCache = false) =>
+        _protectedResources.Contains(type + "/" + id) ||
+        (_hasGeneratedCache && !generatedCache && type == "CapabilityStatement" && id == _capabilityStatementId);
+
+    internal void RecordUpsert(string type, string id, bool inserted, bool generatedCache = false)
+    {
+        if (generatedCache)
+        {
+            _hasGeneratedCache = true;
+            RecordRemoval(type, id);
+            return;
+        }
+        if (inserted && _hasProtected && _loadState != LoadStateCodes.None &&
+            _loadingThread == Environment.CurrentManagedThreadId)
+        {
+            _protectedResources.Add(type + "/" + id);
+            RecordRemoval(type, id);
+            return;
+        }
+        if (!inserted || _maxResourceCount <= 0)
         {
             return;
         }
+        _liveNodes.Add((type, id), _liveOrder.AddLast((type, id)));
+    }
 
-        int numberToRemove = _resourceQ.Count - _maxResourceCount;
-
-        for (int i = 0; i < numberToRemove; i++)
+    internal void RecordRemoval(string type, string id)
+    {
+        if (_liveNodes.Remove((type, id), out LinkedListNode<(string Type, string Id)>? node))
         {
-            if (_resourceQ.TryDequeue(out string? id) &&
-                (!string.IsNullOrEmpty(id)))
-            {
-                string[] components = id.Split('/');
-
-                switch (components.Length)
-                {
-                    // resource and id
-                    case 2:
-                        {
-                            if (_store.TryGetValue(components[0], out IVersionedResourceStore? rs))
-                            {
-                                rs.InstanceDelete(components[1], _protectedResources);
-                            }
-                        }
-                        break;
-
-                    // TODO: handle versioned resources
-                    // resource, id, and version
-                    case 3:
-                        {
-                            if (_store.TryGetValue(components[0], out IVersionedResourceStore? rs))
-                            {
-                                rs.InstanceDelete(components[1], _protectedResources);
-                            }
-                        }
-                        break;
-                }
-            }
+            _liveOrder.Remove(node);
         }
     }
 
@@ -1010,7 +1105,6 @@ public partial class VersionedFhirStore : IFhirStore
     private void CheckUsage(object? state)
     {
         CheckReceivedNotificationUsage();
-        CheckResourceUsage();
     }
 
     /// <summary>Attempts to resolve an ITypedElement from the given string.</summary>
@@ -1598,15 +1692,6 @@ public partial class VersionedFhirStore : IFhirStore
                 StatusCode = createStatusCode,
             };
             return false;
-        }
-
-        if ((_loadState != LoadStateCodes.None) && _hasProtected)
-        {
-            _protectedResources.Add(resourceType + "/" + stored.Id);
-        }
-        else if ((_maxResourceCount != 0) && (stored.Meta?.VersionId is not null))
-        {
-            _resourceQ.Enqueue(resourceType + "/" + stored.Id + "/" + stored.Meta.VersionId);
         }
 
         response = new()
@@ -2720,7 +2805,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             if (compartmentDefinition is not CompartmentDefinition cd)
             {
-                Console.WriteLine("CompartmentDefinition: resource is not a CompartmentDefinition");
+                AfterMutation(() => Console.WriteLine("CompartmentDefinition: resource is not a CompartmentDefinition"), diagnostic: true);
                 return false;
             }
 
@@ -2729,7 +2814,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             if (!_store.ContainsKey(parsed.CompartmentType))
             {
-                Console.WriteLine($"CompartmentDefinition: resource type {parsed.CompartmentType} not supported for requested compartment {cd.Url}");
+                AfterMutation(() => Console.WriteLine($"CompartmentDefinition: resource type {parsed.CompartmentType} not supported for requested compartment {cd.Url}"), diagnostic: true);
                 return false;
             }
 
@@ -2739,7 +2824,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error parsing CompartmentDefinition: {ex.Message}");
+            AfterMutation(() => Console.WriteLine($"Error parsing CompartmentDefinition: {ex.Message}"), diagnostic: true);
             return false;
         }
     }
@@ -2895,6 +2980,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool StoreProcessSubscriptionTopic(ParsedSubscriptionTopic topic, bool remove = false)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         bool result;
@@ -2918,7 +3004,7 @@ public partial class VersionedFhirStore : IFhirStore
     {
         if (remove)
         {
-            if (!_topics.ContainsKey(topic.Url))
+            if (!_topics.TryRemove(topic.Url, out _))
             {
                 return false;
             }
@@ -3130,6 +3216,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>The subscription event count.</returns>
     public long GetSubscriptionEventCount(string subscriptionId, bool increment)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         long count = 0;
@@ -3157,6 +3244,7 @@ public partial class VersionedFhirStore : IFhirStore
         bool removed = false,
         bool sendHandshake = false)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
@@ -3184,6 +3272,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="status">The status.</param>
     public void ChangeSubscriptionStatus(string id, string status)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
@@ -3201,6 +3290,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="subscriptionEvent">The subscription event.</param>
     public void RegisterSendEvent(string subscriptionId, SubscriptionEvent subscriptionEvent)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         SubscriptionSendEventArgs? send = null;
@@ -3220,7 +3310,7 @@ public partial class VersionedFhirStore : IFhirStore
         PublishSubscriptionChanges(changes, diagnostics);
         if (send is not null)
         {
-            OnSubscriptionSendEvent?.Invoke(this, send);
+            AfterMutation(() => OnSubscriptionSendEvent?.Invoke(this, send));
         }
     }
 
@@ -3229,6 +3319,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="errorMessage">Message describing the error.</param>
     public void RegisterError(string id, string errorMessage)
     {
+        using MutationScope mutation = BeginMutation();
         string? diagnostic = null;
         lock (SubscriptionLifecycleLock)
         {
@@ -3239,7 +3330,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         if (diagnostic is not null)
         {
-            _subscriptionDiagnosticWriter(diagnostic);
+            AfterMutation(() => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
         }
     }
 
@@ -3430,6 +3521,7 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool StoreProcessSubscription(ParsedSubscription subscription, bool remove = false)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         bool result;
@@ -6704,14 +6796,15 @@ rs,
         // update our current capabilities
         if (root == _config.BaseUrl)
         {
-            _store["CapabilityStatement"].InstanceUpdate(
+            ((ResourceStore<CapabilityStatement>)_store["CapabilityStatement"]).InstanceUpdate(
                 cs,
                 true,
                 string.Empty,
                 string.Empty,
                 _protectedResources,
                 out _,
-                out _);
+                out _,
+                generatedCache: true);
             _capabilitiesAreStale = false;
         }
 

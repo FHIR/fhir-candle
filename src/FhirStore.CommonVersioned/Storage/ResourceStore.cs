@@ -688,13 +688,10 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         List<SubscriptionChangedEventArgs> subscriptionChanges = [];
         List<string> subscriptionDiagnostics = [];
-        lock (_lockObject)
+        using VersionedFhirStore.MutationScope mutation = _store.BeginMutation();
+        using (_store.EnterLifecycle(parsedSubscription is not null))
         {
-            if (parsedSubscription is not null)
-            {
-                Monitor.Enter(_store.SubscriptionLifecycleLock);
-            }
-            try
+            lock (_lockObject)
             {
                 if (_resourceStore.ContainsKey(source.Id))
                 {
@@ -727,6 +724,7 @@ public class ResourceStore<T> : IVersionedResourceStore
                         $"Failed to create resource {source.TypeName}/{source.Id}");
                     return null;
                 }
+                _store.RecordUpsert(_resourceName, source.Id, inserted: true);
                 if (parsedSubscription is not null)
                 {
                     _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
@@ -737,18 +735,14 @@ public class ResourceStore<T> : IVersionedResourceStore
                     _store.Terminology.ApplyStoredValueSetChange(null, createdValueSet);
                 }
             }
-            finally
-            {
-                if (parsedSubscription is not null)
-                {
-                    Monitor.Exit(_store.SubscriptionLifecycleLock);
-                }
-            }
         }
 
         _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
-        RegisterInstanceCreated(source.Id);
-        _store.RegisterInstanceCreated(_resourceName, source.Id);
+        _store.AfterMutation(() =>
+        {
+            RegisterInstanceCreated(source.Id);
+            _store.RegisterInstanceCreated(_resourceName, source.Id);
+        });
 
         if (source is IConformanceResource cr)
         {
@@ -758,7 +752,8 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        TestCreateAgainstSubscriptions((T)source);
+        Dictionary<string, ExecutableSubscriptionInfo> bindings = SubscriptionExecutionSnapshot();
+        _store.AfterMutation(() => TestCreateAgainstSubscriptions((T)source, bindings));
 
         if (parsedSubscriptionTopic is not null)
         {
@@ -800,6 +795,17 @@ public class ResourceStore<T> : IVersionedResourceStore
         HashSet<string> protectedResources,
         out HttpStatusCode sc,
         out OperationOutcome outcome)
+        => InstanceUpdate(source, allowCreate, ifMatch, ifNoneMatch, protectedResources, out sc, out outcome, generatedCache: false);
+
+    internal Resource? InstanceUpdate(
+        Resource source,
+        bool allowCreate,
+        string ifMatch,
+        string ifNoneMatch,
+        HashSet<string> protectedResources,
+        out HttpStatusCode sc,
+        out OperationOutcome outcome,
+        bool generatedCache)
     {
         if ((source is null) ||
             (source is not T))
@@ -819,13 +825,6 @@ public class ResourceStore<T> : IVersionedResourceStore
         if (source.Meta is null)
         {
             source.Meta = new Meta();
-        }
-
-        if (protectedResources.Any() && protectedResources.Contains(_resourceName + "/" + source.Id))
-        {
-            outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.Unauthorized, $"Resource {_resourceName}/{source.Id} is protected and cannot be changed");
-            sc = HttpStatusCode.Unauthorized;
-            return null;
         }
 
         ParsedSubscriptionTopic? parsedSubscriptionTopic = null;
@@ -884,13 +883,16 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         List<SubscriptionChangedEventArgs> subscriptionChanges = [];
         List<string> subscriptionDiagnostics = [];
-        lock (_lockObject)
+        using VersionedFhirStore.MutationScope mutation = _store.BeginMutation();
+        if (_store.IsProtected(_resourceName, source.Id, generatedCache) || protectedResources.Contains(_resourceName + "/" + source.Id))
         {
-            if (parsedSubscription is not null)
-            {
-                Monitor.Enter(_store.SubscriptionLifecycleLock);
-            }
-            try
+            outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.Unauthorized, $"Resource {_resourceName}/{source.Id} is protected and cannot be changed");
+            sc = HttpStatusCode.Unauthorized;
+            return null;
+        }
+        using (_store.EnterLifecycle(parsedSubscription is not null))
+        {
+            lock (_lockObject)
             {
                 if (!_resourceStore.ContainsKey(source.Id))
                 {
@@ -964,6 +966,7 @@ public class ResourceStore<T> : IVersionedResourceStore
 
                 // store
                 _resourceStore[source.Id] = (T)source;
+                _store.RecordUpsert(_resourceName, source.Id, previous is null, generatedCache);
                 if (parsedSubscription is not null)
                 {
                     _store.CommitSubscriptionLocked(parsedSubscription, (Subscription)source, false, subscriptionChanges, subscriptionDiagnostics);
@@ -974,18 +977,14 @@ public class ResourceStore<T> : IVersionedResourceStore
                     _store.Terminology.ApplyStoredValueSetChange(previous as ValueSet, replacementValueSet);
                 }
             }
-            finally
-            {
-                if (parsedSubscription is not null)
-                {
-                    Monitor.Exit(_store.SubscriptionLifecycleLock);
-                }
-            }
         }
 
         _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
-        RegisterInstanceUpdated(source.Id);
-        _store.RegisterInstanceUpdated(_resourceName, source.Id);
+        _store.AfterMutation(() =>
+        {
+            RegisterInstanceUpdated(source.Id);
+            _store.RegisterInstanceUpdated(_resourceName, source.Id);
+        });
 
         if (source is IConformanceResource cr)
         {
@@ -1003,13 +1002,14 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
+        Dictionary<string, ExecutableSubscriptionInfo> bindings = SubscriptionExecutionSnapshot();
         if (previous is null)
         {
-            TestCreateAgainstSubscriptions((T)source);
+            _store.AfterMutation(() => TestCreateAgainstSubscriptions((T)source, bindings));
         }
         else
         {
-            TestUpdateAgainstSubscriptions((T)source, previous);
+            _store.AfterMutation(() => TestUpdateAgainstSubscriptions((T)source, previous, bindings));
         }
 
         if (parsedSubscriptionTopic is not null)
@@ -1049,12 +1049,8 @@ public class ResourceStore<T> : IVersionedResourceStore
             return null;
         }
 
-        if (!_resourceStore.ContainsKey(id))
-        {
-            return null;
-        }
-
-        if (protectedResources.Any() && protectedResources.Contains(_resourceName + "/" + id))
+        using VersionedFhirStore.MutationScope mutation = _store.BeginMutation();
+        if (_store.IsProtected(_resourceName, id) || protectedResources.Contains(_resourceName + "/" + id))
         {
             return null;
         }
@@ -1063,20 +1059,20 @@ public class ResourceStore<T> : IVersionedResourceStore
 
         List<SubscriptionChangedEventArgs> subscriptionChanges = [];
         List<string> subscriptionDiagnostics = [];
-        lock (_lockObject)
+        bool subscriptionMutation = typeof(T) == typeof(Subscription);
+        using (_store.EnterLifecycle(subscriptionMutation))
         {
-            bool subscriptionMutation = typeof(T) == typeof(Subscription);
-            if (subscriptionMutation)
-            {
-                Monitor.Enter(_store.SubscriptionLifecycleLock);
-            }
-            try
+            lock (_lockObject)
             {
                 if (subscriptionMutation)
                 {
                     _store.ValidateSubscriptionCommitLocked();
                 }
                 _ = _resourceStore.TryRemove(id, out previous);
+                if (previous is not null)
+                {
+                    _store.RecordRemoval(_resourceName, id);
+                }
                 if (subscriptionMutation && previous is not null)
                 {
                     previous = (T)previous.DeepCopy();
@@ -1094,13 +1090,6 @@ public class ResourceStore<T> : IVersionedResourceStore
                     }
                 }
             }
-            finally
-            {
-                if (subscriptionMutation)
-                {
-                    Monitor.Exit(_store.SubscriptionLifecycleLock);
-                }
-            }
         }
 
         _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
@@ -1109,8 +1098,11 @@ public class ResourceStore<T> : IVersionedResourceStore
             return null;
         }
 
-        RegisterInstanceDeleted(id);
-        _store.RegisterInstanceDeleted(_resourceName, id);
+        _store.AfterMutation(() =>
+        {
+            RegisterInstanceDeleted(id);
+            _store.RegisterInstanceDeleted(_resourceName, id);
+        });
 
         if (previous is IConformanceResource pcr)
         {
@@ -1120,7 +1112,8 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
         }
 
-        TestDeleteAgainstSubscriptions(previous);
+        Dictionary<string, ExecutableSubscriptionInfo> bindings = SubscriptionExecutionSnapshot();
+        _store.AfterMutation(() => TestDeleteAgainstSubscriptions(previous, bindings));
 
         switch (previous?.TypeName)
         {
@@ -1137,6 +1130,8 @@ public class ResourceStore<T> : IVersionedResourceStore
                 RemoveExecutableSearchParameter((SearchParameter)(Resource)previous);
                 break;
 
+            case "Basic" when previous is Basic basic && basic.Code?.Coding?.Any(c =>
+                c.System == "http://hl7.org/fhir/fhir-types" && c.Code == "SubscriptionTopic") == true:
             case "SubscriptionTopic":
                 {
                     // get a common subscription topic for execution
@@ -1616,12 +1611,14 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <summary>Tests a create interaction against all subscriptions.</summary>
     /// <param name="current">The current resource version.</param>
     public void TestCreateAgainstSubscriptions(T current)
+        => TestCreateAgainstSubscriptions(current, SubscriptionExecutionSnapshot());
+
+    private void TestCreateAgainstSubscriptions(T current, Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions)
     {
         // TODO: Change this to async
 
         try
         {
-            Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
             if (executableSubscriptions.Count == 0 ||
                 executableSubscriptions.Values.All(executable => executable.FiltersBySubscription.Count == 0))
             {
@@ -1665,12 +1662,14 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <param name="current"> The current resource version.</param>
     /// <param name="previous">The previous resource version.</param>
     public void TestUpdateAgainstSubscriptions(T current, T previous)
+        => TestUpdateAgainstSubscriptions(current, previous, SubscriptionExecutionSnapshot());
+
+    private void TestUpdateAgainstSubscriptions(T current, T previous, Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions)
     {
         // TODO: Change this to async
 
         try
         {
-            Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
             if (executableSubscriptions.Count == 0 ||
                 executableSubscriptions.Values.All(executable => executable.FiltersBySubscription.Count == 0))
             {
@@ -1716,12 +1715,14 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <summary>Tests a delete interaction against all subscriptions.</summary>
     /// <param name="previous">The previous resource version.</param>
     public void TestDeleteAgainstSubscriptions(T previous)
+        => TestDeleteAgainstSubscriptions(previous, SubscriptionExecutionSnapshot());
+
+    private void TestDeleteAgainstSubscriptions(T previous, Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions)
     {
         // TODO: Change this to async
 
         try
         {
-            Dictionary<string, ExecutableSubscriptionInfo> executableSubscriptions = SubscriptionExecutionSnapshot();
             if (executableSubscriptions.Count == 0 ||
                 executableSubscriptions.Values.All(executable => executable.FiltersBySubscription.Count == 0))
             {
@@ -1794,7 +1795,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"ResourceStore[{_resourceName}] <<< Exception Setting Executable Search Parameter {rt}.{name}: {ex.Message}");
+                _store.AfterMutation(() => Console.WriteLine($"ResourceStore[{_resourceName}] <<< Exception Setting Executable Search Parameter {rt}.{name}: {ex.Message}"), diagnostic: true);
             }
         }
     }

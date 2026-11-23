@@ -11,9 +11,29 @@ namespace FhirCandle.Storage;
 
 public partial class VersionedFhirStore
 {
-    // Ordering: Subscription resource mutation -> lifecycle -> registration/history.
+    // Ordering: tenant write gate -> lifecycle (if needed) -> typed mutation -> registration/history.
     // Publication and awaiting transport/timer tasks always happen outside these locks.
     internal readonly object SubscriptionLifecycleLock = new();
+
+    internal readonly struct LifecycleScope(object? gate) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (gate is not null)
+            {
+                Monitor.Exit(gate);
+            }
+        }
+    }
+
+    internal LifecycleScope EnterLifecycle(bool needed)
+    {
+        if (needed)
+        {
+            Monitor.Enter(SubscriptionLifecycleLock);
+        }
+        return new(needed ? SubscriptionLifecycleLock : null);
+    }
     private readonly TimeProvider _clock;
     private readonly ITimer _subscriptionTimer;
     private long _subscriptionRevision;
@@ -55,11 +75,11 @@ public partial class VersionedFhirStore
     {
         foreach (SubscriptionChangedEventArgs change in changes)
         {
-            OnSubscriptionsChanged?.Invoke(this, change);
+            AfterMutation(() => OnSubscriptionsChanged?.Invoke(this, change));
         }
         foreach (string diagnostic in diagnostics)
         {
-            _subscriptionDiagnosticWriter(diagnostic);
+            AfterMutation(() => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
         }
     }
 
@@ -208,6 +228,17 @@ public partial class VersionedFhirStore
 
     private ParsedSubscription[] SubscriptionSnapshots()
     {
+        lock (SubscriptionLifecycleLock)
+        {
+            DateTimeOffset now = _clock.GetUtcNow();
+            ParsedSubscription[] current = _subscriptions.Values.ToArray();
+            if (_lifecycleStopped || !current.Any(subscription => subscription.CurrentStatus is ("active" or "requested") &&
+                SubscriptionLifecyclePolicy.IsExpired(subscription.ExpirationTicks, now)))
+            {
+                return current;
+            }
+        }
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         ParsedSubscription[] subscriptions;
@@ -228,21 +259,24 @@ public partial class VersionedFhirStore
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         Subscription? snapshot;
-        lock (SubscriptionLifecycleLock)
+        using (MutationScope mutation = BeginMutation())
         {
-            if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+            lock (SubscriptionLifecycleLock)
             {
-                NormalizeSubscriptionLocked(subscription, instant, changes, diagnostics);
+                if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+                {
+                    NormalizeSubscriptionLocked(subscription, instant, changes, diagnostics);
+                }
+                snapshot = _store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore)
+                    ? resourceStore.ReadRawSubscription(id)
+                    : null;
+                if (detach && snapshot is not null)
+                {
+                    snapshot = (Subscription)snapshot.DeepCopy();
+                }
             }
-            snapshot = _store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore)
-                ? resourceStore.ReadRawSubscription(id)
-                : null;
-            if (detach && snapshot is not null)
-            {
-                snapshot = (Subscription)snapshot.DeepCopy();
-            }
+            PublishSubscriptionChanges(changes, diagnostics);
         }
-        PublishSubscriptionChanges(changes, diagnostics);
         if (detach && snapshot is not null)
         {
             onDetach?.Invoke();
@@ -252,6 +286,7 @@ public partial class VersionedFhirStore
 
     internal Subscription[] SubscriptionResourceSnapshots()
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         Subscription[] snapshots;
@@ -269,6 +304,7 @@ public partial class VersionedFhirStore
 
     internal (string Id, string Status, Resource Resource)[] SubscriptionStatusSnapshots(string notificationType)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         (string, string, Resource)[] snapshots;
@@ -286,6 +322,7 @@ public partial class VersionedFhirStore
     internal void AcceptSubscriptionEvent(
         string id, string topicUrl, long revision, Resource focus, IEnumerable<object> additionalContext)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         SubscriptionSendEventArgs? send = null;
@@ -318,7 +355,7 @@ public partial class VersionedFhirStore
         PublishSubscriptionChanges(changes, diagnostics);
         if (send is not null)
         {
-            OnSubscriptionSendEvent?.Invoke(this, send);
+            AfterMutation(() => OnSubscriptionSendEvent?.Invoke(this, send));
         }
     }
 
@@ -333,6 +370,7 @@ public partial class VersionedFhirStore
 
     internal void RegisterSubscriptionExecutionError(string id, long revision, string error)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         string? diagnostic = null;
@@ -352,7 +390,7 @@ public partial class VersionedFhirStore
         PublishSubscriptionChanges(changes, diagnostics);
         if (diagnostic is not null)
         {
-            _subscriptionDiagnosticWriter(diagnostic);
+            AfterMutation(() => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
         }
     }
 
@@ -379,22 +417,25 @@ public partial class VersionedFhirStore
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         Task<SubscriptionNotificationOutcome>? operation = null;
-        lock (SubscriptionLifecycleLock)
+        using (BeginMutation())
         {
-            if (CanDispatchLocked(args, changes, diagnostics))
+            lock (SubscriptionLifecycleLock)
             {
-                try
+                if (CanDispatchLocked(args, changes, diagnostics))
                 {
-                    operation = startTransport();
-                }
-                catch (Exception exception)
-                {
-                    operation = Task.FromException<SubscriptionNotificationOutcome>(exception);
+                    try
+                    {
+                        operation = startTransport();
+                    }
+                    catch (Exception exception)
+                    {
+                        operation = Task.FromException<SubscriptionNotificationOutcome>(exception);
+                    }
                 }
             }
+            PublishSubscriptionChanges(changes, diagnostics);
         }
         // Even an already-completed or synchronously throwing starter is observed after unlock.
-        PublishSubscriptionChanges(changes, diagnostics);
         deliveryTask = operation is null
             ? Task.FromResult(new SubscriptionNotificationOutcome(SubscriptionNotificationOutcome.OutcomeKind.Suppressed))
             : CompleteSubscriptionDispatchAsync(args, operation);
@@ -420,6 +461,7 @@ public partial class VersionedFhirStore
 
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
+        using MutationScope mutation = BeginMutation();
         lock (SubscriptionLifecycleLock)
         {
             if (!CanDispatchLocked(args, changes, diagnostics))
@@ -450,6 +492,7 @@ public partial class VersionedFhirStore
     /// <inheritdoc/>
     public bool TryCompleteSubscriptionHandshake(SubscriptionSendEventArgs args)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         bool activated;
@@ -466,64 +509,68 @@ public partial class VersionedFhirStore
     private (Bundle? Bundle, string ContentType) BuildSubscriptionEvents(
         string id, IEnumerable<long> numbers, string notificationType, string contentLevel, bool allowEmptySelectionFallback)
     {
-        List<SubscriptionChangedEventArgs> changes = [];
-        List<string> diagnostics = [];
         Bundle? bundle = null;
         string contentType = string.Empty;
-        try
+        ReadSubscriptionHistory(id, subscription =>
         {
-            lock (SubscriptionLifecycleLock)
-            {
-                if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
-                {
-                    NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
-                    contentType = subscription.ContentType;
-                    lock (subscription.GeneratedEvents)
-                    {
-                        bundle = _subscriptionConverter.BundleForSubscriptionEvents(subscription, numbers, notificationType,
-                            _config.BaseUrl, contentLevel, allowEmptySelectionFallback);
-                        bundle = (Bundle?)bundle?.DeepCopy();
-                    }
-                }
-            }
-        }
-        finally
-        {
-            PublishSubscriptionChanges(changes, diagnostics);
-        }
+            contentType = subscription.ContentType;
+            bundle = _subscriptionConverter.BundleForSubscriptionEvents(subscription, numbers, notificationType,
+                _config.BaseUrl, contentLevel, allowEmptySelectionFallback);
+            bundle = (Bundle?)bundle?.DeepCopy();
+        });
         return (bundle, contentType);
     }
 
     internal Bundle? RetainedSubscriptionEvents(string id, long since, long? until, string contentLevel)
     {
-        List<SubscriptionChangedEventArgs> changes = [];
-        List<string> diagnostics = [];
         Bundle? bundle = null;
-        try
+        ReadSubscriptionHistory(id, subscription =>
+        {
+            long upperBound = Math.Min(until ?? subscription.CurrentEventCount, subscription.CurrentEventCount);
+            long[] numbers = since > upperBound ? [] : subscription.GeneratedEvents.Keys
+                .Where(number => since <= number && number <= upperBound).OrderBy(number => number).ToArray();
+            bundle = _subscriptionConverter.BundleForSubscriptionEvents(subscription, numbers, "query-event",
+                _config.BaseUrl, contentLevel, allowEmptySelectionFallback: false);
+            bundle = (Bundle?)bundle?.DeepCopy();
+        });
+        return bundle;
+    }
+
+    // Replay needs a coherent lifecycle/history pair, not exclusive access to unrelated
+    // tenant rows. If normalization is necessary, drop the read locks before mutating.
+    private void ReadSubscriptionHistory(string id, Action<ParsedSubscription> read)
+    {
+        while (true)
         {
             lock (SubscriptionLifecycleLock)
             {
-                if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
+                if (!_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
                 {
-                    NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
+                    return;
+                }
+                DateTimeOffset now = _clock.GetUtcNow();
+                if (_lifecycleStopped || subscription.CurrentStatus is not ("active" or "requested") ||
+                    !SubscriptionLifecyclePolicy.IsExpired(subscription.ExpirationTicks, now))
+                {
                     lock (subscription.GeneratedEvents)
                     {
-                        long highestEvent = subscription.CurrentEventCount;
-                        long upperBound = Math.Min(until ?? highestEvent, highestEvent);
-                        long[] numbers = since > upperBound ? [] : subscription.GeneratedEvents.Keys
-                            .Where(number => since <= number && number <= upperBound).OrderBy(number => number).ToArray();
-                        bundle = _subscriptionConverter.BundleForSubscriptionEvents(subscription, numbers, "query-event",
-                            _config.BaseUrl, contentLevel, allowEmptySelectionFallback: false);
-                        bundle = (Bundle?)bundle?.DeepCopy();
+                        read(subscription);
                     }
+                    return;
                 }
             }
-        }
-        finally
-        {
+            using MutationScope mutation = BeginMutation();
+            List<SubscriptionChangedEventArgs> changes = [];
+            List<string> diagnostics = [];
+            lock (SubscriptionLifecycleLock)
+            {
+                if (_subscriptions.TryGetValue(id, out ParsedSubscription? current))
+                {
+                    NormalizeSubscriptionLocked(current, _clock.GetUtcNow(), changes, diagnostics);
+                }
+            }
             PublishSubscriptionChanges(changes, diagnostics);
         }
-        return bundle;
     }
 
     private void RearmSubscriptionTimerLocked()
@@ -543,6 +590,7 @@ public partial class VersionedFhirStore
 
     private void ExpireSubscriptions(object? state)
     {
+        using MutationScope mutation = BeginMutation();
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
         lock (SubscriptionLifecycleLock)
@@ -560,6 +608,7 @@ public partial class VersionedFhirStore
     private void StopSubscriptionLifecycle()
     {
         bool drain;
+        using (BeginMutation())
         lock (SubscriptionLifecycleLock)
         {
             drain = !_lifecycleStopped;
