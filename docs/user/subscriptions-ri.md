@@ -39,6 +39,24 @@ is not successful communication. Reserved example-domain shortcuts remain simula
 Inactive subscriptions retain their existing history for `$events` and `$status` inspection.
 Ordinary replacement does not transfer the previous subscription's event count or history.
 
+## Notification delivery limits
+
+| CLI option | Configuration key | Default (per server) |
+| --- | --- | --- |
+| `--notification-queue-capacity` | `Notification_Queue_Capacity` | 256 waiting notifications |
+| `--notification-concurrency` | `Notification_Concurrency` | 4 active deliveries |
+
+Both limits are positive integers. Waiting capacity must be at least the number of configured
+tenants. Set either key in `appsettings.json` or as an environment variable. Environment variables
+also accept the `Candle` prefix, for example `CandleNotification_Concurrency=2`. An unprefixed
+variable overrides its prefixed counterpart, and a CLI option overrides the corresponding key.
+
+Events, handshakes, and heartbeats share these limits. Each tenant has a FIFO queue. Waiting
+slots are divided evenly among tenants, with any remainder assigned deterministically; unused
+slots are not lent to other tenants. When a tenant's queue is full, the server declines the new
+notification without evicting an accepted one. A `queue_saturated` diagnostic reports refusals,
+not transport failures. As workers become available, they take turns among nonempty tenant queues.
+
 ## Zulip delivery
 
 - To use the operator bot, configure `ZulipUrl`, `ZulipEmail`, and `ZulipKey` together on the

@@ -2,7 +2,6 @@
 using FhirCandle.Storage;
 using System.Text;
 using fhir.candle.Models;
-using System.Collections.Concurrent;
 using FhirCandle.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
@@ -21,10 +20,9 @@ public class RestOnlyNotificationManager : INotificationManager
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly TimeProvider _clock;
-    private readonly object _schedulingLock = new();
+    internal NotificationScheduler Scheduler { get; }
     private readonly Dictionary<(IFhirStore Store, string Id, long Revision), long> _heartbeatReservations = [];
     private readonly Dictionary<(IFhirStore Store, string Id), long> _handshakeRevisions = [];
-    private bool _stopped;
     private bool _started;
 
     /// <summary>The logger.</summary>
@@ -35,17 +33,6 @@ public class RestOnlyNotificationManager : INotificationManager
 
     /// <summary>The heartbeat timer.</summary>
     private ITimer? _heartbeatTimer;
-
-    private ITimer? _notificationTimer;
-
-    private record NotificationRequest
-    {
-        public required IFhirStore Store { get; init; }
-
-        public required SubscriptionSendEventArgs Args { get; init; }
-    }
-
-    private ConcurrentQueue<NotificationRequest> _notificationRequestQ = new();
 
     /// <summary>Initializes a new instance of the <see cref="NotificationManager"/> class.</summary>
     /// <param name="serverConfig">    The server configuration.</param>
@@ -77,6 +64,7 @@ public class RestOnlyNotificationManager : INotificationManager
         HttpClient? httpClient)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        Scheduler = new(serverConfig, tenants.Keys, logger, _clock, DeliverAsync);
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new();
         _logger = logger;
@@ -86,9 +74,11 @@ public class RestOnlyNotificationManager : INotificationManager
     /// <summary>Try notify via the appropriate channel type.</summary>
     /// <param name="store">The store.</param>
     /// <param name="e">    Subscription event information.</param>
+    /// <param name="cancellationToken">Cancellation of delivery during shutdown.</param>
     /// <returns>The revision-fenced notification outcome.</returns>
-    private async Task<Outcome> TryNotify(IFhirStore store, SubscriptionSendEventArgs e)
+    private async Task<Outcome> TryNotify(IFhirStore store, SubscriptionSendEventArgs e, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Outcome admission = await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.SetupComplete))).ConfigureAwait(false);
         if (admission.Kind == OutcomeKind.Suppressed)
         {
@@ -113,12 +103,16 @@ public class RestOnlyNotificationManager : INotificationManager
             {
                 throw new NotSupportedException($"Unimplemented channel type: {e.Subscription.ChannelCode}");
             }
-            Outcome outcome = await TryNotifyRestHook(store, e, contents).ConfigureAwait(false);
+            Outcome outcome = await TryNotifyRestHook(store, e, contents, cancellationToken).ConfigureAwait(false);
             if (e.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake && outcome.Succeeded)
             {
                 store.TryCompleteSubscriptionHandshake(e);
             }
             return outcome;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -131,12 +125,15 @@ public class RestOnlyNotificationManager : INotificationManager
     /// <param name="store">   The store.</param>
     /// <param name="e">       Subscription event information.</param>
     /// <param name="contents">Serialized contents of the notification.</param>
+    /// <param name="cancellationToken">Cancellation of delivery during shutdown.</param>
     /// <returns>The revision-fenced REST outcome.</returns>
     private async Task<Outcome> TryNotifyRestHook(
         IFhirStore store,
         SubscriptionSendEventArgs e,
-        string contents)
+        string contents,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         // auto-pass any notifications to example.org
         if (e.Subscription.Endpoint.Contains("example.org", StringComparison.Ordinal))
         {
@@ -174,7 +171,11 @@ public class RestOnlyNotificationManager : INotificationManager
 
             // send our request
             return await DispatchAsync(store, e,
-                () => RestOutcomeAsync(_httpClient.SendAsync(request), contents, e.Subscription.Endpoint)).ConfigureAwait(false);
+                () => RestOutcomeAsync(_httpClient.SendAsync(request, cancellationToken), contents, e.Subscription.Endpoint)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -211,10 +212,10 @@ public class RestOnlyNotificationManager : INotificationManager
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_schedulingLock)
+        lock (Scheduler.Gate)
         {
             ObjectDisposedException.ThrowIf(_hasDisposed, this);
-            if (_stopped)
+            if (Scheduler.IsStopped)
             {
                 throw new InvalidOperationException("RestOnlyNotificationManager has already stopped.");
             }
@@ -223,6 +224,7 @@ public class RestOnlyNotificationManager : INotificationManager
                 return Task.CompletedTask;
             }
             _started = true;
+            Scheduler.Start();
             _logger.LogInformation("Starting NotificationManager...");
 
             foreach (IFhirStore store in _storeManager.Values)
@@ -247,43 +249,23 @@ public class RestOnlyNotificationManager : INotificationManager
                 null,
                 TimeSpan.Zero,
                 TimeSpan.FromSeconds(2));
-
-            _notificationTimer = _clock.CreateTimer(
-                CheckNotificationQ,
-                null,
-                TimeSpan.Zero,
-                TimeSpan.FromSeconds(1));
         }
         return Task.CompletedTask;
     }
 
-    /// <summary>Check notification q.</summary>
-    /// <exception cref="Exception">Thrown when an exception error condition occurs.</exception>
-    /// <param name="state">The state.</param>
-    private void CheckNotificationQ(object? state)
-    {
-        lock (_schedulingLock)
-        {
-            if (_stopped)
-            {
-                return;
-            }
-            while (_notificationRequestQ.TryDequeue(out NotificationRequest? request))
-            {
-                _ = DeliverAsync(request.Store, request.Args);
-            }
-        }
-    }
-
-    private async Task DeliverAsync(IFhirStore store, SubscriptionSendEventArgs args)
+    private async Task DeliverAsync(IFhirStore store, SubscriptionSendEventArgs args, CancellationToken cancellationToken)
     {
         try
         {
-            Outcome outcome = await TryNotify(store, args).ConfigureAwait(false);
+            Outcome outcome = await TryNotify(store, args, cancellationToken).ConfigureAwait(false);
             if (outcome.Kind == OutcomeKind.Failed)
             {
                 _logger.LogWarning("Notification delivery failed for Subscription/{SubscriptionId}", args.Subscription.Id);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Notification delivery canceled during shutdown for Subscription/{SubscriptionId}", args.Subscription.Id);
         }
         catch (Exception exception)
         {
@@ -293,10 +275,10 @@ public class RestOnlyNotificationManager : INotificationManager
         {
             if (args.NotificationType == ParsedSubscription.NotificationTypeCodes.Heartbeat)
             {
-                lock (_schedulingLock)
+                lock (Scheduler.Gate)
                 {
                     (IFhirStore, string, long) key = (store, args.Subscription.Id, args.Revision);
-                    if (!_stopped && _heartbeatReservations.ContainsKey(key))
+                    if (!Scheduler.IsStopped && _heartbeatReservations.ContainsKey(key))
                     {
                         _heartbeatReservations[key] = _clock.GetUtcNow().UtcTicks +
                             (long)(args.Subscription.HeartbeatSeconds ?? 0) * TimeSpan.TicksPerSecond;
@@ -310,9 +292,9 @@ public class RestOnlyNotificationManager : INotificationManager
     /// <param name="state">The state.</param>
     private void CheckAndSendHeartbeats(object? state)
     {
-        lock (_schedulingLock)
+        lock (Scheduler.Gate)
         {
-            if (_stopped)
+            if (Scheduler.IsStopped)
             {
                 return;
             }
@@ -340,21 +322,16 @@ public class RestOnlyNotificationManager : INotificationManager
                         next = currentTicks + interval;
                         _heartbeatReservations[key] = next;
                     }
-                    if (next != long.MaxValue && currentTicks >= Math.Max(next, sub.LastCommunicationTicks + interval))
+                    if (next != long.MaxValue && currentTicks >= Math.Max(next, sub.LastCommunicationTicks + interval) &&
+                        Scheduler.TryEnqueue(store, new()
+                        {
+                            Tenant = store.Config,
+                            Subscription = sub,
+                            Revision = revision,
+                            NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
+                        }))
                     {
                         _heartbeatReservations[key] = long.MaxValue;
-
-                        _notificationRequestQ.Enqueue(new()
-                        {
-                            Store = store,
-                            Args = new()
-                            {
-                                Tenant = store.Config,
-                                Subscription = sub,
-                                Revision = revision,
-                                NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
-                            },
-                        });
                     }
                 }
             }
@@ -375,9 +352,9 @@ public class RestOnlyNotificationManager : INotificationManager
     /// <param name="e">     Subscription event information.</param>
     private void Store_OnSubscriptionSendEvent(object? sender, SubscriptionSendEventArgs e)
     {
-        lock (_schedulingLock)
+        lock (Scheduler.Gate)
         {
-            if (_stopped)
+            if (Scheduler.IsStopped)
             {
                 return;
             }
@@ -387,11 +364,7 @@ public class RestOnlyNotificationManager : INotificationManager
                 return;
             }
 
-            _notificationRequestQ.Enqueue(new()
-            {
-                Store = _storeManager[e.Tenant.ControllerName],
-                Args = e,
-            });
+            Scheduler.TryEnqueue(_storeManager[e.Tenant.ControllerName], e);
         }
     }
 
@@ -400,9 +373,9 @@ public class RestOnlyNotificationManager : INotificationManager
     /// <param name="e">     Subscription changed event information.</param>
     private void Store_OnSubscriptionsChanged(object? sender, SubscriptionChangedEventArgs e)
     {
-        lock (_schedulingLock)
+        lock (Scheduler.Gate)
         {
-            if (_stopped || !_storeManager.ContainsKey(e.Tenant.ControllerName))
+            if (Scheduler.IsStopped || !_storeManager.ContainsKey(e.Tenant.ControllerName))
             {
                 return;
             }
@@ -432,18 +405,16 @@ public class RestOnlyNotificationManager : INotificationManager
                     return;
                 }
 
-                _handshakeRevisions[(store, current.Id)] = e.Revision;
-                _notificationRequestQ.Enqueue(new()
+                if (Scheduler.TryEnqueue(store, new()
                 {
-                    Store = store,
-                    Args = new()
-                    {
-                        Tenant = e.Tenant,
-                        Subscription = e.ChangedSubscription,
-                        Revision = e.Revision,
-                        NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
-                    }
-                });
+                    Tenant = e.Tenant,
+                    Subscription = current,
+                    Revision = e.Revision,
+                    NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
+                }))
+                {
+                    _handshakeRevisions[(store, current.Id)] = e.Revision;
+                }
             }
         }
     }
@@ -452,29 +423,21 @@ public class RestOnlyNotificationManager : INotificationManager
     /// <param name="cancellationToken">Indicates that the shutdown process should no longer be
     ///  graceful.</param>
     /// <returns>An asynchronous result.</returns>
-    Task IHostedService.StopAsync(CancellationToken cancellationToken)
+    Task IHostedService.StopAsync(CancellationToken cancellationToken) => Scheduler.StopAsync(DetachProducers, cancellationToken);
+
+    private ValueTask DetachProducers()
     {
-        lock (_schedulingLock)
+        if (_started)
         {
-            if (_stopped)
-            {
-                return Task.CompletedTask;
-            }
-            _stopped = true;
-            _heartbeatTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            _notificationTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             foreach (IFhirStore store in _storeManager.Values)
             {
                 store.OnSubscriptionsChanged -= Store_OnSubscriptionsChanged;
                 store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;
             }
-            _notificationRequestQ.Clear();
-            _heartbeatReservations.Clear();
-            _handshakeRevisions.Clear();
         }
-        _heartbeatTimer?.Dispose();
-        _notificationTimer?.Dispose();
-        return Task.CompletedTask;
+        _heartbeatReservations.Clear();
+        _handshakeRevisions.Clear();
+        return _heartbeatTimer?.DisposeAsync() ?? ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -486,22 +449,21 @@ public class RestOnlyNotificationManager : INotificationManager
     ///  release only unmanaged resources.</param>
     protected virtual void Dispose(bool disposing)
     {
-        if (!_hasDisposed)
+        if (!disposing)
         {
-            // dispose managed state (managed objects)
-            if (disposing)
+            return;
+        }
+        Scheduler.DisposeAfterDrain(DetachProducers);
+        lock (Scheduler.Gate)
+        {
+            if (_hasDisposed)
             {
-                ((IHostedService)this).StopAsync(CancellationToken.None).GetAwaiter().GetResult();
-                _heartbeatTimer?.Dispose();
-                _notificationTimer?.Dispose();
-                if (_ownsHttpClient)
-                {
-                    _httpClient.Dispose();
-                }
+                return;
             }
-
-            // free unmanaged resources (unmanaged objects) and override finalizer
-            // set large fields to null
+            if (_ownsHttpClient)
+            {
+                _httpClient.Dispose();
+            }
             _hasDisposed = true;
         }
     }

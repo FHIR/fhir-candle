@@ -244,6 +244,20 @@ public record class CliOptions
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    /// <summary>Gets the server-wide waiting notification limit option.</summary>
+    public Option<int?> NotificationQueueCapacity { get; } = new("--notification-queue-capacity")
+    {
+        Description = "Maximum waiting subscription notifications per server (default 256, at least one per tenant).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the server-wide active notification limit option.</summary>
+    public Option<int?> NotificationConcurrency { get; } = new("--notification-concurrency")
+    {
+        Description = "Maximum concurrent subscription deliveries per server (positive integer, default 4).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
     public Option<string?> ZulipEmail { get; } = new("--zulip-email")
     {
         Description = "Zulip bot email address to use for Zulip notifications.",
@@ -332,6 +346,8 @@ public record class CandleConfig
     /// <summary>(Immutable) The default listen port.</summary>
     private const int _defaultListenPort = 5826;
     private const int _defaultSmtpPort = 465;
+    private const int _defaultNotificationQueueCapacity = 256;
+    private const int _defaultNotificationConcurrency = 4;
     private const string _defaultOtelProtocol = "grpc";
 
 
@@ -494,6 +510,31 @@ public record class CandleConfig
     [ConfigurationKeyName("Max_Subscription_Minutes")]
     public int MaxSubscriptionExpirationMinutes { get; set; } = 0;
 
+    /// <summary>Gets or sets the maximum waiting subscription notifications across all tenants.</summary>
+    [ConfigurationKeyName("Notification_Queue_Capacity")]
+    public int NotificationQueueCapacity { get; set; } = _defaultNotificationQueueCapacity;
+
+    /// <summary>Gets or sets the maximum active subscription deliveries across all tenants.</summary>
+    [ConfigurationKeyName("Notification_Concurrency")]
+    public int NotificationConcurrency { get; set; } = _defaultNotificationConcurrency;
+
+    /// <summary>Checks both notification limits against the number of tenants served by the scheduler.</summary>
+    public void ValidateNotificationBudgets(int tenantCount)
+    {
+        int minimum = Math.Max(1, tenantCount);
+        if (NotificationQueueCapacity < minimum)
+        {
+            throw new ArgumentOutOfRangeException(nameof(NotificationQueueCapacity), NotificationQueueCapacity,
+                $"Notification_Queue_Capacity must be at least {minimum} (one waiting slot per tenant).");
+        }
+
+        if (NotificationConcurrency < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(NotificationConcurrency), NotificationConcurrency,
+                "Notification_Concurrency must be at least 1.");
+        }
+    }
+
     [ConfigurationKeyName("Zulip_Email")]
     public string? ZulipEmail { get; set; } = null;
 
@@ -636,6 +677,9 @@ public record class CandleConfig
         AllowCreateAsUpdate = RawAllowCreateAsUpdate ?? true;
         Strict = pr.GetValue(opt.Strict) ?? envConfig?.Strict ?? false;
         MaxSubscriptionExpirationMinutes = pr.GetValue(opt.MaxSubscriptionExpirationMinutes) ?? envConfig?.MaxSubscriptionExpirationMinutes ?? 0;
+        NotificationQueueCapacity = pr.GetValue(opt.NotificationQueueCapacity) ?? envConfig?.NotificationQueueCapacity ?? _defaultNotificationQueueCapacity;
+        NotificationConcurrency = pr.GetValue(opt.NotificationConcurrency) ?? envConfig?.NotificationConcurrency ?? _defaultNotificationConcurrency;
+        ValidateNotificationBudgets(0);
 
         ZulipEmail = pr.GetValue(opt.ZulipEmail) ?? envConfig?.ZulipEmail;
         ZulipKey = pr.GetValue(opt.ZulipKey) ?? envConfig?.ZulipKey;
@@ -1032,6 +1076,8 @@ public class CliRootCommand : RootCommand
         Add(_cliOptions.Strict);
 
         Add(_cliOptions.MaxSubscriptionExpirationMinutes);
+        Add(_cliOptions.NotificationQueueCapacity);
+        Add(_cliOptions.NotificationConcurrency);
         Add(_cliOptions.ZulipEmail);
         Add(_cliOptions.ZulipKey);
         Add(_cliOptions.ZulipUrl);

@@ -11,7 +11,6 @@ using MailKit.Net.Smtp;
 using MailKit;
 using MimeKit;
 using fhir.candle.Models;
-using System.Collections.Concurrent;
 using FhirCandle.Configuration;
 using Outcome = FhirCandle.Models.SubscriptionNotificationOutcome;
 using OutcomeKind = FhirCandle.Models.SubscriptionNotificationOutcome.OutcomeKind;
@@ -38,8 +37,7 @@ public class NotificationManager : INotificationManager
     /// <summary>The heartbeat timer.</summary>
     private ITimer? _heartbeatTimer;
 
-    /// <summary>The queued-notification timer.</summary>
-    private ITimer? _notificationTimer;
+    internal NotificationScheduler Scheduler { get; }
 
     private readonly Dictionary<(IFhirStore Store, string Id, long Revision), long> _heartbeatReservations = [];
     private readonly Dictionary<(IFhirStore Store, string Id), long> _handshakeRevisions = [];
@@ -54,32 +52,8 @@ public class NotificationManager : INotificationManager
         (client, token) => client.IsConnected ? client.DisconnectAsync(true, token) : Task.CompletedTask;
     internal Func<ZulipSender.Destination, string, int, bool, CancellationToken, Task<(bool success, string? details, ulong messageId)>> ZulipSend { get; set; }
 
-    /// <summary>Serializes scheduling with the beginning of shutdown.</summary>
-    private readonly object _lifecycleLock = new();
-
-    /// <summary>Delivery tasks that must finish before stores and transports can be disposed.</summary>
-    private readonly HashSet<Task> _inFlight = [];
-
-    /// <summary>Cancels transports that support cancellation when graceful shutdown is abandoned.</summary>
-    private readonly CancellationTokenSource _sendCancellation = new();
-
     /// <summary>True after the service has attached its store event handlers.</summary>
     private bool _started;
-
-    /// <summary>True once no further notification work may be scheduled.</summary>
-    private bool _stopping;
-
-    /// <summary>The single timer/delivery drain shared by all stop and disposal calls.</summary>
-    private Task? _stopTask;
-
-    private record NotificationRequest
-    {
-        public required IFhirStore Store { get; init; }
-
-        public required SubscriptionSendEventArgs Args { get; init; }
-    }
-
-    private ConcurrentQueue<NotificationRequest> _notificationRequestQ = new();
 
     private readonly ZulipSender _zulipSender;
 
@@ -137,6 +111,7 @@ public class NotificationManager : INotificationManager
         HttpMessageHandler? zulipHandler)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        Scheduler = new(serverConfig, tenants.Keys, logger, _clock, DeliverAsync);
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new();
         _logger = logger;
@@ -739,10 +714,10 @@ public class NotificationManager : INotificationManager
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_lifecycleLock)
+        lock (Scheduler.Gate)
         {
             ObjectDisposedException.ThrowIf(_hasDisposed, this);
-            if (_stopping)
+            if (Scheduler.IsStopped)
             {
                 throw new InvalidOperationException("NotificationManager has already stopped.");
             }
@@ -751,6 +726,7 @@ public class NotificationManager : INotificationManager
                 return Task.CompletedTask;
             }
             _started = true;
+            Scheduler.Start();
             _logger.LogInformation("Starting NotificationManager...");
 
             foreach (IFhirStore store in _storeManager.Values)
@@ -775,66 +751,40 @@ public class NotificationManager : INotificationManager
                 null,
                 TimeSpan.Zero,
                 TimeSpan.FromSeconds(2));
-
-            _notificationTimer = _clock.CreateTimer(
-                CheckNotificationQ,
-                null,
-                TimeSpan.Zero,
-                TimeSpan.FromSeconds(1));
         }
         return Task.CompletedTask;
     }
 
-    /// <summary>Check notification q.</summary>
-    /// <exception cref="Exception">Thrown when an exception error condition occurs.</exception>
-    /// <param name="state">The state.</param>
-    private void CheckNotificationQ(object? state)
-    {
-        lock (_lifecycleLock)
-        {
-            if (_stopping)
-            {
-                return;
-            }
-
-            _inFlight.RemoveWhere(delivery => delivery.IsCompleted);
-            while (_notificationRequestQ.TryDequeue(out NotificationRequest? request))
-            {
-                _inFlight.Add(DeliverAsync(request));
-            }
-        }
-    }
-
     /// <summary>Observes every delivery, including failures before a channel has been selected.</summary>
-    private async Task DeliverAsync(NotificationRequest request)
+    private async Task DeliverAsync(IFhirStore store, SubscriptionSendEventArgs args, CancellationToken cancellationToken)
     {
         try
         {
-            Outcome outcome = await TryNotify(request.Store, request.Args, _sendCancellation.Token).ConfigureAwait(false);
+            Outcome outcome = await TryNotify(store, args, cancellationToken).ConfigureAwait(false);
             if (outcome.Kind == OutcomeKind.Failed)
             {
-                _logger.LogWarning("Notification delivery failed for Subscription/{SubscriptionId}", request.Args.Subscription.Id);
+                _logger.LogWarning("Notification delivery failed for Subscription/{SubscriptionId}", args.Subscription.Id);
             }
         }
-        catch (OperationCanceledException) when (_sendCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Notification delivery canceled during shutdown for Subscription/{SubscriptionId}", request.Args.Subscription.Id);
+            _logger.LogInformation("Notification delivery canceled during shutdown for Subscription/{SubscriptionId}", args.Subscription.Id);
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Notification delivery failed for Subscription/{SubscriptionId}", request.Args.Subscription.Id);
+            _logger.LogError(exception, "Notification delivery failed for Subscription/{SubscriptionId}", args.Subscription.Id);
         }
         finally
         {
-            if (request.Args.NotificationType == ParsedSubscription.NotificationTypeCodes.Heartbeat)
+            if (args.NotificationType == ParsedSubscription.NotificationTypeCodes.Heartbeat)
             {
-                lock (_lifecycleLock)
+                lock (Scheduler.Gate)
                 {
-                    (IFhirStore, string, long) key = (request.Store, request.Args.Subscription.Id, request.Args.Revision);
-                    if (!_stopping && _heartbeatReservations.ContainsKey(key))
+                    (IFhirStore, string, long) key = (store, args.Subscription.Id, args.Revision);
+                    if (!Scheduler.IsStopped && _heartbeatReservations.ContainsKey(key))
                     {
                         _heartbeatReservations[key] = _clock.GetUtcNow().UtcTicks +
-                            (long)(request.Args.Subscription.HeartbeatSeconds ?? 0) * TimeSpan.TicksPerSecond;
+                            (long)(args.Subscription.HeartbeatSeconds ?? 0) * TimeSpan.TicksPerSecond;
                     }
                 }
             }
@@ -845,9 +795,9 @@ public class NotificationManager : INotificationManager
     /// <param name="state">The state.</param>
     private void CheckAndSendHeartbeats(object? state)
     {
-        lock (_lifecycleLock)
+        lock (Scheduler.Gate)
         {
-            if (_stopping)
+            if (Scheduler.IsStopped)
             {
                 return;
             }
@@ -875,21 +825,16 @@ public class NotificationManager : INotificationManager
                         next = currentTicks + interval;
                         _heartbeatReservations[key] = next;
                     }
-                    if (next != long.MaxValue && currentTicks >= Math.Max(next, sub.LastCommunicationTicks + interval))
+                    if (next != long.MaxValue && currentTicks >= Math.Max(next, sub.LastCommunicationTicks + interval) &&
+                        Scheduler.TryEnqueue(store, new()
+                        {
+                            Tenant = store.Config,
+                            Subscription = sub,
+                            Revision = revision,
+                            NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
+                        }))
                     {
                         _heartbeatReservations[key] = long.MaxValue;
-
-                        _notificationRequestQ.Enqueue(new()
-                        {
-                            Store = store,
-                            Args = new()
-                            {
-                                Tenant = store.Config,
-                                Subscription = sub,
-                                Revision = revision,
-                                NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
-                            },
-                        });
                     }
                 }
             }
@@ -910,9 +855,9 @@ public class NotificationManager : INotificationManager
     /// <param name="e">     Subscription event information.</param>
     private void Store_OnSubscriptionSendEvent(object? sender, SubscriptionSendEventArgs e)
     {
-        lock (_lifecycleLock)
+        lock (Scheduler.Gate)
         {
-            if (_stopping)
+            if (Scheduler.IsStopped)
             {
                 return;
             }
@@ -922,11 +867,7 @@ public class NotificationManager : INotificationManager
                 return;
             }
 
-            _notificationRequestQ.Enqueue(new()
-            {
-                Store = _storeManager[e.Tenant.ControllerName],
-                Args = e,
-            });
+            Scheduler.TryEnqueue(_storeManager[e.Tenant.ControllerName], e);
         }
     }
 
@@ -935,9 +876,9 @@ public class NotificationManager : INotificationManager
     /// <param name="e">     Subscription changed event information.</param>
     private void Store_OnSubscriptionsChanged(object? sender, SubscriptionChangedEventArgs e)
     {
-        lock (_lifecycleLock)
+        lock (Scheduler.Gate)
         {
-            if (_stopping || !_storeManager.ContainsKey(e.Tenant.ControllerName))
+            if (Scheduler.IsStopped || !_storeManager.ContainsKey(e.Tenant.ControllerName))
             {
                 return;
             }
@@ -967,20 +908,17 @@ public class NotificationManager : INotificationManager
                     return;
                 }
 
-                _handshakeRevisions[(store, current.Id)] = e.Revision;
-                _notificationRequestQ.Enqueue(new()
+                if (Scheduler.TryEnqueue(store, new()
                 {
-                    Store = store,
-                    Args = new()
-                    {
-                        Tenant = e.Tenant,
-                        Subscription = e.ChangedSubscription!,
-                        Revision = e.Revision,
-                        NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
-                    }
-                });
+                    Tenant = e.Tenant,
+                    Subscription = current,
+                    Revision = e.Revision,
+                    NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
+                }))
+                {
+                    _handshakeRevisions[(store, current.Id)] = e.Revision;
+                }
             }
-
         }
     }
 
@@ -988,86 +926,21 @@ public class NotificationManager : INotificationManager
     /// <param name="cancellationToken">Indicates that the shutdown process should no longer be
     ///  graceful.</param>
     /// <returns>An asynchronous result.</returns>
-    async Task IHostedService.StopAsync(CancellationToken cancellationToken)
-    {
-        Task shutdown = BeginShutdown();
-        // Cancellation means the caller stopped waiting, not that non-cancellable transports finished.
-        // Dispose or a subsequent StopAsync still joins the same drain task before releasing resources.
-        try
-        {
-            await shutdown.WaitAsync(cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            CancelPendingSends();
-            throw;
-        }
-    }
+    Task IHostedService.StopAsync(CancellationToken cancellationToken) => Scheduler.StopAsync(DetachProducers, cancellationToken);
 
-    /// <summary>Closes scheduling once and returns the shared asynchronous teardown.</summary>
-    private Task BeginShutdown()
+    private ValueTask DetachProducers()
     {
-        lock (_lifecycleLock)
+        if (_started)
         {
-            if (_stopTask is not null)
+            foreach (IFhirStore store in _storeManager.Values)
             {
-                return _stopTask;
-            }
-
-            _stopping = true;
-            _heartbeatTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            _notificationTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            if (_started)
-            {
-                foreach (IFhirStore store in _storeManager.Values)
-                {
-                    store.OnSubscriptionsChanged -= Store_OnSubscriptionsChanged;
-                    store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;
-                }
-            }
-            _notificationRequestQ.Clear();
-            _heartbeatReservations.Clear();
-            _handshakeRevisions.Clear();
-            _stopTask = DrainAsync();
-            return _stopTask;
-        }
-    }
-
-    /// <summary>Joins timer callbacks and every delivery before allowing resource disposal.</summary>
-    private async Task DrainAsync()
-    {
-        if (_heartbeatTimer is not null)
-        {
-            await _heartbeatTimer.DisposeAsync().ConfigureAwait(false);
-        }
-        if (_notificationTimer is not null)
-        {
-            await _notificationTimer.DisposeAsync().ConfigureAwait(false);
-        }
-
-        Task[] deliveries;
-        lock (_lifecycleLock)
-        {
-            deliveries = _inFlight.ToArray();
-        }
-        await Task.WhenAll(deliveries).ConfigureAwait(false);
-        lock (_lifecycleLock)
-        {
-            _inFlight.Clear();
-        }
-    }
-
-    /// <summary>Cancels supported transports without racing disposal of their token source.</summary>
-    private void CancelPendingSends()
-    {
-        lock (_lifecycleLock)
-        {
-            if (!_hasDisposed)
-            {
-                _sendCancellation.Cancel();
+                store.OnSubscriptionsChanged -= Store_OnSubscriptionsChanged;
+                store.OnSubscriptionSendEvent -= Store_OnSubscriptionSendEvent;
             }
         }
+        _heartbeatReservations.Clear();
+        _handshakeRevisions.Clear();
+        return _heartbeatTimer?.DisposeAsync() ?? ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -1084,10 +957,8 @@ public class NotificationManager : INotificationManager
             return;
         }
 
-        Task shutdown = BeginShutdown();
-        CancelPendingSends();
-        shutdown.GetAwaiter().GetResult();
-        lock (_lifecycleLock)
+        Scheduler.DisposeAfterDrain(DetachProducers);
+        lock (Scheduler.Gate)
         {
             if (_hasDisposed)
             {
@@ -1098,7 +969,6 @@ public class NotificationManager : INotificationManager
                 _httpClient.Dispose();
             }
             _zulipSender.Dispose();
-            _sendCancellation.Dispose();
             _hasDisposed = true;
         }
     }

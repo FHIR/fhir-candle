@@ -9,14 +9,15 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using fhir.candle.Services;
+using fhir.candle.Tests.Infrastructure;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Outcome = FhirCandle.Models.SubscriptionNotificationOutcome;
 using OutcomeKind = FhirCandle.Models.SubscriptionNotificationOutcome.OutcomeKind;
 
@@ -77,7 +78,6 @@ public sealed class SubscriptionNotificationLifecycleTests
                 fixture.Store.Clock.Advance(TimeSpan.FromMinutes(31));
             }
             fixture.Start();
-            fixture.RunQueueTimer();
             Assert.Equal(0, fixture.QueuedCount);
             Assert.Equal(0, fixture.Handler.Starts);
             Assert.Equal(0, fixture.HandshakeRevisionCount);
@@ -108,6 +108,7 @@ public sealed class SubscriptionNotificationLifecycleTests
                     if (inFlight)
                     {
                         delivery = fixture.DrainOneAsync();
+                        await fixture.Handler.WaitForStartAsync();
                         Assert.Equal(1, fixture.Handler.Starts);
                     }
                     fixture.Revoke(change, requested: true);
@@ -198,6 +199,7 @@ public sealed class SubscriptionNotificationLifecycleTests
         Task delivery = fixture.DrainOneAsync();
         try
         {
+            await fixture.Handler.WaitForStartAsync();
             Assert.Equal(1, fixture.Handler.Starts);
             fixture.Publish(publication);
             Assert.Equal(0, fixture.QueuedCount);
@@ -1020,6 +1022,7 @@ public sealed class SubscriptionNotificationLifecycleTests
         Task delivery = fixture.DrainOneAsync();
         try
         {
+            await fixture.Handler.WaitForStartAsync();
             Assert.Equal(1, fixture.Handler.Starts);
             fixture.Store.Clock.Advance(TimeSpan.FromSeconds(120));
             fixture.Scan();
@@ -1042,6 +1045,7 @@ public sealed class SubscriptionNotificationLifecycleTests
         Dictionary<object, long> renewedSchedule;
         try
         {
+            await fixture.Handler.WaitForStartAsync();
             Assert.Equal(2, fixture.Handler.Starts);
             fixture.Revoke("cycle");
             fixture.Scan();
@@ -1619,53 +1623,315 @@ public sealed class SubscriptionNotificationLifecycleTests
 
     [Theory]
     [MemberData(nameof(Managers))]
+    public async Task BoundedQueueMakesProgressAcrossTenants(FhirReleases.FhirSequenceCodes version, bool restOnly)
+    {
+        foreach (int concurrency in new[] { 1, 3 })
+        {
+            using LifecycleTestStore sibling = new(version);
+            sibling.Store.Config.ControllerName = "sibling";
+            sibling.Seed();
+            using NotificationFixture fixture = new(version, restOnly, sibling: sibling, capacity: 5, concurrency: concurrency,
+                liveWorkers: true);
+            Channel<(string Id, TaskCompletionSource Release)> arrivals = Channel.CreateUnbounded<(string, TaskCompletionSource)>();
+            TaskCompletionSource cleanup = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            int active = 0;
+            fixture.Handler.SendOperation = async (request, token) =>
+            {
+                int count = Interlocked.Increment(ref active);
+                try
+                {
+                    Assert.InRange(count, 1, concurrency);
+                    JsonNode bundle = JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!;
+                    JsonNode encounter = Assert.Single(bundle["entry"]!.AsArray().Select(entry => entry!["resource"]!),
+                        resource => (string?)resource["resourceType"] == "Encounter");
+                    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    arrivals.Writer.TryWrite((encounter["id"]!.GetValue<string>(), release));
+                    await Task.WhenAny(cleanup.Task, release.Task);
+                    return new(HttpStatusCode.NoContent);
+                }
+                catch (Exception exception)
+                {
+                    arrivals.Writer.TryComplete(exception);
+                    throw;
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref active);
+                }
+            };
+            Task<(string Id, TaskCompletionSource Release)> Next() =>
+                arrivals.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            fixture.Start();
+            Queue<TaskCompletionSource> held = new();
+            try
+            {
+                for (int i = 0; i < concurrency; i++)
+                {
+                    fixture.Store.Match($"held-{i}");
+                    (string id, TaskCompletionSource release) = await Next();
+                    Assert.Equal($"held-{i}", id);
+                    held.Enqueue(release);
+                }
+                // Five waiting slots: the lexically first tenant has three; it cannot borrow the other two.
+                foreach (string id in new[] { "a-1", "a-2", "a-3", "a-refused" })
+                {
+                    fixture.Store.Match(id);
+                }
+                Assert.Equal(3, fixture.QueuedCount);
+                foreach (string id in new[] { "b-1", "b-2", "b-refused" })
+                {
+                    sibling.Match(id);
+                }
+                Assert.Equal(5, fixture.QueuedCount);
+                Assert.Equal(3, fixture.Scheduler.WaitingFor(fixture.Store.Store.Config.ControllerName));
+                Assert.Equal(2, fixture.Scheduler.WaitingFor(sibling.Store.Config.ControllerName));
+                Assert.Equal(2, fixture.Scheduler.RefusedCount);
+                Assert.Equal(concurrency, fixture.Handler.Starts);
+                int a = 0;
+                int b = 0;
+                char previous = '\0';
+                for (int remaining = 4; remaining >= 0; remaining--)
+                {
+                    held.Dequeue().SetResult();
+                    (string id, TaskCompletionSource release) = await Next();
+                    held.Enqueue(release);
+                    if (a < 3 && b < 2)
+                    {
+                        Assert.NotEqual(previous, id[0]);
+                    }
+                    previous = id[0];
+                    Assert.Equal(id[0] == 'a' ? $"a-{++a}" : $"b-{++b}", id);
+                    Assert.Equal(remaining, fixture.QueuedCount);
+                    Assert.Equal(concurrency, fixture.Scheduler.ActiveCount);
+                    Assert.Equal(concurrency, Volatile.Read(ref active));
+                }
+                Assert.Equal((3, 2), (a, b));
+            }
+            finally
+            {
+                Task stop = fixture.Stop();
+                cleanup.TrySetResult();
+                await stop.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            Assert.Equal(concurrency + 5, fixture.Handler.Starts);
+            Assert.Equal(concurrency + 3, fixture.Store.Subscription.SerializedEvents.Count);
+            Assert.Equal(2, sibling.Subscription.SerializedEvents.Count);
+            Assert.Empty(fixture.Store.Subscription.NotificationErrors);
+            Assert.Empty(sibling.Subscription.NotificationErrors);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Managers))]
+    public async Task SaturationDoesNotReserveOrCompleteDelivery(FhirReleases.FhirSequenceCodes version, bool restOnly)
+    {
+        foreach (string kind in new[] { "event", "heartbeat", "handshake" })
+        {
+            using NotificationFixture fixture = new(version, restOnly, capacity: 1);
+            fixture.Start();
+            fixture.Scan();
+            fixture.Store.Match("fill");
+            SubscriptionChangedEventArgs? publication = null;
+            fixture.Store.Store.OnSubscriptionsChanged += (_, change) =>
+            {
+                if (change.SendHandshake) { publication = change; }
+            };
+            void Produce()
+            {
+                switch (kind)
+                {
+                    case "event": fixture.Store.Match("refused-" + fixture.Store.Sent.Count); break;
+                    case "heartbeat": fixture.Scan(); break;
+                    case "handshake": fixture.Publish(Assert.IsType<SubscriptionChangedEventArgs>(publication)); break;
+                }
+            }
+            fixture.Store.Clock.Advance(TimeSpan.FromSeconds(120));
+            if (kind == "handshake")
+            {
+                fixture.Store.PutSubscription("requested");
+            }
+            for (int attempt = 0; attempt < 3; attempt++) { Produce(); }
+            Assert.Equal(1, fixture.QueuedCount);
+            Assert.Equal(0, fixture.Handler.Starts);
+            Assert.Equal(0, fixture.HandshakeRevisionCount);
+            Assert.DoesNotContain(long.MaxValue, fixture.HeartbeatSchedule().Values);
+            ParsedSubscription sub = fixture.Store.Subscription;
+            Assert.Empty(sub.SerializedEvents);
+            Assert.Empty(sub.NotificationErrors);
+            Assert.Equal(0, sub.LastCommunicationTicks);
+            IReadOnlyDictionary<string, object?> warning = Assert.Single(fixture.Log.Saturation);
+            Assert.Equal(fixture.Store.Store.Config.ControllerName, warning["Tenant"]);
+            Assert.Equal(kind switch
+            {
+                "event" => ParsedSubscription.NotificationTypeCodes.EventNotification,
+                "heartbeat" => ParsedSubscription.NotificationTypeCodes.Heartbeat,
+                _ => ParsedSubscription.NotificationTypeCodes.Handshake,
+            }, warning["Kind"]);
+            Assert.Equal(1, warning["Depth"]);
+            Assert.Equal(1L, warning["RefusedCount"]);
+            fixture.Store.Clock.Advance(TimeSpan.FromMinutes(1));
+            Produce();
+            Assert.Equal(2, fixture.Log.Saturation.Count);
+            Assert.Equal(kind == "handshake" ? 5L : 4L, fixture.Scheduler.RefusedCount);
+            Assert.Equal(fixture.Scheduler.RefusedCount, fixture.Log.Saturation.Last()["RefusedCount"]);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Message.Contains("delivery failed", StringComparison.OrdinalIgnoreCase));
+
+            // The requested revision invalidates the filler. In the other cases fail it at transport
+            // so the heartbeat remains due and we can retry admission on the very same revision.
+            fixture.Handler.StartOperation = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            await fixture.DrainOneAsync();
+            if (kind == "handshake")
+            {
+                Assert.Equal(0, fixture.Handler.Starts);
+                Assert.Empty(sub.NotificationErrors);
+            }
+            else
+            {
+                Assert.Equal(1, fixture.Handler.Starts);
+                Assert.Single(sub.NotificationErrors);
+                Assert.Contains(fixture.Log.Entries, entry => entry.Message.Contains("delivery failed", StringComparison.OrdinalIgnoreCase));
+            }
+            fixture.Handler.StartOperation = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            Produce();
+            Assert.Equal(1, fixture.QueuedCount);
+            await fixture.DrainOneAsync();
+            Assert.Equal(kind == "handshake" ? 1 : 2, fixture.Handler.Starts);
+            Assert.Equal("active", fixture.Store.Subscription.CurrentStatus);
+            Assert.Single(fixture.Store.Subscription.SerializedEvents);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Managers))]
+    public async Task StartupReconciliationSharesHandshakeBudget(FhirReleases.FhirSequenceCodes version, bool restOnly)
+    {
+        using NotificationFixture fixture = new(version, restOnly, capacity: 1);
+        fixture.Store.PutSubscription("requested");
+        JsonObject second = fixture.Store.SubscriptionJson("requested");
+        second["id"] = "second-requested";
+        fixture.Store.Put(second);
+        fixture.Start();
+        Assert.Equal(1, fixture.QueuedCount);
+        Assert.Equal(1, fixture.HandshakeRevisionCount);
+        Assert.Equal(1, fixture.Scheduler.RefusedCount);
+        await fixture.DrainOneAsync();
+        ParsedSubscription declined = Assert.Single(fixture.Store.Store.CurrentSubscriptions, sub => sub.CurrentStatus == "requested");
+        Assert.Equal(0, declined.LastCommunicationTicks);
+        Assert.Empty(declined.NotificationErrors);
+        Assert.Empty(declined.SerializedEvents);
+        fixture.Publish(new()
+        {
+            Tenant = fixture.Store.Store.Config,
+            ChangedSubscription = declined,
+            Revision = declined.Revision,
+            SendHandshake = true,
+        });
+        await fixture.DrainOneAsync();
+        Assert.All(fixture.Store.Store.CurrentSubscriptions, sub => Assert.Equal("active", sub.CurrentStatus));
+        Assert.Equal(2, fixture.Handler.Starts);
+    }
+
+    [Theory]
+    [MemberData(nameof(Managers))]
     public async Task ManagerStopPreservesInFlightDrainAndTimerOwnership(FhirReleases.FhirSequenceCodes version, bool restOnly)
     {
-        using NotificationFixture fixture = new(version, restOnly);
-        fixture.Start();
-        if (restOnly)
+        foreach (string mode in new[] { "drain", "cancel", "dispose" })
         {
-            await ((IHostedService)fixture.Service).StopAsync(CancellationToken.None);
-            int starts = fixture.Handler.Starts;
-            fixture.Store.Clock.Advance(TimeSpan.FromMinutes(1));
-            fixture.Store.Clock.RunDueCallbacks();
-            fixture.Store.Match("stopped");
-            fixture.RunQueueTimer();
-            Assert.Equal(starts, fixture.Handler.Starts);
-            Assert.Equal(0, fixture.QueuedCount);
-            return;
+            bool ownsClient = mode == "dispose";
+            using NotificationFixture fixture = new(version, restOnly, concurrency: 1, liveWorkers: true, ownsClient: ownsClient);
+            using CancellationTokenSource cancellation = new();
+            TaskCompletionSource<CancellationToken> started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<HttpResponseMessage> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Handler.StartOperation = token =>
+            {
+                started.TrySetResult(token);
+                return release.Task; // Intentionally ignore cancellation until explicitly released.
+            };
+            fixture.Start();
+            fixture.Store.Match("active");
+            Task? dispose = null;
+            Task? repeated = null;
+            try
+            {
+                CancellationToken transport = await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                TaskCompletionSource canceled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                using CancellationTokenRegistration registration = transport.Register(() => canceled.TrySetResult());
+                fixture.Store.Match("waiting");
+                Assert.Equal(1, fixture.QueuedCount);
+                Task stop = fixture.Stop(cancellation.Token);
+                repeated = fixture.Stop();
+                Assert.False(stop.IsCompleted);
+                Assert.False(repeated.IsCompleted);
+                Assert.False(transport.IsCancellationRequested);
+                Assert.Equal(0, fixture.QueuedCount);
+                Assert.Equal(1, Assert.Single(fixture.Log.Discards));
+                fixture.Store.Clock.Advance(TimeSpan.FromMinutes(3));
+                fixture.Store.Clock.RunDueCallbacks();
+                fixture.Store.Match("after-stop");
+                Assert.Equal(0, fixture.QueuedCount);
+                if (mode == "cancel")
+                {
+                    cancellation.Cancel();
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stop.WaitAsync(TimeSpan.FromSeconds(10)));
+                }
+                else if (mode == "dispose")
+                {
+                    dispose = Task.Run(fixture.Service.Dispose);
+                }
+                if (mode != "drain")
+                {
+                    await canceled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    if (dispose is not null) { Assert.False(dispose.IsCompleted); }
+                }
+                Assert.False(repeated.IsCompleted);
+                Assert.False(fixture.Handler.Disposed);
+                release.TrySetResult(new(HttpStatusCode.NoContent));
+                if (mode != "cancel") { await stop.WaitAsync(TimeSpan.FromSeconds(10)); }
+                if (mode == "drain")
+                {
+                    Assert.False(transport.IsCancellationRequested);
+                    Assert.Equal(1, Assert.Single(fixture.Store.Subscription.SerializedEvents).Key);
+                }
+            }
+            finally
+            {
+                if (!release.Task.IsCompleted) { release.SetResult(new(HttpStatusCode.NoContent)); }
+                if (repeated is not null) { await repeated.WaitAsync(TimeSpan.FromSeconds(10)); }
+                if (dispose is not null) { await dispose.WaitAsync(TimeSpan.FromSeconds(10)); }
+            }
+            await fixture.Stop().WaitAsync(TimeSpan.FromSeconds(10));
+            if (ownsClient) { Assert.True(fixture.Handler.Disposed); }
+            fixture.Service.Dispose();
+            Assert.Equal(1, fixture.Handler.Starts);
+            Assert.Equal(ownsClient, fixture.Handler.Disposed);
+            if (!ownsClient)
+            {
+                fixture.Handler.StartOperation = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+                using HttpResponseMessage probe = await fixture.Client.GetAsync("https://ownership.unit.test");
+                Assert.Equal(HttpStatusCode.NoContent, probe.StatusCode);
+            }
         }
 
-        TaskCompletionSource<HttpResponseMessage> first = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        TaskCompletionSource<HttpResponseMessage> second = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Queue<Task<HttpResponseMessage>> held = new([first.Task, second.Task]);
-        fixture.Handler.StartOperation = _ => held.Dequeue();
-        fixture.Store.Match("first");
-        fixture.Store.Match("second");
-        fixture.RunQueueTimer();
-        Assert.Equal(2, fixture.Handler.Starts);
-        Task stop = ((IHostedService)fixture.Service).StopAsync(CancellationToken.None);
+        // A timer callback captured before shutdown is still owned even with no active send.
+        using NotificationFixture timers = new(version, restOnly);
+        timers.Start();
+        timers.Scan();
+        timers.Store.Clock.Advance(TimeSpan.FromMinutes(2));
+        IReadOnlyList<ManualTimeProvider.CapturedCallback> callbacks = timers.Store.Clock.CaptureDueCallbacks();
+        Task timerDrain;
         try
         {
-            Assert.False(stop.IsCompleted);
-            using CancellationTokenSource canceled = new();
-            canceled.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ((IHostedService)fixture.Service).StopAsync(canceled.Token));
-            Assert.False(fixture.Handler.Disposed);
+            timerDrain = timers.Stop();
+            Assert.NotEmpty(callbacks);
+            Assert.False(timerDrain.IsCompleted);
         }
         finally
         {
-            first.TrySetResult(new HttpResponseMessage(HttpStatusCode.NoContent));
-            second.TrySetResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            foreach (ManualTimeProvider.CapturedCallback callback in callbacks) { callback.Invoke(); }
         }
-        await stop.WaitAsync(TimeSpan.FromSeconds(10));
-        await ((IHostedService)fixture.Service).StopAsync(CancellationToken.None);
-        fixture.Service.Dispose();
-        // The injected client is caller-owned and remains usable after manager teardown.
-        Assert.False(fixture.Handler.Disposed);
-        fixture.Handler.StartOperation = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
-        using HttpResponseMessage probe = await fixture.Client.GetAsync("https://ownership.unit.test");
-        Assert.Equal(HttpStatusCode.NoContent, probe.StatusCode);
+        await timerDrain.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, timers.QueuedCount);
+        Assert.Equal(0, timers.Handler.Starts);
     }
 
     private static void SetDiagnosticWriter(LifecycleTestStore fixture, TextWriter writer) => fixture.Store.GetType()
@@ -1717,17 +1983,25 @@ public sealed class SubscriptionNotificationLifecycleTests
         internal RecordingHandler Handler { get; } = new();
         internal HttpClient Client { get; }
         internal RecordingLog Log { get; } = new();
-        private readonly bool _restOnly;
-        internal NotificationFixture(FhirReleases.FhirSequenceCodes version, bool restOnly, ZulipHandler? zulipHandler = null)
+        internal NotificationScheduler Scheduler => Service is RestOnlyNotificationManager rest
+            ? rest.Scheduler : ((NotificationManager)Service).Scheduler;
+        internal NotificationFixture(FhirReleases.FhirSequenceCodes version, bool restOnly, ZulipHandler? zulipHandler = null,
+            LifecycleTestStore? sibling = null, int capacity = 256, int concurrency = 4, bool liveWorkers = false, bool ownsClient = false)
         {
-            _restOnly = restOnly;
             Store = new(version);
             Store.Seed();
             Client = new(Handler);
             TestStores stores = new(Store.Store);
             Dictionary<string, TenantConfiguration> tenants = new() { [Store.Store.Config.ControllerName] = Store.Store.Config };
+            if (sibling is not null)
+            {
+                stores.Add(sibling.Store.Config.ControllerName, sibling.Store);
+                tenants.Add(sibling.Store.Config.ControllerName, sibling.Store.Config);
+            }
             CandleConfig config = new()
             {
+                NotificationQueueCapacity = capacity,
+                NotificationConcurrency = concurrency,
                 SmtpHost = "smtp.unit.test",
                 SmtpPort = 465,
                 SmtpUser = "sender@unit.test",
@@ -1739,8 +2013,15 @@ public sealed class SubscriptionNotificationLifecycleTests
             Service = restOnly
                 ? new RestOnlyNotificationManager(config, tenants, stores, Log, Store.Clock, Client)
                 : new NotificationManager(config, tenants, stores, Log, Store.Clock, Client, zulipHandler);
+            if (ownsClient)
+            {
+                // Exercise the manager-owned disposal path without ever installing a network transport.
+                Service.GetType().GetField("_ownsHttpClient", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(Service, true);
+            }
+            if (!liveWorkers) { Scheduler.PauseWorkers(); }
         }
         internal void Start() => ((IHostedService)Service).StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        internal Task Stop(CancellationToken token = default) => ((IHostedService)Service).StopAsync(token);
         internal void Email()
         {
             Store.PutSubscription("requested");
@@ -1767,12 +2048,10 @@ public sealed class SubscriptionNotificationLifecycleTests
         internal Task<Outcome> Notify(SubscriptionSendEventArgs args, CancellationToken cancellationToken = default)
         {
             MethodInfo method = Service.GetType().GetMethod("TryNotify", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            return (Task<Outcome>)method.Invoke(Service, _restOnly ? [Store.Store, args] : [Store.Store, args, cancellationToken])!;
+            return (Task<Outcome>)method.Invoke(Service, [Store.Store, args, cancellationToken])!;
         }
         internal void Scan() => Invoke("CheckAndSendHeartbeats", [null]);
-        internal void RunQueueTimer() => Invoke("CheckNotificationQ", [null]);
-        private object Queue => Service.GetType().GetField("_notificationRequestQ", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Service)!;
-        internal int QueuedCount => ((IEnumerable)Queue).Cast<object>().Count();
+        internal int QueuedCount => Scheduler.WaitingCount;
         internal int HandshakeRevisionCount => ((IDictionary)Service.GetType()
             .GetField("_handshakeRevisions", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Service)!).Count;
         internal void Publish(SubscriptionChangedEventArgs change) => Store.Store.GetType()
@@ -1784,15 +2063,7 @@ public sealed class SubscriptionNotificationLifecycleTests
                 .GetField("_heartbeatReservations", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Service)!;
             return reservations.Keys.Cast<object>().ToDictionary(key => key, key => (long)reservations[key]!);
         }
-        internal Task DrainOneAsync()
-        {
-            // Run exactly the same per-request method as the timer, but retain its task for rendezvous.
-            object?[] arguments = [null];
-            Assert.True((bool)Queue.GetType().GetMethod("TryDequeue")!.Invoke(Queue, arguments)!);
-            object request = arguments[0]!;
-            object args = request.GetType().GetProperty("Args")!.GetValue(request)!;
-            return (Task)Invoke("DeliverAsync", _restOnly ? [Store.Store, args] : [request])!;
-        }
+        internal Task DrainOneAsync() => Scheduler.DrainOneAsync().WaitAsync(TimeSpan.FromSeconds(10));
         private object? Invoke(string method, object?[] arguments) =>
             Service.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(Service, arguments);
         internal void Revoke(string change, bool requested = false)
@@ -1826,6 +2097,9 @@ public sealed class SubscriptionNotificationLifecycleTests
     {
         internal Func<CancellationToken, Task<HttpResponseMessage>> StartOperation { get; set; } =
             _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+        internal Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? SendOperation { get; set; }
+        private readonly SemaphoreSlim _arrivals = new(0);
+        internal Task WaitForStartAsync() => _arrivals.WaitAsync().WaitAsync(TimeSpan.FromSeconds(10));
         private int _starts;
         internal int Starts => Volatile.Read(ref _starts);
         internal bool Disposed { get; private set; }
@@ -1833,11 +2107,13 @@ public sealed class SubscriptionNotificationLifecycleTests
         {
             ObjectDisposedException.ThrowIf(Disposed, this);
             Interlocked.Increment(ref _starts);
-            return StartOperation(cancellationToken);
+            _arrivals.Release();
+            return SendOperation is null ? StartOperation(cancellationToken) : SendOperation(request, cancellationToken);
         }
         protected override void Dispose(bool disposing)
         {
             Disposed = true;
+            if (disposing) { _arrivals.Dispose(); }
             base.Dispose(disposing);
         }
     }
@@ -1846,12 +2122,25 @@ public sealed class SubscriptionNotificationLifecycleTests
     {
         internal ConcurrentQueue<string> Failures { get; } = new();
         internal ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
+        internal ConcurrentQueue<IReadOnlyDictionary<string, object?>> Saturation { get; } = new();
+        internal ConcurrentQueue<int> Discards { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             string message = formatter(state, exception);
             Entries.Enqueue((logLevel, message));
+            if (state is IEnumerable<KeyValuePair<string, object?>> fields)
+            {
+                if (message.StartsWith("queue_saturated", StringComparison.Ordinal))
+                {
+                    Saturation.Enqueue(fields.ToDictionary(pair => pair.Key, pair => pair.Value));
+                }
+                if (message.StartsWith("queue_discarded", StringComparison.Ordinal))
+                {
+                    Discards.Enqueue((int)fields.Single(pair => pair.Key == "DiscardedCount").Value!);
+                }
+            }
             if (logLevel >= LogLevel.Warning)
             {
                 Failures.Enqueue(message);

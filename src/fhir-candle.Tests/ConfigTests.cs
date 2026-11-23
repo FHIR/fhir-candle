@@ -28,6 +28,76 @@ namespace fhir.candle.Tests;
 
 public class ConfigTests
 {
+    [Fact]
+    public void NotificationBudgetsBindIndependently()
+    {
+        CliRootCommand command = new();
+        CandleConfig Bind(IConfiguration configuration, params string[] args)
+        {
+            ParseResult parsed = command.Parse(args);
+            parsed.Errors.ShouldBeEmpty();
+            return new(command.CommandCliOptions, parsed, configuration);
+        }
+
+        static void AssertBudgets(CandleConfig config, int capacity, int concurrency)
+        {
+            config.NotificationQueueCapacity.ShouldBe(capacity);
+            config.NotificationConcurrency.ShouldBe(concurrency);
+        }
+
+        AssertBudgets(new CandleConfig(), 256, 4);
+        AssertBudgets(Bind(new ConfigurationBuilder().Build()), 256, 4);
+
+        string section = $"NotificationBudgets_{Guid.NewGuid():N}";
+        IConfigurationBuilder builder = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [$"{section}:Notification_Queue_Capacity"] = "12",
+            [$"{section}:Notification_Concurrency"] = "3",
+        });
+        AssertBudgets(Bind(builder.Build().GetSection(section)), 12, 3);
+        string capacityKey = $"{section}__Notification_Queue_Capacity";
+        string concurrencyKey = $"Candle{section}__Notification_Concurrency";
+        try
+        {
+            Environment.SetEnvironmentVariable(capacityKey, "8");
+            Environment.SetEnvironmentVariable(concurrencyKey, "2");
+            IConfiguration env = builder.AddEnvironmentVariables("Candle").AddEnvironmentVariables().Build().GetSection(section);
+            AssertBudgets(Bind(env), 8, 2);
+            AssertBudgets(Bind(env, "--notification-queue-capacity", "7"), 7, 2);
+            AssertBudgets(Bind(env, "--notification-concurrency", "1"), 8, 1);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(capacityKey, null);
+            Environment.SetEnvironmentVariable(concurrencyKey, null);
+        }
+
+        CandleConfig twoSlots = Bind(new ConfigurationBuilder().Build(), "--notification-queue-capacity", "2");
+        twoSlots.ValidateNotificationBudgets(2);
+        Should.Throw<ArgumentOutOfRangeException>(() => twoSlots.ValidateNotificationBudgets(3))
+            .Message.ShouldContain("at least 3");
+    }
+
+    [Theory]
+    [InlineData("--notification-queue-capacity", "Notification_Queue_Capacity", "0")]
+    [InlineData("--notification-queue-capacity", "Notification_Queue_Capacity", "-1")]
+    [InlineData("--notification-concurrency", "Notification_Concurrency", "0")]
+    [InlineData("--notification-concurrency", "Notification_Concurrency", "-1")]
+    public void NotificationBudgetsRejectNonpositiveEffectiveValues(string option, string key, string value)
+    {
+        CliRootCommand command = new();
+        IConfiguration empty = new ConfigurationBuilder().Build();
+        IConfiguration external = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [key] = value }).Build();
+        ParseResult invalid = command.Parse([option, value]);
+        invalid.Errors.ShouldBeEmpty();
+        Should.Throw<ArgumentOutOfRangeException>(() => new CandleConfig(command.CommandCliOptions, invalid, empty))
+            .Message.ShouldContain(key);
+        Should.Throw<ArgumentOutOfRangeException>(() => new CandleConfig(command.CommandCliOptions, command.Parse([]), external))
+            .Message.ShouldContain(key);
+        _ = new CandleConfig(command.CommandCliOptions, command.Parse([option, "4"]), external);
+    }
+
     /// <summary>All package limits retain numeric width, external keys, and CLI precedence.</summary>
     [Fact]
     public void PackageLimitsBindDefaultsJsonAndCli()
