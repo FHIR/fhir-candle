@@ -11,6 +11,15 @@ using Microsoft.Extensions.Hosting;
 
 namespace fhir.candle.Services;
 
+/// <summary>Credential-free outcome of resolving an access token on a named tenant.</summary>
+public enum GrantStatus
+{
+    Missing,
+    NotCurrent,
+    Expired,
+    Admitted,
+}
+
 /// <summary>Interface for smart authentication manager.</summary>
 public interface ISmartAuthManager : IHostedService
 {
@@ -39,13 +48,13 @@ public interface ISmartAuthManager : IHostedService
     /// <param name="key">   The key.</param>
     /// <param name="auth">  [out] The authentication.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    bool TryGetAuthorization(string tenant, string key, out AuthorizationInfo auth);
+    bool TryGetPendingAuthorization(string tenant, string key, out AuthorizationInfo auth);
 
-    /// <summary>Gets an authorization.</summary>
-    /// <param name="tenant">The tenant name.</param>
-    /// <param name="key">   The key.</param>
-    /// <returns>The authorization.</returns>
-    AuthorizationInfo? GetAuthorization(string tenant, string key);
+    /// <summary>Resolve a complete access token to a detached grant.</summary>
+    GrantStatus ResolveAccessToken(string tenant, string? token, out AuthorizationInfo auth);
+
+    /// <summary>Get the named tenant's explicit development simulator grant.</summary>
+    bool TryGetSimulator(string tenant, out AuthorizationInfo auth);
 
     /// <summary>Query if this request is authorized.</summary>
     /// <param name="ctx">The context.</param>
@@ -148,7 +157,7 @@ public interface ISmartAuthManager : IHostedService
         string clientId,
         out AuthorizationInfo.SmartResponse response);
 
-    /// <summary>Attempts to introspection.</summary>
+    /// <summary>Processes an introspection request. A successful lookup with no response means inactive.</summary>
     /// <param name="tenant">  The tenant name.</param>
     /// <param name="token">   The token.</param>
     /// <param name="response">[out] The response.</param>

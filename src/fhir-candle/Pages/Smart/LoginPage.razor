@@ -9,6 +9,12 @@
 
 <PageTitle>SMART Login</PageTitle>
 
+@if (_auth is null)
+{
+    <FluentLabel>No current login request.</FluentLabel>
+    return;
+}
+
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
     <FluentText Size="TextSize.Size700">SMART Login</FluentText>
     <FluentLabel>Please login to the FHIR store: @StoreName.</FluentLabel>
@@ -188,7 +194,7 @@
 
     private void DoInit()
     {
-        _ = AuthManager.TryGetAuthorization(StoreName, Key, out _auth);
+        _ = AuthManager.TryGetPendingAuthorization(StoreName, Key, out _auth);
 
         if (StoreManager.TryGetValue(StoreName, out _store!))
         {

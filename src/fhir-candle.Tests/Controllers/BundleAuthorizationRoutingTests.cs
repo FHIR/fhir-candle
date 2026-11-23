@@ -307,7 +307,7 @@ public class BundleAuthorizationRoutingTests
         AssertUnchanged(store, before, watch);
         AssertUnchanged(peer, peerBefore, peerWatch);
 
-        Assert.False(host.AuthManager.TryGetAuthorization(peer.Config.ControllerName, "Bearer " + token, out _));
+        Assert.Equal(GrantStatus.NotCurrent, host.AuthManager.ResolveAccessToken(peer.Config.ControllerName, token, out _));
         using HttpResponseMessage denied = await SendAsync(host, peer, "GET", "Patient/seed", token);
         Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         AssertUnchanged(store, before, watch);
@@ -353,15 +353,15 @@ public class BundleAuthorizationRoutingTests
             Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         }
 
-        Assert.True(host.AuthManager.TryGetAuthorization(store.Config.ControllerName, Guid.Empty.ToString(), out AuthorizationInfo administrator));
+        Assert.True(host.AuthManager.TryGetSimulator(store.Config.ControllerName, out AuthorizationInfo administrator));
         Assert.Equal(Guid.Empty.ToString(), administrator.Key);
         Assert.Equal("administrator", administrator.UserId);
         AssertEffectiveScopes(administrator, ["*.*"], []);
         AuthorizationInfo.SmartResponse adminResponse = Assert.IsType<AuthorizationInfo.SmartResponse>(administrator.Response);
         Assert.False(string.IsNullOrEmpty(adminResponse.AccessToken));
-        Assert.True(host.AuthManager.TryGetAuthorization(
-            store.Config.ControllerName, "Bearer " + adminResponse.AccessToken, out AuthorizationInfo resolvedAdmin));
-        Assert.Same(administrator, resolvedAdmin);
+        Assert.Equal(GrantStatus.Admitted, host.AuthManager.ResolveAccessToken(
+            store.Config.ControllerName, adminResponse.AccessToken, out AuthorizationInfo resolvedAdmin));
+        Assert.NotSame(administrator, resolvedAdmin);
         await AssertSeededRead(host, store, "Observation", adminResponse.AccessToken);
         await AssertSeededSearch(host, store, "Observation", adminResponse.AccessToken);
         foreach ((IFhirStore tenantStore, string[] before, MutationWatch watch) in snapshots)
@@ -402,13 +402,13 @@ public class BundleAuthorizationRoutingTests
         Seed(store);
         MutationWatch watch = new(store);
         string[] before = Fingerprint(store);
-        AuthorizationInfo authorization = InstallAuthorization(host, "Patient.r");
+        (AuthorizationInfo authorization, AuthorizationInfo.SmartResponse grant) = ExchangeAuthorizationCode(host, "user/Patient.r", string.Empty);
         string url = method == "POST" ? "Patient" : "Patient/seed";
         JsonObject? body = method == "DELETE" ? null : Patient(method == "POST" ? "attempt" : "seed", "MustNotPersist");
         Assert.True(host.AuthManager.IsAuthorized(Context(store, "GET", "Patient/seed", authorization)));
         Assert.False(host.AuthManager.IsAuthorized(Context(store, method, url, authorization)));
 
-        using HttpResponseMessage read = await SendAsync(host, store, "GET", "Patient/seed", authorization.Key);
+        using HttpResponseMessage read = await SendAsync(host, store, "GET", "Patient/seed", grant.AccessToken);
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         Assert.Equal(JsonFormat, read.Content.Headers.ContentType?.MediaType);
         Assert.True(JsonNode.DeepEquals(
@@ -416,11 +416,11 @@ public class BundleAuthorizationRoutingTests
             JsonNode.Parse(await read.Content.ReadAsStringAsync())));
         AssertUnchanged(store, before, watch);
 
-        using HttpResponseMessage direct = await SendAsync(host, store, method, url, authorization.Key, body?.ToJsonString());
+        using HttpResponseMessage direct = await SendAsync(host, store, method, url, grant.AccessToken, body?.ToJsonString());
         Assert.Equal(HttpStatusCode.Unauthorized, direct.StatusCode);
         AssertUnchanged(store, before, watch);
 
-        JsonObject response = await SendJsonBundle(host, store, Bundle(kind, Entry("denied", method, url, body)), authorization.Key);
+        JsonObject response = await SendJsonBundle(host, store, Bundle(kind, Entry("denied", method, url, body)), grant.AccessToken);
         JsonObject denied = Assert.Single(response["entry"]!.AsArray())!.AsObject();
         Assert.Equal("denied", denied["fullUrl"]!.GetValue<string>());
         AssertOwnDenial(denied, method, url, method switch
@@ -442,7 +442,7 @@ public class BundleAuthorizationRoutingTests
         Seed(store);
         MutationWatch watch = new(store);
         string[] before = Fingerprint(store);
-        AuthorizationInfo authorization = InstallAuthorization(host, "Patient.c");
+        (AuthorizationInfo authorization, AuthorizationInfo.SmartResponse grant) = ExchangeAuthorizationCode(host, "user/Patient.c", string.Empty);
         Assert.True(host.AuthManager.IsAuthorized(Context(store, "POST", "Patient", authorization)));
         Assert.False(host.AuthManager.IsAuthorized(Context(store, "GET", "Patient/seed", authorization)));
         JsonObject late = nested
@@ -452,7 +452,7 @@ public class BundleAuthorizationRoutingTests
                     Entry("denied", "GET", "Patient/seed")))))
             : Entry("denied", "GET", "Patient/seed");
         JsonObject response = await SendJsonBundle(host, store, Bundle("transaction",
-            Entry("allowed", "POST", "Patient", Patient("client", "MustNotPersist")), late), authorization.Key);
+            Entry("allowed", "POST", "Patient", Patient("client", "MustNotPersist")), late), grant.AccessToken);
         JsonArray entries = response["entry"]!.AsArray();
         Assert.Equal(2, entries.Count);
         JsonObject earlier = entries[0]!.AsObject();
@@ -500,7 +500,7 @@ public class BundleAuthorizationRoutingTests
         string? token = unknownBearer ? Guid.NewGuid().ToString() : null;
         Assert.True(required.Config.SmartRequired);
         Assert.False(required.Config.SmartAllowed);
-        Assert.False(host.AuthManager.TryGetAuthorization(required.Config.ControllerName, token is null ? string.Empty : $"Bearer {token}", out _));
+        Assert.Equal(unknownBearer ? GrantStatus.NotCurrent : GrantStatus.Missing, host.AuthManager.ResolveAccessToken(required.Config.ControllerName, token, out _));
         Assert.False(host.AuthManager.IsAuthorized(Context(required, "POST", string.Empty, null)));
         JsonObject request = Bundle(kind, Entry("write", "PUT", "Patient/attempt", Patient("attempt", "OptionalWrite")));
         using HttpResponseMessage denied = await SendAsync(host, required, "POST", string.Empty, token, request.ToJsonString());
@@ -509,7 +509,7 @@ public class BundleAuthorizationRoutingTests
 
         Assert.False(optional.Config.SmartRequired);
         Assert.True(optional.Config.SmartAllowed);
-        Assert.False(host.AuthManager.TryGetAuthorization(optional.Config.ControllerName, token is null ? string.Empty : $"Bearer {token}", out _));
+        Assert.Equal(unknownBearer ? GrantStatus.NotCurrent : GrantStatus.Missing, host.AuthManager.ResolveAccessToken(optional.Config.ControllerName, token, out _));
         Assert.True(host.AuthManager.IsAuthorized(Context(optional, "POST", string.Empty, null)));
         JsonObject response = await SendJsonBundle(host, optional, request, token);
         JsonObject created = Assert.Single(response["entry"]!.AsArray())!.AsObject();
@@ -537,7 +537,7 @@ public class BundleAuthorizationRoutingTests
         Seed(store);
         MutationWatch watch = new(store);
         string[] before = Fingerprint(store);
-        AuthorizationInfo authorization = InstallAuthorization(host, "Patient.r");
+        (AuthorizationInfo authorization, AuthorizationInfo.SmartResponse grant) = ExchangeAuthorizationCode(host, "user/Patient.r", string.Empty);
         Assert.True(host.AuthManager.IsAuthorized(Context(store, "GET", "Patient/seed", authorization)));
         Assert.False(host.AuthManager.IsAuthorized(Context(store, "DELETE", "Patient/seed", authorization)));
         XElement request = new(_fhir + "Bundle",
@@ -545,7 +545,7 @@ public class BundleAuthorizationRoutingTests
             XmlEntry("read", "GET", "Patient/seed"),
             XmlEntry("denied", "DELETE", "Patient/seed"));
         using HttpResponseMessage response = await SendAsync(
-            host, store, "POST", string.Empty, authorization.Key, request.ToString(SaveOptions.DisableFormatting), XmlFormat);
+            host, store, "POST", string.Empty, grant.AccessToken, request.ToString(SaveOptions.DisableFormatting), XmlFormat);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(XmlFormat, response.Content.Headers.ContentType?.MediaType);
         XElement bundle = XElement.Parse(await response.Content.ReadAsStringAsync());
@@ -632,7 +632,7 @@ public class BundleAuthorizationRoutingTests
         Assert.Equal(clientId, body["client_id"]!.GetValue<string>());
         string token = body["access_token"]!.GetValue<string>();
         Assert.False(string.IsNullOrEmpty(token));
-        Assert.True(host.AuthManager.TryGetAuthorization(tenant.ControllerName, "Bearer " + token, out AuthorizationInfo authorization));
+        Assert.Equal(GrantStatus.Admitted, host.AuthManager.ResolveAccessToken(tenant.ControllerName, token, out AuthorizationInfo authorization));
         Assert.Equal(tenant.ControllerName, authorization.Tenant);
         Assert.Equal(clientId, authorization.RequestParameters.ClientId);
         Assert.Equal(tenant.BaseUrl, authorization.RequestParameters.Audience);
@@ -651,7 +651,7 @@ public class BundleAuthorizationRoutingTests
         Assert.EndsWith("key=" + key, redirect);
         Assert.True(Guid.TryParse(key, out Guid parsed));
         Assert.NotEqual(Guid.Empty, parsed);
-        Assert.True(host.AuthManager.TryGetAuthorization(tenant.ControllerName, key, out AuthorizationInfo authorization));
+        Assert.True(host.AuthManager.TryGetPendingAuthorization(tenant.ControllerName, key, out AuthorizationInfo authorization));
         Assert.Equal(tenant.ControllerName, authorization.Tenant);
         Assert.Equal(clientId, authorization.RequestParameters.ClientId);
         Assert.Equal(tenant.BaseUrl, authorization.RequestParameters.Audience);
@@ -670,10 +670,10 @@ public class BundleAuthorizationRoutingTests
         Assert.Equal("bearer", response.TokenType);
         Assert.Equal(clientId, response.ClientId);
         Assert.False(string.IsNullOrEmpty(response.AccessToken));
-        Assert.True(host.AuthManager.TryGetAuthorization(
-            tenant.ControllerName, "Bearer " + response.AccessToken, out AuthorizationInfo resolved));
-        Assert.Same(authorization, resolved);
-        Assert.Same(response, resolved.Response);
+        Assert.Equal(GrantStatus.Admitted, host.AuthManager.ResolveAccessToken(
+            tenant.ControllerName, response.AccessToken, out AuthorizationInfo resolved));
+        Assert.NotSame(authorization, resolved);
+        Assert.Null(resolved.Response);
         Assert.DoesNotContain("*.*", resolved.UserScopes);
         Assert.DoesNotContain("*.*", resolved.PatientScopes);
         foreach (string declined in declinedScopes)
@@ -746,35 +746,39 @@ public class BundleAuthorizationRoutingTests
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Serialize(store, store[resource]["seed"])), match["resource"]));
     }
 
-    private static AuthorizationInfo InstallAuthorization(TestHost host, params string[] scopes)
+    [Fact]
+    public async Task IntrospectionReturnsOnlyActiveFlagForNoncurrentTokens()
     {
-        string token = Guid.NewGuid().ToString();
-        AuthorizationInfo authorization = new()
+        using TestHost host = new(FhirReleases.FhirSequenceCodes.R4, includePeerRequired: true);
+        string tenant = host.Store.Config.ControllerName;
+        (_, AuthorizationInfo.SmartResponse grant) = ExchangeAuthorizationCode(host, "user/Patient.r", string.Empty);
+        using HttpResponseMessage active = await Post(tenant, grant.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, active.StatusCode);
+        JsonObject body = JsonNode.Parse(await active.Content.ReadAsStringAsync())!.AsObject();
+        Assert.True(body["active"]!.GetValue<bool>());
+        Assert.Equal("user/Patient.r", body["scope"]!.GetValue<string>());
+
+        Assert.True(host.AuthManager.TrySmartRefresh(tenant, grant.RefreshToken, grant.ClientId, out AuthorizationInfo.SmartResponse rotated));
+        foreach ((string name, string token) in new[]
         {
-            Key = token,
-            Tenant = host.Store.Config.ControllerName,
-            RemoteIpAddress = "127.0.0.1",
-            RequestParameters = new()
-            {
-                ClientId = "bundle-authorization-routing",
-                Audience = host.Store.Config.BaseUrl,
-                Scope = string.Join(' ', scopes.Select(s => $"user/{s}")),
-            },
-            UserId = "restricted-test-user",
-            UserScopes = new(scopes, StringComparer.Ordinal),
-            Expires = DateTimeOffset.UtcNow.AddHours(1),
-        };
-        host.AuthManager.SmartAuthorizations.Add($"{authorization.Tenant}:{token}", authorization);
-        Assert.IsType<SmartAuthManager>(host.AuthManager);
-        Assert.True(Guid.TryParse(token, out Guid parsed));
-        Assert.NotEqual(Guid.Empty, parsed);
-        Assert.DoesNotContain("*.*", authorization.UserScopes);
-        Assert.True(authorization.UserScopes.SetEquals(scopes));
-        Assert.Empty(authorization.PatientScopes);
-        Assert.True(host.AuthManager.TryGetAuthorization(authorization.Tenant, $"Bearer {token}", out AuthorizationInfo resolved));
-        Assert.Same(authorization, resolved);
-        Assert.True(host.AuthManager.IsAuthorized(Context(host.Store, "POST", string.Empty, resolved)));
-        return resolved;
+            (tenant, grant.AccessToken), (tenant, rotated.RefreshToken),
+            (host.PeerRequiredStore.Config.ControllerName, rotated.AccessToken),
+        })
+        {
+            using HttpResponseMessage inactive = await Post(name, token);
+            Assert.Equal(HttpStatusCode.OK, inactive.StatusCode);
+            Assert.Equal("application/json", inactive.Content.Headers.ContentType?.MediaType);
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse("{\"active\":false}"), JsonNode.Parse(await inactive.Content.ReadAsStringAsync())));
+        }
+
+        using HttpResponseMessage malformed = await Post(tenant, string.Empty);
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+
+        async Task<HttpResponseMessage> Post(string name, string token)
+        {
+            using FormUrlEncodedContent form = new(new Dictionary<string, string> { ["token"] = token });
+            return await host.Factory.Client.PostAsync($"/_smart/{name}/introspect", form);
+        }
     }
 
     private static FhirRequestContext Context(IFhirStore store, string method, string url, AuthorizationInfo? authorization) => new()

@@ -6,6 +6,11 @@
 
 using fhir.candle.Services;
 using fhir.candle.Tests.Extensions;
+using fhir.candle.Tests.Infrastructure;
+using fhir.candle.Controllers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Primitives;
 using FhirCandle.Models;
 using FhirCandle.Smart;
 using FhirCandle.Utils;
@@ -116,7 +121,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         key.ShouldNotBeNull();
         key.ShouldNotBeEmpty();
 
-        _fixture.AuthR4.TryGetAuthorization(_fixture.Name, key, out AuthorizationInfo authInfo).ShouldBeTrue();
+        _fixture.AuthR4.TryGetPendingAuthorization(_fixture.Name, key, out AuthorizationInfo authInfo).ShouldBeTrue();
         authInfo.ShouldNotBeNull();
         authInfo.Tenant.ShouldBe(_fixture.Name);
         authInfo.Expires.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
@@ -155,7 +160,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         queryAuthKey.ShouldNotBeNullOrEmpty();
         authKey.ShouldBeEquivalentTo(queryAuthKey);
 
-        _fixture.AuthR4.TryGetAuthorization(
+        _fixture.AuthR4.TryGetPendingAuthorization(
             _fixture.Name,
             authKey,
             out AuthorizationInfo auth).ShouldBeTrue();
@@ -194,6 +199,112 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         }
 
         response.AccessToken.ShouldNotBeNullOrEmpty();
+    }
+
+    /// <summary>Both exchange paths publish a detached grant with one current token and deadline.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IssuedGrantLifecycleAgreesWithIntrospection(bool assertion)
+    {
+        ManualTimeProvider clock = new(DateTimeOffset.UtcNow);
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant, clock);
+        string name = tenant.ControllerName;
+        string client = "interactive";
+        AuthorizationInfo.SmartResponse grant;
+        manager.ResolveAccessToken(name, null, out _).ShouldBe(GrantStatus.Missing);
+        if (assertion)
+        {
+            (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys("RS384", "lifecycle-key");
+            client = RegisterAssertionClient(manager, publicKey);
+            string jwt = manager.GenerateSignedJwt(client, client, tenant.BaseUrl, Guid.NewGuid().ToString(),
+                clock.GetUtcNow().AddMinutes(10).UtcDateTime, privateKey);
+            manager.TryClientAssertionExchange(name, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                jwt, ["system/Patient.r"], out grant, out _).ShouldBeTrue();
+        }
+        else
+        {
+            manager.RequestAuth(name, string.Empty, "code", client, "http://localhost/callback", null, "user/Patient.r",
+                string.Empty, tenant.BaseUrl, null, null, out _, out string key).ShouldBeTrue();
+            manager.TryGetPendingAuthorization(name, key, out AuthorizationInfo pending).ShouldBeTrue();
+            Check(name, key, GrantStatus.NotCurrent);
+            Check(name, pending.AuthCode, GrantStatus.NotCurrent);
+            pending.LaunchPatient = "Patient/consented";
+            manager.TryUpdateAuth(name, key, pending).ShouldBeTrue();
+            manager.TryCreateSmartResponse(name, pending.AuthCode, client, string.Empty, string.Empty, out grant).ShouldBeTrue();
+            manager.TryCreateSmartResponse(name, pending.AuthCode, client, string.Empty, string.Empty, out _).ShouldBeFalse();
+            manager.TryGetPendingAuthorization(name, key, out _).ShouldBeFalse();
+            pending.LaunchPatient = "Patient/edited";
+            pending.UserScopes.Add("*.*");
+            manager.TryUpdateAuth(name, key, pending).ShouldBeFalse();
+        }
+
+        Check(name, grant.AccessToken, GrantStatus.Admitted);
+        Check(name, grant.RefreshToken, GrantStatus.NotCurrent);
+        Check("other", grant.AccessToken, GrantStatus.NotCurrent);
+        int count = manager.SmartAuthorizations.Count;
+        AuthorizationInfo.SmartResponse?[] rotations = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+            manager.TrySmartRefresh(name, grant.RefreshToken, client, out AuthorizationInfo.SmartResponse rotated) ? rotated : null)));
+        AuthorizationInfo.SmartResponse current = Assert.Single(rotations.OfType<AuthorizationInfo.SmartResponse>());
+        manager.SmartAuthorizations.Count.ShouldBe(count);
+        Check(name, grant.AccessToken, GrantStatus.NotCurrent);
+        clock.Advance(TimeSpan.FromSeconds(current.ExpiresInSeconds) - TimeSpan.FromTicks(1));
+        AuthorizationInfo diagnostic = manager.SmartAuthorizations.Values.Single(auth => auth.Key != Guid.Empty.ToString());
+        diagnostic.Expires = DateTimeOffset.MaxValue;
+        diagnostic.UserScopes.Clear();
+        Check(name, current.AccessToken, GrantStatus.Admitted);
+        clock.Advance(TimeSpan.FromTicks(1));
+        Check(name, current.AccessToken, GrantStatus.Expired);
+
+        DefaultHttpContext context = new();
+        context.Request.ContentType = "application/x-www-form-urlencoded";
+        context.Request.Form = new FormCollection(new Dictionary<string, StringValues> { ["token"] = current.AccessToken });
+        using MemoryStream body = new();
+        context.Response.Body = body;
+        SmartController controller = new(manager, NullLogger<ISmartAuthManager>.Instance)
+        {
+            ControllerContext = new() { HttpContext = context },
+        };
+        await controller.PostSmartTokenIntrospect(name);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("{\"active\":false}", System.Text.Encoding.UTF8.GetString(body.ToArray()));
+
+        void Check(string tenantName, string token, GrantStatus expected)
+        {
+            manager.ResolveAccessToken(tenantName, token, out AuthorizationInfo auth).ShouldBe(expected);
+            manager.TryIntrospection(tenantName, token, out AuthorizationInfo.IntrospectionResponse? info).ShouldBeTrue();
+            if (expected != GrantStatus.Admitted)
+            {
+                auth.ShouldBeNull();
+                info.ShouldBeNull();
+                return;
+            }
+
+            AuthorizationInfo.IntrospectionResponse active = Assert.IsType<AuthorizationInfo.IntrospectionResponse>(info);
+            active.Active.ShouldBeTrue();
+            active.ExpiresAt.ShouldBe(auth.Expires.ToUnixTimeSeconds());
+            active.Scopes.ShouldBe(assertion ? "system/Patient.r" : "user/Patient.r");
+            auth.UserScopes.SetEquals(["Patient.r"]).ShouldBeTrue();
+            auth.LaunchPatient.ShouldBe(assertion ? string.Empty : "Patient/consented");
+            auth.UserScopes.Clear();
+            auth.Expires = DateTimeOffset.MaxValue;
+        }
+    }
+
+    [Fact]
+    public void SimulatorRequiresItsExplicitIdentity()
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        string name = tenant.ControllerName;
+        manager.TryGetSimulator(name, out AuthorizationInfo simulator).ShouldBeTrue();
+        manager.ResolveAccessToken(name, simulator.Key, out _).ShouldBe(GrantStatus.NotCurrent);
+        manager.TryGetPendingAuthorization(name, simulator.Key, out _).ShouldBeFalse();
+        manager.TryCreateSmartResponse(name, simulator.Key, simulator.RequestParameters.ClientId,
+            string.Empty, string.Empty, out AuthorizationInfo.SmartResponse response).ShouldBeTrue();
+        manager.ResolveAccessToken(name, response.AccessToken, out AuthorizationInfo auth).ShouldBe(GrantStatus.Admitted);
+        auth.UserScopes.SetEquals(["*.*"]).ShouldBeTrue();
+        manager.TryIntrospection(name, response.AccessToken, out AuthorizationInfo.IntrospectionResponse? info).ShouldBeTrue();
+        Assert.True(info?.Active);
     }
 
     /// <summary>Tests a dynamic client registration and token request with an invalid token.</summary>
@@ -537,7 +648,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
     }
 
     /// <summary>Creates isolated SMART state without opening a listener or using shared fixture clients.</summary>
-    private static SmartAuthManager CreateAssertionManager(out TenantConfiguration tenant)
+    private static SmartAuthManager CreateAssertionManager(out TenantConfiguration tenant, TimeProvider? clock = null)
     {
         tenant = new()
         {
@@ -556,7 +667,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
                 TenantsR4 = [tenant.ControllerName],
                 SmartRequiredTenants = [tenant.ControllerName],
             },
-            null);
+            null, clock);
         manager.Init();
         return manager;
     }
@@ -620,7 +731,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         response.ClientId.ShouldBe(clientId);
         response.TokenType.ShouldBe("bearer");
         response.Scopes.ShouldBe("system/*.rs");
-        manager.TryGetAuthorization(tenant.ControllerName, "Bearer " + response.AccessToken, out AuthorizationInfo auth).ShouldBeTrue();
+        manager.ResolveAccessToken(tenant.ControllerName, response.AccessToken, out AuthorizationInfo auth).ShouldBe(GrantStatus.Admitted);
         auth.Tenant.ShouldBe(tenant.ControllerName);
         auth.RequestParameters.ClientId.ShouldBe(clientId);
         auth.RequestParameters.Audience.ShouldBe(tenant.BaseUrl);

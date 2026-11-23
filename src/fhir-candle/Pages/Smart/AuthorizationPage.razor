@@ -12,7 +12,11 @@
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
 
-@if (string.IsNullOrEmpty(ErrorMessage))
+@if (_auth is null)
+{
+    <FluentLabel>No current consent request.</FluentLabel>
+}
+else if (string.IsNullOrEmpty(ErrorMessage))
 {
     <FluentText Size="TextSize.Size700">SMART Authorization</FluentText>
     <FluentLabel>Please select allowed scopes:</FluentLabel>
@@ -302,7 +306,7 @@ else
     {
         base.OnInitialized();
 
-        if (AuthManager.TryGetAuthorization(StoreName, Key, out _auth))
+        if (AuthManager.TryGetPendingAuthorization(StoreName, Key, out _auth))
         {
             UpdateScopeInfo();
             _selected.Clear();
@@ -347,7 +351,7 @@ else
     {
         if (e.Location.ToLowerInvariant().Contains("/smart/auth?", StringComparison.Ordinal))
         {
-            _ = AuthManager.TryGetAuthorization(StoreName, Key, out _auth);
+            _ = AuthManager.TryGetPendingAuthorization(StoreName, Key, out _auth);
 
             NavTracker?.NotifyNav(_navPages);
         }
