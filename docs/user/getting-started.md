@@ -109,6 +109,11 @@ The output of the release build can be run from the root directory of the repo:
 
 ## Next steps
 
+In **FHIR Contents**, **Admin — no sign-in** inspects the synthetic store
+without applying SMART scopes. To compare the same resource ID with what a
+client can read, select **View as SMART caller** and use its issued access
+token for that tenant. See [Compare the store and caller views](tenants.md#compare-the-store-and-caller-views).
+
 - [FHIR tenants](tenants.md) — choose which FHIR versions and endpoints to load.
 - [Loading initial data](loading-data.md) — seed the server with resources.
 - [Strict mode (`--strict`)](strict-mode.md) — run a spec-conformant REST

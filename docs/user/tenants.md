@@ -12,6 +12,28 @@ the ones specified. To load only an R4 endpoint at `fhir`, the arguments would
 include `--r4 fhir`. You can specify multiple tenants for the same version; for
 example, `--r5 fhir --r5 also-fhir` will create two endpoints.
 
+## Compare the store and caller views
+
+Unauthenticated UI users have admin access to inspect synthetic store state.
+This is a trusted development UI, not an access-control boundary for the server.
+
+1. Open **FHIR Contents** for the named tenant. In **Admin — no sign-in**,
+   open a synthetic Patient and note its ID. Counts and editor links belong to
+   this view; they do not establish what a client may read.
+2. On that same detail page choose **View as SMART caller**. Paste the tenant's
+   issued access token into the masked field and select **Use credential**.
+   Compare the result with `GET /fhir/<tenant>/Patient/<id>` using that token.
+   Open the Patient list to compare search results separately: read and search
+   permissions need not match.
+3. Try an ID outside the grant or change the format. A denial leaves no
+   resource body. Expiry clears displayed results even while idle. Changing
+   inspector tenants discards the credential. None of these actions switches
+   back to admin, even on a SMART-optional tenant.
+
+The credential stays in this Blazor circuit, not browser storage or the URL.
+Use **Admin — no sign-in** to switch back explicitly. A new circuit starts in
+admin mode with no credential. Other developer diagnostics remain trusted tools.
+
 ## SMART backend scopes
 
 For testing and development, a registered backend client can exchange a fresh

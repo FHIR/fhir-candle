@@ -261,6 +261,7 @@ public static partial class Program
             builder.Services.AddHostedService<IFhirPackageService>(sp => sp.GetRequiredService<IFhirPackageService>());
 
             // add a SMART Authorization singleton, then register as a hosted service
+            builder.Services.AddSingleton(TimeProvider.System);
             builder.Services.AddSingleton<ISmartAuthManager, SmartAuthManager>();
             builder.Services.AddHostedService<ISmartAuthManager>(sp => sp.GetRequiredService<ISmartAuthManager>());
 
@@ -305,6 +306,7 @@ public static partial class Program
                 //builder.Services.AddServerSideBlazor();
                 builder.Services.AddFluentUIComponents();
                 builder.Services.AddScoped<Ui.CandleThemeState>();
+                builder.Services.AddScoped<SmartViewerSession>();
 
                 // set our default UI page
                 //Pages.Index.Mode = config.UiMode;
