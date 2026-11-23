@@ -159,7 +159,9 @@ public partial class VersionedFhirStore : IFhirStore
     private int _loadingThread;
 
     /// <summary>The received notifications.</summary>
-    private readonly ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = [];
+    private readonly Dictionary<string, List<ParsedSubscriptionStatus>> _receivedNotifications = [];
+    private readonly object _receiptGate = new();
+    private bool _receiptsStopped;
 
     /// <summary>(Immutable) The received notification window ticks.</summary>
     private static readonly long _receivedNotificationWindowTicks = TimeSpan.FromMinutes(10).Ticks;
@@ -171,8 +173,8 @@ public partial class VersionedFhirStore : IFhirStore
     /// <summary>List of identifiers for the protected.</summary>
     private readonly HashSet<string> _protectedResources = [];
 
-    /// <summary>The storage capacity timer.</summary>
-    private System.Threading.Timer? _capacityMonitor = null;
+    /// <summary>Receipt maintenance starts with the first receipt, regardless of resource capacity.</summary>
+    private ITimer? _receiptTimer;
 
     /// <summary>The terminology.</summary>
     private readonly StoreTerminologyService _terminology = new();
@@ -420,15 +422,6 @@ public partial class VersionedFhirStore : IFhirStore
         // generate our initial capability statement
         _ = generateCapabilities(new FhirRequestContext(this, "GET", _config.BaseUrl + "/metadata"));
 
-        // Retain the existing receipt maintenance schedule.
-        if (_maxResourceCount > 0)
-        {
-            _capacityMonitor = new System.Threading.Timer(
-                CheckUsage,
-                null,
-                TimeSpan.Zero,
-                TimeSpan.FromSeconds(30));
-        }
     }
 
     /// <summary>Check loaded operations.</summary>
@@ -847,7 +840,26 @@ public partial class VersionedFhirStore : IFhirStore
     public IEnumerable<ParsedSubscription> CurrentSubscriptions => SubscriptionSnapshots();
 
     /// <summary>Gets the received notifications.</summary>
-    public ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> ReceivedNotifications => _receivedNotifications;
+    public IReadOnlyDictionary<string, IReadOnlyList<ParsedSubscriptionStatus>> ReceivedNotifications
+    {
+        get
+        {
+            lock (_receiptGate)
+            {
+                long cutoff = _clock.GetUtcNow().UtcTicks - _receivedNotificationWindowTicks;
+                Dictionary<string, IReadOnlyList<ParsedSubscriptionStatus>> snapshot = [];
+                foreach ((string id, List<ParsedSubscriptionStatus> entries) in _receivedNotifications)
+                {
+                    ParsedSubscriptionStatus[] fresh = entries.Where(n => n.ProcessedDateTime.UtcTicks > cutoff).ToArray();
+                    if (fresh.Length != 0)
+                    {
+                        snapshot.Add(id, Array.AsReadOnly(fresh));
+                    }
+                }
+                return snapshot.AsReadOnly();
+            }
+        }
+    }
 
     /// <summary>Gets the element that has the specified key in the read-only dictionary.</summary>
     /// <param name="key">The key to locate.</param>
@@ -1055,56 +1067,32 @@ public partial class VersionedFhirStore : IFhirStore
     }
 
     /// <summary>Check received notification usage.</summary>
-    private void CheckReceivedNotificationUsage()
+    private void CheckReceivedNotificationUsage(object? state)
     {
-        // check received notification usage
-        if (!_receivedNotifications.Any())
+        List<(string Id, int Count)> changed = [];
+        lock (_receiptGate)
         {
-            return;
-        }
-
-        List<string> idsToRemove = new();
-        long windowTicks = DateTimeOffset.Now.Ticks - _receivedNotificationWindowTicks;
-
-        foreach ((string id, List<ParsedSubscriptionStatus> notifications) in _receivedNotifications)
-        {
-            if (!notifications.Any())
+            if (_receiptsStopped)
             {
-                idsToRemove.Add(id);
-                continue;
+                return;
             }
-
-            // check oldest notification
-            if (notifications.First().ProcessedDateTime.Ticks > windowTicks)
+            long cutoff = _clock.GetUtcNow().UtcTicks - _receivedNotificationWindowTicks;
+            foreach ((string id, List<ParsedSubscriptionStatus> entries) in _receivedNotifications)
             {
-                continue;
-            }
-
-            // remove all notifications that are too old
-            notifications.RemoveAll(n => n.ProcessedDateTime.Ticks < windowTicks);
-
-            if (notifications.Any())
-            {
-                RegisterReceivedSubscriptionChanged(id, notifications.Count, false);
+                if (entries.RemoveAll(n => n.ProcessedDateTime.UtcTicks <= cutoff) != 0)
+                {
+                    changed.Add((id, entries.Count));
+                    if (entries.Count == 0)
+                    {
+                        _receivedNotifications.Remove(id);
+                    }
+                }
             }
         }
-
-        if (idsToRemove.Any())
+        foreach ((string id, int count) in changed)
         {
-            foreach (string id in idsToRemove)
-            {
-                _ = _receivedNotifications.TryRemove(id, out _);
-                RegisterReceivedSubscriptionChanged(id, 0, true);
-            }
+            RegisterReceivedSubscriptionChanged(id, count, count == 0);
         }
-    }
-
-    /// <summary>Check expired subscriptions.</summary>
-    /// <summary>Check and send heartbeats.</summary>
-    /// <param name="state">The state.</param>
-    private void CheckUsage(object? state)
-    {
-        CheckReceivedNotificationUsage();
     }
 
     /// <summary>Attempts to resolve an ITypedElement from the given string.</summary>
@@ -3362,12 +3350,21 @@ public partial class VersionedFhirStore : IFhirStore
     /// <param name="status">  The parsed SubscriptionStatus information from the notification.</param>
     public void RegisterReceivedNotification(string bundleId, ParsedSubscriptionStatus status)
     {
-        if (!_receivedNotifications.ContainsKey(status.SubscriptionReference))
+        status = status.DetachedCopy();
+        lock (_receiptGate)
         {
-            _ = _receivedNotifications.TryAdd(status.SubscriptionReference, new());
-        }
+            if (_receiptsStopped || status.ProcessedDateTime.UtcTicks <= _clock.GetUtcNow().UtcTicks - _receivedNotificationWindowTicks)
+            {
+                return;
+            }
 
-        _receivedNotifications[status.SubscriptionReference].Add(status);
+            _receiptTimer ??= _clock.CreateTimer(CheckReceivedNotificationUsage, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            if (!_receivedNotifications.TryGetValue(status.SubscriptionReference, out List<ParsedSubscriptionStatus>? entries))
+            {
+                _receivedNotifications.Add(status.SubscriptionReference, entries = []);
+            }
+            entries.Add(status);
+        }
 
         EventHandler<ReceivedSubscriptionEventArgs>? handler = OnReceivedSubscriptionEvent;
 
@@ -3501,7 +3498,7 @@ public partial class VersionedFhirStore : IFhirStore
             return null;
         }
 
-        return status;
+        return status.DetachedCopy(_clock.GetUtcNow());
     }
 
     /// <summary>Status for subscription.</summary>
@@ -7475,7 +7472,11 @@ rs,
             if (disposing)
             {
                 StopSubscriptionLifecycle();
-                _capacityMonitor?.Dispose();
+                lock (_receiptGate)
+                {
+                    _receiptsStopped = true;
+                    _receiptTimer?.Dispose();
+                }
 
                 foreach (IVersionedResourceStore rs in _store.Values)
                 {

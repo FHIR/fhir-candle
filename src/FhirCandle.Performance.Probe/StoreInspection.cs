@@ -174,6 +174,7 @@ public static class StoreInspection
             identities.Add(identity, new ResourceIdentity(Text(value, "TypeName"), Text(value, "Id")));
         }
 
+        // Read once: historical stores expose a dictionary, current stores return a fresh snapshot.
         object received = Required(store, "ReceivedNotifications");
         SortedDictionary<string, ReceiptSnapshot[]> receipts = new(StringComparer.Ordinal);
         int receiptCount = 0;

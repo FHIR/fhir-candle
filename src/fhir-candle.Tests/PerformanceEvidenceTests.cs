@@ -448,6 +448,23 @@ public class PerformanceEvidenceTests
         Assert.Equal(first.NotificationEvents[0].AdditionalContextReferences, notificationEvent.AdditionalContextReferences);
     }
 
+    /// <summary>The current store's snapshot provides the full historical receipt evidence contract.</summary>
+    [Theory]
+    [MemberData(nameof(ReceiptRetentionTests.Versions), MemberType = typeof(ReceiptRetentionTests))]
+    public void InspectionReadsCurrentReceiptSnapshot(FhirCandle.Utils.FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        ProbeChallenge challenge = Workloads.CreateProbeChallenge(version.ToString());
+        (bool success, FhirCandle.Models.FhirResponseContext response) = fixture.Interact("POST", "$subscription-hook",
+            JsonNode.Parse(challenge.Notification)!.AsObject());
+        Assert.True(success, response.SerializedOutcome);
+        Assert.NotNull(fixture.Store.GetType().GetProperty("ReceivedNotifications"));
+        TenantSnapshot snapshot = StoreInspection.InspectTenant(
+            new Dictionary<string, object> { ["lifecycle"] = fixture.Store }, "lifecycle", []);
+        (ClockObservation start, ClockObservation end) = FixtureClocks(LifecycleTestStore.Now.AddSeconds(-1), LifecycleTestStore.Now);
+        CorrectnessOracle.ValidateReceipt(snapshot, challenge, start, end);
+    }
+
     /// <summary>Dual explicit resource dictionaries must use the object view for Count, ContainsKey and Item.</summary>
     [Fact]
     public void InspectionUsesObjectViewForDualResourceDictionaries()

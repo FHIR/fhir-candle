@@ -556,17 +556,10 @@
                 return;
             }
 
-            if (e.ChangedSubscription.CurrentStatus == "active")
+            if (_store.CurrentSubscriptions.Any(s => s.Id == subscription.Id && s.CurrentStatus == "active"))
             {
-                if (_store.ReceivedNotifications.TryGetValue(subscriptionLocation, out List<ParsedSubscriptionStatus>? notifications))
-                {
-                    ParsedSubscriptionStatus? handshake = notifications.Where(n => n.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake)?.First() ?? null;
-
-                    if (handshake is not null)
-                    {
-                        handshakeBundleId = handshake.BundleId;
-                    }
-                }
+                handshakeBundleId = _store.ReceivedNotifications.GetValueOrDefault(subscriptionLocation)?
+                    .FirstOrDefault(n => n.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake)?.BundleId ?? string.Empty;
 
                 MoveToStep(6);
             }

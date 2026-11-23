@@ -2244,7 +2244,7 @@ public partial class Sdk6ContractTests
         Assert.Same(receiverCapture.Store, eventSender);
         Assert.Equal(receiver.Name, args.Tenant.ControllerName);
         Assert.Equal(bundleId, args.BundleId);
-        KeyValuePair<string, List<ParsedSubscriptionStatus>> received = Assert.Single(receiverCapture.Store.ReceivedNotifications);
+        KeyValuePair<string, IReadOnlyList<ParsedSubscriptionStatus>> received = Assert.Single(receiverCapture.Store.ReceivedNotifications);
         Assert.Equal(graph.Tenant.BaseUrl + "/Subscription/" + SubscriptionId, received.Key);
         ParsedSubscriptionStatus parsed = Assert.Single(received.Value);
         Assert.Same(parsed, args.Status);

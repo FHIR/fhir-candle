@@ -2484,7 +2484,7 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
 
         int baselineCount = versionedStore.ReceivedNotifications.TryGetValue(
             subscriptionReference,
-            out List<ParsedSubscriptionStatus>? baselineList)
+            out IReadOnlyList<ParsedSubscriptionStatus>? baselineList)
             ? baselineList.Count
             : 0;
 
@@ -2508,7 +2508,7 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
 
         int countAfterFirst = versionedStore.ReceivedNotifications.TryGetValue(
             subscriptionReference,
-            out List<ParsedSubscriptionStatus>? listAfterFirst)
+            out IReadOnlyList<ParsedSubscriptionStatus>? listAfterFirst)
             ? listAfterFirst.Count
             : 0;
         countAfterFirst.ShouldBe(baselineCount + 1);
@@ -2537,7 +2537,7 @@ public class R4TestSubscriptions : IClassFixture<R4Tests>
 
         int countAfterSecond = versionedStore.ReceivedNotifications.TryGetValue(
             subscriptionReference,
-            out List<ParsedSubscriptionStatus>? listAfterSecond)
+            out IReadOnlyList<ParsedSubscriptionStatus>? listAfterSecond)
             ? listAfterSecond.Count
             : 0;
         countAfterSecond.ShouldBe(countAfterFirst);

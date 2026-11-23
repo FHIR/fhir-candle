@@ -4,7 +4,6 @@
 // </copyright>
 
 using FhirCandle.Models;
-using System.Collections.Concurrent;
 using System.Net;
 
 namespace FhirCandle.Storage;
@@ -305,8 +304,8 @@ public interface IFhirStore : IDisposable, IReadOnlyDictionary<string, IResource
     /// <summary>Gets the current subscriptions.</summary>
     IEnumerable<ParsedSubscription> CurrentSubscriptions { get; }
 
-    /// <summary>Gets the received notifications.</summary>
-    ConcurrentDictionary<string, List<ParsedSubscriptionStatus>> ReceivedNotifications { get; }
+    /// <summary>Gets a detached, read-only snapshot of receipts inside the retention window.</summary>
+    IReadOnlyDictionary<string, IReadOnlyList<ParsedSubscriptionStatus>> ReceivedNotifications { get; }
 
     /// <summary>
     /// Retrieves a list of search parameters for a specified FHIR resource type.

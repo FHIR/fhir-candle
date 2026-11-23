@@ -9,14 +9,17 @@
 
 <PageTitle>Received Notifications</PageTitle>
 
-@if (!_store?.ReceivedNotifications.Any() ?? false)
+@{
+    IReadOnlyDictionary<string, IReadOnlyList<ParsedSubscriptionStatus>>? snapshot = _store?.ReceivedNotifications;
+}
+@if (snapshot is null || snapshot.Count == 0)
 {
     <FluentLabel>No events received for this endpoint.</FluentLabel>
 }
 else
 {
     <FluentGrid Spacing="4">
-        @foreach (KeyValuePair<string, List<ParsedSubscriptionStatus>> kvp in _store!.ReceivedNotifications.AsEnumerable())
+        @foreach (KeyValuePair<string, IReadOnlyList<ParsedSubscriptionStatus>> kvp in snapshot)
         {
             <FluentGridItem Style="min-width: var(--field-container-min-width);">
                 <FluentCounterBadge Count="@kvp.Value.Count()" Appearance="BadgeAppearance.Filled" Color="BadgeColor.Brand" Positioning="Positioning.AfterBottom" OverflowCount="999">

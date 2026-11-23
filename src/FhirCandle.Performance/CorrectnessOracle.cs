@@ -802,7 +802,7 @@ public static class CorrectnessOracle
         ValidateReceipt(snapshot, [new ReceiptExpectation(new NotificationInput(challenge.FhirVersion, challenge.EventNumber,
             challenge.BundleId, challenge.StatusId, challenge.FocusId, challenge.ContextId, challenge.Notification), started, completed)]);
 
-    /// <summary>Requires precisely the ordered receipt list, with one individually bound event per Bundle.</summary>
+    /// <summary>Requires the same ordered receipt evidence from historical lists and detached snapshots.</summary>
     public static void ValidateReceipt(TenantSnapshot snapshot, IReadOnlyList<ReceiptExpectation> expected)
     {
         string subscription = Source + "Subscription/perf-subscription";

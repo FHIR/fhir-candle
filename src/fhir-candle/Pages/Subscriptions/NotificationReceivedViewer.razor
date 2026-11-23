@@ -9,14 +9,17 @@
 
 <PageTitle>Received Subscription Events</PageTitle>
 
-@if (!_notifications?.Any() ?? false)
+@{
+    IReadOnlyList<ParsedSubscriptionStatus>? notifications = _store?.ReceivedNotifications.GetValueOrDefault(SubscriptionRef);
+}
+@if (notifications is null || notifications.Count == 0)
 {
     <FluentLabel>No events received for this Subscription.</FluentLabel>
 }
 else
 {
     <FluentGrid Spacing="4">
-        @foreach (ParsedSubscriptionStatus status in _notifications!)
+        @foreach (ParsedSubscriptionStatus status in notifications)
         {
             <FluentGridItem Style="min-width: var(--field-container-min-width);">
                 <FluentCard>
@@ -75,8 +78,6 @@ else
 
     private IFhirStore _store = null!;
 
-    private List<ParsedSubscriptionStatus> _notifications = null!;
-
     /// <summary>Executes the initialized asynchronous action.</summary>
     /// <returns>An asynchronous result.</returns>
     protected override void OnInitialized()
@@ -87,11 +88,7 @@ else
             (StoreManager.TryGetValue(StoreName, out _store!)))
         {
             _store.OnReceivedSubscriptionEvent += Store_OnReceivedSubscriptionEvent;
-
-            if (!string.IsNullOrEmpty(SubscriptionRef))
-            {
-                _ = _store.ReceivedNotifications.TryGetValue(SubscriptionRef, out _notifications!);
-            }
+            _store.OnReceivedSubscriptionChanged += Store_OnReceivedSubscriptionEvent;
         }
 
         // notify of store root in case user clicked here directly
@@ -108,12 +105,14 @@ else
             if (_store is not null)
             {
                 _store.OnReceivedSubscriptionEvent -= Store_OnReceivedSubscriptionEvent;
+                _store.OnReceivedSubscriptionChanged -= Store_OnReceivedSubscriptionEvent;
             }
 
             if ((!string.IsNullOrEmpty(StoreName)) &&
                 (StoreManager.TryGetValue(StoreName, out _store!)))
             {
                 _store.OnReceivedSubscriptionEvent += Store_OnReceivedSubscriptionEvent;
+                _store.OnReceivedSubscriptionChanged += Store_OnReceivedSubscriptionEvent;
             }
 
             // notify of store root in case user clicked here directly
@@ -124,7 +123,7 @@ else
     /// <summary>Event handler. Called by Store for on subscription events.</summary>
     /// <param name="sender">The sender.</param>
     /// <param name="e">     Subscription event information.</param>
-    private void Store_OnReceivedSubscriptionEvent(object? sender, ReceivedSubscriptionEventArgs e)
+    private void Store_OnReceivedSubscriptionEvent(object? sender, object e)
     {
         InvokeAsync(StateHasChanged);
     }
@@ -138,6 +137,7 @@ else
         if (_store is not null)
         {
             _store.OnReceivedSubscriptionEvent -= Store_OnReceivedSubscriptionEvent;
+            _store.OnReceivedSubscriptionChanged -= Store_OnReceivedSubscriptionEvent;
         }
     }
 
