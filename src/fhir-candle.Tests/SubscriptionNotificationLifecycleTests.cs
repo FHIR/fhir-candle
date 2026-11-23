@@ -671,6 +671,89 @@ public sealed class SubscriptionNotificationLifecycleTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public async Task ZulipCredentialsStayWithApprovedSender(FhirReleases.FhirSequenceCodes version)
+    {
+        const string Approved = "https://operator.unit.test/chat";
+        const string Independent = "https://subscription.unit.test:8443/other";
+        ZulipHandler handler = new();
+        using NotificationFixture fixture = new(version, false, handler);
+        fixture.Zulip();
+
+        async Task Check(string? site, string? email, string? key, string? label, string? route,
+            bool stream = true, bool redirect = false)
+        {
+            Dictionary<string, List<string>> parameters = new()
+            {
+                [stream ? "streamId" : "userId"] = ["42"],
+            };
+            if (site is not null) { parameters["site"] = [site]; }
+            if (email is not null) { parameters["email"] = [email]; }
+            if (key is not null) { parameters["key"] = [key]; }
+            fixture.Store.Subscription.Parameters = parameters;
+            handler.Stream = stream;
+            handler.Redirect = redirect;
+            handler.Calls.Clear();
+            Outcome result = await fixture.Notify(fixture.Store.Args());
+            if (label is null)
+            {
+                Assert.Empty(handler.Calls);
+                Assert.Equal(OutcomeKind.Failed, result.Kind);
+                return;
+            }
+            Assert.Equal((label, route + "/api/v1/messages"), Assert.Single(handler.Calls));
+            Assert.Equal(redirect ? OutcomeKind.Failed : OutcomeKind.Delivered, result.Kind);
+        }
+
+        await Check(null, null, null, "operator", Approved);
+        await Check("HTTPS://OPERATOR.UNIT.TEST:443/chat/", null, null, "operator", Approved, stream: false);
+        foreach (string invalid in new[] { Independent, "https://operator.unit.test:8443/chat", Approved + "/other",
+            "https://operator.unit.test/Chat", "http://operator.unit.test/chat", "https://user@operator.unit.test/chat",
+            Approved + "?query", Approved + "#fragment", Approved + "/.", Approved + "//", Approved + "/%2e" })
+        {
+            await Check(invalid, null, null, null, null);
+        }
+        await Check(null, "subscriber", "synthetic-sub", null, null);
+        await Check(Approved, "subscriber", null, null, null);
+        await Check(Approved, null, "synthetic-sub", null, null);
+        await Check(Approved, "subscriber", string.Empty, null, null);
+        await Check("http://subscription.unit.test", "subscriber", "synthetic-sub", null, null);
+        await Check(Independent, "subscriber", "synthetic-sub", "subscription", Independent, stream: false);
+        await Check(null, null, null, "operator", Approved, redirect: true);
+    }
+
+    private sealed class ZulipHandler : HttpMessageHandler
+    {
+        internal List<(string Label, string Destination)> Calls { get; } = [];
+        internal bool Stream { get; set; }
+        internal bool Redirect { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string? header = request.Headers.Authorization?.Parameter;
+            string label = header == Basic("operator:synthetic-op") ? "operator" :
+                header == Basic("subscriber:synthetic-sub") ? "subscription" : "unknown";
+            Calls.Add((label, request.RequestUri!.AbsoluteUri));
+            Assert.Equal("Basic", request.Headers.Authorization?.Scheme);
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("application/x-www-form-urlencoded", request.Content!.Headers.ContentType?.MediaType);
+            System.Collections.Specialized.NameValueCollection fields = System.Web.HttpUtility.ParseQueryString(
+                await request.Content.ReadAsStringAsync(cancellationToken));
+            Assert.Equal(Stream ? "channel" : "direct", fields["type"]);
+            Assert.Equal(Stream ? "Subscription Notification" : null, fields["topic"]);
+            Assert.Equal("[42]", fields["to"]);
+            Assert.False(string.IsNullOrEmpty(fields["content"]));
+            if (Redirect)
+            {
+                return new(HttpStatusCode.TemporaryRedirect) { Headers = { Location = new("https://redirect.unit.test/") } };
+            }
+            return new(HttpStatusCode.OK) { Content = new StringContent("""{"result":"success","id":17}""") };
+        }
+
+        private static string Basic(string synthetic) => Convert.ToBase64String(Encoding.UTF8.GetBytes(synthetic));
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public async Task ZulipOrdinaryFailureContinuesEligibleRecipients(FhirReleases.FhirSequenceCodes version)
     {
         foreach (bool failPrivate in new[] { false, true })
@@ -691,8 +774,7 @@ public sealed class SubscriptionNotificationLifecycleTests
                 reached[id - 1].SetResult();
                 return results[id - 1].Task;
             }
-            manager.ZulipStream = (_, _, id) => Start(id);
-            manager.ZulipPrivate = (_, _, id) => Start(id);
+            manager.ZulipSend = (_, _, id, _, _) => Start(id);
             Task<Outcome> delivery = fixture.Notify(fixture.Store.Args(ParsedSubscription.NotificationTypeCodes.Handshake));
             long expectedCommunication = 0;
             List<string> errors = [];
@@ -770,8 +852,7 @@ public sealed class SubscriptionNotificationLifecycleTests
                 reached[id - 1].SetResult();
                 return results[id - 1].Task;
             }
-            manager.ZulipStream = (_, _, id) => Start(id);
-            manager.ZulipPrivate = (_, _, id) => Start(id);
+            manager.ZulipSend = (_, _, id, _, _) => Start(id);
             Task<Outcome>? direct = null;
             Task delivery;
             if (queued)
@@ -859,8 +940,7 @@ public sealed class SubscriptionNotificationLifecycleTests
                     return mode != "positive" && starts.Count == 1
                         ? held.Task : Task.FromResult((true, (string?)null, 1UL));
                 }
-                manager.ZulipStream = (_, _, id) => Start(id);
-                manager.ZulipPrivate = (_, _, id) => Start(id);
+                manager.ZulipSend = (_, _, id, _, _) => Start(id);
                 using CancellationTokenSource cancellation = new();
                 bool canceled = change.EndsWith("cancel", StringComparison.Ordinal);
                 bool failed = change.StartsWith("failed-", StringComparison.Ordinal);
@@ -1638,7 +1718,7 @@ public sealed class SubscriptionNotificationLifecycleTests
         internal HttpClient Client { get; }
         internal RecordingLog Log { get; } = new();
         private readonly bool _restOnly;
-        internal NotificationFixture(FhirReleases.FhirSequenceCodes version, bool restOnly)
+        internal NotificationFixture(FhirReleases.FhirSequenceCodes version, bool restOnly, ZulipHandler? zulipHandler = null)
         {
             _restOnly = restOnly;
             Store = new(version);
@@ -1652,10 +1732,13 @@ public sealed class SubscriptionNotificationLifecycleTests
                 SmtpPort = 465,
                 SmtpUser = "sender@unit.test",
                 SmtpPassword = "synthetic-only",
+                ZulipUrl = zulipHandler is null ? null : "https://operator.unit.test/chat/",
+                ZulipEmail = zulipHandler is null ? null : "operator",
+                ZulipKey = zulipHandler is null ? null : "synthetic-op",
             };
             Service = restOnly
                 ? new RestOnlyNotificationManager(config, tenants, stores, Log, Store.Clock, Client)
-                : new NotificationManager(config, tenants, stores, Log, Store.Clock, Client);
+                : new NotificationManager(config, tenants, stores, Log, Store.Clock, Client, zulipHandler);
         }
         internal void Start() => ((IHostedService)Service).StartAsync(CancellationToken.None).GetAwaiter().GetResult();
         internal void Email()

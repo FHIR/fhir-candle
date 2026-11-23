@@ -52,10 +52,7 @@ public class NotificationManager : INotificationManager
         (client, message, token) => client.SendAsync(message, token);
     internal Func<SmtpClient, CancellationToken, Task> SmtpDisconnect { get; set; } =
         (client, token) => client.IsConnected ? client.DisconnectAsync(true, token) : Task.CompletedTask;
-    internal Func<zulip_cs_lib.ZulipClient, string, int, Task<(bool success, string? details, ulong messageId)>> ZulipStream { get; set; } =
-        (client, message, id) => client.Messages.TrySendStream(message, "Subscription Notification", [id]);
-    internal Func<zulip_cs_lib.ZulipClient, string, int, Task<(bool success, string? details, ulong messageId)>> ZulipPrivate { get; set; } =
-        (client, message, id) => client.Messages.TrySendPrivate(message, [id]);
+    internal Func<ZulipSender.Destination, string, int, bool, CancellationToken, Task<(bool success, string? details, ulong messageId)>> ZulipSend { get; set; }
 
     /// <summary>Serializes scheduling with the beginning of shutdown.</summary>
     private readonly object _lifecycleLock = new();
@@ -84,14 +81,7 @@ public class NotificationManager : INotificationManager
 
     private ConcurrentQueue<NotificationRequest> _notificationRequestQ = new();
 
-    /// <summary>The zulip site URL (e.g., https://chat.fhir.org/).</summary>
-    private string _zulipUrl;
-
-    /// <summary>The zulip bot email address.</summary>
-    private string _zulipEmail;
-
-    /// <summary>The zulip bot API key.</summary>
-    private string _zulipKey;
+    private readonly ZulipSender _zulipSender;
 
     /// <summary>The SMTP host.</summary>
     private string _smtpHost;
@@ -133,6 +123,18 @@ public class NotificationManager : INotificationManager
         ILogger<NotificationManager> logger,
         TimeProvider clock,
         HttpClient? httpClient)
+        : this(serverConfig, tenants, fhirStoreManager, logger, clock, httpClient, null)
+    {
+    }
+
+    internal NotificationManager(
+        CandleConfig serverConfig,
+        Dictionary<string, TenantConfiguration> tenants,
+        IFhirStoreManager fhirStoreManager,
+        ILogger<NotificationManager> logger,
+        TimeProvider clock,
+        HttpClient? httpClient,
+        HttpMessageHandler? zulipHandler)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _ownsHttpClient = httpClient is null;
@@ -140,21 +142,8 @@ public class NotificationManager : INotificationManager
         _logger = logger;
         _storeManager = fhirStoreManager;
 
-        _zulipUrl = serverConfig.ZulipUrl ?? string.Empty;
-        _zulipEmail = serverConfig.ZulipEmail ?? string.Empty;
-        _zulipKey = serverConfig.ZulipKey ?? string.Empty;
-
-        if (string.IsNullOrEmpty(_zulipUrl) ||
-            string.IsNullOrEmpty(_zulipEmail) ||
-            string.IsNullOrEmpty(_zulipKey))
-        {
-            _logger.LogInformation("Zulip information not found - Zulip notification will not be sent");
-        }
-        else
-        {
-            _logger.LogInformation($"Found Zulip configuration: {_zulipUrl} ({_zulipEmail})");
-            ZulipClientPool.AddOrRegisterClient(_zulipUrl, _zulipEmail, _zulipKey);
-        }
+        _zulipSender = new(serverConfig.ZulipUrl, serverConfig.ZulipEmail, serverConfig.ZulipKey, zulipHandler);
+        ZulipSend = _zulipSender.SendAsync;
 
         _smtpHost = serverConfig.SmtpHost ?? string.Empty;
         _smtpPort = serverConfig.SmtpPort;
@@ -334,23 +323,11 @@ public class NotificationManager : INotificationManager
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string zulipSite = e.Subscription.Parameters.ContainsKey("site") ? e.Subscription.Parameters["site"].First() : _zulipUrl;
-        string zulipEmail = e.Subscription.Parameters.ContainsKey("email") ? e.Subscription.Parameters["email"].First() : _zulipEmail;
-        string zulipKey = e.Subscription.Parameters.ContainsKey("key") ? e.Subscription.Parameters["key"].First() : _zulipKey;
-
-        if (string.IsNullOrEmpty(zulipSite) ||
-            string.IsNullOrEmpty(zulipEmail) ||
-            string.IsNullOrEmpty(zulipKey))
-        {
-            return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Failed))).ConfigureAwait(false);
-        }
-
         // send the request to the endpoint
         try
         {
-            zulip_cs_lib.ZulipClient client = ZulipClientPool.GetOrCreateClient(zulipSite, zulipEmail, zulipKey);
-
-            if (client is null)
+            ZulipSender.Destination? destination = _zulipSender.Bind(e.Subscription.Parameters);
+            if (destination is null)
             {
                 return await DispatchAsync(store, e, () => Task.FromResult(new Outcome(OutcomeKind.Failed))).ConfigureAwait(false);
             }
@@ -369,9 +346,8 @@ public class NotificationManager : INotificationManager
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
-                    // This existing Zulip API has no cancellation overload. Keep awaiting any started send.
                     outcome = await DispatchAsync(store, e,
-                        () => ZulipOutcomeAsync(ZulipStream(client, messageText, id), contents)).ConfigureAwait(false);
+                        () => ZulipOutcomeAsync(ZulipSend(destination, messageText, id, true, cancellationToken), contents)).ConfigureAwait(false);
                     if (outcome.Kind == OutcomeKind.Suppressed)
                     {
                         return outcome;
@@ -394,7 +370,7 @@ public class NotificationManager : INotificationManager
 
                     cancellationToken.ThrowIfCancellationRequested();
                     outcome = await DispatchAsync(store, e,
-                        () => ZulipOutcomeAsync(ZulipPrivate(client, messageText, id), contents)).ConfigureAwait(false);
+                        () => ZulipOutcomeAsync(ZulipSend(destination, messageText, id, false, cancellationToken), contents)).ConfigureAwait(false);
                     if (outcome.Kind == OutcomeKind.Suppressed)
                     {
                         return outcome;
@@ -1121,6 +1097,7 @@ public class NotificationManager : INotificationManager
             {
                 _httpClient.Dispose();
             }
+            _zulipSender.Dispose();
             _sendCancellation.Dispose();
             _hasDisposed = true;
         }

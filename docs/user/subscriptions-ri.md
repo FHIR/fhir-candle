@@ -39,6 +39,19 @@ is not successful communication. Reserved example-domain shortcuts remain simula
 Inactive subscriptions retain their existing history for `$events` and `$status` inspection.
 Ordinary replacement does not transfer the previous subscription's event count or history.
 
+## Zulip delivery
+
+- To use the operator bot, configure `ZulipUrl`, `ZulipEmail`, and `ZulipKey` together on the
+  server. Omit subscription parameters `site`, `email`, and `key`. Alternatively, `site` alone
+  may repeat the configured HTTPS base: host case, an explicit default port, and a final slash
+  do not matter, but the host, effective port and case-sensitive base path must otherwise match.
+- To use a subscription's own bot, provide one value each for `site`, `email`, and `key`.
+  Missing credentials are never filled in from the operator bot.
+
+Use an absolute HTTPS site with simple, unescaped path segments and no user information, query
+or fragment. Messages for `streamId` and `userId` are posted to `api/v1/messages` beneath that
+base. Redirects fail the send; configure the final site rather than a redirecting URL.
+
 ## Related
 
 - [Getting started](getting-started.md)
