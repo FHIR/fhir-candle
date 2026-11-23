@@ -1460,14 +1460,10 @@ public partial class VersionedFhirStore : IFhirStore
         // check for conditional create (isConditionalCreate/conditionalQuery computed above)
         if (isConditionalCreate)
         {
-            bool success = DoTypeSearch(
-                ctx with { UrlQuery = conditionalQuery },
-                out FhirResponseContext searchResp);
-
-            if (success &&
-                (searchResp.Resource is Bundle bundle))
+            if (ResolveConditionalMatches(ctx, conditionalQuery, [resourceType],
+                    out int count, out Resource? match, out FhirResponseContext searchResp))
             {
-                switch (bundle.Total)
+                switch (count)
                 {
                     // no matches - continue with store as normal
                     case 0:
@@ -1476,17 +1472,7 @@ public partial class VersionedFhirStore : IFhirStore
                     // one match - return the match as if just stored except with OK instead of Created
                     case 1:
                         {
-                            if (bundle.Entry[0].Resource is not Resource r)
-                            {
-                                response = new()
-                                {
-                                    Outcome = SerializationUtils.BuildOutcomeForRequest(
-                                        HttpStatusCode.PreconditionFailed,
-                                        $"If-None-Exist query returned an entry without a resource: {bundle.Entry[0].FullUrl}"),
-                                    StatusCode = HttpStatusCode.PreconditionFailed,
-                                };
-                                return false;
-                            }
+                            Resource r = match!;
 
                             response = new()
                             {
@@ -1511,7 +1497,7 @@ public partial class VersionedFhirStore : IFhirStore
                             {
                                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.PreconditionFailed,
-                                    $"If-None-Exist query returned too many matches: {bundle.Total}"),
+                                    $"If-None-Exist query returned too many matches: {count}"),
                                 StatusCode = HttpStatusCode.PreconditionFailed,
                             };
                             return false;
@@ -2582,15 +2568,10 @@ public partial class VersionedFhirStore : IFhirStore
                 return false;
             }
 
-            bool success = DoTypeSearch(
-                ctx,
-                out FhirResponseContext searchResp);
-
-            if (success &&
-                (searchResp.Resource is not null) &&
-                (searchResp.Resource is Bundle bundle))
+            if (ResolveConditionalMatches(ctx, ctx.UrlQuery, [ctx.ResourceType],
+                    out int count, out Resource? match, out FhirResponseContext searchResp))
             {
-                switch (bundle?.Total)
+                switch (count)
                 {
                     // no matches - continue with update as create
                     case 0:
@@ -2608,7 +2589,7 @@ public partial class VersionedFhirStore : IFhirStore
                     // one match - check extra conditions and continue with update if they pass
                     case 1:
                         {
-                            string matchedId = bundle.Entry[0].Resource?.Id ?? string.Empty;
+                            string matchedId = match!.Id!;
 
                             if (!string.IsNullOrEmpty(id))
                             {
@@ -2641,7 +2622,7 @@ public partial class VersionedFhirStore : IFhirStore
                             {
                                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                                     HttpStatusCode.PreconditionFailed,
-                                    $"Conditional update query returned too many matches: {bundle?.Total}"),
+                                    $"Conditional update query returned too many matches: {count}"),
                                 StatusCode = HttpStatusCode.PreconditionFailed,
                             };
                             return false;
@@ -4291,12 +4272,9 @@ public partial class VersionedFhirStore : IFhirStore
         FhirRequestContext ctx,
         out FhirResponseContext response)
     {
-        bool success = DoSystemSearch(ctx, out FhirResponseContext searchResp);
-
-        // check for failed search
-        if ((!success) ||
-            (searchResp.Resource is null) ||
-            (searchResp.Resource is not Bundle resultBundle))
+        string[] types = System.Web.HttpUtility.ParseQueryString(ctx.UrlQuery)["_type"]?.Split(',') ?? [];
+        if (!ResolveConditionalMatches(ctx, ctx.UrlQuery, types, out int count, out Resource? match,
+                out FhirResponseContext searchResp))
         {
             response = new()
             {
@@ -4309,7 +4287,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // we are done if there are no results found
-        if (resultBundle.Total == 0)
+        if (count == 0)
         {
             response = new()
             {
@@ -4322,34 +4300,20 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // TODO(ginoc): Determine if we want to support conditional-delete-multiple
-        if (resultBundle.Total > 1)
+        if (count > 1)
         {
             response = new()
             {
                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
-                    $"Too many matches found for system delete: ({resultBundle.Total})",
+                    $"Too many matches found for system delete: ({count})",
                     OperationOutcome.IssueType.MultipleMatches),
                 StatusCode = HttpStatusCode.PreconditionFailed,
             };
             return false;
         }
 
-        Resource? match = resultBundle.Entry.First().Resource;
-        if (match is null)
-        {
-            response = new()
-            {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.InternalServerError,
-                    $"Resource ({resultBundle.Entry.First().FullUrl}) not accessible post search!",
-                    OperationOutcome.IssueType.Processing),
-                StatusCode = HttpStatusCode.InternalServerError,
-            };
-            return false;
-        }
-
-        string resourceType = match.TypeName;
+        string resourceType = match!.TypeName;
         if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
         {
             response = new()
@@ -4532,12 +4496,8 @@ public partial class VersionedFhirStore : IFhirStore
             return false;
         }
 
-        bool success = DoTypeSearch(ctx, out FhirResponseContext searchResp);
-
-        // check for failed search
-        if ((!success) ||
-            (searchResp.Resource is null) ||
-            (searchResp.Resource is not Bundle resultBundle))
+        if (!ResolveConditionalMatches(ctx, ctx.UrlQuery, [ctx.ResourceType], out int count, out Resource? match,
+                out FhirResponseContext searchResp))
         {
             response = new()
             {
@@ -4550,7 +4510,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // we are done if there are no results found
-        if (resultBundle.Total == 0)
+        if (count == 0)
         {
             response = new()
             {
@@ -4563,30 +4523,15 @@ public partial class VersionedFhirStore : IFhirStore
         }
 
         // TODO(ginoc): Determine if we want to support conditional-delete-multiple
-        if (resultBundle.Total > 1)
+        if (count > 1)
         {
             response = new()
             {
                 Outcome = SerializationUtils.BuildOutcomeForRequest(
                     HttpStatusCode.PreconditionFailed,
-                    $"Too many matches found for type ({ctx.ResourceType}) delete: ({resultBundle.Total})",
+                    $"Too many matches found for type ({ctx.ResourceType}) delete: ({count})",
                     OperationOutcome.IssueType.MultipleMatches),
                 StatusCode = HttpStatusCode.PreconditionFailed,
-            };
-            return false;
-        }
-
-        Resource? match = resultBundle.Entry.First().Resource;
-
-        if (match is null)
-        {
-            response = new()
-            {
-                Outcome = SerializationUtils.BuildOutcomeForRequest(
-                    HttpStatusCode.InternalServerError,
-                    $"Resource ({resultBundle.Entry.First().FullUrl}) not accessible post search!",
-                    OperationOutcome.IssueType.Processing),
-                StatusCode = HttpStatusCode.InternalServerError,
             };
             return false;
         }
@@ -4626,7 +4571,7 @@ rs,
             }
         }
 
-        string resourceType = match.TypeName;
+        string resourceType = match!.TypeName;
         string id = match.Id!;
 
         // attempt delete
@@ -4841,6 +4786,64 @@ rs,
 
     internal Action<string, ParsedSearchParameter[]>? NestedTypeSearchObserver { get; set; }
 
+    internal System.Runtime.CompilerServices.ConditionalWeakTable<FhirRequestContext, Action<string>> PageObservers { get; } = new();
+
+    private bool ResolveConditionalMatches(FhirRequestContext ctx, string query, string[] types,
+        out int count, out Resource? match, out FhirResponseContext response)
+    {
+        count = 0;
+        match = null;
+        if (types.Length == 0)
+        {
+            response = new()
+            {
+                Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.Forbidden,
+                    "System search with no resource types is too costly.", OperationOutcome.IssueType.TooCostly),
+                StatusCode = HttpStatusCode.Forbidden,
+            };
+            return false;
+        }
+        HashSet<SearchPageSelector.Identity> ids = [];
+        DateTimeOffset instant = _clock.GetUtcNow();
+        foreach (string type in types.Distinct())
+        {
+            if (!_store.TryGetValue(type, out IVersionedResourceStore? rs))
+            {
+                response = new()
+                {
+                    StatusCode = HttpStatusCode.NotFound,
+                    Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.NotFound,
+                        $"Resource type: {type} is not supported", OperationOutcome.IssueType.NotSupported),
+                };
+                return false;
+            }
+            ParsedSearchParameter[] parameters = ParsedSearchParameter.Parse(query, this, rs, type, out List<string> unknown);
+            if (TryBuildStrictSearchOutcome(EffectiveSearchHandling(ctx), unknown, parameters, out response))
+            {
+                return false;
+            }
+            foreach (Resource r in rs.SearchCandidates(parameters, instant))
+            {
+                if (!string.IsNullOrEmpty(r.Id) && CanReturn(ctx, r, 's'))
+                {
+                    ids.Add(new(type, r.Id));
+                }
+            }
+        }
+        count = ids.Count;
+        if (count == 1)
+        {
+            SearchPageSelector.Identity id = ids.Single();
+            match = _store[id.Type].DetachMatch(id.Id, instant, null);
+            if (match is null || !CanReturn(ctx, match, 's'))
+            {
+                return DenyVisibility(out response);
+            }
+        }
+        response = new();
+        return true;
+    }
+
     internal Resource[] DoNestedTypeSearch(string resourceType, ParsedSearchParameter[] parameters)
     {
         NestedTypeSearchObserver?.Invoke(resourceType, parameters);
@@ -4916,9 +4919,10 @@ rs,
         SearchParameterHandling handling,
         List<string> unknownParameters,
         ParsedSearchParameter[] parameters,
-        out FhirResponseContext response)
+        out FhirResponseContext response,
+        bool invalidOffset = false)
     {
-        if (handling != SearchParameterHandling.Strict)
+        if (handling != SearchParameterHandling.Strict && !invalidOffset)
         {
             response = new();
             return false;
@@ -4926,7 +4930,13 @@ rs,
 
         List<(StrictRuleCode Rule, string Message, OperationOutcome.IssueType IssueType)> issues = [];
 
-        foreach (string key in unknownParameters)
+        if (invalidOffset)
+        {
+            issues.Add((StrictRuleCode.SearchMalformedParameter, "_offset requires one nonnegative integer.",
+                OperationOutcome.IssueType.Invalid));
+        }
+
+        foreach (string key in unknownParameters.Where(_ => handling == SearchParameterHandling.Strict))
         {
             issues.Add((
                 StrictRuleCode.SearchUnknownParameter,
@@ -4934,7 +4944,7 @@ rs,
                 OperationOutcome.IssueType.NotSupported));
         }
 
-        foreach (ParsedSearchParameter parameter in parameters)
+        foreach (ParsedSearchParameter parameter in parameters.Where(_ => handling == SearchParameterHandling.Strict))
         {
             if (parameter.IgnoredParameter)
             {
@@ -5051,83 +5061,58 @@ rs,
         // Strict search handling: reject unknown / malformed parameters with 400
         // when the effective Prefer: handling=strict is in effect (either the
         // tenant is strict, or the client explicitly sent the header).
+        ParsedResultParameters resultParameters = new(searchQueryParams, this, rs, ctx.ResourceType);
         if (TryBuildStrictSearchOutcome(
                 EffectiveSearchHandling(ctx),
                 unknownSearchKeys,
                 parameters,
-                out FhirResponseContext strictResponse))
+                out FhirResponseContext strictResponse, resultParameters.InvalidOffset))
         {
             response = strictResponse;
             return false;
         }
 
-        // execute search
-        List<Resource> results = rs.TypeSearch(parameters).ToList();
-
-        if (ctx.Authorization is not null)
+        DateTimeOffset instant = _clock.GetUtcNow();
+        SearchPageSelector page = new(rs.SearchCandidates(parameters, instant).Where(r => CanReturn(ctx, r, 's')), resultParameters, this);
+        string root = getBaseUrl(ctx);
+        string Link(int? offset)
         {
-            results.RemoveAll(r => !CanReturn(ctx, r, 's'));
+            IEnumerable<(string key, string value)> applied = parameters.Where(p => !p.IgnoredParameter)
+                .Select(p => p.GetAppliedQueryString().Split('=', 2))
+                .Where(parts => parts.Length == 2).Select(parts => (parts[0], parts[1]))
+                .Concat(resultParameters.RawParameters.Where(p => offset is null || p.key != "_offset"));
+            if (offset is not null)
+            {
+                applied = applied.Append(("_offset", offset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            }
+            string query = string.Join('&', applied.Select(p => $"{Uri.EscapeDataString(p.key)}={Uri.EscapeDataString(p.value)}"));
+            return $"{root}/{ctx.ResourceType}" + (query.Length == 0 ? string.Empty : "?" + query);
         }
-
-        // parse search result parameters
-        ParsedResultParameters resultParameters = new ParsedResultParameters(
-            searchQueryParams,
-            this,
-            rs,
-            ctx.ResourceType);
-
-        string selfLink = $"{getBaseUrl(ctx)}/{ctx.ResourceType}";
-        string selfSearchParams = string.Join('&', parameters.Where(p => !p.IgnoredParameter).Select(p => p.GetAppliedQueryString()));
-        string selfResultParams = resultParameters.GetAppliedQueryString();
-
-        if (!string.IsNullOrEmpty(selfSearchParams))
-        {
-            selfLink = selfLink + "?" + selfSearchParams;
-        }
-
-        if (!string.IsNullOrEmpty(selfResultParams))
-        {
-            selfLink = selfLink + (selfLink.Contains('?') ? '&' : '?') + selfResultParams;
-        }
-
-        // create our bundle for results
-        Bundle bundle = new Bundle
+        Bundle bundle = new()
         {
             Type = Bundle.BundleType.Searchset,
-            Total = results.Count(),
-            Link = [ new Bundle.LinkComponent() { Relation = "self", Url = selfLink, },],
+            Total = page.Total,
+            Link = [new() { Relation = "self", Url = Link(null) }],
         };
-
-        if (resultParameters.SummaryFlag != "count")
+        PageObservers.TryGetValue(ctx, out Action<string>? observe);
+        observe?.Invoke("selected");
+        HashSet<string> addedIds = [];
+        foreach (SearchPageSelector.Identity id in page.Matches)
         {
-            // create our sort comparer, if necessary
-            FhirSortComparer? comparer = resultParameters.SortRequests.Length == 0
-                ? null
-                : new(this, resultParameters.SortRequests);
-
-            HashSet<string> addedIds = new();
-            int resultCount = 0;
-
-            foreach (Resource resource in (IEnumerable<Resource>)(comparer is null ? results : results.OrderBy(r => r, comparer)))
+            Resource? resource = rs.DetachMatch(id.Id, instant, observe is null ? null : () => observe("detached"));
+            if (resource is not null && CanReturn(ctx, resource, 's'))
             {
-                if (((resultParameters.MaxResults is not null) && (resultCount >= resultParameters.MaxResults)) ||
-                    (resultParameters.PageMatchCount is not null) && (resultCount >= resultParameters.PageMatchCount))
-                {
-                    break;
-                }
-
-                resultCount++;
-
-                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
-
-                // add any included resources
-                AddInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
-
-                // TODO: check for include:iterate directives
-
-                // add any reverse included resources
-                AddReverseInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddSearchMatch(bundle, resource, root, addedIds);
             }
+        }
+        if (page.NextOffset is int next && bundle.Entry.Count != 0)
+        {
+            bundle.Link.Add(new() { Relation = "next", Url = Link(next) });
+        }
+        foreach (Bundle.EntryComponent entry in bundle.Entry.ToArray())
+        {
+            AddInclusions(ctx, bundle, entry.Resource!, resultParameters, root, addedIds);
+            AddReverseInclusions(ctx, bundle, entry.Resource!, resultParameters, root, addedIds);
         }
 
         return FinishSearch(ctx, hooks, rs, bundle, "Type search successful", out response);
@@ -6060,9 +6045,10 @@ rs,
         foreach (Resource inclusion in inclusions)
         {
             string id = $"{inclusion.TypeName}/{inclusion.Id}";
-            if (CanReturn(ctx, inclusion, 's'))
+            Resource detached = (Resource)inclusion.DeepCopy();
+            if (CanReturn(ctx, detached, 's'))
             {
-                bundle.AddSearchEntry(inclusion, $"{rootUrl}/{id}", Bundle.SearchEntryMode.Include);
+                bundle.AddSearchEntry(detached, $"{rootUrl}/{id}", Bundle.SearchEntryMode.Include);
             }
             else
             {
@@ -6157,6 +6143,10 @@ rs,
             return;
         }
 
+        if (PageObservers.TryGetValue(ctx, out Action<string>? observe))
+        {
+            observe("expanded");
+        }
         IEnumerable<Resource> reverseInclusions = ResolveReverseInclusions(resource, resultParameters, addedIds);
 
         AddVisibleInclusions(ctx, bundle, reverseInclusions, rootUrl, addedIds);
@@ -6339,6 +6329,10 @@ rs,
             ElementResolver = Resolve,
         };
 
+        if (PageObservers.TryGetValue(ctx, out Action<string>? observe))
+        {
+            observe("expanded");
+        }
         IEnumerable<Resource> inclusions = ResolveInclusions(resource, resourcePN, resultParameters, addedIds, fpContext);
 
         AddVisibleInclusions(ctx, bundle, inclusions, rootUrl, addedIds);

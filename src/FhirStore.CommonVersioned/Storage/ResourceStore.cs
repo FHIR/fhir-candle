@@ -1998,6 +1998,36 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
     }
 
+    IEnumerable<Resource> IVersionedResourceStore.SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant)
+    {
+        Dictionary<string, Resource[]> reverseChainCache = [];
+        foreach ((string id, T stored) in _resourceStore)
+        {
+            Resource? resource = typeof(T) == typeof(Subscription)
+                ? _store.SubscriptionForSearch(id, instant)
+                : stored;
+            if (resource is not null && _searchTester.TestForMatch(resource.ToPocoNode(), parameters, reverseChainCache: reverseChainCache))
+            {
+                yield return resource;
+            }
+        }
+    }
+
+    Resource? IVersionedResourceStore.DetachMatch(string id, DateTimeOffset instant, Action? onDetach)
+    {
+        if (typeof(T) == typeof(Subscription))
+        {
+            return _store.SubscriptionForSearch(id, instant, detach: true, onDetach);
+        }
+        if (!_resourceStore.TryGetValue(id, out T? resource))
+        {
+            return null;
+        }
+        Resource detached = (Resource)resource.DeepCopy();
+        onDetach?.Invoke();
+        return detached;
+    }
+
     public bool TestForAny(ParsedSearchParameter link, ParsedSearchParameter filter)
     {
         IEnumerable<T>? source = null;

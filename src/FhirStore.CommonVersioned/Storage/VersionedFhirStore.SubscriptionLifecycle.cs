@@ -221,6 +221,9 @@ public partial class VersionedFhirStore
     }
 
     internal Subscription? SubscriptionResourceSnapshot(string id)
+        => SubscriptionForSearch(id, _clock.GetUtcNow(), detach: true);
+
+    internal Subscription? SubscriptionForSearch(string id, DateTimeOffset instant, bool detach = false, Action? onDetach = null)
     {
         List<SubscriptionChangedEventArgs> changes = [];
         List<string> diagnostics = [];
@@ -229,13 +232,21 @@ public partial class VersionedFhirStore
         {
             if (_subscriptions.TryGetValue(id, out ParsedSubscription? subscription))
             {
-                NormalizeSubscriptionLocked(subscription, _clock.GetUtcNow(), changes, diagnostics);
+                NormalizeSubscriptionLocked(subscription, instant, changes, diagnostics);
             }
             snapshot = _store.TryGetValue("Subscription", out IVersionedResourceStore? resourceStore)
-                ? (Subscription?)resourceStore.ReadRawSubscription(id)?.DeepCopy()
+                ? resourceStore.ReadRawSubscription(id)
                 : null;
+            if (detach && snapshot is not null)
+            {
+                snapshot = (Subscription)snapshot.DeepCopy();
+            }
         }
         PublishSubscriptionChanges(changes, diagnostics);
+        if (detach && snapshot is not null)
+        {
+            onDetach?.Invoke();
+        }
         return snapshot;
     }
 

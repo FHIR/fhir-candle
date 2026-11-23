@@ -47,6 +47,9 @@ public static class Common
         /// <summary>Limit the number of match results per page of response..</summary>
         "_count",
 
+        "_offset",
+        "_maxresults",
+
         /// <summary>Include additional resources according to a GraphDefinition.</summary>
         "_graph",
 
