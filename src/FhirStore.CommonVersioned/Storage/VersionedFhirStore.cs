@@ -2062,12 +2062,15 @@ public partial class VersionedFhirStore : IFhirStore
             // check for the hook indicating processing is complete
             if (hr.StatusCode is not null)
             {
-                response = hr;
-                return true;
+                return FinishVisibilityHook(ctx, hr, 'r', out response);
             }
         }
 
         Resource? r = rs.InstanceRead(ctx.Id);
+        if (hooks.Length != 0 && r is not null && !CanReturn(ctx, r, 'r'))
+        {
+            return DenyVisibility(out response);
+        }
 
         Resource? sForHook = null;
 
@@ -2086,12 +2089,15 @@ public partial class VersionedFhirStore : IFhirStore
 
                 if (hr.StatusCode is not null)
                 {
-                    response = hr;
-                    return true;
+                    return FinishVisibilityHook(ctx, hr, 'r', out response);
                 }
 
                 if (hr.Resource is not null)
                 {
+                    if (RequiresHookCheck(ctx) && hr.Resource is not Resource)
+                    {
+                        return DenyVisibility(out response);
+                    }
                     sForHook = (Resource?)hr.Resource;
                     r = sForHook;
                 }
@@ -2110,6 +2116,11 @@ public partial class VersionedFhirStore : IFhirStore
             };
 
             return false;
+        }
+
+        if (!CanReturn(ctx, r, 'r'))
+        {
+            return DenyVisibility(out response);
         }
 
         string eTag = string.IsNullOrEmpty(r.Meta?.VersionId) ? string.Empty : $"W/\"{r.Meta.VersionId}\"";
@@ -5025,8 +5036,7 @@ rs,
             // check for the hook indicating processing is complete
             if (hr.StatusCode is not null)
             {
-                response = hr;
-                return true;
+                return FinishVisibilityHook(ctx, hr, 's', out response);
             }
         }
 
@@ -5056,7 +5066,7 @@ rs,
 
         if (ctx.Authorization is not null)
         {
-            results = filterSearchResultsForAuth(ctx, results);
+            results.RemoveAll(r => !CanReturn(ctx, r, 's'));
         }
 
         // parse search result parameters
@@ -5108,71 +5118,19 @@ rs,
 
                 resultCount++;
 
-                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-                if (addedIds.Contains(relativeUrl) &&
-                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
-                {
-                    // promote to match
-                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
-                }
-                else
-                {
-                    // add the matched result to the bundle
-                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                    // track we have added this id
-                    addedIds.Add(relativeUrl);
-                }
+                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
 
                 // add any included resources
-                AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
 
                 // TODO: check for include:iterate directives
 
                 // add any reverse included resources
-                AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddReverseInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
             }
         }
 
-        if (hooks.Length > 0)
-        {
-            foreach (IFhirInteractionHook hook in hooks)
-            {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            rs,
-                            bundle,
-                            out FhirResponseContext hr);
-
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode is not null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-
-                    // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource is not null) &&
-                        (hr.Resource is Bundle opBundle))
-                    {
-                        bundle = opBundle;
-                    }
-                }
-            }
-        }
-
-        response = new()
-        {
-            Resource = bundle,
-            ResourceType = "Bundle",
-            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Type search successful"),
-            StatusCode = HttpStatusCode.OK,
-        };
-        return true;
+        return FinishSearch(ctx, hooks, rs, bundle, "Type search successful", out response);
     }
 
     /// <summary>Compartment search.</summary>
@@ -5212,100 +5170,189 @@ rs,
         return success;
     }
 
-    private bool isAuthorizedAsSearchMatch(FhirRequestContext ctx, Resource r)
+    private bool CanReturn(FhirRequestContext ctx, Resource r, char action)
     {
         if (ctx.Authorization is null)
         {
             return true;
         }
 
-        // check for user scopes that would cover this resource
-        if (ctx.Authorization.UserScopes.Contains("*.*") ||
-            ctx.Authorization.UserScopes.Contains("*.s") ||
-            ctx.Authorization.UserScopes.Contains(r.TypeName + ".*") ||
-            ctx.Authorization.UserScopes.Contains(r.TypeName + ".s"))
+        switch (ctx.Authorization.PermissionFor(r.TypeName, action))
         {
-            return true;
+            case AuthorizationInfo.ResourcePermission.Unrestricted:
+                return true;
+            case AuthorizationInfo.ResourcePermission.None:
+                return false;
         }
 
-        // check for a patient compartment search matching the launch patient (already filtered)
-        if (((ctx.Interaction == Common.StoreInteractionCodes.CompartmentSearch) ||
-             (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)) &&
-            (ctx.CompartmentType == "Patient") &&
-            (("Patient/" + ctx.Id) == ctx.Authorization.LaunchPatient))
-        {
-            return true;
-        }
-
-        // get the patient compartment
-        if (!_compartments.TryGetValue("Patient", out ParsedCompartment? patientCompartment))
+        string patient = ctx.Authorization.LaunchPatient;
+        if (string.IsNullOrEmpty(patient) || !patient.StartsWith("Patient/", StringComparison.Ordinal) ||
+            !Id.IsValidValue(patient[8..]))
         {
             return false;
         }
 
-        // patients can only search for resources that are in the patient compartment
-        if (!patientCompartment.IncludedResources.TryGetValue(r.TypeName, out ParsedCompartment.IncludedResource? ir))
+        if (r.TypeName == "Patient")
+        {
+            return patient == "Patient/" + r.Id;
+        }
+
+        if (!_compartments.TryGetValue("Patient", out ParsedCompartment? compartment) ||
+            !compartment.IncludedResources.TryGetValue(r.TypeName, out ParsedCompartment.IncludedResource? ir))
         {
             return false;
         }
 
-        // check to see if this resource is allowed under a patient scope (still need to match with actual patient)
-        if (ctx.Authorization.PatientScopes.Contains("*.*") ||
-            ctx.Authorization.PatientScopes.Contains("*.s") ||
-            ctx.Authorization.PatientScopes.Contains(r.TypeName + ".*") ||
-            ctx.Authorization.PatientScopes.Contains(r.TypeName + ".s"))
+        PocoNode node = r.ToPocoNode();
+        foreach (string code in ir.SearchParamCodes)
         {
-            // check to see if this is a patient resource
-            if ((r.TypeName == "Patient") &&
-                (("Patient/" + r.Id) == ctx.Authorization.LaunchPatient))
+            ParsedSearchParameter[] predicates = ParsedSearchParameter.Parse(
+                $"?{Uri.EscapeDataString(code)}={patient}", this, _store[r.TypeName], r.TypeName);
+            if (predicates is [{ IgnoredParameter: false, CompiledExpression: not null,
+                ParamType: SearchParamType.Reference, Modifier: SearchModifierCodes.None } predicate] &&
+                predicate.Name == code && _searchTester.TestForMatch(node, predicates))
             {
                 return true;
             }
-
-            PocoNode pn = r.ToPocoNode();
-
-            // check to see if this resource would be in the desired patient compartment
-            foreach (string spCode in ir.SearchParamCodes)
-            {
-                if (_searchTester.TestForMatch(
-                    pn,
-                    ParsedSearchParameter.Parse($"?{spCode}={ctx.Authorization.LaunchPatient}", this, _store[r.TypeName], r.TypeName)))
-                {
-                    return true;
-                }
-            }
         }
 
-        // default fails
         return false;
     }
 
-    private List<Resource> filterSearchResultsForAuth(FhirRequestContext ctx, List<Resource> resources)
+    private static bool DenyVisibility(out FhirResponseContext response)
     {
-        // if no authorization is required, return the unfiltered resources
-        if (ctx.Authorization is null)
+        response = new()
         {
-            return resources;
+            StatusCode = HttpStatusCode.Forbidden,
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.Forbidden,
+                "Resource is not visible to this grant.", OperationOutcome.IssueType.Forbidden),
+        };
+        return false;
+    }
+
+    private static bool RequiresHookCheck(FhirRequestContext ctx) =>
+        ctx.Authorization is not null &&
+        !(ctx.Authorization.Key == Guid.Empty.ToString() && ctx.Authorization.UserScopes.Contains("*.*"));
+
+    private bool FinishSearch(FhirRequestContext ctx, IFhirInteractionHook[] hooks, IVersionedResourceStore? rs,
+        Bundle bundle, string diagnostic, out FhirResponseContext response)
+    {
+        bool checkBundle = false;
+        foreach (IFhirInteractionHook hook in hooks)
+        {
+            if (!hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
+            {
+                continue;
+            }
+
+            _ = hook.DoInteractionHook(ctx, this, rs, bundle, out FhirResponseContext hr);
+            if (hr.StatusCode is not null)
+            {
+                return FinishVisibilityHook(ctx, hr, 's', out response);
+            }
+
+            // The hook may change the bundle in place, even without returning a replacement.
+            checkBundle = RequiresHookCheck(ctx);
+            if (hr.Resource is Bundle replacement)
+            {
+                bundle = replacement;
+            }
+            else if (checkBundle && hr.Resource is not null)
+            {
+                return DenyVisibility(out response);
+            }
         }
 
-        // check for user * scopes
-        if (ctx.Authorization.UserScopes.Contains("*.*") ||
-            ctx.Authorization.UserScopes.Contains("*.s"))
+        response = new()
         {
-            return resources;
+            Resource = checkBundle ? CheckedHookBundle(ctx, bundle) : bundle,
+            ResourceType = "Bundle",
+            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, diagnostic),
+            StatusCode = HttpStatusCode.OK,
+        };
+        return true;
+    }
+
+    private bool FinishVisibilityHook(FhirRequestContext ctx, FhirResponseContext hook, char action, out FhirResponseContext response)
+    {
+        if (!RequiresHookCheck(ctx))
+        {
+            response = hook;
+            return true;
         }
 
-        // check for a patient compartment search matching the launch patient (already filtered)
-        if (((ctx.Interaction == Common.StoreInteractionCodes.CompartmentSearch) ||
-             (ctx.Interaction == Common.StoreInteractionCodes.CompartmentTypeSearch)) &&
-            (ctx.CompartmentType == "Patient") &&
-            (("Patient/" + ctx.Id) == ctx.Authorization.LaunchPatient))
+        if ((int?)hook.StatusCode >= 400)
         {
-            return resources;
+            // Preserve the diagnostic classification, not free text, references, extensions
+            // or pre-serialized data that may describe an unchecked resource.
+            OperationOutcome diagnostic = SerializationUtils.BuildOutcomeForRequest(
+                hook.StatusCode.Value, "Interaction hook declined the request.");
+            if (hook.Outcome is OperationOutcome outcome && outcome.Issue.Count > 0)
+            {
+                diagnostic.Issue = outcome.Issue.Select(issue => new OperationOutcome.IssueComponent
+                {
+                    Code = issue.Code,
+                    Severity = issue.Severity,
+                }).ToList();
+            }
+            response = new()
+            {
+                StatusCode = hook.StatusCode,
+                Outcome = diagnostic,
+            };
+            return false;
         }
 
-        // check each resource
-        return resources.Where(r => isAuthorizedAsSearchMatch(ctx, r)).ToList();
+        Resource? checkedResource = action == 's'
+            ? hook.Resource is Bundle bundle ? CheckedHookBundle(ctx, bundle) : null
+            : hook.Resource is Resource resource && CanReturn(ctx, resource, action) ? resource : null;
+        if (checkedResource is null)
+        {
+            return DenyVisibility(out response);
+        }
+
+        response = new()
+        {
+            Resource = checkedResource,
+            ResourceType = checkedResource.TypeName,
+            Id = checkedResource.Id ?? string.Empty,
+            ETag = action == 'r' && !string.IsNullOrEmpty(checkedResource.Meta?.VersionId)
+                ? $"W/\"{checkedResource.Meta.VersionId}\"" : string.Empty,
+            LastModified = action == 'r' ? checkedResource.Meta?.LastUpdated?.UtcDateTime.ToString("r") ?? string.Empty : string.Empty,
+            Location = action == 'r' && !string.IsNullOrEmpty(checkedResource.Id)
+                ? $"{getBaseUrl(ctx)}/{checkedResource.TypeName}/{checkedResource.Id}" : string.Empty,
+            Outcome = SerializationUtils.BuildOutcomeForRequest(hook.StatusCode!.Value, "Interaction hook completed the request."),
+            StatusCode = hook.StatusCode,
+        };
+        return true;
+    }
+
+    // Never copy hook-provided totals, links, entry metadata, or serialized bodies.
+    private Bundle CheckedHookBundle(FhirRequestContext ctx, Bundle source)
+    {
+        Bundle result = new() { Type = Bundle.BundleType.Searchset, Total = 0 };
+        string query = ctx.SourceFormat == "application/x-www-form-urlencoded" && !string.IsNullOrEmpty(ctx.SourceContent)
+            ? ctx.SourceContent : ctx.UrlQuery;
+        bool countOnly = ctx.SerializeSummaryFlag == "count" || System.Web.HttpUtility.ParseQueryString(query)["_summary"] == "count";
+        foreach (Bundle.EntryComponent entry in source.Entry)
+        {
+            if (entry.Resource is not Resource resource || !CanReturn(ctx, resource, 's'))
+            {
+                continue;
+            }
+
+            Bundle.SearchEntryMode mode = entry.Search?.Mode ?? Bundle.SearchEntryMode.Match;
+            if (mode == Bundle.SearchEntryMode.Match)
+            {
+                result.Total++;
+            }
+
+            if (!countOnly)
+            {
+                result.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{resource.TypeName}/{resource.Id}", mode);
+            }
+        }
+        return result;
     }
 
 
@@ -5381,8 +5428,7 @@ rs,
             // check for the hook indicating processing is complete
             if (hr.StatusCode is not null)
             {
-                response = hr;
-                return true;
+                return FinishVisibilityHook(ctx, hr, 's', out response);
             }
         }
 
@@ -5467,7 +5513,7 @@ rs,
 
         if (ctx.Authorization is not null)
         {
-            results = filterSearchResultsForAuth(ctx, results);
+            results.RemoveAll(r => !CanReturn(ctx, r, 's'));
         }
 
         // parse search result parameters
@@ -5519,71 +5565,19 @@ rs,
 
                 resultCount++;
 
-                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-                if (addedIds.Contains(relativeUrl) &&
-                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
-                {
-                    // promote to match
-                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
-                }
-                else
-                {
-                    // add the matched result to the bundle
-                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                    // track we have added this id
-                    addedIds.Add(relativeUrl);
-                }
+                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
 
                 // add any included resources
-                AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
 
                 // TODO: check for include:iterate directives
 
                 // add any reverse included resources
-                AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddReverseInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
             }
         }
 
-        if (hooks.Length > 0)
-        {
-            foreach (IFhirInteractionHook hook in hooks)
-            {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            compartmentRS,
-                            bundle,
-                            out FhirResponseContext hr);
-
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode is not null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-
-                    // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource is not null) &&
-                        (hr.Resource is Bundle opBundle))
-                    {
-                        bundle = opBundle;
-                    }
-                }
-            }
-        }
-
-        response = new()
-        {
-            Resource = bundle,
-            ResourceType = "Bundle",
-            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Compartment search successful"),
-            StatusCode = HttpStatusCode.OK,
-        };
-        return true;
+        return FinishSearch(ctx, hooks, compartmentRS, bundle, "Compartment search successful", out response);
     }
 
     /// <summary>Compartment search, restricted to a single type.</summary>
@@ -5738,8 +5732,7 @@ rs,
             // check for the hook indicating processing is complete
             if (hr.StatusCode is not null)
             {
-                response = hr;
-                return true;
+                return FinishVisibilityHook(ctx, hr, 's', out response);
             }
         }
 
@@ -5750,12 +5743,12 @@ rs,
             rs,
             ctx.ResourceType);
 
-        ParsedSearchParameter[] compartmentFilters = compartmentIR.SearchParamCodes.Select(
+        ParsedSearchParameter[] compartmentFilters = compartmentIR.SearchParamCodes.SelectMany(
             code => ParsedSearchParameter.Parse(
             $"?{code}={ctx.CompartmentType}/{ctx.Id}",
             this,
             rs,
-            ctx.ResourceType).First()).ToArray();
+            ctx.ResourceType)).Where(p => !p.IgnoredParameter && p.CompiledExpression is not null).ToArray();
 
         // execute search - if there is only one compartment criteria, add it here
         List<Resource> results = (compartmentFilters.Length == 1)
@@ -5773,7 +5766,7 @@ rs,
 
         if (ctx.Authorization is not null)
         {
-            results = filterSearchResultsForAuth(ctx, results);
+            results.RemoveAll(r => !CanReturn(ctx, r, 's'));
         }
 
         // parse search result parameters
@@ -5825,71 +5818,19 @@ rs,
 
                 resultCount++;
 
-                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-                if (addedIds.Contains(relativeUrl) &&
-                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
-                {
-                    // promote to match
-                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
-                }
-                else
-                {
-                    // add the matched result to the bundle
-                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                    // track we have added this id
-                    addedIds.Add(relativeUrl);
-                }
+                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
 
                 // add any included resources
-                AddInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
 
                 // TODO: check for include:iterate directives
 
                 // add any reverse included resources
-                AddReverseInclusions(bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
+                AddReverseInclusions(ctx, bundle, resource, resultParameters, getBaseUrl(ctx), addedIds);
             }
         }
 
-        if (hooks.Length > 0)
-        {
-            foreach (IFhirInteractionHook hook in hooks)
-            {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            rs,
-                            bundle,
-                            out FhirResponseContext hr);
-
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode is not null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-
-                    // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource is not null) &&
-                        (hr.Resource is Bundle opBundle))
-                    {
-                        bundle = opBundle;
-                    }
-                }
-            }
-        }
-
-        response = new()
-        {
-            Resource = bundle,
-            ResourceType = "Bundle",
-            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"Compartment type search successful"),
-            StatusCode = HttpStatusCode.OK,
-        };
-        return true;
+        return FinishSearch(ctx, hooks, rs, bundle, "Compartment type search successful", out response);
     }
 
 
@@ -5984,8 +5925,7 @@ rs,
             // check for the hook indicating processing is complete
             if (hr.StatusCode is not null)
             {
-                response = hr;
-                return true;
+                return FinishVisibilityHook(ctx, hr, 's', out response);
             }
         }
 
@@ -6016,7 +5956,7 @@ rs,
             }
 
             // execute search
-            IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters);
+            IEnumerable<Resource> results = _store[resourceType].TypeSearch(parameters).Where(r => CanReturn(ctx, r, 's'));
 
             // parse search result parameters
             ParsedResultParameters resultParameters = new ParsedResultParameters(searchQueryParams, this, _store[resourceType], resourceType);
@@ -6077,85 +6017,59 @@ rs,
                     break;
                 }
 
-                // skip resources we cannot include
-                if ((ctx.Authorization is not null) && !isAuthorizedAsSearchMatch(ctx, resource))
-                {
-                    continue;
-                }
-
                 resultCount++;
 
-                string relativeUrl = $"{resource.TypeName}/{resource.Id}";
-
-                if (addedIds.Contains(relativeUrl) &&
-                    (bundle.FindEntry(new ResourceReference(relativeUrl)).FirstOrDefault() is Bundle.EntryComponent matchedEntry))
-                {
-                    // promote to match
-                    matchedEntry.Search!.Mode = Bundle.SearchEntryMode.Match;
-                }
-                else
-                {
-                    // add the matched result to the bundle
-                    bundle.AddSearchEntry(resource, $"{getBaseUrl(ctx)}/{relativeUrl}", Bundle.SearchEntryMode.Match);
-
-                    // track we have added this id
-                    addedIds.Add(relativeUrl);
-                }
+                AddSearchMatch(bundle, resource, getBaseUrl(ctx), addedIds);
 
                 // add any included resources
-                AddInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
+                AddInclusions(ctx, bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
 
                 // check for include:iterate directives
 
                 // add any reverse included resources
-                AddReverseInclusions(bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
+                AddReverseInclusions(ctx, bundle, resource, rpForResource, getBaseUrl(ctx), addedIds);
             }
         }
 
-        if (hooks.Length > 0)
-        {
-            foreach (IFhirInteractionHook hook in hooks)
-            {
-                if (hook.HookRequestStates.Contains(Common.HookRequestStateCodes.Post))
-                {
-                    _ = hook.DoInteractionHook(
-                            ctx,
-                            this,
-                            _store[ctx.ResourceType],
-                            bundle,
-                            out FhirResponseContext hr);
-
-                    // check for the hook indicating processing is complete
-                    if (hr.StatusCode is not null)
-                    {
-                        response = hr;
-                        return true;
-                    }
-
-                    // if the hook modified the resource, use that moving forward
-                    if ((hr.Resource is not null) &&
-                        (hr.Resource is Bundle opBundle))
-                    {
-                        bundle = opBundle;
-                    }
-                }
-            }
-        }
-
-        // set the total number of results aggregated across types
         if (resultCount != -1)
         {
             bundle.Total = resultCount;
         }
 
-        response = new()
+        return FinishSearch(ctx, hooks, null, bundle, "System search successful", out response);
+    }
+
+    private static void AddSearchMatch(Bundle bundle, Resource resource, string rootUrl, HashSet<string> addedIds)
+    {
+        string id = $"{resource.TypeName}/{resource.Id}";
+        string url = $"{rootUrl}/{id}";
+        if (!addedIds.Add(id))
         {
-            Resource = bundle,
-            ResourceType = "Bundle",
-            Outcome = SerializationUtils.BuildOutcomeForRequest(HttpStatusCode.OK, $"System search successful"),
-            StatusCode = HttpStatusCode.OK,
-        };
-        return true;
+            // The primary may already be present as an include.
+            Bundle.EntryComponent existing = bundle.Entry.First(e => e.FullUrl == url);
+            existing.Resource = resource;
+            existing.Search!.Mode = Bundle.SearchEntryMode.Match;
+            return;
+        }
+        bundle.AddSearchEntry(resource, url, Bundle.SearchEntryMode.Match);
+    }
+
+    private void AddVisibleInclusions(FhirRequestContext ctx, Bundle bundle, IEnumerable<Resource> inclusions,
+        string rootUrl, HashSet<string> addedIds)
+    {
+        foreach (Resource inclusion in inclusions)
+        {
+            string id = $"{inclusion.TypeName}/{inclusion.Id}";
+            if (CanReturn(ctx, inclusion, 's'))
+            {
+                bundle.AddSearchEntry(inclusion, $"{rootUrl}/{id}", Bundle.SearchEntryMode.Include);
+            }
+            else
+            {
+                // The resolver reserved the identity, but no entry was admitted.
+                addedIds.Remove(id);
+            }
+        }
     }
 
     private void AddIterativeInclusions()
@@ -6224,12 +6138,14 @@ rs,
     }
 
     /// <summary>Adds a reverse inclusions.</summary>
+    /// <param name="ctx">             The request and its visibility constraints.</param>
     /// <param name="bundle">          The bundle.</param>
     /// <param name="resource">        [out] The resource.</param>
     /// <param name="resultParameters">Options for controlling the result.</param>
     /// <param name="rootUrl">         URL of the root.</param>
     /// <param name="addedIds">        List of identifiers for the added.</param>
     private void AddReverseInclusions(
+        FhirRequestContext ctx,
         Bundle bundle,
         Resource resource,
         ParsedResultParameters resultParameters,
@@ -6243,11 +6159,7 @@ rs,
 
         IEnumerable<Resource> reverseInclusions = ResolveReverseInclusions(resource, resultParameters, addedIds);
 
-        foreach (Resource inclusion in reverseInclusions)
-        {
-            // add the matched result to the bundle
-            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{inclusion.TypeName}/{inclusion.Id}", Bundle.SearchEntryMode.Include);
-        }
+        AddVisibleInclusions(ctx, bundle, reverseInclusions, rootUrl, addedIds);
     }
 
     /// <summary>Enumerates resolve inclusions in this collection.</summary>
@@ -6398,12 +6310,14 @@ rs,
     }
 
     /// <summary>Adds the inclusions.</summary>
+    /// <param name="ctx">             The request and its visibility constraints.</param>
     /// <param name="bundle">          The bundle.</param>
     /// <param name="resource">        [out] The resource.</param>
     /// <param name="resultParameters">Options for controlling the result.</param>
     /// <param name="rootUrl">         URL of the root.</param>
     /// <param name="addedIds">        List of identifiers for the added.</param>
     private void AddInclusions(
+        FhirRequestContext ctx,
         Bundle bundle,
         Resource resource,
         ParsedResultParameters resultParameters,
@@ -6427,11 +6341,7 @@ rs,
 
         IEnumerable<Resource> inclusions = ResolveInclusions(resource, resourcePN, resultParameters, addedIds, fpContext);
 
-        foreach (Resource inclusion in inclusions)
-        {
-            // add the matched result to the bundle
-            bundle.AddSearchEntry(inclusion, $"{rootUrl}/{inclusion.TypeName}/{inclusion.Id}", Bundle.SearchEntryMode.Include);
-        }
+        AddVisibleInclusions(ctx, bundle, inclusions, rootUrl, addedIds);
     }
 
     /// <summary>Gets the server capabilities.</summary>

@@ -241,6 +241,20 @@ public class AuthorizationInfo
     /// <summary>Gets the activity.</summary>
     public List<AuthActivityRecord> Activity { get; } = [];
 
+    /// <summary>Whether returning a resource requires verifying its patient membership.</summary>
+    public enum ResourcePermission { None, PatientConditional, Unrestricted }
+
+    /// <summary>Matches normalized SMART permissions against the actual type and action.</summary>
+    public ResourcePermission PermissionFor(string resourceType, char action)
+    {
+        bool Matches(HashSet<string> scopes) =>
+            scopes.Contains("*.*") || scopes.Contains($"*.{action}") ||
+            scopes.Contains($"{resourceType}.*") || scopes.Contains($"{resourceType}.{action}");
+
+        return Matches(UserScopes) ? ResourcePermission.Unrestricted :
+            Matches(PatientScopes) ? ResourcePermission.PatientConditional : ResourcePermission.None;
+    }
+
     /// <summary>Query if this object is authorized.</summary>
     /// <returns>True if authorized, false if not.</returns>
     public bool IsAuthorized(
@@ -326,31 +340,11 @@ public class AuthorizationInfo
             case Storage.Common.StoreInteractionCodes.InstanceReadHistory:
             case Storage.Common.StoreInteractionCodes.InstanceReadVersion:
             case Storage.Common.StoreInteractionCodes.TypeHistory:
-                {
-                    if (PatientScopes.Contains("*.r") ||
-                        UserScopes.Contains("*.r") ||
-                        PatientScopes.Contains(resourceType + ".r") ||
-                        UserScopes.Contains(resourceType + ".r"))
-                    {
-                        return true;
-                    }
-
-                    return false;
-                }
+                return PermissionFor(resourceType, 'r') != ResourcePermission.None;
 
             case Storage.Common.StoreInteractionCodes.CompartmentTypeSearch:
             case Storage.Common.StoreInteractionCodes.TypeSearch:
-                {
-                    if (PatientScopes.Contains("*.s") ||
-                        UserScopes.Contains("*.s") ||
-                        PatientScopes.Contains(resourceType + ".s") ||
-                        UserScopes.Contains(resourceType + ".s"))
-                    {
-                        return true;
-                    }
-
-                    return false;
-                }
+                return PermissionFor(resourceType, 's') != ResourcePermission.None;
 
             case Storage.Common.StoreInteractionCodes.TypeCreate:
             case Storage.Common.StoreInteractionCodes.TypeCreateConditional:
@@ -435,15 +429,7 @@ public class AuthorizationInfo
             // TODO: compartment search should be clever and check the intersection of the sets of resources in the compartment
             case Storage.Common.StoreInteractionCodes.CompartmentSearch:
             case Storage.Common.StoreInteractionCodes.SystemSearch:
-                {
-                    if (PatientScopes.Contains("*.s") ||
-                        UserScopes.Contains("*.s"))
-                    {
-                        return true;
-                    }
-
-                    return false;
-                }
+                return PermissionFor("*", 's') != ResourcePermission.None;
 
             default:
                 break;

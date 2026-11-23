@@ -577,6 +577,29 @@ public class BundleAuthorizationRoutingTests
         AssertUnchanged(store, before, watch);
     }
 
+    [Theory]
+    [MemberData(nameof(VersionCases))]
+    public async Task BatchReadsCheckEachPatientsVisibility(FhirReleases.FhirSequenceCodes version)
+    {
+        using TestHost host = new(version);
+        IFhirStore store = host.Store;
+        Seed(store);
+        SeedResource(store, "Patient", Patient("other", "Excluded-family"));
+        (_, AuthorizationInfo.SmartResponse grant) = ExchangeAuthorizationCode(
+            host, "launch/patient patient/Patient.r", "Patient/seed");
+
+        JsonObject result = await SendJsonBundle(host, store, Bundle("batch",
+            Entry("urn:uuid:00000000-0000-0000-0000-000000000001", "GET", "Patient/seed"),
+            Entry("urn:uuid:00000000-0000-0000-0000-000000000002", "GET", "Patient/other")), grant.AccessToken);
+        JsonArray entries = result["entry"]!.AsArray();
+        Assert.Equal(2, entries.Count);
+        Assert.Equal("seed", entries[0]!["resource"]!["id"]!.GetValue<string>());
+        Assert.Equal("403 Forbidden", entries[1]!["response"]!["status"]!.GetValue<string>());
+        Assert.Null(entries[1]!["resource"]);
+        Assert.Null(entries[1]!["response"]!["etag"]);
+        Assert.DoesNotContain("Excluded-family", result.ToJsonString());
+    }
+
     private static (JsonWebKey PrivateKey, JsonWebKey PublicKey) CreateAssertionKeys()
     {
         using RSA rsa = RSA.Create(2048);
@@ -936,7 +959,7 @@ public class BundleAuthorizationRoutingTests
             RequestParameters = new() { Scope = "user/*.*" },
             UserScopes = ["*.*"],
         };
-        FhirRequestContext ctx = Context(store, "PUT", $"{type}/seed", privileged) with
+        FhirRequestContext ctx = Context(store, "PUT", $"{type}/{resource["id"]}", privileged) with
         {
             SourceContent = resource.ToJsonString(),
             SourceFormat = JsonFormat,
