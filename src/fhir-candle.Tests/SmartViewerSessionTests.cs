@@ -15,6 +15,7 @@ using FhirCandle.Storage;
 using FhirCandle.Utils;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace fhir.candle.Tests;
@@ -23,6 +24,130 @@ namespace fhir.candle.Tests;
 [Collection(CompatibilityHostCollection.Name)]
 public class SmartViewerSessionTests
 {
+    private static WebApplication BuildViewerHost(DirectoryInfo root, TenantConfiguration tenant, TimeProvider clock)
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton(clock);
+        builder.Services.AddScoped<SmartViewerSession>();
+        CandleConfig config = new()
+        {
+            PublicUrl = "http://localhost",
+            SourceDirectory = root.FullName,
+            FhirCacheDirectory = root.FullName,
+            UseOfficialRegistries = false,
+            TenantsR4 = [tenant.ControllerName],
+        };
+        return Program.BuildAppForTesting(builder, config, new() { [tenant.ControllerName] = tenant });
+    }
+
+    /// <summary>The patient selected on the login grid binds both REST and circuit visibility after consent.</summary>
+    [Fact]
+    public async Task InteractivePatientSelectionSurvivesGrantExchange()
+    {
+        TenantConfiguration tenant = new()
+        {
+            ControllerName = "picker", BaseUrl = "http://localhost/fhir/picker",
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4, SmartAllowed = true, SmartRequired = true,
+            AllowCreateAsUpdate = true, AllowExistingId = true,
+        };
+        DirectoryInfo root = Directory.CreateTempSubdirectory("candle-login-");
+        try
+        {
+            await using WebApplication app = BuildViewerHost(root, tenant, TimeProvider.System);
+            await app.StartAsync();
+            using HttpClient rest = app.GetTestClient();
+            IFhirStoreManager stores = app.Services.GetRequiredService<IFhirStoreManager>();
+            ISmartAuthManager auth = app.Services.GetRequiredService<ISmartAuthManager>();
+            using IFhirStore store = stores[tenant.ControllerName];
+            Put("CompartmentDefinition/patient", """
+                {"resourceType":"CompartmentDefinition","id":"patient","url":"urn:picker:patient","name":"PatientMembership",
+                 "status":"active","code":"Patient","search":true,"resource":[{"code":"Observation","param":["subject"]}]}
+                """);
+            foreach (string id in new[] { "included", "excluded" })
+            {
+                Put($"Patient/{id}", $$"""{"resourceType":"Patient","id":"{{id}}"}""");
+                Put($"Observation/obs-{id}", $$$"""
+                    {"resourceType":"Observation","id":"obs-{{{id}}}","status":"final","code":{"text":"test"},
+                     "subject":{"reference":"Patient/{{{id}}}"}}
+                    """);
+            }
+
+            const string Callback = "http://localhost/return";
+            string[] scopes = ["patient/Observation.rs", "patient/Patient.rs"];
+            string authorize = QueryHelpers.AddQueryString("/_smart/picker/authorize", new Dictionary<string, string?>
+            {
+                ["response_type"] = "code", ["client_id"] = "picker-test", ["redirect_uri"] = Callback,
+                ["scope"] = string.Join(" ", scopes), ["state"] = "picker-state", ["aud"] = tenant.BaseUrl,
+            });
+            using HttpResponseMessage pending = await rest.GetAsync(authorize);
+            Assert.Equal(HttpStatusCode.Redirect, pending.StatusCode);
+            Uri redirect = await FluentUiIntegrationTests.SelectPatientAndApproveAsync(
+                new Uri(rest.BaseAddress!, pending.Headers.Location!), "included", stores, auth);
+            Assert.Equal(Callback, redirect.GetLeftPart(UriPartial.Path));
+            Assert.Equal("picker-state", QueryHelpers.ParseQuery(redirect.Query)["state"].ToString());
+            using FormUrlEncodedContent form = new(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code", ["code"] = QueryHelpers.ParseQuery(redirect.Query)["code"].ToString(),
+                ["client_id"] = "picker-test", ["redirect_uri"] = Callback,
+            });
+            using HttpResponseMessage exchange = await rest.PostAsync("/_smart/picker/token", form);
+            exchange.EnsureSuccessStatusCode();
+            JsonNode issued = JsonNode.Parse(await exchange.Content.ReadAsStringAsync())!;
+            Assert.Equal("included", (string?)issued["patient"]);
+            Assert.Equal(scopes, issued["scope"]!.GetValue<string>().Split(' ').Order(StringComparer.Ordinal));
+            string token = issued["access_token"]!.GetValue<string>();
+            Assert.Equal(GrantStatus.Admitted, auth.ResolveAccessToken(tenant.ControllerName, token, out AuthorizationInfo identity));
+            Assert.Equal("Patient/included", identity.UserId);
+            Assert.Equal("included", identity.LaunchPatient);
+            Assert.Empty(identity.UserScopes);
+            rest.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using IServiceScope circuit = app.Services.CreateScope();
+            SmartViewerSession session = circuit.ServiceProvider.GetRequiredService<SmartViewerSession>();
+            session.SelectTenant(tenant.ControllerName);
+            session.SelectMode(true);
+            session.SignIn(token);
+            foreach ((string type, string selected, string other) in new[]
+                { ("Patient", "included", "excluded"), ("Observation", "obs-included", "obs-excluded") })
+            {
+                SmartViewerSession.Request list = new(tenant.ControllerName, type);
+                await Load(list);
+                Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+                Assert.Equal(selected, Assert.Single(session.Display.Rows).Id);
+                JsonNode bundle = JsonNode.Parse(await rest.GetStringAsync($"{tenant.BaseUrl}/{type}"))!;
+                Assert.Equal(1, (int?)bundle["total"]);
+                Assert.Equal(selected, (string?)Assert.Single(bundle["entry"]!.AsArray())!["resource"]!["id"]);
+
+                await Load(list with { Id = selected });
+                Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+                JsonNode body = JsonNode.Parse(await rest.GetStringAsync($"{tenant.BaseUrl}/{type}/{selected}"))!;
+                Assert.Equal(type, (string?)body["resourceType"]);
+                Assert.Equal(selected, (string?)body["id"]);
+                Assert.True(JsonNode.DeepEquals(body, JsonNode.Parse(session.Display.Body)));
+
+                using HttpResponseMessage denied = await rest.GetAsync($"{tenant.BaseUrl}/{type}/{other}");
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+                Assert.DoesNotContain(other, await denied.Content.ReadAsStringAsync());
+                await Load(list with { Id = other });
+                Assert.Equal(HttpStatusCode.Forbidden, session.Display.Status);
+                AssertEmpty(session);
+            }
+            await app.StopAsync();
+
+            Task Load(SmartViewerSession.Request request) =>
+                session.LoadAsync(request, (_, _) => throw new InvalidOperationException("Unexpected admin load"));
+            void Put(string path, string content)
+            {
+                FhirRequestContext ctx = new(store, "PUT", path) { SourceContent = content, SourceFormat = "application/fhir+json" };
+                Assert.True(store.InstanceUpdate(ctx, out FhirResponseContext response), response.SerializedOutcome);
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
     /// <summary>Caller inspection is tenant-bound, expires while idle and never repopulates from admin.</summary>
     [Fact]
     public async Task AdminAndCallerReadDifferentViews()
@@ -40,19 +165,7 @@ public class SmartViewerSessionTests
         try
         {
             ManualTimeProvider clock = new(DateTimeOffset.UtcNow);
-            WebApplicationBuilder builder = WebApplication.CreateBuilder();
-            builder.WebHost.UseTestServer();
-            builder.Services.AddSingleton<TimeProvider>(clock);
-            builder.Services.AddScoped<SmartViewerSession>();
-            CandleConfig config = new()
-            {
-                PublicUrl = "http://localhost",
-                SourceDirectory = root.FullName,
-                FhirCacheDirectory = root.FullName,
-                UseOfficialRegistries = false,
-                TenantsR4 = [tenant.ControllerName],
-            };
-            await using WebApplication app = Program.BuildAppForTesting(builder, config, new() { [tenant.ControllerName] = tenant });
+            await using WebApplication app = BuildViewerHost(root, tenant, clock);
             await app.StartAsync();
             using IFhirStore store = app.Services.GetRequiredService<IFhirStoreManager>()[tenant.ControllerName];
             ISmartAuthManager auth = app.Services.GetRequiredService<ISmartAuthManager>();

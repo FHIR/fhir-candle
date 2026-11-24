@@ -132,6 +132,36 @@ public class SmartVisibilityTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public void PatientIdentityMustBeBareOrRelative(FhirReleases.FhirSequenceCodes version)
+    {
+        using IFhirStore store = CreateStore(version);
+        AuthorizationInfo grant = Grant("Patient.r", "Patient.s", "Observation.r", "Observation.s");
+        grant.UserId = "Patient/alpha";
+        foreach (string context in new[] { "alpha", "Patient/alpha" })
+        {
+            grant.LaunchPatient = context;
+            AssertRead(store, "Patient/alpha", grant, true);
+            AssertRead(store, "Observation/one", grant, true);
+            AssertRead(store, "Patient/beta", grant, false);
+            AssertRead(store, "Observation/other", grant, false);
+            AssertEntries(Search(store, "Patient", grant), 1, "match:Patient/alpha");
+            AssertEntries(Search(store, "Observation", grant), 2, "match:Observation/one", "match:Observation/two");
+        }
+
+        foreach (string context in new[] { "", "Patient/", "Practitioner/alpha", "patient/alpha", "/Patient/alpha",
+            store.Config.BaseUrl + "/Patient/alpha", "Patient/alpha/_history/1", "Patient/Patient/alpha", "alpha?x",
+            " alpha", "Patient/alpha ", "Patient/alpha\n", new string('a', 65) })
+        {
+            grant.LaunchPatient = context;
+            AssertRead(store, "Patient/alpha", grant, false);
+            AssertRead(store, "Observation/one", grant, false);
+            AssertEntries(Search(store, "Patient", grant), 0);
+            AssertEntries(Search(store, "Observation", grant), 0);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public void ReturnedResourcesRespectScopeAndPatient(FhirReleases.FhirSequenceCodes version)
     {
         using IFhirStore store = CreateStore(version);

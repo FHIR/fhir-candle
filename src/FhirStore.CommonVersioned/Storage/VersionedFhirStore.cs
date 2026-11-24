@@ -5292,13 +5292,17 @@ rs,
                 return false;
         }
 
-        string patient = ctx.Authorization.LaunchPatient;
-        if (string.IsNullOrEmpty(patient) || !patient.StartsWith("Patient/", StringComparison.Ordinal) ||
-            !Id.IsValidValue(patient[8..]))
+        string id = ctx.Authorization.LaunchPatient;
+        if (!string.IsNullOrEmpty(id) && id.StartsWith("Patient/", StringComparison.Ordinal))
+        {
+            id = id[8..];
+        }
+        if (string.IsNullOrEmpty(id) || !Id.IsValidValue(id))
         {
             return false;
         }
 
+        string patient = "Patient/" + id;
         if (r.TypeName == "Patient")
         {
             return patient == "Patient/" + r.Id;

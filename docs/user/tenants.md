@@ -30,6 +30,12 @@ This is a trusted development UI, not an access-control boundary for the server.
    inspector tenants discards the credential. None of these actions switches
    back to admin, even on a SMART-optional tenant.
 
+For example, select `alpha` at **Patient Login** and approve only
+`patient/Patient.rs` and `patient/Observation.rs`. The token response's
+`patient` field is `alpha`, not `Patient/alpha`. With that access token, REST
+and the SMART viewer can read and search `Patient/alpha` and Observations in
+its patient compartment, but not another patient's unrelated records.
+
 The credential stays in this Blazor circuit, not browser storage or the URL.
 Use **Admin — no sign-in** to switch back explicitly. A new circuit starts in
 admin mode with no credential. Other developer diagnostics remain trusted tools.

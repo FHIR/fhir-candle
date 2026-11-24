@@ -27,6 +27,7 @@ using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -467,7 +468,47 @@ public class FluentUiIntegrationTests
         return (Assert.Single(renderer.Components<NavMenu>()), closed);
     }
 
-    private static ServiceProvider Services(RecordingJs js)
+    internal static async Task<Uri> SelectPatientAndApproveAsync(
+        Uri loginUri, string patientId, IFhirStoreManager stores, ISmartAuthManager auth)
+    {
+        using ServiceProvider services = Services(new RecordingJs(), stores, auth);
+        NavigationManager navigation = services.GetRequiredService<NavigationManager>();
+        navigation.NavigateTo(loginUri.ToString());
+        await using (ManagedRenderer login = new(services))
+        {
+            await login.MountAsync<LoginPage>(PageParameters(loginUri, "/smart/login"));
+            FluentStack panel = login.Components<FluentStack>().Single(stack =>
+                login.Children<ResourcePicker>(stack).Count() == 1 &&
+                login.Children<FluentTextInput>(stack).Any(input => input.Label == "User (Patient)"));
+            FluentDataGrid<InstanceTableRec> grid = Assert.Single(login.Children<FluentDataGrid<InstanceTableRec>>(panel));
+            await EventuallyAsync(login, () => login.Children<FluentDataGridRow<InstanceTableRec>>(grid)
+                .Any(row => row.Item?.Id == patientId));
+            await login.Dispatcher.InvokeAsync(() => grid.OnRowClick.InvokeAsync(
+                login.Children<FluentDataGridRow<InstanceTableRec>>(grid).Single(row => row.Item?.Id == patientId)));
+            FluentButton submit = login.Children<FluentButton>(panel).Single(button => login.Text(button.ChildContent) == "Login");
+            Assert.False(submit.Disabled);
+            await login.Dispatcher.InvokeAsync(() => submit.OnClick.InvokeAsync(new MouseEventArgs()));
+        }
+
+        await using ManagedRenderer consent = new(services);
+        await consent.MountAsync<AuthorizationPage>(PageParameters(new Uri(navigation.Uri), "/smart/auth"));
+        FluentButton approve = consent.Components<FluentButton>().Single(button =>
+            consent.Text(button.ChildContent) == "Approve Selected Scopes");
+        await consent.Dispatcher.InvokeAsync(() => approve.OnClick.InvokeAsync(new MouseEventArgs()));
+        return new Uri(navigation.Uri);
+
+        static Dictionary<string, object?> PageParameters(Uri uri, string path)
+        {
+            Assert.Equal(path, uri.AbsolutePath);
+            return new()
+            {
+                [nameof(LoginPage.StoreName)] = QueryHelpers.ParseQuery(uri.Query)["store"].ToString(),
+                [nameof(LoginPage.Key)] = QueryHelpers.ParseQuery(uri.Query)["key"].ToString(),
+            };
+        }
+    }
+
+    private static ServiceProvider Services(RecordingJs js, IFhirStoreManager? stores = null, ISmartAuthManager? auth = null)
     {
         ServiceCollection services = new();
         services.AddLogging();
@@ -476,8 +517,8 @@ public class FluentUiIntegrationTests
         services.AddSingleton<IJSRuntime>(js);
         services.AddSingleton<NavigationManager>(new TestNavigation());
         services.AddSingleton(new CandleConfig());
-        services.AddSingleton<IFhirStoreManager>(new TestStores());
-        services.AddSingleton(DispatchProxy.Create<ISmartAuthManager, TestAuth>());
+        services.AddSingleton(stores ?? new TestStores());
+        services.AddSingleton(auth ?? DispatchProxy.Create<ISmartAuthManager, TestAuth>());
         services.AddScoped<ProtectedLocalStorage>();
         services.AddScoped<CandleThemeState>();
         services.AddFluentUIComponents();
@@ -528,6 +569,10 @@ public class FluentUiIntegrationTests
         public IEnumerable<T> Components<T>() => new[] { _root }.Concat(Frames()
             .Where(frame => frame.FrameType == RenderTreeFrameType.Component).Select(frame => frame.Component))
             .OfType<T>().Distinct();
+
+        public IEnumerable<T> Children<T>(IComponent parent) => Walk(Frames().Single(frame =>
+            frame.FrameType == RenderTreeFrameType.Component && ReferenceEquals(frame.Component, parent)).ComponentId)
+            .Where(frame => frame.FrameType == RenderTreeFrameType.Component).Select(frame => frame.Component).OfType<T>().Distinct();
 
         public void AssertFeedbackBeforeLayout()
         {
