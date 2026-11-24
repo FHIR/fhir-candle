@@ -19,8 +19,9 @@ internal sealed class SearchPageSelector
     internal int? Total { get; }
     internal int? NextOffset { get; }
 
+    // The visible candidate stream contains each (type, store key) at most once.
     internal SearchPageSelector(IEnumerable<Candidate> candidates, ParsedResultParameters parameters, VersionedFhirStore store,
-        ParsedResultParameters.SortRequest[] sort, IReadOnlyDictionary<string, ParsedResultParameters> byType)
+        ParsedResultParameters.SortRequest[] sort, IReadOnlyDictionary<string, ParsedResultParameters> byType, Action<int>? observePeak)
     {
         int offset = parameters.Offset ?? 0;
         bool countOnly = parameters.SummaryFlag == "count" || parameters.PageMatchCount == 0;
@@ -38,14 +39,15 @@ internal sealed class SearchPageSelector
             }
         }
         List<Row> ordered = [];
-        HashSet<Identity> seen = [];
+        int visible = 0;
+        int peak = 0;
         foreach ((Identity id, Resource resource) in candidates)
         {
-            if (!seen.Add(id) || countOnly)
+            int ordinal = visible++;
+            if (countOnly)
             {
                 continue;
             }
-            int ordinal = seen.Count - 1;
             if (comparer is not null)
             {
                 (FhirSortComparer projection, int[] positions) = projections[id.Type];
@@ -65,6 +67,10 @@ internal sealed class SearchPageSelector
             {
                 break;
             }
+            if (observePeak is not null)
+            {
+                peak = Math.Max(peak, Matches.Count + ordered.Count);
+            }
         }
         if (comparer is not null)
         {
@@ -75,8 +81,9 @@ internal sealed class SearchPageSelector
             });
             Matches.AddRange(ordered.Skip(offset).Take((int)Math.Min(int.MaxValue, end - offset)).Select(r => r.Identity));
         }
-        Total = needTotal ? seen.Count : null;
-        if (Matches.Count != 0 && end < seen.Count && end < parameters.MaxResults.GetValueOrDefault(long.MaxValue))
+        observePeak?.Invoke(Math.Max(peak, Matches.Count + ordered.Count));
+        Total = needTotal ? visible : null;
+        if (Matches.Count != 0 && end < visible && end < parameters.MaxResults.GetValueOrDefault(long.MaxValue))
         {
             NextOffset = (int)end;
         }

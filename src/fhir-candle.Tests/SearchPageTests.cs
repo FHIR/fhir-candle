@@ -8,7 +8,6 @@ extern alias candleR4B;
 extern alias candleR5;
 
 using System.Net;
-using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using FhirCandle.Models;
 using FhirCandle.Storage;
@@ -21,20 +20,27 @@ public class SearchPageTests
 {
     public static IEnumerable<object[]> Versions => LifecycleTestStore.Versions;
 
-    private static JsonObject Page(IFhirStore store, string path, Action<string> observe, AuthorizationInfo? auth = null)
+    private static JsonObject Page(IFhirStore store, string path, Action<string> observe, AuthorizationInfo? auth = null,
+        Action<int>? observePeak = null)
     {
         FhirRequestContext ctx = new(store, "GET", path)
         {
             Authorization = auth, DestinationFormat = "application/fhir+json",
         };
-        ConditionalWeakTable<FhirRequestContext, Action<string>> observers = store switch
+        switch (store)
         {
-            candleR4::FhirCandle.Storage.VersionedFhirStore r4 => r4.PageObservers,
-            candleR4B::FhirCandle.Storage.VersionedFhirStore r4b => r4b.PageObservers,
-            candleR5::FhirCandle.Storage.VersionedFhirStore r5 => r5.PageObservers,
-            _ => throw new ArgumentException(nameof(store)),
-        };
-        observers.Add(ctx, observe);
+            case candleR4::FhirCandle.Storage.VersionedFhirStore r4:
+                r4.PageObservers.Add(ctx, new(observe, observePeak));
+                break;
+            case candleR4B::FhirCandle.Storage.VersionedFhirStore r4b:
+                r4b.PageObservers.Add(ctx, new(observe, observePeak));
+                break;
+            case candleR5::FhirCandle.Storage.VersionedFhirStore r5:
+                r5.PageObservers.Add(ctx, new(observe, observePeak));
+                break;
+            default:
+                throw new ArgumentException(nameof(store));
+        }
         FhirResponseContext response;
         bool success = ctx.Interaction switch
         {
@@ -88,6 +94,86 @@ public class SearchPageTests
                 row["subject"]!["reference"] = "Patient/b";
             }
             fixture.Put(row);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void UnsortedWindowBoundsRetainedKeys(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        SeedObservations(fixture); // Five visible; o5 belongs to another patient.
+        AuthorizationInfo auth = Grant();
+        int seededVisible = 5;
+        foreach (int visible in new[] { 5, 100 })
+        {
+            while (seededVisible < visible)
+            {
+                JsonObject row = JsonNode.Parse("""
+                    {"resourceType":"Observation","status":"final","code":{"text":"sample"},"subject":{"reference":"Patient/a"}}
+                    """)!.AsObject();
+                row["id"] = $"extra-{++seededVisible}";
+                fixture.Put(row);
+            }
+
+            foreach ((string controls, int rows, int peak, bool next) in new[]
+            {
+                ("_count=1&_offset=2&_maxresults=4", 1, 1, true),
+                ("_count=1&_offset=2&_maxresults=3", 1, 1, false),
+                ("_summary=count&_maxresults=2", 0, 0, false),
+                ("_count=0&_total=none", 0, 0, false),
+                ($"_count=1&_offset={visible + 1}", 0, 0, false),
+                // Calibration: the sorted path retains both the ordered candidates and the selected window.
+                ("_count=1&_sort=_id", 1, visible + 1, true),
+            })
+            {
+                List<int> peaks = [];
+                List<string> events = [];
+                JsonObject page = Page(fixture.Store, "Observation?" + controls, events.Add, auth, peaks.Add);
+                Assert.Equal(visible, (int?)page["total"]);
+                Assert.Equal(peak, Assert.Single(peaks));
+                string[] matches = Ids(page);
+                Assert.Equal(rows, matches.Length);
+                Assert.DoesNotContain("o5", matches);
+                Assert.Equal(rows, events.Count(e => e == "detached"));
+                Assert.Equal(next, Next(page) is not null);
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void OverlappingSourcesCountEachKeyOnce(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        fixture.Put(JsonNode.Parse("""
+            {"resourceType":"CompartmentDefinition","id":"membership","url":"urn:test:membership","name":"Membership",
+             "status":"active","code":"Patient","search":true,"resource":[{"code":"Observation","param":["subject","performer"]}]}
+            """)!.AsObject());
+        fixture.Put(new() { ["resourceType"] = "Patient", ["id"] = "a" });
+        foreach ((string id, string subject, string performer) in new[]
+        {
+            ("a", "a", "a"), ("subject", "a", "b"), ("performer", "b", "a"), ("neither", "b", "b"),
+        })
+        {
+            JsonObject row = JsonNode.Parse("""
+                {"resourceType":"Observation","status":"final","code":{"text":"sample"},"subject":{},"performer":[{}]}
+                """)!.AsObject();
+            row["id"] = id;
+            row["subject"]!["reference"] = "Patient/" + subject;
+            row["performer"]![0]!["reference"] = "Patient/" + performer;
+            fixture.Put(row);
+        }
+        JsonObject system = Page(fixture.Store, "?_type=Patient,Observation&_type=Observation,Patient", _ => { });
+        Assert.Equal(5, (int?)system["total"]);
+        AssertPageEntries(fixture.Store, system, ("Patient/a", "match", "a"), ("Observation/a", "match", "a"),
+            ("Observation/subject", "match", "subject"), ("Observation/performer", "match", "performer"),
+            ("Observation/neither", "match", "neither"));
+        foreach (string path in new[] { "Patient/a/Observation", "Patient/a/*" })
+        {
+            JsonObject compartment = Page(fixture.Store, path, _ => { });
+            Assert.Equal(3, (int?)compartment["total"]);
+            Assert.Equal(new[] { "a", "performer", "subject" }, Ids(compartment).Order());
         }
     }
 

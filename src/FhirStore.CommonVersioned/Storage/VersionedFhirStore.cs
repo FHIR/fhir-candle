@@ -4918,7 +4918,9 @@ rs,
 
     internal Action<string, ParsedSearchParameter[]>? NestedTypeSearchObserver { get; set; }
 
-    internal System.Runtime.CompilerServices.ConditionalWeakTable<FhirRequestContext, Action<string>> PageObservers { get; } = new();
+    internal sealed record PageObserver(Action<string> Boundary, Action<int>? RetainedKeyPeak);
+
+    internal System.Runtime.CompilerServices.ConditionalWeakTable<FhirRequestContext, PageObserver> PageObservers { get; } = new();
 
     private bool ResolveConditionalMatches(FhirRequestContext ctx, string query, string[] types,
         out int count, out string matchedKey, out Resource? match, out FhirResponseContext response)
@@ -5228,8 +5230,10 @@ rs,
             v.Split(',').Where(sortByLiteral.ContainsKey).ToArray()).Where(v => v.Length != 0).ToArray();
         ParsedResultParameters.SortRequest[] sort = sortOccurrences.SelectMany(v => v).Distinct()
             .Select(literal => sortByLiteral[literal]).ToArray();
+        PageObservers.TryGetValue(ctx, out PageObserver? observer);
+        Action<string>? observe = observer?.Boundary;
         SearchPageSelector page = new(sources.SelectMany(s => s.Candidates).Where(c => CanReturn(ctx, c.Body, 's')),
-            controls, this, sort, byType);
+            controls, this, sort, byType, observer?.RetainedKeyPeak);
         string root = getBaseUrl(ctx);
         // Replay each applied input occurrence once, even when several types parsed it.
         HashSet<(string?, string?)> accepted = sources.SelectMany(s => s.Parameters).Where(p => !p.IgnoredParameter)
@@ -5260,7 +5264,6 @@ rs,
             Total = page.Total,
             Link = [new() { Relation = "self", Url = Link(null) }],
         };
-        PageObservers.TryGetValue(ctx, out Action<string>? observe);
         observe?.Invoke("selected");
         HashSet<SearchPageSelector.Identity> addedIds = [];
         List<SearchPageSelector.Candidate> primaries = [];

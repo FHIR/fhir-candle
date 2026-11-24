@@ -2006,6 +2006,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
     }
 
+    // One dictionary scan yields at most one candidate per store key, regardless of the body's ID.
     IEnumerable<SearchPageSelector.Candidate> IVersionedResourceStore.SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant)
     {
         Dictionary<string, Resource[]> reverseChainCache = [];
