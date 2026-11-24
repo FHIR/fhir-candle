@@ -9,9 +9,13 @@ extern alias coreR4;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using BlazorMonaco.Editor;
 using fhir.candle.Layout;
+using fhir.candle.Pages.RI.subscriptions;
 using fhir.candle.Pages.Smart;
+using fhir.candle.Pages.Store;
 using fhir.candle.Services;
+using fhir.candle.Tests.Infrastructure;
 using fhir.candle.Ui;
 using FhirCandle.Configuration;
 using FhirCandle.Models;
@@ -22,6 +26,7 @@ using FhirCandle.Ui.Common.Components;
 using FhirCandle.Ui.R4.Subscriptions;
 using FhirCandle.Utils;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
@@ -165,6 +170,109 @@ public class FluentUiIntegrationTests
         await cleanup;
         Assert.Single(pendingJs.Calls, call => call.Name == "candleTheme.disconnect");
         Assert.DoesNotContain(pendingJs.Calls, call => call.Name == "candleTheme.persist");
+    }
+
+    /// <summary>Changing the shell theme updates the mounted resource editor without losing its model.</summary>
+    [Fact]
+    public async Task ResourceViewerFollowsThemeWithoutRemountingEditor()
+    {
+        using IFhirStore store = CreateTestStore();
+        RecordingJs js = new();
+        using ServiceProvider services = Services(js, new TestStores { ["test"] = store });
+        services.GetRequiredService<NavigationManager>().NavigateTo("/store/resource-viewer?store=test&type=CapabilityStatement&id=metadata");
+        await using ManagedRenderer renderer = new(services);
+        await renderer.MountAsync<CandleUiRoot>(new()
+        {
+            [nameof(CandleUiRoot.ChildContent)] = LayoutContent(builder =>
+            {
+                builder.OpenComponent<ResourceViewer>(0);
+                builder.CloseComponent();
+            }),
+        });
+        StandaloneCodeEditor editor = Assert.Single(renderer.Components<StandaloneCodeEditor>());
+        FluentButton toggle = renderer.Components<FluentButton>().Single(button => button.Title == "Light/Dark Mode");
+        foreach (string expected in new[] { "vs-dark", "vs" })
+        {
+            await renderer.Dispatcher.InvokeAsync(() => toggle.OnClick.InvokeAsync(new MouseEventArgs()));
+            Assert.Equal(expected, js.Calls.Last(call => call.Name == "blazorMonaco.editor.setTheme").Args[0]);
+            Assert.Same(editor, Assert.Single(renderer.Components<StandaloneCodeEditor>()));
+        }
+    }
+
+    /// <summary>The tour displays its fixed heartbeat without initializing the CDN-backed numeric mask.</summary>
+    [Fact]
+    public async Task SubscriptionTourDisplaysHeartbeatWithoutNumberMask()
+    {
+        using IFhirStore store = CreateTestStore();
+        RecordingJs js = new();
+        using ServiceProvider services = Services(js, new TestStores { ["test"] = store });
+        services.GetRequiredService<NavigationManager>().NavigateTo("/subscriptions/tour?store=test");
+        await using ManagedRenderer renderer = new(services);
+        await renderer.MountAsync<Tour>([]);
+        FluentTextInput heartbeat = renderer.Components<FluentTextInput>().Single(input => input.Label == "Heartbeat frequency (seconds)");
+        Assert.True(heartbeat.ReadOnly);
+        Assert.Equal("120", heartbeat.Value);
+        Assert.DoesNotContain(js.Calls, call => call.Name.EndsWith(".applyNumberMask", StringComparison.Ordinal));
+    }
+
+    /// <summary>The tour uses the POST time and the assigned identity, even if the hook runs before POST returns.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubscriptionTourRecognizesReceivedHandshake(bool deliverDuringCreate)
+    {
+        ManualTimeProvider clock = new(new DateTimeOffset(2035, 5, 1, 12, 0, 0, TimeSpan.FromHours(-6)));
+        using IFhirStore store = CreateTestStore(clock);
+        using ServiceProvider services = Services(new RecordingJs(), new TestStores { ["test"] = store }, clock: clock);
+        services.GetRequiredService<NavigationManager>().NavigateTo("/subscriptions/tour?store=test");
+        await using ManagedRenderer renderer = new(services);
+        await renderer.MountAsync<Tour>([]);
+        clock.Advance(TimeSpan.FromMinutes(20));
+
+        if (deliverDuringCreate)
+        {
+            store.OnSubscriptionsChanged += (_, change) =>
+            {
+                if (change.SendHandshake)
+                {
+                    DeliverHandshake(change.ChangedSubscription!);
+                }
+            };
+        }
+        FluentButton post = Assert.Single(renderer.Components<FluentButton>(), button => renderer.Text(button.ChildContent).Trim() == "POST Subscription");
+        await renderer.Dispatcher.InvokeAsync(() => post.OnClick.InvokeAsync(new MouseEventArgs()));
+        ParsedSubscription created = Assert.Single(store.CurrentSubscriptions);
+        Assert.Equal(clock.GetUtcNow().AddMinutes(10).UtcTicks, created.ExpirationTicks);
+        Assert.Contains(renderer.Components<FluentLink>(), link => link.Href == $"/store/resource-viewer?store=test&type=Subscription&id={created.Id}");
+        if (!deliverDuringCreate)
+        {
+            Assert.Equal("requested", created.CurrentStatus);
+            Assert.Contains("Waiting for handshake.", renderer.RenderedText());
+            DeliverHandshake(created);
+        }
+
+        ParsedSubscriptionStatus receipt = Assert.Single(store.ReceivedNotifications[$"{store.Config.BaseUrl}/Subscription/{created.Id}"]);
+        Assert.Equal("active", Assert.Single(store.CurrentSubscriptions).CurrentStatus);
+        await EventuallyAsync(renderer, () => renderer.Components<FluentLink>().Any(link =>
+            link.Href == $"/store/resource-viewer?store=test&type=Bundle&id={receipt.BundleId}"));
+        Assert.Contains("Handshake received!", renderer.RenderedText());
+
+        void DeliverHandshake(ParsedSubscription subscription)
+        {
+            FhirRequestContext hook = new(store, "POST", subscription.Endpoint)
+            {
+                SourceContent = store.SerializeSubscriptionEvents(subscription.Id, [], "handshake", false),
+                SourceFormat = subscription.ContentType,
+            };
+            Assert.True(store.SystemOperation(hook, out FhirResponseContext response), response.SerializedOutcome);
+            Assert.True(store.TryCompleteSubscriptionHandshake(new()
+            {
+                Tenant = store.Config,
+                Subscription = subscription,
+                Revision = subscription.Revision,
+                NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
+            }));
+        }
     }
 
     /// <summary>The complete vendor anchor event dismisses only its owning service-created drawer.</summary>
@@ -323,6 +431,13 @@ public class FluentUiIntegrationTests
         {
             await firstHti2Renderer.MountAsync<CandleUiRoot>(hti2Parameters);
             firstPage = Assert.Single(firstHti2Renderer.Components<UsCoreHti2ContentsR4>());
+            InputNumber<int?> heartbeat = Assert.Single(firstHti2Renderer.Components<InputNumber<int?>>());
+            Assert.Equal(120, heartbeat.Value);
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => heartbeat.ValueChanged.InvokeAsync(45));
+            Assert.Equal(45, heartbeat.Value);
+            await firstHti2Renderer.Dispatcher.InvokeAsync(() => heartbeat.ValueChanged.InvokeAsync(null));
+            Assert.Null(heartbeat.Value);
+            Assert.DoesNotContain(js.Calls, call => call.Name.EndsWith(".applyNumberMask", StringComparison.Ordinal));
             FluentAutocomplete<PatientR4, string> patients =
                 Assert.Single(firstHti2Renderer.Components<FluentAutocomplete<PatientR4, string>>());
             Assert.False(patients.Multiple);
@@ -508,7 +623,19 @@ public class FluentUiIntegrationTests
         }
     }
 
-    private static ServiceProvider Services(RecordingJs js, IFhirStoreManager? stores = null, ISmartAuthManager? auth = null)
+    private static IFhirStore CreateTestStore(TimeProvider? clock = null)
+    {
+        IFhirStore store = new candleR4::FhirCandle.Storage.VersionedFhirStore(clock ?? TimeProvider.System);
+        store.Init(new TenantConfiguration
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
+            ControllerName = "test",
+            BaseUrl = "http://localhost/fhir/test",
+        });
+        return store;
+    }
+
+    private static ServiceProvider Services(RecordingJs js, IFhirStoreManager? stores = null, ISmartAuthManager? auth = null, TimeProvider? clock = null)
     {
         ServiceCollection services = new();
         services.AddLogging();
@@ -521,6 +648,9 @@ public class FluentUiIntegrationTests
         services.AddSingleton(auth ?? DispatchProxy.Create<ISmartAuthManager, TestAuth>());
         services.AddScoped<ProtectedLocalStorage>();
         services.AddScoped<CandleThemeState>();
+        services.AddSingleton(clock ?? TimeProvider.System);
+        services.AddScoped<SmartViewerSession>();
+        services.AddSupplyValueFromQueryProvider();
         services.AddFluentUIComponents();
         return services.BuildServiceProvider();
     }
@@ -737,8 +867,12 @@ public class FluentUiIntegrationTests
             using RenderTreeBuilder builder = new();
             fragment(builder);
             ArrayRange<RenderTreeFrame> frames = builder.GetFrames();
-            return string.Concat(frames.Array.Take(frames.Count).Where(frame => frame.FrameType == RenderTreeFrameType.Text)
-                .Select(frame => frame.TextContent));
+            return string.Concat(frames.Array.Take(frames.Count).Select(frame => frame.FrameType switch
+            {
+                RenderTreeFrameType.Text => frame.TextContent,
+                RenderTreeFrameType.Markup => frame.MarkupContent,
+                _ => string.Empty,
+            }));
         }
 
         public void ThrowErrors()

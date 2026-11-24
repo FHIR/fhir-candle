@@ -1,14 +1,14 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel>
+    <FluentText Block="true">
         In FHIR @Store.Config.FhirVersion, topics are discovered by looking at the server
         <code>CapabilityStatement</code> for the
         <FluentLink Href="http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition-capabilitystatement-subscriptiontopic-canonical.html"
                  >SubscriptionTopic Canonical Extension</FluentLink>.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel>
+    <FluentText Block="true">
         For this walkthrough, we will be using the included <code>encounter-complete</code>
         topic that has a canonical URL of <code class="copy-click">http://example.org/FHIR/SubscriptionTopic/encounter-complete</code>.
         The current metadata for this server can be viewed
@@ -16,17 +16,17 @@
                  >here</FluentLink>,
         or requested (in FHIR) at
         <code class="copy-click">@Store.Config.BaseUrl/metadata</code>.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel>
+    <FluentText Block="true">
         Note that in FHIR R4, there is not an official required format for representing <code>SubscriptionTopic</code>
         resources.  Since topics are canonical resources, the expectation is that they will be defined
         by authors (e.g., in Implementation Guides) and communicated out-of-band.  For example, for
         an "encounter-start" topic, both the server and client can function with <i>only</i> the
         canonical URL and the understanding of what that topic represents.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel>
+    <FluentText Block="true">
         With that said, one possible way of representing topics in FHIR R4 is to use the model provided
         in FHIR R5, ported using FHIR cross-version support.  This implementation supports topics defined via
         that mechanism.  Our included <code>encounter-complete</code> topic is thus available on this server
@@ -34,11 +34,11 @@
                     >Basic/encounter-complete</FluentLink>
         or in FHIR at
         <code class="copy-click">@Store.Config.BaseUrl/Basic/encounter-complete</code>.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel>
+    <FluentText Block="true">
         Click next to select the <code>encounter-complete</code> topic.
-    </FluentLabel>
+    </FluentText>
 </FluentStack>
 
 @code {

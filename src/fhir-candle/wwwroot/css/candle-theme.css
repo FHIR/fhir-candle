@@ -41,6 +41,18 @@ html[data-candle-theme] body {
     --candle-secondary: var(--colorNeutralBackground2, #242424);
 }
 
+/* A saved brand color can be arbitrarily dark. Keep content links readable even on hovered grid rows. */
+html[data-candle-theme="dark"] .content {
+    --colorBrandForegroundLink: #9fceff;
+    --colorBrandForegroundLinkHover: #c5e3ff;
+    --colorBrandForegroundLinkPressed: #b1d7ff;
+    --colorBrandForegroundLinkSelected: var(--colorBrandForegroundLinkPressed);
+}
+
+html[data-candle-theme="dark"] .content fluent-link[href] {
+    text-decoration-line: underline;
+}
+
 /* Until interactive hydration, use the app bootstrap rather than defaulting to light. */
 .candle-ui-root:not([data-candle-theme]) {
     --candle-background: var(--candle-document-background);
@@ -78,9 +90,11 @@ html[data-candle-theme] body {
 }
 
 .candle-breadcrumbs a {
-    color: white;
+    color: inherit;
 }
 
-.candle-header {
+.candle-header[area="header"] {
+    color: var(--candle-foreground);
+    background-color: var(--candle-secondary);
     border-bottom: 1px solid var(--candle-neutral);
 }

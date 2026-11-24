@@ -21,23 +21,23 @@
 @implements IDisposable
 
 <FluentLayout>
-    <FluentLayoutItem Area="LayoutArea.Header" Class="candle-header" Style="background-color: var(--candle-brand)">
+    <FluentLayoutItem Area="LayoutArea.Header" Class="candle-header">
         <FluentButton Title="Navigation" IconEnd="@(new Icons.Regular.Size24.Navigation())"
                       OnClick="@OpenNavPanel" Appearance="ButtonAppearance.Primary" />
         <FluentSpacer Width="8" />
         <nav class="candle-breadcrumbs" aria-label="Breadcrumb">
             <ol>
-                <li><FluentLink Href="/">@homeTitle</FluentLink></li>
+                <li><a href="/">@homeTitle</a></li>
                 @foreach (NavPageInfoRec item in _crumbs)
                 {
-                    <li><FluentLink Href="@item.Link">@item.Display</FluentLink></li>
+                    <li><a href="@item.Link">@item.Display</a></li>
                 }
             </ol>
         </nav>
         <FluentSpacer />
         <FluentAnchorButton Href="https://github.com/FHIR/fhir-candle" Target="LinkTarget.Blank"
-                            Appearance="ButtonAppearance.Primary" Title="GitHub">
-            <img src="media/github-mark-white.svg" height="20" width="20" alt="GitHub" />
+                            Appearance="ButtonAppearance.Primary" Title="GitHub" IconOnly="true">
+            <img src="media/github-mark-white.svg" height="20" width="20" alt="" />
         </FluentAnchorButton>
         <FluentSpacer Width="8" />
         <FluentButton Title="Light/Dark Mode" Appearance="ButtonAppearance.Primary"
@@ -47,7 +47,9 @@
     <FluentLayoutItem Area="LayoutArea.Content" Class="content" Style="width:100%;">
         <CascadingValue Value="@this" IsFixed="true">
             <CascadingValue Value="@BrowserStore" IsFixed=true>
-                @Body
+                <CascadingValue Name="@nameof(INavTracker.IsDarkMode)" Value="@IsDarkMode">
+                    @Body
+                </CascadingValue>
             </CascadingValue>
         </CascadingValue>
     </FluentLayoutItem>
@@ -97,6 +99,7 @@
         await DialogService.ShowDrawerAsync<NavMenu>(new DialogOptions()
         {
             Alignment = DialogAlignment.Start,
+            Width = "min(20rem, 90vw)",
             Header = { Title = "FHIR Candle", CloseAction = { Visible = false } },
             Footer =
             {

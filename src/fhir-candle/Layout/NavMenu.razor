@@ -9,7 +9,7 @@
 
 <FluentDialogBody>
     <ChildContent>
-        <FluentNav Id="main-menu" Width="250px" UseSingleExpanded="false" OnItemClick="OnDestinationClickAsync">
+        <FluentNav Id="main-menu" Width="100%" UseSingleExpanded="false" OnItemClick="OnDestinationClickAsync">
             <FluentNavItem IconRest="@(new Icons.Regular.Size24.Home())" Href="/" Tooltip="Home">Home</FluentNavItem>
 
             @if (AuthManager.IsEnabled)

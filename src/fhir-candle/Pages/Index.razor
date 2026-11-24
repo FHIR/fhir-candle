@@ -116,9 +116,9 @@
 
                         @if (kvp.Value.Config.SmartRequired)
                         {
-                            <FluentLabel>
+                            <FluentText Block="true">
                                 SMART authorization has been set to <code>required</code> for this FHIR endpoint:
-                            </FluentLabel>
+                            </FluentText>
                             <ul>
                                 <li>
                                     The SMART well-known configuration is available at: 
@@ -176,9 +176,9 @@
 
                         @if (kvp.Value.Config.SmartAllowed)
                         {
-                            <FluentLabel>
+                            <FluentText Block="true">
                                 SMART authorization has been set to <code>optional</code> for this FHIR endpoint:
-                            </FluentLabel>
+                            </FluentText>
                             <ul>
                                 <li>
                                     The SMART well-known configuration is available at:

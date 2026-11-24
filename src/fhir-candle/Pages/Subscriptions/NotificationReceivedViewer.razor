@@ -37,7 +37,7 @@ else
                         {
                             @foreach (ParsedSubscriptionStatus.ParsedNotificationEvent ne in status.NotificationEvents)
                             {
-                                <FluentNumberInput Label="Event Number" ReadOnly="true" Value="@ne.EventNumber"/>
+                                <FluentTextInput Label="Event Number" ReadOnly="true" Value="@ne.EventNumber?.ToString()"/>
                                 <FluentTextInput Label="Timestamp" ReadOnly="true" Value="@ne.Timestamp?.ToLocalTime().ToString("O")"/>
                                 <FluentTextInput Label="Focus Reference" ReadOnly="true" Value="@ne.FocusReference"/>
                                 <FluentTextInput Label="Additional Context" ReadOnly="true" Value="@string.Join(", ", ne.AdditionalContextReferences ?? Array.Empty<string>())"/>

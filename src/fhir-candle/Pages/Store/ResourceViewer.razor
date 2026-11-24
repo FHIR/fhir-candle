@@ -1,14 +1,9 @@
 @page "/store/resource-viewer"
 @using FhirCandle.Configuration
-@using Microsoft.FluentUI.AspNetCore.Components
 @inject CandleConfig ServerConfig
 @inject SmartViewerSession Session
 
-<FhirStorePage NamedTenant="@(StoreName ?? string.Empty)" ResourceType="@(ResourceType ?? string.Empty)" Id="@(Id ?? string.Empty)" Format="@_format">
-    <FluentSelect @bind-Value="_format" TOption="string" TValue="string" Label="Resource format">
-        <FluentOption Value="@("json")">JSON</FluentOption>
-        <FluentOption Value="@("xml")">XML</FluentOption>
-    </FluentSelect>
+<FhirStorePage NamedTenant="@(StoreName ?? string.Empty)" ResourceType="@(ResourceType ?? string.Empty)" Id="@(Id ?? string.Empty)" @bind-Format="_format">
     @{ SmartViewerSession.View view = Session.Display; }
     @if (view.AdminStore is IFhirStore store)
     {
@@ -24,7 +19,7 @@
                 <FhirCandle.Ui.R5.Components.FhirEditorLinks BaseUrl="@store.Config.BaseUrl" ResourceType="@ResourceType" Id="@Id" FhirPathLabUrl="@ServerConfig.FhirPathLabUrl" />
                 break;
         }
-        <FhirCandle.Ui.Common.Components.FhirEditor Language="@_format" EditorContent="@view.Body" DarkMode="@(NavTracker?.IsDarkMode ?? true)" />
+        <FhirCandle.Ui.Common.Components.FhirEditor Language="@_format" EditorContent="@view.Body" DarkMode="@IsDarkMode" />
     }
     else if (!string.IsNullOrEmpty(view.Body))
     {
@@ -33,7 +28,7 @@
 </FhirStorePage>
 
 @code {
-    [CascadingParameter] public INavTracker? NavTracker { get; set; }
+    [CascadingParameter(Name = nameof(INavTracker.IsDarkMode))] public bool IsDarkMode { get; set; }
     [SupplyParameterFromQuery(Name = "store")] public string StoreName { get; set; } = string.Empty;
     [SupplyParameterFromQuery(Name = "type")] public string ResourceType { get; set; } = string.Empty;
     [SupplyParameterFromQuery(Name = "id")] public string Id { get; set; } = string.Empty;

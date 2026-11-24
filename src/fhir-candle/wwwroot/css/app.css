@@ -64,6 +64,10 @@ body {
     margin-bottom: 0;
 }
 
+.store-actions > fluent-field {
+    margin-block: 0;
+}
+
 .navmenu-icon {
     display: none;
 }
@@ -234,13 +238,9 @@ fluent-textarea {
         height: 100%;
     }
 
-    #main-menu {
-        width: 100% !important;
+    #main-menu > div:first-child:is(.expander) {
+        display: none;
     }
-
-        #main-menu > div:first-child:is(.expander) {
-            display: none;
-        }
 
     .navmenu {
         width: 100%;
@@ -269,6 +269,13 @@ fluent-textarea {
         height: 20px;
         border: none;
     }
+}
+
+.content fluent-text fluent-link,
+.copy-click {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
 }
 
 .copy-click {

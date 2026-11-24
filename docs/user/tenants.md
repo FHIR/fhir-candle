@@ -39,6 +39,7 @@ offsets return `400 Bad Request`.
 
 Unauthenticated UI users have admin access to inspect synthetic store state.
 This is a trusted development UI, not an access-control boundary for the server.
+Hover over or focus the warning icon next to **Refresh** to see this reminder.
 
 1. Open **FHIR Contents** for the named tenant. In **Admin — no sign-in**,
    open a synthetic Patient and note its ID. Counts and editor links belong to

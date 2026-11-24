@@ -1,5 +1,6 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using Hl7.Fhir.Utility;
+@using Microsoft.AspNetCore.Components.Forms
 
 @inject IHttpContextAccessor HttpContextAccessor
 
@@ -130,7 +131,9 @@
                     </FluentSelect>
 
                     <FluentTextInput @bind-Value="_editingSubscription.Endpoint" Label="Endpoint" />
-                    <FluentNumberInput @bind-Value="_editingSubscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" />
+                    <FluentField Label="Heartbeat frequency (seconds)" ForId="hti2-heartbeat" IncludeInputSlot="false">
+                        <InputNumber id="hti2-heartbeat" slot="input" step="1" @bind-Value="_editingSubscription.HeartbeatSeconds" />
+                    </FluentField>
                     <FluentTextInput @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true" />
 
                     <FluentLabel>

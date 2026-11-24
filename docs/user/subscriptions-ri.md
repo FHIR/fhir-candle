@@ -7,6 +7,11 @@ default landing page of the subscriptions RI, the following command can be used:
 fhir-candle --reference-implementation subscriptions --load-package hl7.fhir.uv.subscriptions-backport#1.1.0 --load-examples false --protect-source true -m 1000
 ```
 
+In the subscriptions tour, **POST Subscription** requests a ten-minute lifetime starting
+when you press the button. The server posts the handshake to the tenant's own
+`$subscription-hook`. The **Server Handshake** step links to the received Bundle after
+the subscription becomes active; simply creating the subscription is not an acknowledgment.
+
 ## Resource-trigger interactions
 
 Supported resource interactions apply before FHIRPath criteria are evaluated. An update-only

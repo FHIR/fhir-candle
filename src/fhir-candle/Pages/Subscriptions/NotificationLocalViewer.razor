@@ -17,7 +17,7 @@
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                     <FluentTextInput Label="Subscription" ReadOnly="true" Value="@("Subscription/" + subEvent.SubscriptionId)"/>
                     <FluentTextInput Label="Topic" ReadOnly="true" Value="@subEvent.TopicUrl"/>
-                    <FluentNumberInput Label="Event Number" ReadOnly="true" Value="@subEvent.EventNumber"/>
+                    <FluentTextInput Label="Event Number" ReadOnly="true" Value="@subEvent.EventNumber.ToString()"/>
                     <FluentTextInput Label="Received" ReadOnly="true" Value="@subEvent.Timestamp.ToLocalTime().ToString("o")"/>
                     <FluentTextInput Label="Status At Generation" ReadOnly="true" Value="@subEvent.StatusAtGeneration"/>
 

@@ -34,23 +34,12 @@
         }
     }
 
-    private bool _darkMode = true;
-
+    /// <summary>Gets or sets whether to use the dark editor theme.</summary>
     [Parameter]
-    public bool DarkMode 
-    { 
-        get => _darkMode;
-        set
-        {
-            if (value == _darkMode)
-            {
-                return;
-            }
+    public bool DarkMode { get; set; } = true;
 
-            _darkMode = value;
-            _ = UpdateTheme();
-        }
-    }
+    private string EditorTheme => DarkMode ? "vs-dark" : "vs";
+    private bool? _appliedDarkMode;
 
     private string _editorContent = "";
 
@@ -85,7 +74,7 @@
         return new StandaloneEditorConstructionOptions
         {
             Language = _language,
-            Theme = _darkMode ? "vs-dark" : "vs-light",
+            Theme = EditorTheme,
             GlyphMargin = false,
             Value = _editorContent,
             ShowFoldingControls = "false",
@@ -125,9 +114,8 @@
 
         try
         {
-            await JS.InvokeVoidAsync(
-                "blazorMonaco.editor.setTheme",
-                _darkMode ? "vs-dark" : "vs-light");
+            _appliedDarkMode = DarkMode;
+            await JS.InvokeVoidAsync("blazorMonaco.editor.setTheme", EditorTheme);
         }
         catch (JSDisconnectedException ex)
         {
@@ -158,12 +146,9 @@
     }
 
 
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-
-        _ = UpdateTheme();
-    }
+    /// <inheritdoc />
+    protected override Task OnParametersSetAsync() =>
+        _appliedDarkMode.HasValue && _appliedDarkMode != DarkMode ? UpdateTheme() : Task.CompletedTask;
 
     /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged

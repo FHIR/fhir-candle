@@ -4,6 +4,7 @@
 
 @inject NavigationManager NavigationManager
 @inject IFhirStoreManager StoreManager
+@inject TimeProvider Clock
 @inject ISmartAuthManager AuthManager
 @inject IJSRuntime JS
 @inject IDialogService DialogService
@@ -74,8 +75,8 @@
                         </FluentSelect>
 
                         <FluentTextInput Value="@subscription.Endpoint" Label="Endpoint" ReadOnly="true"/>
-                        <FluentNumberInput @bind-Value="subscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" ReadOnly="true"/>
-                        <FluentTextInput @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true"/>
+                        <FluentTextInput Value="@subscription.HeartbeatSeconds?.ToString()" Label="Heartbeat frequency (seconds)" ReadOnly="true"/>
+                        <FluentTextInput Value="@Expiration" Label="End (expiration)" ReadOnly="true"/>
                     </FluentStack>
 
                     <br/>
@@ -111,12 +112,12 @@
         <FluentWizardStep Label="Select Filters" Summary="Set criteria for triggering" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel>
+                    <FluentText Block="true">
                         The final piece of configuration for a subscription are filter values.
                         In this tour, we will be using <code>Patient/example</code> as a 
                         patient filter for our topic.  Note that allowed filters are defined
                         by each topic.
-                    </FluentLabel>
+                    </FluentText>
                     <FluentTextInput Label="Subscription Filter" @bind-Value="@bindFilter" ReadOnly="true"/>
                 </FluentStack>
             </ChildContent>
@@ -137,13 +138,13 @@
 
                     @if (!string.IsNullOrEmpty(subscriptionLocation))
                     {
-                        <FluentLabel>
-                            Now that our subscription is created, is can be viewed
-                            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Subscription&id={subscription.Id}")"
+                        <FluentText Block="true">
+                            Now that our subscription is created, it can be viewed
+                            <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Subscription&id={subscriptionId}")"
                                         >here</FluentLink>,
                             or requested (in FHIR) at
                             <code class="copy-click">@subscriptionLocation</code>.
-                        </FluentLabel>
+                        </FluentText>
                     }
                 </FluentStack>
             </ChildContent>
@@ -159,13 +160,13 @@
                     }
                     else
                     {
-                        <FluentLabel>
+                        <FluentText Block="true">
                             Handshake received! The notification bundle can be viewed
                             <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={handshakeBundleId}")"
                                         >here</FluentLink>,
                             or requested (in FHIR) at
                             <code class="copy-click">@($"{_store.Config.BaseUrl}/Bundle/{handshakeBundleId}")</code>.
-                        </FluentLabel>
+                        </FluentText>
                     }
                 </FluentStack>
             </ChildContent>
@@ -174,17 +175,17 @@
         <FluentWizardStep Label="Trigger Notification" OnChange="@OnStepChange">
             <ChildContent>
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                    <FluentLabel>
+                    <FluentText Block="true">
                         The topic we are using is set to trigger when an <code>Encounter</code> is set to the
                         status of <code>@encounterStatus</code>.  This can be true either when the encounter
                         resource is created, or it could be updated from another state.
-                    </FluentLabel>
+                    </FluentText>
 
-                    <FluentLabel>
+                    <FluentText Block="true">
                         Since we specified the filter that encounters need to have a <code>patient</code>
                         that matches <code>Patient/example</code>, we need to also set the <code>subject</code>
                         reference to that patient.
-                    </FluentLabel>
+                    </FluentText>
 
                     <FluentLabel>
                         For simplicity during this walkthrough, we will create an encounter with all the 
@@ -199,13 +200,13 @@
                         (postedEncounters.Last() is string encounterId) &&
                         (!string.IsNullOrEmpty(encounterId)))
                     {
-                        <FluentLabel>
+                        <FluentText Block="true">
                             Encounter posted! The resource can be viewed
                             <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Encounter&id={encounterId}")"
                                         >here</FluentLink>,
                             or requested (in FHIR) at
                             <code class="copy-click">@_store.Config.BaseUrl/Encounter/@encounterId</code>.
-                        </FluentLabel>
+                        </FluentText>
                     }
                 </FluentStack>
             </ChildContent>
@@ -225,17 +226,17 @@
                             This subscription has triggered @postedEncounters.Count notifications.
                         </FluentLabel>
 
-                        <FluentLabel>
+                        <FluentText Block="true">
                             Details about sent notifications for this subscription can be found
-                            <FluentLink Href="@($"/subscriptions/notification-local-viewer?store={StoreName}&id={subscription.Id}")"
+                            <FluentLink Href="@($"/subscriptions/notification-local-viewer?store={StoreName}&id={subscriptionId}")"
                                         >here</FluentLink>.
-                        </FluentLabel>
+                        </FluentText>
 
-                        <FluentLabel>
+                        <FluentText Block="true">
                             Details about received notifications for this subscription can be found
                             <FluentLink Href="@($"/subscriptions/notification-received-viewer?store={StoreName}&ref={subscriptionLocation}")"
                                         >here</FluentLink>.
-                        </FluentLabel>
+                        </FluentText>
                     }
                 </FluentStack>
             </ChildContent>
@@ -284,7 +285,7 @@
     /// <summary>The store.</summary>
     private IFhirStore _store = null!;
 
-    private Timer _recheckTimer = null!;
+    private string subscriptionId = string.Empty;
 
     /// <summary>Gets or sets the on step.</summary>
     private int onStep { get; set; } = 1;
@@ -296,11 +297,10 @@
     private string handshakeBundleId = string.Empty;
 
     /// <summary>Gets the expiration.</summary>
-    private string Expiration
-    {
-        get => DateTime.Now.ToString("O") + " (in 10 minutes)";
-        set { }
-    }
+    private const int LifetimeMinutes = 10;
+    private string Expiration => string.IsNullOrEmpty(subscriptionLocation)
+        ? $"{LifetimeMinutes} minutes after POST"
+        : SubscriptionLifecyclePolicy.GetExpiration(subscription.ExpirationTicks)!.Value.ToString("O");
 
     /// <summary>The subscription.</summary>
     ParsedSubscription subscription = new()
@@ -313,7 +313,7 @@
         ChannelSystem = "http://terminology.hl7.org/CodeSystem/subscription-channel-type",
         Endpoint = string.Empty,
         HeartbeatSeconds = 120,
-        ExpirationTicks = DateTime.Now.AddMinutes(10).Ticks,
+        ExpirationTicks = SubscriptionLifecyclePolicy.UnlimitedExpirationTicks,
         ContentType = "application/fhir+json",
         ContentLevel = "id-only",
         Filters = new()
@@ -387,7 +387,8 @@
 
         postingResource = true;
 
-        if (!_store.TryGetSubscription(subscription, out object? s))
+        subscription.ExpirationTicks = Clock.GetUtcNow().AddMinutes(LifetimeMinutes).UtcTicks;
+        if (!_store.TryGetSubscription(subscription, out object? s) || s is not Hl7.Fhir.Model.Resource resource)
         {
             _ = NotificationService.ShowMessageBarAsync(new MessageBarOptions()
             {
@@ -399,7 +400,9 @@
             return;
         }
 
-        FhirRequestContext ctx = new(_store, "POST", "Subscription", s);
+        // The draft converter requires an ID, but a FHIR create leaves the ID to the server.
+        resource.Id = null;
+        FhirRequestContext ctx = new(_store, "POST", "Subscription", resource);
 
         if (!_store.InstanceCreate(ctx, out FhirResponseContext response))
         {
@@ -414,8 +417,10 @@
         }
 
         postingResource = false;
+        subscriptionId = response.Id;
         subscriptionLocation = response.Location;
         MoveToStep(5);
+        CheckHandshake();
     }
 
     /// <summary>Posts the encounter.</summary>
@@ -467,6 +472,7 @@
         {
             _ = _store.InstanceDelete(new FhirRequestContext(_store, "DELETE", subscriptionLocation), out _);
             subscriptionLocation = string.Empty;
+            subscriptionId = string.Empty;
         }
 
         if (!string.IsNullOrEmpty(handshakeBundleId))
@@ -543,48 +549,33 @@
     /// <param name="e">     Subscription event information.</param>
     private void Store_OnSubscriptionsChanged(object? sender, SubscriptionChangedEventArgs e)
     {
-        if (e.ChangedSubscription?.Id.Equals(subscription.Id, StringComparison.Ordinal) ?? false)
+        if (e.ChangedSubscription is { CurrentStatus: "active" } active)
         {
-            if (string.IsNullOrEmpty(subscriptionLocation))
+            _ = InvokeAsync(() =>
             {
-                _recheckTimer = new Timer(
-                    RecheckSubscriptionChanged,
-                    e,
-                    TimeSpan.Zero,
-                    TimeSpan.FromSeconds(1));
-
-                return;
-            }
-
-            if (_store.CurrentSubscriptions.Any(s => s.Id == subscription.Id && s.CurrentStatus == "active"))
-            {
-                handshakeBundleId = _store.ReceivedNotifications.GetValueOrDefault(subscriptionLocation)?
-                    .FirstOrDefault(n => n.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake)?.BundleId ?? string.Empty;
-
-                MoveToStep(6);
-            }
-
-            return;
+                if (active.Id == subscriptionId)
+                {
+                    CheckHandshake();
+                }
+            });
         }
-
-        if ((!string.IsNullOrEmpty(e.RemovedSubscriptionId)) &&
-            (e.RemovedSubscriptionId.Equals(subscription.Id, StringComparison.Ordinal)))
+        else if (!string.IsNullOrEmpty(e.RemovedSubscriptionId) && e.RemovedSubscriptionId == subscriptionId)
         {
-            MoveToStep(10);
+            _ = InvokeAsync(() => MoveToStep(10));
         }
     }
 
-    private void RecheckSubscriptionChanged(object? state)
+    private void CheckHandshake()
     {
-        if (string.IsNullOrEmpty(subscriptionLocation))
+        // Delivery can finish before InstanceCreate returns the server-assigned ID.
+        if (string.IsNullOrEmpty(handshakeBundleId) &&
+            _store.CurrentSubscriptions.Any(s => s.Id == subscriptionId && s.CurrentStatus == "active") &&
+            _store.ReceivedNotifications.GetValueOrDefault(subscriptionLocation)?
+                .FirstOrDefault(n => n.NotificationType == ParsedSubscription.NotificationTypeCodes.Handshake) is { } receipt)
         {
-            return;
+            handshakeBundleId = receipt.BundleId;
+            MoveToStep(6);
         }
-
-        _recheckTimer?.Change(Timeout.Infinite, 0);
-        _recheckTimer?.Dispose();
-
-        Store_OnSubscriptionsChanged(this, (SubscriptionChangedEventArgs)state!);
     }
 
     /// <summary>Event handler. Called by Store for on subscription events.</summary>
@@ -609,9 +600,6 @@
     /// </summary>
     public void Dispose()
     {
-        _recheckTimer?.Change(Timeout.Infinite, 0);
-        _recheckTimer?.Dispose();
-
         if (_store is not null)
         {
             _store.OnInstanceCreated -= Store_OnChanged;

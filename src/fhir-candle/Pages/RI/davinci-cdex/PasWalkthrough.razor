@@ -14,7 +14,7 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
     <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">PAS using CDex Tasks</FluentLabel>
 
-    <FluentLabel>
+    <FluentText Block="true">
         This page provides a walkthrough of DaVinci Prior Authorization Support (PAS), in FHIR R4.
         The CI build of the IG can be found on
         <FluentLink Href="https://build.fhir.org/ig/HL7/davinci-pas/">build.fhir.org</FluentLink>,
@@ -22,7 +22,7 @@
         <FluentLink Href="http://hl7.org/fhir/us/davinci-pas/">hl7.org</FluentLink>.
         <br />
         Note that this walkthrough uses two internal FHIR endpoints, one for a Provider and one for a Payer or Intermediary.
-    </FluentLabel>
+    </FluentText>
 
     <FhirCandle.Ui.R4.davinci_pas.PasWalkthroughR4
         ProviderStore="@_provider"

@@ -7,14 +7,31 @@
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
     <FluentText Size="TextSize.Size700">FHIR Resources: @Tenant</FluentText>
     <strong>@(Session.Smart ? SmartViewerSession.SmartLabel : SmartViewerSession.AdminLabel) — Tenant: @Tenant</strong>
-    <p>Unauthenticated UI users have admin access to inspect synthetic store state.</p>
-    <button type="button" @onclick="SwitchMode">@(Session.Smart ? SmartViewerSession.AdminLabel : SmartViewerSession.SmartLabel)</button>
-    @if (Session.Smart)
-    {
-        <label>Issued access token <input type="password" autocomplete="off" @bind="_input" @bind:event="oninput" /></label>
-        <button type="button" @onclick="SignIn">Use credential</button>
-    }
-    <button type="button" @onclick="Refresh">Refresh</button>
+    <FluentStack Class="store-actions" Orientation="Orientation.Horizontal" Wrap="true" HorizontalGap="8" VerticalGap="8" VerticalAlignment="VerticalAlignment.Center">
+        @if (FormatChanged.HasDelegate)
+        {
+            <FluentSelect Value="@Format" ValueChanged="@FormatChanged" TOption="string" TValue="string"
+                          Label="Resource format" LabelPosition="LabelPosition.Before">
+                <FluentOption Value="@("json")">JSON</FluentOption>
+                <FluentOption Value="@("xml")">XML</FluentOption>
+            </FluentSelect>
+        }
+        else if (ChildContent is null && !Session.Smart)
+        {
+            <FluentSwitch Label="Hide Empty Resources" @bind-Value="_hideEmpty" />
+        }
+        <FluentButton OnClick="SwitchMode">@(Session.Smart ? SmartViewerSession.AdminLabel : SmartViewerSession.SmartLabel)</FluentButton>
+        <FluentButton OnClick="Refresh">Refresh</FluentButton>
+        <span id="store-access-warning" tabindex="0" role="img" aria-label="Store access warning" style="display: inline-flex;">
+            <FluentIcon Value="@(new Icons.Regular.Size20.Warning())" Color="Color.Warning" />
+        </span>
+        <FluentTooltip Anchor="store-access-warning" UseTooltipService="false">Unauthenticated UI users have admin access to inspect synthetic store state.</FluentTooltip>
+        @if (Session.Smart)
+        {
+            <label>Issued access token <input type="password" autocomplete="off" @bind="_input" @bind:event="oninput" /></label>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SignIn">Use credential</FluentButton>
+        }
+    </FluentStack>
     @if (Session.Display.Status is {} status && (int)status >= 400)
     {
         <p role="status">Inspector: @((int)status) @status</p>
@@ -25,10 +42,6 @@
     }
     else
     {
-        @if (!Session.Smart)
-        {
-            <FluentSwitch Label="Hide Empty Resources" @bind-Value="_hideEmpty" />
-        }
         <FluentDataGrid @key="Session.Display" Items="@Types" ShowHover="true">
             <TemplateColumn Title="Resource Name" Sortable="true">
                 <FluentLink Href="@ListLink(context.Name)">@context.Name</FluentLink>
@@ -51,6 +64,7 @@
     [Parameter] public string? ResourceType { get; set; }
     [Parameter] public string? Id { get; set; }
     [Parameter] public string Format { get; set; } = "json";
+    [Parameter] public EventCallback<string> FormatChanged { get; set; }
 
     private string Tenant => NamedTenant ?? StoreName ?? string.Empty;
     private string ListLink(string type) => $"/store/resource-list?store={Uri.EscapeDataString(Tenant)}&type={Uri.EscapeDataString(type)}";

@@ -1,9 +1,9 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel>
+    <FluentText Block="true">
         FHIR R5 endpoint at <code class="copy-click">@Store.Config.BaseUrl</code>
-    </FluentLabel>
+    </FluentText>
     
     @if (AdditionalContent is not null)
     {
@@ -29,11 +29,11 @@
         </FluentDataGrid>
     }
 
-    <FluentLabel>
+    <FluentText Block="true">
         This endpoint uses <FluentLink Href="https://hl7.org/fhir/R5" Target="LinkTarget.Blank">FHIR R5</FluentLink>
         and Subscriptions via the
         <FluentLink Href="http://hl7.org/fhir/R5/subscriptions.html" Target="LinkTarget.Blank">Subscriptions Framework</FluentLink>
-    </FluentLabel>
+    </FluentText>
     
     <ul>
         <li>
@@ -52,7 +52,7 @@
         </li>
     </ul>
 
-    <FluentLabel>
+    <FluentText Block="true">
         The endpoint also exposes a system-level operation, <code class="copy-click">@($"{Store.Config.BaseUrl}/$subscription-hook")</code>
         which can be used as a notification endpoint for FHIR @Store.Config.FhirVersion notifications (e.g.,
         if you are developing a server that sends notifications, you can point it here).
@@ -60,15 +60,15 @@
         the
         <FluentLink Href="@($"/subscriptions/notifications-received?store={StoreName}")">Received Notifications</FluentLink>
         page.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel>
+    <FluentText Block="true">
         Note that the server will NOT send notifications to addresses rooted in <code>example.org</code>.
         For example, a REST-Hook pointing at <code>http://example.org/endpoints/test</code> will trigger
         the notifications and be visible on the
         <FluentLink Href="@($"/subscriptions/local?store={StoreName}")">Local Subscriptions</FluentLink>
         page, but not actually attempt to send the notification to the endpoint.
-    </FluentLabel>
+    </FluentText>
 
 </FluentStack>
 

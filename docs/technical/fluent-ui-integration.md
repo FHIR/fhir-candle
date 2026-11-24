@@ -65,7 +65,9 @@ it where default overflow can clip them. Managed assertions pin composition
 and these CSS declarations; they do not prove actual positioning.
 
 `MainLayout` retains navigation, breadcrumbs, `INavTracker.IsDarkMode` and
-`OnThemeChanged`, and the existing editor theme input. The root/state do not
+`OnThemeChanged`, and a changing `IsDarkMode` cascading value for the
+resource viewer. It updates the mounted Monaco editor (`vs` / `vs-dark`)
+without reloading the resource or replacing the model. The root/state do not
 own store, SMART, subscription, or editor logic. Versioned UI assemblies,
 aliases/shared imports, Router layouts/focus navigation, HeadOutlet, Monaco
 scripts, and Blazor startup remain separate preservation boundaries.
@@ -74,15 +76,25 @@ Necessary released API bindings include:
 
 | Consumer | 5.1.0 binding |
 |---|---|
-| Navigation drawer | `IDialogService.ShowDrawerAsync<NavMenu>(DialogOptions)`; `NavMenu : FluentDialogInstance`, start alignment, nested header/footer action settings, no submit actions |
-| Navigation / links | `FluentNav`, `FluentNavCategory`, `FluentNavItem`; `FluentLink` / `FluentAnchorButton`; semantic breadcrumb `nav` / `ol` because breadcrumbs were removed |
-| Text / number inputs | `FluentTextInput` / `FluentNumberInput`; search uses immediate input with zero vendor delay while retaining the application's debounce and immediate clear |
+| Navigation drawer | `IDialogService.ShowDrawerAsync<NavMenu>(DialogOptions)`; the start-aligned drawer sets the width (at most `20rem` or `90vw`, whichever is smaller), and `FluentNav` fills its content area |
+| Navigation / links | `FluentNav`, `FluentNavCategory`, `FluentNavItem`; `FluentLink` / `FluentAnchorButton`; native breadcrumb anchors inherit the header's neutral theme foreground |
+| Text / number inputs | `FluentTextInput` for text and Blazor `InputNumber` for the editable HTI-2 heartbeat; search uses immediate input with zero vendor delay while retaining the application's debounce and immediate clear |
 | Select / autocomplete | `FluentSelect<TOption,TValue>` uses `ValueChanged` for single selection; autocomplete uses its own `OnOptionsSearch` / `SelectedItemsChanged` contract |
 | Published feedback | `INotificationService.ShowMessageBarAsync(MessageBarOptions)` targeting `MESSAGES_TOP`, not removed `IMessageService` |
+
+The subscriptions tour and its notification viewers use read-only text fields
+for heartbeat seconds and event numbers. The HTI-2 heartbeat remains an
+optional integer. Neither displaying nor editing these values loads IMask.
 
 Managed regressions exercise drawer/feedback delivery, search/row activation,
 autocomplete selection, and SMART key-family RSA→RS384 / EC→ES384 callbacks.
 They do not infer working callbacks from unmatched attributes compiling.
+
+Use `FluentText` rather than `FluentLabel` for sentences containing inline
+links or code. The released label uses `inline-flex`, which separates text
+and links into flex items and loses the spaces between them. In body text,
+inline links and copyable values move to the next line as a unit and can
+wrap internally if wider than their container.
 
 The picker ignores header/non-data rows before mutating selection or notifying
 its consumer. Managed checks dispatch the rendered sortable header event and
@@ -155,6 +167,10 @@ The app independently owns `html[data-candle-theme]` and document background /
 color-scheme fallback; it does not depend on vendor `body.dataset.theme`
 remaining unchanged. `candle-theme.css` maps released `--colorBrandBackground`
 and `--colorNeutral*` tokens into small app-owned `--candle-*` semantics.
+In dark mode, links in page content use a light-blue palette rather than
+the saved brand color. They stay underlined and maintain at least 4.5:1
+contrast on dark content backgrounds, including hovered grid rows. Header
+controls and light-mode links retain their existing colors.
 
 Only user revisions persist through the adapter. Before its synchronous
 mode-only write, it rereads storage on **every** write so newer colors, nested
