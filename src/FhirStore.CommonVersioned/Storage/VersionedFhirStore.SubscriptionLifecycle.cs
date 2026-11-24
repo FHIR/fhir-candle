@@ -75,11 +75,11 @@ public partial class VersionedFhirStore
     {
         foreach (SubscriptionChangedEventArgs change in changes)
         {
-            AfterMutation(() => OnSubscriptionsChanged?.Invoke(this, change));
+            AfterMutation(nameof(OnSubscriptionsChanged), () => OnSubscriptionsChanged?.Invoke(this, change));
         }
         foreach (string diagnostic in diagnostics)
         {
-            AfterMutation(() => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
+            AfterMutation("SubscriptionDiagnostic", () => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
         }
     }
 
@@ -355,7 +355,7 @@ public partial class VersionedFhirStore
         PublishSubscriptionChanges(changes, diagnostics);
         if (send is not null)
         {
-            AfterMutation(() => OnSubscriptionSendEvent?.Invoke(this, send));
+            AfterMutation(nameof(OnSubscriptionSendEvent), () => OnSubscriptionSendEvent?.Invoke(this, send));
         }
     }
 
@@ -390,7 +390,7 @@ public partial class VersionedFhirStore
         PublishSubscriptionChanges(changes, diagnostics);
         if (diagnostic is not null)
         {
-            AfterMutation(() => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
+            AfterMutation("SubscriptionDiagnostic", () => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
         }
     }
 

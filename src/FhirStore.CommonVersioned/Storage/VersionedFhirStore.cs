@@ -20,6 +20,7 @@ using Microsoft.Extensions.Primitives;
 using System.Net;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using static FhirCandle.Search.SearchDefinitions;
 using FhirCandle.Serialization;
@@ -152,7 +153,17 @@ public partial class VersionedFhirStore : IFhirStore
     private readonly object _writeGate = new();
     private readonly LinkedList<(string Type, string Id)> _liveOrder = [];
     private readonly Dictionary<(string Type, string Id), LinkedListNode<(string Type, string Id)>> _liveNodes = [];
-    private readonly Queue<(Action Publish, bool Diagnostic)> _publications = [];
+    private sealed class MutationBatch(long sequence)
+    {
+        internal long Sequence { get; } = sequence;
+        internal bool HandedOff { get; set; }
+        internal ExceptionDispatchInfo? Failure { get; set; }
+    }
+
+    private readonly record struct Publication(MutationBatch Batch, string Kind, Action Publish, bool Diagnostic);
+    private readonly Queue<Publication> _publications = [];
+    private MutationBatch? _activeBatch;
+    private long _mutationSequence;
     private List<Action>? _pendingDiagnostics;
     private int _publishingThread;
     private int _mutationDepth;
@@ -938,7 +949,10 @@ public partial class VersionedFhirStore : IFhirStore
             _owner = owner;
             Monitor.Enter(owner._writeGate);
             _pendingAtEntry = owner._publications.Count;
-            owner._mutationDepth++;
+            if (owner._mutationDepth++ == 0)
+            {
+                owner._activeBatch = new(++owner._mutationSequence);
+            }
         }
 
         public void Dispose() => _owner.EndMutation(_pendingAtEntry);
@@ -946,11 +960,15 @@ public partial class VersionedFhirStore : IFhirStore
 
     internal MutationScope BeginMutation() => new(this);
 
-    internal void AfterMutation(Action action, bool diagnostic = false)
+    internal void AfterMutation(string kind, Action action, bool diagnostic = false)
     {
         if (Monitor.IsEntered(_writeGate))
         {
-            _publications.Enqueue((action, diagnostic));
+            _publications.Enqueue(new(_activeBatch!, kind, action, diagnostic));
+        }
+        else if (diagnostic)
+        {
+            WriteDiagnostic(action);
         }
         else
         {
@@ -982,14 +1000,21 @@ public partial class VersionedFhirStore : IFhirStore
     {
         int thread = Environment.CurrentManagedThreadId;
         bool outerPublisher = _publishingThread == 0;
-        if (--_mutationDepth != 0 || _publications.Count == pendingAtEntry || (!outerPublisher && _publishingThread != thread))
+        if (--_mutationDepth != 0)
         {
             Monitor.Exit(_writeGate);
             return;
         }
+        MutationBatch batch = _activeBatch!;
+        _activeBatch = null;
+        if (_publications.Count == pendingAtEntry || (!outerPublisher && _publishingThread != thread))
+        {
+            batch.HandedOff = !outerPublisher && _publishingThread != thread;
+            Monitor.Exit(_writeGate);
+            return;
+        }
         _publishingThread = thread;
-        Exception? failure = null;
-        while (_publications.TryDequeue(out (Action Publish, bool Diagnostic) work))
+        while (_publications.TryDequeue(out Publication work))
         {
             // A slow diagnostic sink must not block later resource or delivery events.
             if (work.Diagnostic)
@@ -1004,7 +1029,17 @@ public partial class VersionedFhirStore : IFhirStore
             }
             catch (Exception ex)
             {
-                failure ??= ex;
+                // The publisher (possibly in a reentrant drain) alone writes failures.
+                // A handed-off batch has no synchronous caller left to notify.
+                if (work.Batch.HandedOff)
+                {
+                    string report = $"publication_failed batch={work.Batch.Sequence} event={work.Kind}";
+                    (_pendingDiagnostics ??= []).Add(() => _subscriptionDiagnosticWriter(report));
+                }
+                else
+                {
+                    work.Batch.Failure ??= ExceptionDispatchInfo.Capture(ex);
+                }
             }
             finally
             {
@@ -1023,12 +1058,21 @@ public partial class VersionedFhirStore : IFhirStore
         {
             foreach (Action write in diagnostics)
             {
-                write();
+                WriteDiagnostic(write);
             }
         }
-        if (failure is not null)
+        batch.Failure?.Throw();
+    }
+
+    private static void WriteDiagnostic(Action write)
+    {
+        try
         {
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
+            write();
+        }
+        catch (Exception)
+        {
+            // Diagnostics are best effort. Never replace a callback failure or skip later reports.
         }
     }
 
@@ -2792,7 +2836,7 @@ public partial class VersionedFhirStore : IFhirStore
         {
             if (compartmentDefinition is not CompartmentDefinition cd)
             {
-                AfterMutation(() => Console.WriteLine("CompartmentDefinition: resource is not a CompartmentDefinition"), diagnostic: true);
+                AfterMutation("CompartmentDiagnostic", () => Console.WriteLine("CompartmentDefinition: resource is not a CompartmentDefinition"), diagnostic: true);
                 return false;
             }
 
@@ -2801,7 +2845,7 @@ public partial class VersionedFhirStore : IFhirStore
 
             if (!_store.ContainsKey(parsed.CompartmentType))
             {
-                AfterMutation(() => Console.WriteLine($"CompartmentDefinition: resource type {parsed.CompartmentType} not supported for requested compartment {cd.Url}"), diagnostic: true);
+                AfterMutation("CompartmentDiagnostic", () => Console.WriteLine($"CompartmentDefinition: resource type {parsed.CompartmentType} not supported for requested compartment {cd.Url}"), diagnostic: true);
                 return false;
             }
 
@@ -2811,7 +2855,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         catch (Exception ex)
         {
-            AfterMutation(() => Console.WriteLine($"Error parsing CompartmentDefinition: {ex.Message}"), diagnostic: true);
+            AfterMutation("CompartmentDiagnostic", () => Console.WriteLine($"Error parsing CompartmentDefinition: {ex.Message}"), diagnostic: true);
             return false;
         }
     }
@@ -3297,7 +3341,7 @@ public partial class VersionedFhirStore : IFhirStore
         PublishSubscriptionChanges(changes, diagnostics);
         if (send is not null)
         {
-            AfterMutation(() => OnSubscriptionSendEvent?.Invoke(this, send));
+            AfterMutation(nameof(OnSubscriptionSendEvent), () => OnSubscriptionSendEvent?.Invoke(this, send));
         }
     }
 
@@ -3317,7 +3361,7 @@ public partial class VersionedFhirStore : IFhirStore
         }
         if (diagnostic is not null)
         {
-            AfterMutation(() => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
+            AfterMutation("SubscriptionDiagnostic", () => _subscriptionDiagnosticWriter(diagnostic), diagnostic: true);
         }
     }
 

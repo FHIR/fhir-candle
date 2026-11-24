@@ -1948,6 +1948,7 @@ public sealed class SubscriptionNotificationLifecycleTests
 
     private static void AssertDiagnosticOutsideLocks(LifecycleTestStore fixture, params Dictionary<long, SubscriptionEvent>[] histories)
     {
+        Assert.False(Monitor.IsEntered(fixture.Field("_writeGate")));
         fixture.AssertOutsideLocks();
         foreach (Dictionary<long, SubscriptionEvent> history in histories)
         {
@@ -1965,14 +1966,32 @@ public sealed class SubscriptionNotificationLifecycleTests
     private sealed class DiagnosticWriter : TextWriter
     {
         private readonly Action<string> _onWriteLine;
+        private readonly ConcurrentQueue<Exception> _failures = new();
         internal ConcurrentQueue<string> Lines { get; } = new();
         public override Encoding Encoding => Encoding.UTF8;
         internal DiagnosticWriter(Action<string> onWriteLine) => _onWriteLine = onWriteLine;
         public override void WriteLine(string? value)
         {
-            string line = Assert.IsType<string>(value);
-            Lines.Enqueue(line);
-            _onWriteLine(line);
+            Exception? failure = Record.Exception(() =>
+            {
+                string line = Assert.IsType<string>(value);
+                Lines.Enqueue(line);
+                _onWriteLine(line);
+            });
+            if (failure is not null)
+            {
+                _failures.Enqueue(failure);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                // The store isolates sink exceptions. Check every callback on the test thread.
+                Assert.Empty(_failures);
+            }
         }
     }
 

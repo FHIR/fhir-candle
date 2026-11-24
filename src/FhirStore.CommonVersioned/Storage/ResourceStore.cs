@@ -745,7 +745,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
 
         _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
-        _store.AfterMutation(() =>
+        _store.AfterMutation(nameof(_store.OnInstanceCreated), () =>
         {
             RegisterInstanceCreated(source.Id);
             _store.RegisterInstanceCreated(_resourceName, source.Id);
@@ -760,7 +760,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
 
         Dictionary<string, ExecutableSubscriptionInfo> bindings = SubscriptionExecutionSnapshot();
-        _store.AfterMutation(() => TestCreateAgainstSubscriptions((T)source, bindings));
+        _store.AfterMutation(nameof(TestCreateAgainstSubscriptions), () => TestCreateAgainstSubscriptions((T)source, bindings));
 
         if (parsedSubscriptionTopic is not null)
         {
@@ -987,7 +987,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
 
         _store.PublishSubscriptionChanges(subscriptionChanges, subscriptionDiagnostics);
-        _store.AfterMutation(() =>
+        _store.AfterMutation(nameof(_store.OnInstanceUpdated), () =>
         {
             RegisterInstanceUpdated(source.Id);
             _store.RegisterInstanceUpdated(_resourceName, source.Id);
@@ -1012,11 +1012,11 @@ public class ResourceStore<T> : IVersionedResourceStore
         Dictionary<string, ExecutableSubscriptionInfo> bindings = SubscriptionExecutionSnapshot();
         if (previous is null)
         {
-            _store.AfterMutation(() => TestCreateAgainstSubscriptions((T)source, bindings));
+            _store.AfterMutation(nameof(TestCreateAgainstSubscriptions), () => TestCreateAgainstSubscriptions((T)source, bindings));
         }
         else
         {
-            _store.AfterMutation(() => TestUpdateAgainstSubscriptions((T)source, previous, bindings));
+            _store.AfterMutation(nameof(TestUpdateAgainstSubscriptions), () => TestUpdateAgainstSubscriptions((T)source, previous, bindings));
         }
 
         if (parsedSubscriptionTopic is not null)
@@ -1105,7 +1105,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             return null;
         }
 
-        _store.AfterMutation(() =>
+        _store.AfterMutation(nameof(_store.OnInstanceDeleted), () =>
         {
             RegisterInstanceDeleted(id);
             _store.RegisterInstanceDeleted(_resourceName, id);
@@ -1120,7 +1120,7 @@ public class ResourceStore<T> : IVersionedResourceStore
         }
 
         Dictionary<string, ExecutableSubscriptionInfo> bindings = SubscriptionExecutionSnapshot();
-        _store.AfterMutation(() => TestDeleteAgainstSubscriptions(previous, bindings));
+        _store.AfterMutation(nameof(TestDeleteAgainstSubscriptions), () => TestDeleteAgainstSubscriptions(previous, bindings));
 
         switch (previous?.TypeName)
         {
@@ -1802,7 +1802,7 @@ public class ResourceStore<T> : IVersionedResourceStore
             }
             catch (Exception ex)
             {
-                _store.AfterMutation(() => Console.WriteLine($"ResourceStore[{_resourceName}] <<< Exception Setting Executable Search Parameter {rt}.{name}: {ex.Message}"), diagnostic: true);
+                _store.AfterMutation("SearchParameterDiagnostic", () => Console.WriteLine($"ResourceStore[{_resourceName}] <<< Exception Setting Executable Search Parameter {rt}.{name}: {ex.Message}"), diagnostic: true);
             }
         }
     }

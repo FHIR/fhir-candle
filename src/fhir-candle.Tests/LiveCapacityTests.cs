@@ -4,6 +4,7 @@
 // </copyright>
 
 using System.Net;
+using System.Reflection;
 using System.Text.Json.Nodes;
 using FhirCandle.Models;
 using FhirCandle.Storage;
@@ -174,6 +175,129 @@ public class LiveCapacityTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public Task HandedOffCallbackFailureReportsOriginWithoutFailingPublisher(FhirReleases.FhirSequenceCodes version) =>
+        ExerciseHandOff(version, throwingSink: false, failingPublisher: false);
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public async Task ThrowingSinkDoesNotChangeWriterOutcomeOrSuppressLaterReport(FhirReleases.FhirSequenceCodes version)
+    {
+        await ExerciseHandOff(version, throwingSink: true, failingPublisher: false);
+        await ExerciseHandOff(version, throwingSink: true, failingPublisher: true);
+    }
+
+    private static async Task ExerciseHandOff(FhirReleases.FhirSequenceCodes version, bool throwingSink, bool failingPublisher)
+    {
+        using LifecycleTestStore fixture = new(version);
+        TimeSpan timeout = TimeSpan.FromSeconds(10);
+        using ManualResetEventSlim publishing = new();
+        using ManualResetEventSlim release = new();
+        InvalidOperationException publisherFailure = new("synchronous callback");
+        List<string> events = [];
+        List<(string Report, bool Locked)> reports = [];
+        fixture.Store.GetType().GetField("_subscriptionDiagnosticWriter", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(fixture.Store, new Action<string>(report =>
+            {
+                reports.Add((report, Monitor.IsEntered(fixture.Field("_writeGate"))));
+                if (throwingSink && reports.Count == 1)
+                {
+                    throw new InvalidOperationException("synthetic sink failure");
+                }
+            }));
+
+        bool released = false;
+        fixture.Store.OnInstanceUpdated += (_, args) =>
+        {
+            events.Add("put " + args.ResourceId);
+            if (args.ResourceId == "publisher")
+            {
+                publishing.Set();
+                released = release.Wait(timeout);
+                if (failingPublisher)
+                {
+                    throw publisherFailure;
+                }
+            }
+        };
+        fixture.Store.OnInstanceCreated += (_, args) =>
+        {
+            events.Add("post " + args.ResourceId);
+            throw new InvalidOperationException("synthetic private callback details");
+        };
+        Task<Exception?> publisher = Task.Run<Exception?>(() => Record.Exception(() => fixture.Put(Row("Patient", "publisher"))));
+        List<string> createdIds = [];
+        List<(string Report, bool Locked)> expectedReports = [];
+        try
+        {
+            Assert.True(publishing.Wait(timeout));
+            long previousBatch = (long)fixture.Field("_mutationSequence");
+            for (int i = 0; i < (throwingSink ? 2 : 1); i++)
+            {
+                string id = "input-" + i;
+                (bool success, FhirResponseContext response) = await Task.Run(() =>
+                    fixture.Interact("POST", "Practitioner", Row("Practitioner", id))).WaitAsync(timeout);
+                Assert.True(success, response.SerializedOutcome);
+                createdIds.Add(response.Id);
+                long batch = (long)fixture.Field("_mutationSequence");
+                Assert.True(batch > previousBatch);
+                expectedReports.Add(($"publication_failed batch={batch} event=OnInstanceCreated", false));
+                previousBatch = batch;
+            }
+            await Task.Run(() => fixture.Put(Row("Patient", "later"))).WaitAsync(timeout);
+            Assert.False(publisher.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+            await publisher.WaitAsync(timeout);
+        }
+
+        Assert.True(released);
+        Assert.Same(failingPublisher ? publisherFailure : null, await publisher);
+        Assert.Equal(expectedReports, reports);
+        Assert.Equal(new[] { "put publisher" }.Concat(createdIds.Select(id => "post " + id)).Append("put later"), events);
+        Assert.Equal("publisher", (string?)fixture.Get("Patient/publisher")["id"]);
+        foreach (string id in createdIds)
+        {
+            Assert.Equal(id, (string?)fixture.Get("Practitioner/" + id)["id"]);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ReentrantPublicationKeepsDistinctFailureOwners(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version, capacity: 1);
+        Reset(fixture);
+        fixture.Put(Row("Patient", "victim"));
+        InvalidOperationException outerFailure = new("outer eviction");
+        InvalidOperationException innerFailure = new("inner eviction");
+        Exception? innerResult = null;
+        List<string> events = [];
+        fixture.Store.OnInstanceUpdated += (_, args) =>
+        {
+            events.Add("put " + args.ResourceId);
+            if (args.ResourceId == "outer")
+            {
+                // The nested publisher must drain the outer eviction before its own events.
+                innerResult = Record.Exception(() => fixture.Put(Row("Patient", "inner")));
+                events.Add("inner returned");
+            }
+        };
+        fixture.Store.OnInstanceDeleted += (_, args) =>
+        {
+            events.Add("delete " + args.ResourceId);
+            throw args.ResourceId == "victim" ? outerFailure : innerFailure;
+        };
+        Exception? outerResult = Record.Exception(() => fixture.Put(Row("Patient", "outer")));
+        Assert.Equal(["put outer", "delete victim", "put inner", "delete outer", "inner returned"], events);
+        Assert.Same(outerFailure, outerResult);
+        Assert.Same(innerFailure, innerResult);
+        AssertState(fixture, ["Patient/inner"]);
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public async Task SubscriptionEvictionPublishesAfterUnlock(FhirReleases.FhirSequenceCodes version)
     {
         using LifecycleTestStore fixture = new(version, capacity: 2);
@@ -189,46 +313,53 @@ public class LiveCapacityTests
         using ManualResetEventSlim release = new();
         List<(long Revision, bool Removed)> changes = [];
         List<string> instances = [];
+        List<Exception?> observations = [];
+        bool released = false;
         fixture.Store.OnInstanceUpdated += (_, args) => instances.Add("put " + args.ResourceType);
         fixture.Store.OnInstanceDeleted += (_, args) => instances.Add("delete " + args.ResourceType);
         fixture.Store.OnSubscriptionsChanged += (_, args) =>
         {
-            fixture.AssertOutsideLocks();
-            Assert.False(Monitor.IsEntered(fixture.Field("_writeGate")));
             changes.Add((args.Revision, args.RemovedSubscriptionId is not null));
+            observations.Add(Record.Exception(() =>
+            {
+                fixture.AssertOutsideLocks();
+                Assert.False(Monitor.IsEntered(fixture.Field("_writeGate")));
+                if (changes.Count == 1)
+                {
+                    Assert.Equal("active", (string?)fixture.Get(key)["status"]);
+                    Assert.Equal(args.Revision, fixture.ExecutableRevision(fixture.Subscription));
+                    AssertState(fixture, [key, topicKey]);
+                }
+            }));
             if (changes.Count == 1)
             {
-                Assert.Equal("active", (string?)fixture.Get(key)["status"]);
-                Assert.Equal(args.Revision, fixture.ExecutableRevision(fixture.Subscription));
-                AssertState(fixture, [key, topicKey]);
                 publishing.Set();
-                Assert.True(release.Wait(timeout));
+                released = release.Wait(timeout);
             }
         };
         Task update = Task.Run(() => fixture.PutSubscription("active"));
         try
         {
             Assert.True(publishing.Wait(timeout));
-            await Task.Run(() =>
-            {
-                ParsedSubscription updated = fixture.Subscription;
-                fixture.Put(Row("Patient", "victim"));
-                Assert.Empty(fixture.Store.CurrentSubscriptions);
-                Assert.Null(fixture.ExecutableRevision(updated));
-                AssertState(fixture, [topicKey, "Patient/victim"]);
-                Assert.True(fixture.Interact("DELETE", "Patient/victim").Success);
-                AssertState(fixture, [topicKey]);
-                fixture.PutSubscription();
-                Assert.Equal("1", (string?)fixture.Get(key)["meta"]!["versionId"]);
-                Assert.Equal(fixture.Subscription.Revision, fixture.ExecutableRevision(fixture.Subscription));
-                AssertState(fixture, [topicKey, key]);
-            }).WaitAsync(timeout);
+            ParsedSubscription updated = fixture.Subscription;
+            await Task.Run(() => fixture.Put(Row("Patient", "victim"))).WaitAsync(timeout);
+            Assert.Empty(fixture.Store.CurrentSubscriptions);
+            Assert.Null(fixture.ExecutableRevision(updated));
+            AssertState(fixture, [topicKey, "Patient/victim"]);
+            Assert.True((await Task.Run(() => fixture.Interact("DELETE", "Patient/victim")).WaitAsync(timeout)).Success);
+            AssertState(fixture, [topicKey]);
+            await Task.Run(() => fixture.PutSubscription()).WaitAsync(timeout);
+            Assert.Equal("1", (string?)fixture.Get(key)["meta"]!["versionId"]);
+            Assert.Equal(fixture.Subscription.Revision, fixture.ExecutableRevision(fixture.Subscription));
+            AssertState(fixture, [topicKey, key]);
         }
         finally
         {
             release.Set();
             await update.WaitAsync(timeout);
         }
+        Assert.True(released);
+        Assert.All(observations, Assert.Null);
         Assert.Equal([(prior + 1, false), (prior + 2, true), (prior + 3, false)], changes);
         Assert.Equal(["put Subscription", "put Patient", "delete Subscription", "delete Patient", "put Subscription"], instances);
     }
