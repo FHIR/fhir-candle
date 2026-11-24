@@ -59,7 +59,7 @@ not transport failures. As workers become available, they take turns among nonem
 
 ## Zulip delivery
 
-- To use the operator bot, configure `ZulipUrl`, `ZulipEmail`, and `ZulipKey` together on the
+- To use the operator bot, configure `Zulip_Url`, `Zulip_Email`, and `Zulip_Key` together on the
   server. Omit subscription parameters `site`, `email`, and `key`. Alternatively, `site` alone
   may repeat the configured HTTPS base: host case, an explicit default port, and a final slash
   do not matter, but the host, effective port and case-sensitive base path must otherwise match.
