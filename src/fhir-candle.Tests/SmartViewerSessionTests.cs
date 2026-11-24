@@ -5,6 +5,7 @@
 
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using fhir.candle.Services;
 using fhir.candle.Tests.Controllers;
@@ -311,6 +312,96 @@ public class SmartViewerSessionTests
         {
             root.Delete(true);
         }
+    }
+
+    /// <summary>Search navigation preserves each admitted store key even when the bodies share an ID.</summary>
+    [Fact]
+    public async Task CallerRowsReadDistinctStoreKeys()
+    {
+        TenantConfiguration tenant = new()
+        {
+            ControllerName = "keys", BaseUrl = "http://localhost/fhir/keys",
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4, SmartAllowed = true, SmartRequired = true,
+            AllowCreateAsUpdate = true, AllowExistingId = true,
+        };
+        DirectoryInfo root = Directory.CreateTempSubdirectory("candle-viewer-keys-");
+        try
+        {
+            await using WebApplication app = BuildViewerHost(root, tenant, TimeProvider.System);
+            await app.StartAsync();
+            using IFhirStore store = app.Services.GetRequiredService<IFhirStoreManager>()[tenant.ControllerName];
+            Dictionary<string, string> names = new() { ["first"] = "Alpha", ["second"] = "Beta" };
+            foreach ((string key, string family) in names)
+            {
+                FhirRequestContext ctx = new(store, "PUT", $"Patient/{key}")
+                {
+                    SourceContent = $$"""{"resourceType":"Patient","id":"{{key}}","name":[{"family":"{{family}}"}]}""",
+                    SourceFormat = "application/fhir+json",
+                };
+                Assert.True(store.InstanceUpdate(ctx, out FhirResponseContext response), response.SerializedOutcome);
+                ((Hl7.Fhir.Model.Resource)store["Patient"][key]).Id = "shared";
+            }
+
+            ISmartAuthManager auth = app.Services.GetRequiredService<ISmartAuthManager>();
+            const string Scope = "user/Patient.rs";
+            Assert.True(auth.RequestAuth(tenant.ControllerName, "127.0.0.1", "code", "viewer-test", "http://localhost/return",
+                string.Empty, Scope, string.Empty, tenant.BaseUrl, string.Empty, string.Empty, out _, out string pending));
+            Assert.True(auth.TryGetPendingAuthorization(tenant.ControllerName, pending, out AuthorizationInfo consent));
+            consent.UserId = "Practitioner/viewer";
+            consent.Scopes[Scope] = true;
+            Assert.True(auth.TryUpdateAuth(tenant.ControllerName, pending, consent));
+            Assert.True(auth.TryCreateSmartResponse(tenant.ControllerName, consent.AuthCode, "viewer-test", string.Empty,
+                string.Empty, out AuthorizationInfo.SmartResponse issued));
+
+            using IServiceScope circuit = app.Services.CreateScope();
+            SmartViewerSession session = circuit.ServiceProvider.GetRequiredService<SmartViewerSession>();
+            session.SelectTenant(tenant.ControllerName);
+            session.SelectMode(true);
+            session.SignIn(issued.AccessToken);
+            SmartViewerSession.Request list = new(tenant.ControllerName, "Patient");
+            Task Load(SmartViewerSession.Request request) =>
+                session.LoadAsync(request, (_, _) => throw new InvalidOperationException("Unexpected admin load"));
+            await Load(list);
+            Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+            string[] ids = session.Display.Rows.Select(row => row.Id).Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(new[] { "first", "second" }, ids);
+            foreach (string id in ids)
+            {
+                await Load(list with { Id = id });
+                Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+                JsonNode body = JsonNode.Parse(session.Display.Body)!;
+                Assert.Equal("shared", (string?)body["id"]);
+                Assert.Equal(names[id], (string?)body["name"]![0]!["family"]);
+            }
+            await app.StopAsync();
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    /// <summary>Only a local primary match with an unambiguous FHIR id becomes a detail link.</summary>
+    [Fact]
+    public void CallerRowsOmitNonlocalAndNonmatchEntries()
+    {
+        const string Root = "http://localhost/fhir/keys";
+        const string Prefix = Root + "/Patient/";
+        (string? Url, string? Mode)[] cases =
+        [
+            (Prefix + "A-1.z", "match"), (Prefix + "included", "include"), (Prefix + "missing-mode", null),
+            (null, "match"), (Root + "/Observation/key", "match"), ("Patient/key", "match"),
+            ("https://localhost/fhir/keys/Patient/key", "match"), ("http://elsewhere/fhir/keys/Patient/key", "match"),
+            (Root + "-other/Patient/key", "match"), (Prefix + "x/y", "match"), (Prefix + "x%2Fy", "match"),
+            (Prefix + "x%5Cy", "match"), (Prefix + "x?y", "match"), (Prefix + "x#y", "match"),
+            (Prefix + "../Patient/key", "match"), (Prefix + ".", "match"), (Prefix, "match"),
+            (Prefix + new string('a', 65), "match"), (Prefix + "a_b", "match"),
+        ];
+        JsonElement bundle = JsonSerializer.SerializeToElement(new
+        {
+            entry = cases.Select(c => new { fullUrl = c.Url, search = new { mode = c.Mode }, resource = new { id = "fallback" } }),
+        });
+        Assert.Equal("A-1.z", Assert.Single(SmartViewerSession.CallerRows(bundle, Root, "Patient")).Id);
     }
 
     private static void AssertDenied(SmartViewerSession session)

@@ -268,12 +268,42 @@ internal sealed class SmartViewerSession : IDisposable
         return new()
         {
             Status = bundle.StatusCode,
-            Rows = document.RootElement.TryGetProperty("entry", out JsonElement entries)
-                ? entries.EnumerateArray().Select(e => new InstanceTableRec
-                {
-                    Id = e.GetProperty("resource").GetProperty("id").GetString()!,
-                }).ToArray() : [],
+            Rows = CallerRows(document.RootElement, store.Config.BaseUrl, request.Type),
         };
+    }
+
+    internal static InstanceTableRec[] CallerRows(JsonElement bundle, string baseUrl, string type)
+    {
+        if (!bundle.TryGetProperty("entry", out JsonElement entries) || entries.ValueKind != JsonValueKind.Array ||
+            !Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? root) || !root.IsWellFormedOriginalString() ||
+            root.Scheme is not ("http" or "https") ||
+            root.UserInfo.Length != 0 || root.Query.Length != 0 || root.Fragment.Length != 0)
+        {
+            return [];
+        }
+
+        // Compare the store-generated spelling before any URI normalization can collapse path segments.
+        string prefix = $"{baseUrl.TrimEnd('/')}/{type}/";
+        List<InstanceTableRec> rows = [];
+        foreach (JsonElement entry in entries.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object ||
+                !entry.TryGetProperty("search", out JsonElement search) || search.ValueKind != JsonValueKind.Object ||
+                !search.TryGetProperty("mode", out JsonElement mode) || mode.ValueKind != JsonValueKind.String || !mode.ValueEquals("match") ||
+                !entry.TryGetProperty("fullUrl", out JsonElement address) || address.ValueKind != JsonValueKind.String ||
+                address.GetString() is not string url || !url.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string id = url[prefix.Length..];
+            if (id.Length is >= 1 and <= 64 && id is not ("." or "..") &&
+                id.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-'))
+            {
+                rows.Add(new() { Id = id });
+            }
+        }
+        return rows.ToArray();
     }
 
     private static FhirRequestContext Context(IFhirStore store, Request request, AuthorizationInfo? grant, bool metadata = false)
