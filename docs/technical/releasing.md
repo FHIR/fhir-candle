@@ -17,12 +17,15 @@ workflow or publish packages locally.
 
 Before the first release using this workflow:
 
-1. Configure the protected GitHub environment **`nuget.org`** with required
-   reviewers or equivalent deployment protection. Allow `v*` release tags.
+1. In the repository's [environment settings](https://github.com/FHIR/fhir-candle/settings/environments),
+   configure **`nuget.org`** with required reviewers or equivalent deployment
+   protection. Restrict deployments to release tags matching `v*`.
 2. Set **`NUGET_PUBLISH_ENVIRONMENT_READY=true`** in that environment only
-   after configuring its protection.
+   after configuring its protection. The flag is a maintainer acknowledgment;
+   the workflow does not check GitHub's protection rules.
 3. Store **`NUGET_USER`** as an environment secret, using the nuget.org profile
-   username, not an email address.
+   username, not an email address. A repository secret with the same name
+   does not establish this environment configuration.
 4. Configure a [NuGet trusted-publishing policy](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)
    for owner **`FHIR`**, repository **`fhir-candle`**, workflow filename
    **`nuget-tool.yml`** (without the directory), and environment **`nuget.org`**.
@@ -77,15 +80,17 @@ a release number.
 4. Optionally run validation first. For maintainers:
 
    ```powershell
-   gh workflow run nuget-tool.yml --ref main -f version=<version> -f tag=v<version>
+   # For v2026.1124.1345, after the release commit is merged and its tag is pushed:
+   gh workflow run nuget-tool.yml --ref main -f version=2026.1124.1345 -f tag=v2026.1124.1345
    ```
 
    Require all exact-source, package-consumer, and container-build jobs to
    pass. This does not reserve the version or publish; the release run
    creates and qualifies its own package.
-5. Publish a GitHub Release for the existing tag. Link its notes to the
-   changelog entry and describe publication as pending until the workflow
-   completes.
+5. Publish a GitHub Release for the **existing tag**, using that version's
+   changelog bullets as the release notes. Link to `changelog.md` **at the tag**,
+   not on the moving `main` branch. Describe publication as pending until the
+   workflow completes.
 6. Compare the candidate's source SHA and SHA-512 in the pack job summary
    with the intended release, review all six tool-consumer results, and
    approve `publish-nuget` in the protected environment.
