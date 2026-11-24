@@ -1,47 +1,36 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using Hl7.Fhir.Utility;
+@using Microsoft.AspNetCore.Components.Forms
 
 @inject IHttpContextAccessor HttpContextAccessor
 
-@implements IDisposable
-
 <FluentAccordion>
-    <FluentAccordionItem Heading="Patient Selection" Expanded="true">
-         <FluentAutocomplete Id="patient-selector"
+    <FluentAccordionItem Header="Patient Selection" Expanded="true" Style="max-width: 100%; --field-min-width: 0px;">
+        <FluentAutocomplete Id="patient-selector"
                 @ref="PatientSelector"
                 TOption="Hl7.Fhir.Model.Patient"
+                TValue="string"
                 Width="100%"
                 Placeholder="search"
-                MaximumSelectedOptions="1"
-                KeepOpen="false"
+                Multiple="false"
                 OnOptionsSearch="@OnPatientSearch"
-                OptionText="@(item => displayFor(item))"
-                OptionStyle="min-height: 40px;"
-                @bind-SelectedOptions="@SelectedPatients">
+                OptionText="@(item => displayFor(item!))"
+                OptionValue="@(item => item?.Id)"
+                @bind-SelectedItems="@SelectedPatients">
             <LabelTemplate>
                 Select a patient
                 <FluentIcon Value="@(new Icons.Regular.Size20.Person())" Style="margin: 0 4px;" />
             </LabelTemplate>
-            <SelectedOptionTemplate>
-                <FluentPersona Name="@(displayFor(context))"
-                        Style="height: 26px; background: var(--neutral-fill-secondary-hover)"
-                        ImageSize="24px"
-                        Initials="@(getInitials(context.Name))"
-                        DismissTitle="Remove"
-                        Status="PresenceStatus.Available"
-                        OnDismissClick="@(async () => SelectedPatients = [])" />
-            </SelectedOptionTemplate>
             <OptionTemplate>
-                <FluentPersona
-                    ImageSize="32px"
-                    Initials="@(getInitials(context.Name))"
-                    Status="PresenceStatus.Available"
-                    StatusSize="PresenceBadgeSize.Small"
-                    Name="@(displayFor(context))" />
+                <FluentStack Orientation="Orientation.Horizontal" Style="min-height: 40px;">
+                    <FluentPresenceBadge Status="PresenceStatus.Available">
+                        <AnchorContent>
+                            <FluentAvatar Size="AvatarSize.Size32" Initials="@(getInitials(context.Name))" Name="@(displayFor(context))" />
+                        </AnchorContent>
+                    </FluentPresenceBadge>
+                    <FluentText>@displayFor(context)</FluentText>
+                </FluentStack>
             </OptionTemplate>
-            <MaximumSelectedOptionsMessage>
-                Only one patient can be selected.
-            </MaximumSelectedOptionsMessage>
             <FooterContent>
                 @if (!context.Items.Any())
                 {
@@ -55,9 +44,9 @@
 
     <br />
 
-    <FluentAccordionItem Heading="Subscription Management" Expanded="true">
+    <FluentAccordionItem Header="Subscription Management" Expanded="true">
         <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
-            <FluentLabel Typo="Typography.Body">
+            <FluentLabel>
                 If you have an existing Subscription, please use it. However, please do not modify subscriptions
                 that other people are using for testing. In order to facilitate that, please enter a user tag
                 that can be used to disambiguate subscriptions.
@@ -66,18 +55,22 @@
                 can still create an encounter that will trigger your subscription).
             </FluentLabel>
 
-            <FluentTextField @bind-Value="UserTag" Label="User Tag" />
+            <FluentTextInput @bind-Value="UserTag" Label="User Tag" />
             <FluentAutocomplete Id="subscription-selector"
                     Label="Select Subscription"
                     TOption="ParsedSubscription"
+                    TValue="string"
                     Width="100%"
                     Placeholder="Select a subscription"
                     MaximumSelectedOptions="1"
-                    KeepOpen="false"
+                    Multiple="false"
                     OnOptionsSearch="@OnSubscriptionSearch"
-                    OptionText="@(item => displayFor(item))"
-                    OptionStyle="min-height: 40px;"
-                    @bind-SelectedOptions="@SelectedSubscriptions">
+                    OptionText="@(item => displayFor(item!))"
+                    OptionValue="@(item => item?.Id)"
+                    @bind-SelectedItems="@SelectedSubscriptions">
+                <OptionTemplate>
+                    <div style="min-height: 40px;">@displayFor(context)</div>
+                </OptionTemplate>
                 <MaximumSelectedOptionsMessage>
                     Only one subscription can be selected.
                 </MaximumSelectedOptionsMessage>
@@ -97,16 +90,16 @@
                 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                     @if (SelectedSubscriptions.Any())
                     {
-                        <FluentLabel Typo="Typography.H6">Edit Subscription</FluentLabel>
+                        <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">Edit Subscription</FluentLabel>
                     }
                     else
                     {
-                        <FluentLabel Typo="Typography.H6">Create Subscription</FluentLabel>
+                        <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">Create Subscription</FluentLabel>
                     }
 
-                    <FluentTextField @bind-Value="_editingSubscription.Reason" Label="Reason (Description)" />
+                    <FluentTextInput @bind-Value="_editingSubscription.Reason" Label="Reason (Description)" />
 
-                    <FluentSelect Label="Status" @bind-Value="_editingSubscription.CurrentStatus" TOption="string">
+                    <FluentSelect Label="Status" @bind-Value="_editingSubscription.CurrentStatus" TOption="string" TValue="string">
                         <FluentOption Value="@("requested")">Requested</FluentOption>
                         <FluentOption Value="@("active")">Active</FluentOption>
                         <FluentOption Value="@("error")">Error</FluentOption>
@@ -114,31 +107,33 @@
                         <FluentOption Value="@("entered-in-error")">Entered In Error</FluentOption>
                     </FluentSelect>
 
-                    <FluentSelect Label="Channel Type" @bind-Value="_editingSubscription.ChannelCode" TOption="string">
+                    <FluentSelect Label="Channel Type" @bind-Value="_editingSubscription.ChannelCode" TOption="string" TValue="string">
                         <FluentOption Disabled="true" Value="@("email")">Email</FluentOption>
                         <FluentOption Disabled="true" Value="@("message")">FHIR Message</FluentOption>
                         <FluentOption Value="@("rest-hook")">REST Hook (http/s POST)</FluentOption>
                         <FluentOption Disabled="true" Value="@("websocket")">Websocket</FluentOption>
                     </FluentSelect>
 
-                    <FluentTextField @bind-Value="_editingSubscription.Endpoint" Label="Endpoint" />
-                    <FluentNumberField @bind-Value="_editingSubscription.HeartbeatSeconds" Label="Heartbeat frequency (seconds)" />
-                    <FluentTextField @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true" />
+                    <FluentTextInput @bind-Value="_editingSubscription.Endpoint" Label="Endpoint" />
+                    <FluentField Label="Heartbeat frequency (seconds)" ForId="hti2-heartbeat" IncludeInputSlot="false">
+                        <InputNumber id="hti2-heartbeat" slot="input" step="1" @bind-Value="_editingSubscription.HeartbeatSeconds" />
+                    </FluentField>
+                    <FluentTextInput @bind-Value="Expiration" Label="End (expiration)" ReadOnly="true" />
 
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         MIME Type to use for notifications:
                     </FluentLabel>
 
-                    <FluentSelect Label="Content Type" @bind-Value="_editingSubscription.ContentType" TOption="string">
+                    <FluentSelect Label="Content Type" @bind-Value="_editingSubscription.ContentType" TOption="string" TValue="string">
                         <FluentOption Value="@("application/fhir+json")">FHIR JSON</FluentOption>
                         <FluentOption Value="@("application/fhir+xml")">FHIR XML</FluentOption>
                     </FluentSelect>
 
-                    <FluentLabel Typo="Typography.Body">
+                    <FluentLabel>
                         Amount of data to include in notifications:
                     </FluentLabel>
 
-                    <FluentSelect Label="Content Level" @bind-Value="_editingSubscription.ContentLevel" TOption="string">
+                    <FluentSelect Label="Content Level" @bind-Value="_editingSubscription.ContentLevel" TOption="string" TValue="string">
                         <FluentOption Value="@("empty")">Empty</FluentOption>
                         <FluentOption Value="@("id-only")">IDs Only</FluentOption>
                         <FluentOption Value="@("full-resource")">Full Resources</FluentOption>
@@ -152,8 +147,8 @@
 
     <br />
 
-    <FluentAccordionItem Heading="Status Panel" Expanded="true">
-        <FluentLabel Typo="Typography.Body">
+    <FluentAccordionItem Header="Status Panel" Expanded="true">
+        <FluentLabel>
             Status Panel
             <br />
         </FluentLabel>
@@ -235,7 +230,7 @@
     // private IResourceStore? _observationStore = null;
     // private IResourceStore? _documentReferenceStore = null;
 
-    private FluentAutocomplete<Hl7.Fhir.Model.Patient> PatientSelector = default!;
+    private FluentAutocomplete<Hl7.Fhir.Model.Patient, string> PatientSelector = default!;
 
     private Hl7.Fhir.Model.Patient[] _selectedPatients = [];
     private IEnumerable<Hl7.Fhir.Model.Patient> SelectedPatients
@@ -371,30 +366,13 @@
 
     private void configureStores()
     {
-        if (_patientStore is not null)
-        {
-            _patientStore.OnInstanceCreated -= PatientStore_OnChanged;
-            _patientStore.OnInstanceDeleted -= PatientStore_OnChanged;
-        }
-
-        if (Store.TryGetValue("Patient", out _patientStore))
-        {
-            _patientStore.OnInstanceCreated += PatientStore_OnChanged;
-            _patientStore.OnInstanceDeleted += PatientStore_OnChanged;
-        }
-
+        Store.TryGetValue("Patient", out _patientStore);
     }
 
     private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         configureStores();
 
-        // _filteredItems = GetFilteredItems();
-    }
-
-    private void PatientStore_OnChanged(object? sender, EventArgs e)
-    {
-        // reset our filtered items
         // _filteredItems = GetFilteredItems();
     }
 
@@ -495,16 +473,17 @@
         switch (o)
         {
             case Hl7.Fhir.Model.Patient p:
-                return $"{p.Id}: {string.Join(", ", p.Name.Select(n => $"{n.Family}, {string.Join(' ', n.Given)}"))}";
+                return $"{p.Id}: {displayFor(p.Name)}";
 
             case ParsedSubscription parsedSubscription:
                 return $"{parsedSubscription.Id}: {parsedSubscription.Endpoint} ({parsedSubscription.CurrentStatus})";
 
             case IEnumerable<Hl7.Fhir.Model.HumanName> hns:
-                return string.Join("; ", hns.Select(hn => $"{hn.Family}, {string.Join(' ', hn.Given)}"));
+                return string.Join("; ", hns.Select(displayFor).Where(name => !string.IsNullOrEmpty(name)));
 
             case Hl7.Fhir.Model.HumanName hn:
-                return $"{hn.Family}, {string.Join(' ', hn.Given)}";
+                return string.Join(", ", new[] { hn.Family, string.Join(' ', hn.Given) }
+                    .Where(part => !string.IsNullOrEmpty(part)));
 
             case Hl7.Fhir.Model.FhirString s:
                 return s.Value ?? string.Empty;
@@ -566,16 +545,5 @@
         }
 
         return o.ToString() ?? string.Empty;
-    }
-
-    public void Dispose()
-    {
-        // debounceTimer?.Dispose();
-
-        // if (_taskStore is not null)
-        // {
-        //     _taskStore.OnInstanceCreated -= ResourceStore_OnChanged;
-        //     _taskStore.OnInstanceDeleted -= ResourceStore_OnChanged;
-        // }
     }
 }

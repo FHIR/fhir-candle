@@ -1,9 +1,9 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.Body">
+    <FluentText Block="true">
         FHIR R5 endpoint at <code class="copy-click">@Store.Config.BaseUrl</code>
-    </FluentLabel>
+    </FluentText>
     
     @if (AdditionalContent is not null)
     {
@@ -12,7 +12,7 @@
 
     @if (RiPages?.Any() ?? false)
     {
-        <FluentLabel Typo="Typography.Body">
+        <FluentLabel>
             Based on loaded packages, this server also implements the following pages:
         </FluentLabel>
 
@@ -21,7 +21,7 @@
             </PropertyColumn>
 
             <TemplateColumn Title="Name">
-                <FluentAnchor Href="@($"{context.RoutePath}?store={StoreName}")" Appearance="Appearance.Hypertext">@context.PageName</FluentAnchor>
+                <FluentLink Href="@($"{context.RoutePath}?store={StoreName}")">@context.PageName</FluentLink>
             </TemplateColumn>
 
             <PropertyColumn Title="Description" Property="@(p => p.Description)" Sortable="true" Tooltip="true">
@@ -29,46 +29,46 @@
         </FluentDataGrid>
     }
 
-    <FluentLabel Typo="Typography.Body">
-        This endpoint uses <FluentAnchor Href="https://hl7.org/fhir/R5" Appearance="Appearance.Hypertext" Target="_blank">FHIR R5</FluentAnchor>
+    <FluentText Block="true">
+        This endpoint uses <FluentLink Href="https://hl7.org/fhir/R5" Target="LinkTarget.Blank">FHIR R5</FluentLink>
         and Subscriptions via the
-        <FluentAnchor Href="http://hl7.org/fhir/R5/subscriptions.html" Appearance="Appearance.Hypertext" Target="_blank">Subscriptions Framework</FluentAnchor>
-    </FluentLabel>
+        <FluentLink Href="http://hl7.org/fhir/R5/subscriptions.html" Target="LinkTarget.Blank">Subscriptions Framework</FluentLink>
+    </FluentText>
     
     <ul>
         <li>
-            <FluentAnchor Href="@($"/store?store={StoreName}")" Appearance="Appearance.Hypertext">FHIR Contents</FluentAnchor>: 
+            <FluentLink Href="@($"/store?store={StoreName}")">FHIR Contents</FluentLink>:
             FHIR resources in this tenant
         </li>
 
         <li>
-            <FluentAnchor Href="@($"/subscriptions/local?store={StoreName}")" Appearance="Appearance.Hypertext">Local Subscriptions</FluentAnchor>: 
+            <FluentLink Href="@($"/subscriptions/local?store={StoreName}")">Local Subscriptions</FluentLink>:
             outgoing Subscription notifications from this server
         </li>
 
         <li>
-            <FluentAnchor Href="@($"/subscriptions/notifications-received?store={StoreName}")" Appearance="Appearance.Hypertext">Received Notifications</FluentAnchor>: 
+            <FluentLink Href="@($"/subscriptions/notifications-received?store={StoreName}")">Received Notifications</FluentLink>:
             incoming notifications received by this server
         </li>
     </ul>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentText Block="true">
         The endpoint also exposes a system-level operation, <code class="copy-click">@($"{Store.Config.BaseUrl}/$subscription-hook")</code>
         which can be used as a notification endpoint for FHIR @Store.Config.FhirVersion notifications (e.g.,
         if you are developing a server that sends notifications, you can point it here).
         Any received notification bundles are stored as resources locally, and the notifications will appear on
         the
-        <FluentAnchor Href="@($"/subscriptions/notifications-received?store={StoreName}")" Appearance="Appearance.Hypertext">Received Notifications</FluentAnchor>
+        <FluentLink Href="@($"/subscriptions/notifications-received?store={StoreName}")">Received Notifications</FluentLink>
         page.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentText Block="true">
         Note that the server will NOT send notifications to addresses rooted in <code>example.org</code>.
         For example, a REST-Hook pointing at <code>http://example.org/endpoints/test</code> will trigger
         the notifications and be visible on the
-        <FluentAnchor Href="@($"/subscriptions/local?store={StoreName}")" Appearance="Appearance.Hypertext">Local Subscriptions</FluentAnchor>
+        <FluentLink Href="@($"/subscriptions/local?store={StoreName}")">Local Subscriptions</FluentLink>
         page, but not actually attempt to send the notification to the endpoint.
-    </FluentLabel>
+    </FluentText>
 
 </FluentStack>
 

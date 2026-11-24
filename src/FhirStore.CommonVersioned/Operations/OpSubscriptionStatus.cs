@@ -131,69 +131,13 @@ public class OpSubscriptionStatus : IFhirOperation
         }
 
         Dictionary<string, Hl7.Fhir.Model.Resource> subscriptionStatuses = new();
-
-        if ((!subscriptionIds.Any()) && (!statusFilters.Any()))
+        HashSet<string> ids = new(subscriptionIds);
+        HashSet<string> filters = new(statusFilters);
+        foreach ((string id, string status, Hl7.Fhir.Model.Resource resource) in store.SubscriptionStatusSnapshots("query-status"))
         {
-            // add all
-            foreach (string id in store._subscriptions.Keys)
+            if ((ids.Count == 0 || ids.Contains(id)) && (filters.Count == 0 || filters.Contains(status)))
             {
-                Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(id, "query-status");
-                if (s is not null)
-                {
-                    subscriptionStatuses.Add(id, s);
-                }
-            }
-        }
-        else if (!subscriptionIds.Any())
-        {
-            // add by filter
-            HashSet<string> filters = new(statusFilters.Distinct());
-
-            foreach (ParsedSubscription sub in store._subscriptions.Values)
-            {
-                if (!filters.Contains(sub.CurrentStatus))
-                {
-                    continue;
-                }
-
-                Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(sub.Id, "query-status");
-                if (s is not null)
-                {
-                    subscriptionStatuses.Add(sub.Id, s);
-                }
-            }
-
-        }
-        else if (!statusFilters.Any())
-        {
-            // add by id
-            foreach (string id in subscriptionIds.Distinct())
-            {
-                Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(id, "query-status");
-                if (s is not null)
-                {
-                    subscriptionStatuses.Add(id, s);
-                }
-            }
-        }
-        else
-        {
-            // check filter and id
-            HashSet<string> filters = new(statusFilters.Distinct());
-
-            foreach (string id in subscriptionIds.Distinct())
-            {
-                if ((!store._subscriptions.ContainsKey(id)) ||
-                    (!filters.Contains(store._subscriptions[id].CurrentStatus)))
-                {
-                    continue;
-                }
-
-                Hl7.Fhir.Model.Resource? s = store.StatusForSubscription(id, "query-status");
-                if (s is not null)
-                {
-                    subscriptionStatuses.Add(id, s);
-                }
+                subscriptionStatuses.Add(id, resource);
             }
         }
 

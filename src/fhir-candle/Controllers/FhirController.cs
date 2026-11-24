@@ -70,6 +70,24 @@ public class FhirController : ControllerBase
 
     }
 
+    private AuthorizationInfo? ResolveBearer(string tenant, string? header)
+    {
+        if (string.IsNullOrEmpty(header))
+        {
+            return null;
+        }
+
+        AuthorizationInfo? auth = null;
+        GrantStatus status = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && header.Length > 7
+            ? _smartAuthManager.ResolveAccessToken(tenant, header[7..], out auth)
+            : GrantStatus.NotCurrent;
+        if (status != GrantStatus.Admitted)
+        {
+            _logger.LogDebug("SMART bearer not admitted: {Status}", status);
+        }
+        return auth;
+    }
+
     /// <summary>Gets the MIME type.</summary>
     /// <param name="queryParam">The query parameter.</param>
     /// <param name="request">   The request.</param>
@@ -303,7 +321,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.SystemCapabilities,
@@ -365,7 +383,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.TypeOperation,
@@ -380,6 +398,12 @@ public class FhirController : ControllerBase
         }
 
         bool success = store.TypeOperation(ctx, out FhirResponseContext opResponse);
+
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            opResponse.StatusCode == HttpStatusCode.MethodNotAllowed)
+        {
+            Response.Headers[HeaderNames.Allow] = "POST";
+        }
 
         await AddFhirResponse(Response, prefer, success, opResponse);
     }
@@ -431,7 +455,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.InstanceRead,
@@ -501,7 +525,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
@@ -521,6 +545,12 @@ public class FhirController : ControllerBase
         bool success = store.InstanceOperation(
             ctx,
             out FhirResponseContext opResponse);
+
+        if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+            opResponse.StatusCode == HttpStatusCode.MethodNotAllowed)
+        {
+            Response.Headers[HeaderNames.Allow] = "POST";
+        }
 
         await AddFhirResponse(Response, prefer, success, opResponse);
     }
@@ -579,7 +609,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.InstanceOperation,
@@ -611,6 +641,27 @@ public class FhirController : ControllerBase
         }
     }
 
+
+    /// <summary>Reads search form occurrences and appends the URL query after the body.</summary>
+    /// <returns>The encoded search parameters.</returns>
+    private async Task<string> getSearchContent()
+    {
+        if (Request.HasFormContentType)
+        {
+            return QueryString.Create(Request.Form).Add(Request.QueryString).ToString();
+        }
+
+        using StreamReader reader = new StreamReader(Request.Body);
+        string content = await reader.ReadToEndAsync();
+        string queryString = Request.QueryString.ToString();
+
+        if (!string.IsNullOrEmpty(queryString))
+        {
+            return string.IsNullOrEmpty(content) ? queryString : content + "&" + queryString[1..];
+        }
+
+        return content;
+    }
 
     /// <summary>
     /// (An Action that handles HTTP POST requests) posts a resource type search.
@@ -646,31 +697,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -682,7 +710,7 @@ public class FhirController : ControllerBase
                 UrlQuery = queryString,
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
@@ -749,31 +777,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -785,7 +790,7 @@ public class FhirController : ControllerBase
                 UrlQuery = queryString,
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
@@ -861,31 +866,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -897,7 +879,7 @@ public class FhirController : ControllerBase
                 UrlQuery = queryString,
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
@@ -981,7 +963,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = isTypedSearch
@@ -1056,7 +1038,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
@@ -1110,31 +1092,8 @@ public class FhirController : ControllerBase
 
         try
         {
-            // read the post body to process
-            string content;
-            if (Request.HasFormContentType)
-            {
-                content = "?" + string.Join('&', Request.Form.Select(kvp => $"{kvp.Key}={kvp.Value}"));
-            }
-            else
-            {
-                using StreamReader reader = new StreamReader(Request.Body);
-                content = await reader.ReadToEndAsync();
-            }
-
+            string content = await getSearchContent();
             string queryString = Request.QueryString.ToString();
-
-            if (!string.IsNullOrEmpty(queryString))
-            {
-                if (string.IsNullOrEmpty(content))
-                {
-                    content = queryString;
-                }
-                else
-                {
-                    content += $"&{queryString}";
-                }
-            }
 
             FhirRequestContext ctx = new()
             {
@@ -1146,7 +1105,7 @@ public class FhirController : ControllerBase
                 UrlQuery = queryString,
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 SerializeSummaryFlag = summary ?? string.Empty,
@@ -1217,7 +1176,7 @@ public class FhirController : ControllerBase
                     UrlQuery = Request.QueryString.ToString(),
                     RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                     Forwarded = getForwardedInfo(Request),
-                    Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                    Authorization = ResolveBearer(storeName, authHeader),
                     DestinationFormat = getMimeType(format, Request),
                     SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                     Interaction = Common.StoreInteractionCodes.SystemOperation,
@@ -1286,7 +1245,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.SystemOperation,
@@ -1304,6 +1263,12 @@ public class FhirController : ControllerBase
             bool success= store.SystemOperation(
                 ctx,
                 out FhirResponseContext opResponse);
+
+            if (ctx.OperationName.Equals("$validate", StringComparison.Ordinal) &&
+                opResponse.StatusCode == HttpStatusCode.MethodNotAllowed)
+            {
+                Response.Headers[HeaderNames.Allow] = "POST";
+            }
 
             await AddFhirResponse(Response, prefer, success, opResponse);
         }
@@ -1363,7 +1328,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.TypeCreate,
@@ -1445,7 +1410,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.InstanceUpdate,
@@ -1533,7 +1498,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.InstanceUpdateConditional,
@@ -1610,7 +1575,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.InstanceDelete,
@@ -1671,7 +1636,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             Interaction = Common.StoreInteractionCodes.TypeSearch,
@@ -1735,7 +1700,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
@@ -1803,7 +1768,7 @@ public class FhirController : ControllerBase
                 UrlQuery = Request.QueryString.ToString(),
                 RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 Forwarded = getForwardedInfo(Request),
-                Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+                Authorization = ResolveBearer(storeName, authHeader),
                 DestinationFormat = getMimeType(format, Request),
                 SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
                 Interaction = Common.StoreInteractionCodes.SystemBundle,
@@ -1862,7 +1827,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,
@@ -1918,7 +1883,7 @@ public class FhirController : ControllerBase
             UrlQuery = Request.QueryString.ToString(),
             RequestHeaders = Request.Headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             Forwarded = getForwardedInfo(Request),
-            Authorization = _smartAuthManager.GetAuthorization(storeName, authHeader ?? string.Empty),
+            Authorization = ResolveBearer(storeName, authHeader),
             DestinationFormat = getMimeType(format, Request),
             SerializePretty = pretty?.Equals("true", StringComparison.Ordinal) ?? false,
             SerializeSummaryFlag = summary ?? string.Empty,

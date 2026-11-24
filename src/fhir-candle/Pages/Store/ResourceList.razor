@@ -1,377 +1,56 @@
-﻿@using Microsoft.FluentUI.AspNetCore.Components;
-
 @page "/store/resource-list"
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject SmartViewerSession Session
 
-@* @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage *@
-
-@inject NavigationManager NavigationManager
-@inject IJSRuntime JS
-@inject IFhirStoreManager StoreManager
-@* @inject ProtectedLocalStorage BrowserStore *@
-
-@implements IDisposable
-
-<PageTitle>Resource List</PageTitle>
-
-<FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.H6">@ResourceType Resources</FluentLabel>
-
-    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="@ColSizes" ShowHover="true">
-        <TemplateColumn Title="Id" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdFilter)" Tooltip="true">
-            <ColumnOptions>
-                <div class="search-box">
-                    <FluentSearch 
-                        Autofocus="true"
-                        @bind-Value="IdFilter"
-                        @bind-Value:after="HandleFilterClear"
-                        @oninput="@(e => IdFilter = e.Value?.ToString() ?? string.Empty)"
-                        Placeholder="Resource ID..." />
-                </div>
-            </ColumnOptions>
+<FhirStorePage NamedTenant="@(StoreName ?? string.Empty)" ResourceType="@(ResourceType ?? string.Empty)">
+    <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">@ResourceType Resources</FluentLabel>
+    @{ SmartViewerSession.View view = Session.Display;
+       IResourceStore? resources = view.AdminStore?.GetValueOrDefault(ResourceType ?? string.Empty); }
+    <FluentDataGrid @key="view" Items="@Filtered(view)" ShowHover="true">
+        <TemplateColumn Title="Id" Sortable="true" Filtered="@(_idFilter.Length > 0)">
+            <ColumnOptions><input type="search" aria-label="Filter by resource ID" @bind="_idFilter" @bind:event="oninput" /></ColumnOptions>
             <ChildContent>
-                <FluentAnchor Href="@($"/store/resource-viewer?store={StoreName}&type={ResourceType}&id={context.Id}")" Appearance="Appearance.Hypertext">@context.Id</FluentAnchor>
+                <FluentLink Href="@($"/store/resource-viewer?store={Uri.EscapeDataString(StoreName ?? string.Empty)}&type={Uri.EscapeDataString(ResourceType ?? string.Empty)}&id={Uri.EscapeDataString(context.Id)}")">@context.Id</FluentLink>
             </ChildContent>
         </TemplateColumn>
-
-        @if (_resourceStore.ResourcesHaveName)
+        @if (resources?.ResourcesHaveName == true)
         {
-            <PropertyColumn Title="Name" Property="@(t => t.Name)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(NameFilter)" Tooltip="true" IsDefaultSortColumn="true">
-                <ColumnOptions>
-                    <div class="search-box">
-                        <FluentSearch 
-                            Autofocus="true"
-                            @bind-Value="NameFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => NameFilter = e.Value?.ToString() ?? string.Empty)"
-                            Placeholder="Name..." />
-                    </div>
-                </ColumnOptions>
+            <PropertyColumn Title="Name" Property="@(r => r.Name)" Sortable="true" IsDefaultSortColumn="true" Filtered="@(_nameFilter.Length > 0)">
+                <ColumnOptions><input type="search" aria-label="Filter by name" @bind="_nameFilter" @bind:event="oninput" /></ColumnOptions>
             </PropertyColumn>
         }
-
-        @if (_resourceStore.ResourcesAreConformance)
+        @if (resources?.ResourcesAreConformance == true)
         {
-            <PropertyColumn Title="Url" Property="@(t => t.Url)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(UrlFilter)" Tooltip="true">
-                <ColumnOptions>
-                    <div class="search-box">
-                        <FluentSearch 
-                            Autofocus="true"
-                            @bind-Value="UrlFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => UrlFilter = e.Value?.ToString() ?? string.Empty)"
-                            Placeholder="Url..." />
-                    </div>
-                </ColumnOptions>
+            <PropertyColumn Title="Url" Property="@(r => r.Url)" Sortable="true" Filtered="@(_urlFilter.Length > 0)">
+                <ColumnOptions><input type="search" aria-label="Filter by URL" @bind="_urlFilter" @bind:event="oninput" /></ColumnOptions>
             </PropertyColumn>
-
-            <PropertyColumn Title="Description" Property="@(t => t.Description)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(DescriptionFilter)" Tooltip="true">
-                <ColumnOptions>
-                    <div class="search-box">
-                        <FluentSearch 
-                            Autofocus="true"
-                            @bind-Value="DescriptionFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => DescriptionFilter = e.Value?.ToString() ?? string.Empty)"
-                            Placeholder="Description..." />
-                    </div>
-                </ColumnOptions>
+            <PropertyColumn Title="Description" Property="@(r => r.Description)" Sortable="true" Filtered="@(_descriptionFilter.Length > 0)">
+                <ColumnOptions><input type="search" aria-label="Filter by description" @bind="_descriptionFilter" @bind:event="oninput" /></ColumnOptions>
             </PropertyColumn>
         }
-
-        @if (_resourceStore.ResourcesAreIdentifiable)
+        @if (resources?.ResourcesAreIdentifiable == true)
         {
-            <PropertyColumn Title="Identifiers" Property="@(t => t.Identifiers)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdentifierFilter)" Tooltip="true">
-                <ColumnOptions>
-                    <div class="search-box">
-                        <FluentSearch 
-                            Autofocus="true"
-                            @bind-Value="IdentifierFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => IdentifierFilter = e.Value?.ToString() ?? string.Empty)"
-                            Placeholder="Identifier..." />
-                    </div>
-                </ColumnOptions>
+            <PropertyColumn Title="Identifiers" Property="@(r => r.Identifiers)" Sortable="true" Filtered="@(_identifierFilter.Length > 0)">
+                <ColumnOptions><input type="search" aria-label="Filter by identifier" @bind="_identifierFilter" @bind:event="oninput" /></ColumnOptions>
             </PropertyColumn>
         }
     </FluentDataGrid>
-</FluentStack>
+</FhirStorePage>
 
 @code {
-    /// <summary>Gets or sets the navigation tracker.</summary>
-    [CascadingParameter]
-    public INavTracker? NavTracker { get; set; } = null;
-
-    private NavPageInfoRec[] _navPages => new NavPageInfoRec[]
-    {
-        new() { Display = StoreName, Link = "/store?store=" + StoreName },
-        new() { Display = ResourceType, Link = $"/store/resource-list?store={StoreName}&type={ResourceType}" },
-    };
-
-    /// <summary>Gets or sets the package name.</summary>
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "store")]
-    public string StoreName { get; set; } = "";
-
-    /// <summary>Gets or sets the identifier of the resource.</summary>
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "type")]
-    public string ResourceType { get; set; } = "";
-
-    /// <summary>The FHIR store.</summary>
-    private IFhirStore _store = null!;
-
-    /// <summary>The resource store.</summary>
-    private IResourceStore _resourceStore = null!;
-
-    private string ColSizes => "1fr" +
-        (_resourceStore.ResourcesHaveName ? " 1fr" : string.Empty) +
-        (_resourceStore.ResourcesAreConformance ? " 1fr 1fr" : string.Empty) +
-        (_resourceStore.ResourcesAreIdentifiable ? " 1fr" : string.Empty);
-
-    private System.Timers.Timer? debounceTimer = null;
-
-    private IQueryable<InstanceTableRec>? _filteredItems = null;
-
-    private IQueryable<InstanceTableRec>? FilteredItems => _filteredItems;
-
+    [SupplyParameterFromQuery(Name = "store")] public string StoreName { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "type")] public string ResourceType { get; set; } = string.Empty;
     private string _idFilter = string.Empty;
-
-    private string IdFilter
-    {
-        get => _idFilter;
-        set
-        {
-            if (value != _idFilter)
-            {
-                _idFilter = value;
-                ResetDebounce();
-            }
-        }
-    }
-
     private string _nameFilter = string.Empty;
-
-    private string NameFilter
-    {
-        get => _nameFilter;
-        set
-        {
-            if (value != _nameFilter)
-            {
-                _nameFilter = value;
-                ResetDebounce();
-            }
-        }
-    }
-
     private string _urlFilter = string.Empty;
-
-    private string UrlFilter
-    {
-        get => _urlFilter;
-        set
-        {
-            if (value != _urlFilter)
-            {
-                _urlFilter = value;
-                ResetDebounce();
-            }
-        }
-    }
-
     private string _descriptionFilter = string.Empty;
-
-    private string DescriptionFilter
-    {
-        get => _descriptionFilter;
-        set
-        {
-            if (value != _descriptionFilter)
-            {
-                _descriptionFilter = value;
-                ResetDebounce();
-            }
-        }
-    }
-
     private string _identifierFilter = string.Empty;
 
-    private string IdentifierFilter
-    {
-        get => _identifierFilter;
-        set
-        {
-            if (value != _identifierFilter)
-            {
-                _identifierFilter = value;
-                ResetDebounce();
-            }
-        }
-    }
+    private IQueryable<InstanceTableRec> Filtered(SmartViewerSession.View view) => view.Rows.Where(r =>
+        Matches(r.Id, _idFilter) && (view.AdminStore is null ||
+        (Matches(r.Name, _nameFilter) && Matches(r.Url, _urlFilter) && Matches(r.Description, _descriptionFilter) &&
+         Matches(r.Identifiers, _identifierFilter)))).AsQueryable();
 
-    /// <summary>Gets filtered items.</summary>
-    /// <returns>The filtered items.</returns>
-    private IQueryable<InstanceTableRec>? GetFilteredItems()
-    {
-        if ((_resourceStore is null) ||
-            (!_resourceStore.Any()))
-        {
-            return null;
-        }
-
-        // check for no filters
-        if (string.IsNullOrWhiteSpace(_idFilter) &&
-            string.IsNullOrWhiteSpace(_nameFilter) &&
-            string.IsNullOrWhiteSpace(_urlFilter) &&
-            string.IsNullOrWhiteSpace(_descriptionFilter) &&
-            string.IsNullOrWhiteSpace(_identifierFilter))
-        {
-            return _resourceStore.GetInstanceTableView();
-        }
-
-        // apply filters
-        return _resourceStore
-            .GetInstanceTableView()
-            .Where(tr => string.IsNullOrWhiteSpace(_idFilter) || tr.Id.Contains(_idFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(tr => string.IsNullOrWhiteSpace(_nameFilter) || tr.Name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(tr => string.IsNullOrWhiteSpace(_urlFilter) || tr.Url.Contains(_urlFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(tr => string.IsNullOrWhiteSpace(_descriptionFilter) || tr.Description.Contains(_descriptionFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(tr => string.IsNullOrWhiteSpace(_identifierFilter) || tr.Identifiers.Contains(_identifierFilter, StringComparison.OrdinalIgnoreCase))
-            .AsQueryable<InstanceTableRec>();
-    }
-    
-    /// <summary>Executes the search action.</summary>
-    private void OnSearchChanged()
-    {
-        _filteredItems = GetFilteredItems();
-        StateHasChanged();
-    }
-
-    private async void TimerElapsed_TickAsync(object? sender, EventArgs e)
-    {
-        CancelDebounce();
-        await InvokeAsync(OnSearchChanged);
-    }
-
-    private void ResetDebounce()
-    {
-        if (debounceTimer is not null)
-        {
-            debounceTimer.Enabled = false;
-            debounceTimer.Elapsed -= TimerElapsed_TickAsync;
-            debounceTimer.Dispose();
-            debounceTimer = null;
-        }
-
-        debounceTimer = new(400);
-        debounceTimer.Elapsed += TimerElapsed_TickAsync;
-        debounceTimer.Enabled = true;
-        debounceTimer.Start();
-    }
-
-    private void CancelDebounce()
-    {
-        if (debounceTimer is not null)
-        {
-            debounceTimer.Enabled = false;
-            debounceTimer.Elapsed -= TimerElapsed_TickAsync;
-            debounceTimer.Dispose();
-            debounceTimer = null;
-        }
-    }
-
-    private void HandleFilterClear()
-    {
-        CancelDebounce();
-        _ = InvokeAsync(OnSearchChanged);
-    }
-
-    /// <summary>Executes the initialized asynchronous action.</summary>
-    /// <returns>An asynchronous result.</returns>
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-
-        if ((!string.IsNullOrEmpty(StoreName)) &&
-            (!string.IsNullOrEmpty(ResourceType)) &&
-            (StoreManager.TryGetValue(StoreName, out _store!)) &&
-            (_store.TryGetValue(ResourceType, out _resourceStore!)))
-        {
-            _resourceStore.OnInstanceCreated += ResourceStore_OnChanged;
-            _resourceStore.OnInstanceUpdated += ResourceStore_OnChanged;
-            _resourceStore.OnInstanceDeleted += ResourceStore_OnChanged;
-            _filteredItems = GetFilteredItems();
-        }
-
-        // notify of store root in case user clicked here directly
-        NavTracker?.NotifyNav(_navPages);
-
-        NavigationManager.LocationChanged += HandleLocationChanged;
-    }
-
-
-    /// <summary>Handles the location changed.</summary>
-    /// <param name="sender">The sender.</param>
-    /// <param name="e">     Location changed event information.</param>
-    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        if (e.Location.ToLowerInvariant().Contains("/store/resource-editor", StringComparison.Ordinal))
-        {
-            // if (_store is not null)
-            // {
-            // }
-
-            if (_resourceStore is not null)
-            {
-                _resourceStore.OnInstanceCreated -= ResourceStore_OnChanged;
-                _resourceStore.OnInstanceUpdated -= ResourceStore_OnChanged;
-                _resourceStore.OnInstanceDeleted -= ResourceStore_OnChanged;
-            }
-
-            if ((!string.IsNullOrEmpty(StoreName)) &&
-                (!string.IsNullOrEmpty(ResourceType)) &&
-                (StoreManager.TryGetValue(StoreName, out _store!)) &&
-                (_store.TryGetValue(ResourceType, out _resourceStore!)))
-            {
-                _resourceStore.OnInstanceCreated += ResourceStore_OnChanged;
-                _resourceStore.OnInstanceUpdated += ResourceStore_OnChanged;
-                _resourceStore.OnInstanceDeleted += ResourceStore_OnChanged;
-                _filteredItems = GetFilteredItems();
-            }
-
-            // notify of store root in case user clicked here directly
-            NavTracker?.NotifyNav(_navPages);
-        }
-    }
-
-    /// <summary>FHIR store on changed.</summary>
-    /// <param name="sender">The sender.</param>
-    /// <param name="e">     Event information.</param>
-    private void ResourceStore_OnChanged(object? sender, EventArgs e)
-    {
-        _filteredItems = GetFilteredItems();
-        _ = InvokeAsync(() => StateHasChanged());
-    }
-
-    /// <summary>
-    /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged
-    /// resources.
-    /// </summary>
-    public void Dispose()
-    {
-        NavigationManager.LocationChanged -= HandleLocationChanged;
-
-        debounceTimer?.Dispose();
-
-        if (_store is not null)
-        {
-        }
-
-        if (_resourceStore is not null)
-        {
-            _resourceStore.OnInstanceCreated -= ResourceStore_OnChanged;
-            _resourceStore.OnInstanceUpdated -= ResourceStore_OnChanged;
-            _resourceStore.OnInstanceDeleted -= ResourceStore_OnChanged;
-        }
-    }
+    private static bool Matches(string? value, string filter) =>
+        string.IsNullOrWhiteSpace(filter) || value?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true;
 }

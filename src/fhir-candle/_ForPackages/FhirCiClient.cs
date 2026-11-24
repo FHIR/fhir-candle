@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
-using Firely.Fhir.Packages;
+using FhirCandle.Models;
+using SemVer = SemanticVersioning.Version;
 using Newtonsoft.Json;
 
 #nullable enable
@@ -13,7 +14,7 @@ namespace fhir.candle._ForPackages
     /// <summary>
     /// Represents a client for interacting with a FHIR Continuous Integration (CI) server.
     /// </summary>
-    public class FhirCiClient : IPackageServer, IDisposable
+    public class FhirCiClient : IDisposable
     {
         /// <summary>(Immutable) The ci scope.</summary>
         public const string FhirCiScope = "build.fhir.org";
@@ -923,7 +924,16 @@ namespace fhir.candle._ForPackages
                 return new();
             }
 
-            Versions v = listing.ToVersions();
+            List<SemVer> parsed = [];
+            foreach (string version in listing.Versions?.Keys ?? Enumerable.Empty<string>())
+            {
+                if (SemVer.TryParse(version, out SemVer? item) && item is not null)
+                {
+                    parsed.Add(item);
+                }
+            }
+            parsed.Sort();
+            Versions v = new(parsed.Select(item => item.ToString()));
 
             if (v.Items.Count != listing.Versions!.Count)
             {
@@ -932,7 +942,6 @@ namespace fhir.candle._ForPackages
 
             return v;
 
-            //return listing is null ? new Versions() : listing.ToVersions();
         }
 
         /// <summary>
@@ -951,13 +960,8 @@ namespace fhir.candle._ForPackages
         /// <param name="reference">The package reference.</param>
         /// <param name="cache">The package cache.</param>
         /// <returns>True if the package is outdated, false if it is up to date, or null if the package is not found in the QA listings.</returns>
-        public async Task<bool?> IsPackageOutdated(PackageReference reference, IPackageCache cache)
+        public async Task<bool?> IsPackageOutdated(PackageReference reference, DiskPackageCache cache)
         {
-            if (cache is not DiskPackageCache diskCache)
-            {
-                throw new Exception("FhirCiClient requires a DiskPackageCache for IsPackageOutdated");
-            }
-
             // find our package in the QA listings
             FhirCiQaRecord? qa = await getQaRecord(reference.Name, reference.Version);
 
@@ -986,7 +990,7 @@ namespace fhir.candle._ForPackages
             }
 
             // get the manifest from the local copy
-            PackageManifest? installedManifest = await diskCache.ReadManifestEx(taggedReference);
+            PackageManifest? installedManifest = await cache.ReadManifestEx(taggedReference);
 
             if (installedManifest is null)
             {
@@ -1004,11 +1008,6 @@ namespace fhir.candle._ForPackages
         /// <param name="cache">The package cache.</param>
         public async Task InstallOrUpdate(PackageReference reference, _ForPackages.DiskPackageCache cache)
         {
-            if (cache is not DiskPackageCache diskCache)
-            {
-                throw new Exception("FhirCiClient requires a DiskPackageCache for IsPackageOutdated");
-            }
-
             // find our package in the QA listings
             FhirCiQaRecord? qa = await getQaRecord(reference.Name, reference.Version);
 
@@ -1032,7 +1031,7 @@ namespace fhir.candle._ForPackages
             bool isInstalled = await cache.IsInstalled(taggedReference);
 
             // get the manifest from the local copy
-            PackageManifest? installedManifest = isInstalled ? await diskCache.ReadManifestEx(taggedReference) : null;
+            PackageManifest? installedManifest = isInstalled ? await cache.ReadManifestEx(taggedReference) : null;
 
             // compare the build date from QA and the installed manifest
             bool shouldDownload = (installedManifest?.Date ?? DateTimeOffset.MinValue) < (qa.BuildDateIso ?? qa.BuildDate ?? DateTimeOffset.MaxValue);

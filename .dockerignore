@@ -1,0 +1,14 @@
+.git
+.vs
+.vscode
+**/bin
+**/obj
+**/TestResults
+**/*.user
+**/*.local.json
+artifacts
+local
+nupkg
+scratch
+secrets
+temp

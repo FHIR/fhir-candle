@@ -1,24 +1,22 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
-@inject IJSRuntime JS
-
 @implements IDisposable
 
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.H6">@ResourceType Resources</FluentLabel>
+    <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">@ResourceType Resources</FluentLabel>
     
     @* <FluentLabel>Selected Ids: @(string.Join(", ", SelectedIds))</FluentLabel> *@
 
-    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="@ColSizes" RowClass="@(itr => SelectedIds.Contains(itr.Id) ? "highlighted-row" : null)" ItemKey="@(i => i.Id)" OnRowFocus="HandleRowFocus" TGridItem=InstanceTableRec>
+    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="@ColSizes" RowClass="@(itr => SelectedIds.Contains(itr.Id) ? "highlighted-row" : null)" ItemKey="@(i => i.Id)" OnRowClick="HandleRowFocus" TGridItem=InstanceTableRec>
         <PropertyColumn Title="Id" Property="@(t => t.Id)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdFilter)" Tooltip="true">
             <ColumnOptions>
                 <div class="search-box">
-                    <FluentSearch 
+                    <FluentTextInput
                         Autofocus="true"
                         @bind-Value="IdFilter"
-                        @bind-Value:after="HandleFilterClear"
-                        @oninput="@(e => IdFilter = e.Value?.ToString() ?? string.Empty)"
+                        Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                        @bind-Value:after="@(() => HandleSearchInput(IdFilter))"
                         Placeholder="Resource ID..." />
                 </div>
             </ColumnOptions>
@@ -29,11 +27,11 @@
             <PropertyColumn Title="Name" Property="@(t => t.Name)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(NameFilter)" Tooltip="true" IsDefaultSortColumn="true">
                 <ColumnOptions>
                     <div class="search-box">
-                        <FluentSearch 
+                        <FluentTextInput
                             Autofocus="true"
                             @bind-Value="NameFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => NameFilter = e.Value?.ToString() ?? string.Empty)"
+                            Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                            @bind-Value:after="@(() => HandleSearchInput(NameFilter))"
                             Placeholder="Name..." />
                     </div>
                 </ColumnOptions>
@@ -45,11 +43,11 @@
             <PropertyColumn Title="Url" Property="@(t => t.Url)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(UrlFilter)" Tooltip="true">
                 <ColumnOptions>
                     <div class="search-box">
-                        <FluentSearch 
+                        <FluentTextInput
                             Autofocus="true"
                             @bind-Value="UrlFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => UrlFilter = e.Value?.ToString() ?? string.Empty)"
+                            Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                            @bind-Value:after="@(() => HandleSearchInput(UrlFilter))"
                             Placeholder="Url..." />
                     </div>
                 </ColumnOptions>
@@ -58,11 +56,11 @@
             <PropertyColumn Title="Description" Property="@(t => t.Description)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(DescriptionFilter)" Tooltip="true">
                 <ColumnOptions>
                     <div class="search-box">
-                        <FluentSearch 
+                        <FluentTextInput
                             Autofocus="true"
                             @bind-Value="DescriptionFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => DescriptionFilter = e.Value?.ToString() ?? string.Empty)"
+                            Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                            @bind-Value:after="@(() => HandleSearchInput(DescriptionFilter))"
                             Placeholder="Description..." />
                     </div>
                 </ColumnOptions>
@@ -74,11 +72,11 @@
             <PropertyColumn Title="Identifiers" Property="@(t => t.Identifiers)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdentifierFilter)" Tooltip="true">
                 <ColumnOptions>
                     <div class="search-box">
-                        <FluentSearch 
+                        <FluentTextInput
                             Autofocus="true"
                             @bind-Value="IdentifierFilter"
-                            @bind-Value:after="HandleFilterClear"
-                            @oninput="@(e => IdentifierFilter = e.Value?.ToString() ?? string.Empty)"
+                            Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                            @bind-Value:after="@(() => HandleSearchInput(IdentifierFilter))"
                             Placeholder="Identifier..." />
                     </div>
                 </ColumnOptions>
@@ -230,44 +228,29 @@
 
     private void HandleRowFocus(FluentDataGridRow<InstanceTableRec> row)
     {
-        // _ = JsLogAsync($"Focused row item id: {row.Item?.Id}");
+        if (row?.Item is null || row.RowType != DataGridRowType.Default)
+        {
+            return;
+        }
 
         if (AllowMultipleSelection)
         {
-            if (row?.Item is not null)
+            if (SelectedIds.Contains(row.Item.Id))
             {
-                if (SelectedIds.Contains(row.Item.Id))
-                {
-                    SelectedIds.Remove(row.Item.Id);
-                }
-                else
-                {
-                    SelectedIds.Add(row.Item.Id);
-                }
+                SelectedIds.Remove(row.Item.Id);
+            }
+            else
+            {
+                SelectedIds.Add(row.Item.Id);
             }
         }
         else
         {
             SelectedIds.Clear();
-            if (row?.Item is not null)
-            {
-                SelectedIds.Add(row.Item.Id);
-            }
+            SelectedIds.Add(row.Item.Id);
         }
 
         SelectedIdsChanged.InvokeAsync(SelectedIds);
-
-        // SelectedIds = SelectedIds.AsEnumerable<string>();
-        StateHasChanged();
-    }
-
-    /// <summary>Logs an asynchronous.</summary>
-    /// <param name="message">The message.</param>
-    /// <returns>An asynchronous result.</returns>
-    private async Task JsLogAsync(string message)
-    {
-        // note this has to be awaited or the call never happens
-        await JS.InvokeVoidAsync("console.log", message);
     }
 
     /// <summary>Executes the search action.</summary>
@@ -314,6 +297,14 @@
     {
         CancelDebounce();
         _ = InvokeAsync(OnSearchChanged);
+    }
+
+    private void HandleSearchInput(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            HandleFilterClear();
+        }
     }
 
     /// <summary>Executes the initialized asynchronous action.</summary>

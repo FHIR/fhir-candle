@@ -19,6 +19,7 @@ using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.JSInterop;
+using ModelContextProtocol.AspNetCore;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -48,16 +49,18 @@ public static partial class Program
             .Build();
 
         RootCommand root = CliOptions.RootCommand;
-        root.SetAction(async (ParseResult pr) => await RunServer(pr, extConfig));
+        root.SetAction(async (ParseResult parseResult) =>
+        {
+            await RunServer(parseResult, extConfig);
+            return _retVal;
+        });
 
         ParseResult pr = root.Parse(args, new ParserConfiguration()
         {
             ResponseFileTokenReplacer = null,
         });
 
-        await pr.InvokeAsync();
-
-        return _retVal;
+        return await pr.InvokeAsync();
 
 
         //// Create commands from CliOptions.Commands so the list is defined in one place
@@ -192,25 +195,29 @@ public static partial class Program
 
             WebApplicationBuilder? builder = null;
 
-            // when packaging as a dotnet tool, we need to do some directory shenanigans for the static content root
+            // Tool payloads carry framework-specific assets; prefer them over package-level assets.
             string root = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location ?? AppContext.BaseDirectory) ?? string.Empty;
             if (!string.IsNullOrEmpty(root))
             {
-                string staticWebRoot = FindRelativeDir(root, "staticwebassets", false);
-                string wwwRoot = FindRelativeDir(root, "wwwroot", false);
-
-                if ((!string.IsNullOrEmpty(staticWebRoot)) && Directory.Exists(staticWebRoot))
+                string wwwRoot = Path.Combine(root, "wwwroot");
+                if (!Directory.Exists(wwwRoot))
                 {
-                    builder = WebApplication.CreateBuilder(new WebApplicationOptions()
-                    {
-                        WebRootPath = staticWebRoot,
-                    });
+                    wwwRoot = FindRelativeDir(root, "wwwroot", false);
                 }
-                else if ((!string.IsNullOrEmpty(wwwRoot)) && Directory.Exists(wwwRoot))
+
+                string staticWebRoot = FindRelativeDir(root, "staticwebassets", false);
+                if ((!string.IsNullOrEmpty(wwwRoot)) && Directory.Exists(wwwRoot))
                 {
                     builder = WebApplication.CreateBuilder(new WebApplicationOptions()
                     {
                         WebRootPath = wwwRoot,
+                    });
+                }
+                else if ((!string.IsNullOrEmpty(staticWebRoot)) && Directory.Exists(staticWebRoot))
+                {
+                    builder = WebApplication.CreateBuilder(new WebApplicationOptions()
+                    {
+                        WebRootPath = staticWebRoot,
                     });
                 }
             }
@@ -254,6 +261,7 @@ public static partial class Program
             builder.Services.AddHostedService<IFhirPackageService>(sp => sp.GetRequiredService<IFhirPackageService>());
 
             // add a SMART Authorization singleton, then register as a hosted service
+            builder.Services.AddSingleton(TimeProvider.System);
             builder.Services.AddSingleton<ISmartAuthManager, SmartAuthManager>();
             builder.Services.AddHostedService<ISmartAuthManager>(sp => sp.GetRequiredService<ISmartAuthManager>());
 
@@ -264,7 +272,8 @@ public static partial class Program
 
                 // add MCP services
                 builder.Services.AddMcpServer()
-                    .WithHttpTransport()
+                    // Preserve initialize-handshake sessions and GET/DELETE routes across the SDK's stateless default change.
+                    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateful)
                     .WithListToolsHandler(fMcpTools.HandleListToolsRequest)
                     .WithCallToolHandler(fMcpTools.HandleCallToolRequest);
                 // .WithToolsFromAssembly();
@@ -296,6 +305,8 @@ public static partial class Program
                 //});
                 //builder.Services.AddServerSideBlazor();
                 builder.Services.AddFluentUIComponents();
+                builder.Services.AddScoped<Ui.CandleThemeState>();
+                builder.Services.AddScoped<SmartViewerSession>();
 
                 // set our default UI page
                 //Pages.Index.Mode = config.UiMode;

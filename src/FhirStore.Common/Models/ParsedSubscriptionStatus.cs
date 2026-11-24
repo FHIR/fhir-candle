@@ -80,4 +80,26 @@ public class ParsedSubscriptionStatus
 
     /// <summary>Gets or initializes the errors.</summary>
     public IEnumerable<string> Errors { get; init; } = Array.Empty<string>();
+
+    /// <summary>Copies a receipt and freezes its nested sequences before publication.</summary>
+    public ParsedSubscriptionStatus DetachedCopy(DateTimeOffset? processedDateTime = null) => new()
+    {
+        BundleId = BundleId,
+        ProcessedDateTime = processedDateTime ?? ProcessedDateTime,
+        SubscriptionReference = SubscriptionReference,
+        SubscriptionTopicCanonical = SubscriptionTopicCanonical,
+        Status = Status,
+        NotificationType = NotificationType,
+        EventsSinceSubscriptionStart = EventsSinceSubscriptionStart,
+        NotificationEvents = Array.AsReadOnly(NotificationEvents.Select(e => new ParsedNotificationEvent
+        {
+            Id = e.Id,
+            EventNumber = e.EventNumber,
+            Timestamp = e.Timestamp,
+            FocusReference = e.FocusReference,
+            AdditionalContextReferences = e.AdditionalContextReferences is null
+                ? null : Array.AsReadOnly(e.AdditionalContextReferences.ToArray()),
+        }).ToArray()),
+        Errors = Array.AsReadOnly(Errors.ToArray()),
+    };
 }

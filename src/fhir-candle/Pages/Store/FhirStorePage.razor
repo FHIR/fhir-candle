@@ -1,299 +1,178 @@
-﻿@using Microsoft.FluentUI.AspNetCore.Components;
-
 @page "/store"
-@inject NavigationManager NavigationManager
-@inject IFhirStoreManager StoreManager
-
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject SmartViewerSession Session
 @implements IDisposable
 
-<PageTitle>FHIR Candle</PageTitle>
-
+<PageTitle>FHIR Resources: @Tenant</PageTitle>
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.H4">FHIR Resources: @StoreName</FluentLabel>
-
-    <FluentSwitch Label="Hide Empty Resources" @bind-Value="HideEmptyResources"></FluentSwitch>
-
-    <FluentDataGrid Items="@FilteredItems" GridTemplateColumns="1fr 1fr" ShowHover="true">
-@*         <PropertyColumn Title="Resource Name" Property="@(ri => ri.ResourceName)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(ResourceNameFilter)" Tooltip="true"  IsDefaultSortColumn="true">
-            <ColumnOptions>
-                <div class="search-box">
-                    <FluentSearch 
-                        Autofocus="true"
-                        @bind-Value="ResourceNameFilter"
-                        @bind-Value:after="HandleFilterClear"
-                        @oninput="@(e => ResourceNameFilter = e.Value?.ToString() ?? string.Empty)"
-                        Placeholder="Resource Name..." />
-                </div>
-            </ColumnOptions>
-        </PropertyColumn>
- *@
-        <TemplateColumn Title="Resource Name" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(ResourceNameFilter)" Tooltip="true"  IsDefaultSortColumn="true">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-list?store={StoreName}&type={context.ResourceName}")">@context.ResourceName</FluentAnchor>
-        </TemplateColumn>
-
-        <PropertyColumn Title="Instance Count" Property="@(ri => ri.Count)" Sortable="true" Tooltip="true">
-        </PropertyColumn>
-
-    </FluentDataGrid>
-
+    <FluentText Size="TextSize.Size700">FHIR Resources: @Tenant</FluentText>
+    <strong>@(Session.Smart ? SmartViewerSession.SmartLabel : SmartViewerSession.AdminLabel) — Tenant: @Tenant</strong>
+    <FluentStack Class="store-actions" Orientation="Orientation.Horizontal" Wrap="true" HorizontalGap="8" VerticalGap="8" VerticalAlignment="VerticalAlignment.Center">
+        @if (FormatChanged.HasDelegate)
+        {
+            <FluentSelect Value="@Format" ValueChanged="@FormatChanged" TOption="string" TValue="string"
+                          Label="Resource format" LabelPosition="LabelPosition.Before">
+                <FluentOption Value="@("json")">JSON</FluentOption>
+                <FluentOption Value="@("xml")">XML</FluentOption>
+            </FluentSelect>
+        }
+        else if (ChildContent is null && !Session.Smart)
+        {
+            <FluentSwitch Label="Hide Empty Resources" @bind-Value="_hideEmpty" />
+        }
+        <FluentButton OnClick="SwitchMode">@(Session.Smart ? SmartViewerSession.AdminLabel : SmartViewerSession.SmartLabel)</FluentButton>
+        <FluentButton OnClick="Refresh">Refresh</FluentButton>
+        <span id="store-access-warning" tabindex="0" role="img" aria-label="Store access warning" style="display: inline-flex;">
+            <FluentIcon Value="@(new Icons.Regular.Size20.Warning())" Color="Color.Warning" />
+        </span>
+        <FluentTooltip Anchor="store-access-warning" UseTooltipService="false">Unauthenticated UI users have admin access to inspect synthetic store state.</FluentTooltip>
+        @if (Session.Smart)
+        {
+            <label>Issued access token <input type="password" autocomplete="off" @bind="_input" @bind:event="oninput" /></label>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SignIn">Use credential</FluentButton>
+        }
+    </FluentStack>
+    @if (Session.Display.Status is {} status && (int)status >= 400)
+    {
+        <p role="status">Inspector: @((int)status) @status</p>
+    }
+    @if (ChildContent is not null)
+    {
+        @ChildContent
+    }
+    else
+    {
+        <FluentDataGrid @key="Session.Display" Items="@Types" ShowHover="true">
+            <TemplateColumn Title="Resource Name" Sortable="true">
+                <FluentLink Href="@ListLink(context.Name)">@context.Name</FluentLink>
+            </TemplateColumn>
+            @if (!Session.Smart)
+            {
+                <PropertyColumn Title="Instance Count" Property="@(r => r.Count)" Sortable="true" />
+            }
+        </FluentDataGrid>
+    }
 </FluentStack>
 
-@*
-<MudTable @ref="_displayTable"
-        Items="@_store.OrderBy(kvp => kvp.Key)"
-        Filter="new Func<KeyValuePair<string, IResourceStore>, bool>(FilterFuncInstance)"
-        Dense="true"
-        Striped="true"
-        Height="calc(100vh - (var(--mud-appbar-height) * 2))"
-        FixedHeader="true">
-    <ToolBarContent>
-        <FluentLabel Typo="Typography.H6">FHIR Resources: @StoreName</FluentLabel>
-        <MudSpacer />
-        <MudSwitch Color="Color.Info" @bind-Checked="hideEmptyResources" Label="Hide empty" />
-        <MudSpacer />
-        <MudTooltip Text="Refresh Contents">
-            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Info" OnClick="HandleRefresh" />
-        </MudTooltip>
-        <MudTooltip Text="Toggle auto-refresh (10 seconds)">
-            <MudSwitch Color="Color.Info" @bind-Checked="autoRefresh" Label="Auto-refresh" />
-        </MudTooltip>
-        <MudSpacer />
-        <FluentTextField @bind-Value="@resourceFilter" Label="Filter" DebounceInterval="100" OnDebounceIntervalElapsed="HandleResourceFilterChange" />
-    </ToolBarContent>
-    <ColGroup>
-        <col style="width: 10vw!important;" />
-        <col style="width: 50vw!important;" />
-        <col style="width: 40vw!important;" />
-    </ColGroup>
-    <HeaderContent>
-        <MudTh></MudTh>
-        <MudTh>Resource Type</MudTh>
-        <MudTh>Count</MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd></MudTd>
-        <MudTd DataLabel="Resource Type">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-list?store={StoreName}&type={context.Key}")" >@context.Key</FluentAnchor>
-        </MudTd>
-        <MudTd DataLabel="Count">@context.Value.Count</MudTd>
-    </RowTemplate>
-</MudTable>
-*@
-
 @code {
-    /// <summary>Gets or sets the navigation tracker.</summary>
-    [CascadingParameter]
-    public INavTracker? NavTracker { get; set; } = null;
+    [CascadingParameter] public INavTracker? NavTracker { get; set; }
+    [SupplyParameterFromQuery(Name = "store")] public string? StoreName { get; set; }
 
-    private NavPageInfoRec[] _navPages => new NavPageInfoRec[]
+    // The list and detail routes reuse this inspector shell.
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? NamedTenant { get; set; }
+    [Parameter] public string? ResourceType { get; set; }
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public string Format { get; set; } = "json";
+    [Parameter] public EventCallback<string> FormatChanged { get; set; }
+
+    private string Tenant => NamedTenant ?? StoreName ?? string.Empty;
+    private string ListLink(string type) => $"/store/resource-list?store={Uri.EscapeDataString(Tenant)}&type={Uri.EscapeDataString(type)}";
+    private IQueryable<SmartViewerSession.ResourceKind> Types => Session.Display.Types
+        .Where(r => !_hideEmpty || r.Count is null or > 0).AsQueryable();
+    private bool _hideEmpty = true;
+    private string _input = string.Empty;
+    private SmartViewerSession.Request? _request;
+    private IFhirStore? _watch;
+    private bool _disposed;
+
+    protected override void OnInitialized() => Session.Expired += SessionExpired;
+
+    protected override async Task OnParametersSetAsync()
     {
-        new() { Display = StoreName, Link = "/store?store=" + StoreName },
-    };
-
-    /// <summary>Gets or sets the package name.</summary>
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "store")]
-    public string StoreName { get; set; } = "";
-
-    /// <summary>Information about the resource store.</summary>
-    private record class ResourceStoreInfo
-    {
-        public string ResourceName { get; set; } = string.Empty;
-        public int Count { get; set; }
-    }
-
-    private System.Timers.Timer? debounceTimer = null;
-
-    private string _resourceNameFilter = string.Empty;
-
-    private string ResourceNameFilter
-    {
-        get => _resourceNameFilter;
-        set
+        SmartViewerSession.Request request = new(Tenant, ResourceType, Id, Format);
+        if (_request == request)
         {
-            if (value != _resourceNameFilter)
+            return;
+        }
+        _request = request;
+        _input = string.Empty;
+        Session.SelectTenant(Tenant);
+        List<NavPageInfoRec> crumbs = [new() { Display = Tenant, Link = $"/store?store={Uri.EscapeDataString(Tenant)}" }];
+        if (ResourceType is not null)
+        {
+            crumbs.Add(new() { Display = ResourceType, Link = ListLink(ResourceType) });
+            if (Id is not null)
             {
-                _resourceNameFilter = value;
-                ResetDebounce();
+                crumbs.Add(new()
+                {
+                    Display = Id,
+                    Link = $"/store/resource-viewer?store={Uri.EscapeDataString(Tenant)}&type={Uri.EscapeDataString(ResourceType)}&id={Uri.EscapeDataString(Id)}",
+                });
             }
         }
+        NavTracker?.NotifyNav(crumbs.ToArray());
+        await Refresh();
     }
 
-    IQueryable<ResourceStoreInfo>? _filteredItems = null;
-
-    private IQueryable<ResourceStoreInfo>? FilteredItems => _filteredItems;
-
-    private IFhirStore _store = null!;
-
-    private bool _hideEmptyResources = true;
-
-    /// <summary>True to hide or false to show empty resources.</summary>
-    private bool HideEmptyResources
+    private Task SwitchMode()
     {
-        get => _hideEmptyResources;
-        set
+        _input = string.Empty;
+        Session.SelectMode(!Session.Smart);
+        return Refresh();
+    }
+
+    private Task SignIn()
+    {
+        Session.SignIn(_input);
+        _input = string.Empty;
+        return Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        if (_disposed || _request is null)
         {
-            if (value != _hideEmptyResources)
-            {
-                _hideEmptyResources = value;
-                _filteredItems = GetFilteredItems();
-            }
+            return;
         }
-    }
-    
-    /// <summary>Gets filtered items.</summary>
-    /// <returns>The filtered items.</returns>
-    private IQueryable<ResourceStoreInfo>? GetFilteredItems()
-    {
-        if ((_store is null) ||
-            (!_store.Any()))
+        Watch(null);
+        await Session.LoadAsync(_request, SmartViewerSession.LoadAdmin);
+        if (!_disposed)
         {
-            return null;
-        }
-
-        // check for no filters
-        if (string.IsNullOrWhiteSpace(_resourceNameFilter))
-        {
-            if (HideEmptyResources)
-            {
-                return _store
-                    .Where(kvp => kvp.Value.Count > 0)
-                    .Select(kvp => new ResourceStoreInfo(){ ResourceName = kvp.Key, Count = kvp.Value.Count })
-                    .AsQueryable<ResourceStoreInfo>();
-            }
-
-            return _store
-                .Select(kvp => new ResourceStoreInfo(){ ResourceName = kvp.Key, Count = kvp.Value.Count })
-                .AsQueryable<ResourceStoreInfo>();
-        }
-
-        if (HideEmptyResources)
-        {
-            return _store
-                .Where(kvp => kvp.Value.Count > 0)
-                .Where(kvp => kvp.Key.Contains(_resourceNameFilter, StringComparison.OrdinalIgnoreCase))
-                .Select(kvp => new ResourceStoreInfo(){ ResourceName = kvp.Key, Count = kvp.Value.Count })
-                .AsQueryable<ResourceStoreInfo>();
-        }
-
-        // apply filters
-        return _store
-            .Where(kvp => kvp.Key.Contains(_resourceNameFilter, StringComparison.OrdinalIgnoreCase))
-            .Select(kvp => new ResourceStoreInfo(){ ResourceName = kvp.Key, Count = kvp.Value.Count })
-            .AsQueryable<ResourceStoreInfo>();
-    }
-
-    /// <summary>Executes the search action.</summary>
-    private void OnSearchChanged()
-    {
-        _filteredItems = GetFilteredItems();
-        StateHasChanged();
-    }
-
-    private async void TimerElapsed_TickAsync(object? sender, EventArgs e)
-    {
-        CancelDebounce();
-        await InvokeAsync(OnSearchChanged);
-    }
-
-    private void ResetDebounce()
-    {
-        if (debounceTimer is not null)
-        {
-            debounceTimer.Enabled = false;
-            debounceTimer.Elapsed -= TimerElapsed_TickAsync;
-            debounceTimer.Dispose();
-            debounceTimer = null;
-        }
-
-        debounceTimer = new(400);
-        debounceTimer.Elapsed += TimerElapsed_TickAsync;
-        debounceTimer.Enabled = true;
-        debounceTimer.Start();
-    }
-
-    private void CancelDebounce()
-    {
-        if (debounceTimer is not null)
-        {
-            debounceTimer.Enabled = false;
-            debounceTimer.Elapsed -= TimerElapsed_TickAsync;
-            debounceTimer.Dispose();
-            debounceTimer = null;
+            Watch(Session.Display.AdminStore);
         }
     }
 
-    private void HandleFilterClear()
+    private void Watch(IFhirStore? store)
     {
-        CancelDebounce();
-        _ = InvokeAsync(OnSearchChanged);
-    }
-
-    /// <summary>Executes the initialized asynchronous action.</summary>
-    /// <returns>An asynchronous result.</returns>
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-
-        if ((!string.IsNullOrEmpty(StoreName)) &&
-            (StoreManager.TryGetValue(StoreName, out _store!)))
+        if (_watch is not null)
         {
-            _store.OnInstanceCreated += Store_OnChanged;
-            _store.OnInstanceDeleted += Store_OnChanged;
+            _watch.OnInstanceCreated -= StoreChanged;
+            _watch.OnInstanceUpdated -= StoreChanged;
+            _watch.OnInstanceDeleted -= StoreChanged;
         }
-
-        _filteredItems = GetFilteredItems();
-
-        NavTracker?.NotifyNav(_navPages);
-    }
-
-    /// <summary>Handles the location changed.</summary>
-    /// <param name="sender">The sender.</param>
-    /// <param name="e">     Location changed event information.</param>
-    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        if (e.Location.ToLowerInvariant().Contains("/store?", StringComparison.Ordinal))
+        _watch = store;
+        if (store is not null)
         {
-            if (_store is not null)
-            {
-                _store.OnInstanceCreated -= Store_OnChanged;
-                _store.OnInstanceDeleted -= Store_OnChanged;
-            }
-
-            if ((!string.IsNullOrEmpty(StoreName)) &&
-                (StoreManager.TryGetValue(StoreName, out _store!)))
-            {
-                _store.OnInstanceCreated += Store_OnChanged;
-                _store.OnInstanceDeleted += Store_OnChanged;
-            }
-
-            _filteredItems = GetFilteredItems();
-
-            NavTracker?.NotifyNav(_navPages);
+            store.OnInstanceCreated += StoreChanged;
+            store.OnInstanceUpdated += StoreChanged;
+            store.OnInstanceDeleted += StoreChanged;
         }
     }
 
-    /// <summary>FHIR store on changed.</summary>
-    /// <param name="sender">The sender.</param>
-    /// <param name="e">     Event information.</param>
-    private void Store_OnChanged(object? sender, EventArgs e)
+    private void StoreChanged(object? sender, EventArgs e) => _ = InvokeAsync(async () =>
     {
-        _filteredItems = GetFilteredItems();
-        _ = InvokeAsync(() => StateHasChanged());
-    }
+        if (!_disposed && !Session.Smart && _watch is not null)
+        {
+            await Refresh();
+            StateHasChanged();
+        }
+    });
 
-    /// <summary>
-    /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged
-    /// resources.
-    /// </summary>
+    private void SessionExpired() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            _input = string.Empty;
+            StateHasChanged();
+        }
+    });
+
     public void Dispose()
     {
-        debounceTimer?.Dispose();
-
-        if (_store is not null)
-        {
-            _store.OnInstanceCreated -= Store_OnChanged;
-            _store.OnInstanceDeleted -= Store_OnChanged;
-        }
+        _disposed = true;
+        Session.Expired -= SessionExpired;
+        Session.CloseView(_request);
+        Watch(null);
     }
 }

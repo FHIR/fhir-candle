@@ -1,36 +1,319 @@
 name: Publish dotnet tool
-# Basics from https://docs.microsoft.com/en-us/azure/dev-spaces/how-to/github-actions
+
 on:
+  release:
+    types: [published]
   workflow_dispatch:
-  workflow_run:
-    workflows: ['Tests']
-    types: [completed]
-    branches:
-    - main
+    inputs:
+      version:
+        description: Canonical three-component NuGet version (for example, 2026.1113.900)
+        required: true
+        type: string
+      tag:
+        description: Matching existing release tag (v<version>); manual runs never publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candle-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  validate:
+    name: validate-release
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
 
-    - uses: actions/setup-dotnet@v5
+    - name: Resolve and validate release identity
+      id: release
+      shell: pwsh
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TAG: ${{ inputs.tag }}
+      run: |
+        if ($env:EVENT_NAME -ceq 'release')
+        {
+          $tag = $env:RELEASE_EVENT_TAG
+          if (!$tag.StartsWith('v', [StringComparison]::Ordinal))
+          {
+            throw "Release tag '$tag' must start with 'v'."
+          }
+          $version = $tag.Substring(1)
+        }
+        elseif ($env:EVENT_NAME -ceq 'workflow_dispatch')
+        {
+          $tag = $env:INPUT_TAG
+          $version = $env:INPUT_VERSION
+        }
+        else
+        {
+          throw "Unsupported event '$env:EVENT_NAME'."
+        }
+
+        $arguments = @{ Version = $version; Tag = $tag; RequireNewVersion = $true }
+        if ($env:EVENT_NAME -ceq 'release')
+        {
+          $arguments.ExpectedCommit = $env:GITHUB_SHA
+        }
+        $commit = & ./.github/scripts/Test-ReleaseIdentity.ps1 @arguments
+        Add-Content $env:GITHUB_OUTPUT "commit=$commit"
+        Add-Content $env:GITHUB_OUTPUT "version=$version"
+        Add-Content $env:GITHUB_OUTPUT "tag=$tag"
+
+  source-ci:
+    name: exact-source-ci
+    needs: validate
+    uses: ./.github/workflows/build-and-test.yml
+    with:
+      commit_sha: ${{ needs.validate.outputs.commit }}
+
+  pack:
+    name: pack-release-candidate
+    needs: [validate, source-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sha512: ${{ steps.candidate.outputs.sha512 }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.validate.outputs.commit }}
+
+    - uses: actions/setup-dotnet@v6
       with:
         dotnet-version: |
-            10.0
-            9.0
-            8.0
+          11.0.x
+          10.0.x
 
-    - name: Build and Publish
+    - name: Build and pack once with the release identity
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
       run: |
-        dotnet restore src/fhir-candle/fhir-candle.csproj
-        dotnet pack -c Release ./src/fhir-candle/fhir-candle.csproj
-        mv ./src/fhir-candle/bin/Release/net8.0/publish/wwwroot ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets
-        mv ./src/fhir-candle/bin/Release/net9.0/publish/wwwroot ./src/fhir-candle/bin/Release/net9.0/publish/staticwebassets
-        mv ./src/fhir-candle/bin/Release/net10.0/publish/wwwroot ./src/fhir-candle/bin/Release/net10.0/publish/staticwebassets
-        7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net8.0/publish/staticwebassets/
-        7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net9.0/publish/staticwebassets/
-        7z a ./nupkg/*.nupkg ./src/fhir-candle/bin/Release/net10.0/publish/staticwebassets/
-        dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.GINOC_NUGET }} --source https://api.nuget.org/v3/index.json
+        $actualCommit = (git rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0 -or $actualCommit -cne $env:RELEASE_COMMIT)
+        {
+          throw 'Package checkout does not match the validated commit.'
+        }
+        $properties = @(
+          "-p:VersionPrefix=$env:RELEASE_VERSION",
+          "-p:Version=$env:RELEASE_VERSION",
+          "-p:PackageVersion=$env:RELEASE_VERSION",
+          "-p:AssemblyVersion=0.$env:RELEASE_VERSION",
+          "-p:FileVersion=0.$env:RELEASE_VERSION",
+          "-p:RepositoryCommit=$env:RELEASE_COMMIT"
+        )
+        $project = 'src/fhir-candle/fhir-candle.csproj'
+        dotnet restore $project
+        if ($LASTEXITCODE -ne 0) { throw 'Release restore failed.' }
+        dotnet build $project --configuration Release --no-restore @properties
+        if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+        dotnet pack $project --configuration Release --no-build --output "$env:RUNNER_TEMP/release-candidate" @properties
+        if ($LASTEXITCODE -ne 0) { throw 'Release pack failed.' }
+
+    - name: Validate candidate and record its hash
+      id: candidate
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+      run: |
+        $hash = & ./.github/scripts/Test-ReleasePackage.ps1 `
+          -CandidateDirectory "$env:RUNNER_TEMP/release-candidate" `
+          -Version $env:RELEASE_VERSION -Commit $env:RELEASE_COMMIT
+        $packageName = "fhir-candle.$env:RELEASE_VERSION.nupkg"
+        "$hash  $packageName" | Set-Content "$env:RUNNER_TEMP/release-candidate/package.sha512" -Encoding ascii
+        Add-Content $env:GITHUB_OUTPUT "sha512=$hash"
+        Add-Content $env:GITHUB_STEP_SUMMARY "Candidate: ``$packageName``; commit: ``$env:RELEASE_COMMIT``; SHA-512: ``$hash``."
+
+    - name: Upload immutable candidate
+      id: upload
+      uses: actions/upload-artifact@v7
+      with:
+        name: fhir-candle-${{ needs.validate.outputs.version }}-candidate
+        path: ${{ runner.temp }}/release-candidate/*
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 90
+
+  package-qualification:
+    name: qualify-${{ matrix.os }}-${{ matrix.framework }}
+    needs: [validate, pack]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        framework: [net11.0, net10.0]
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.validate.outputs.commit }}
+
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: |
+          11.0.x
+          10.0.x
+
+    - uses: actions/download-artifact@v8
+      with:
+        artifact-ids: ${{ needs.pack.outputs.artifact_id }}
+        path: ${{ runner.temp }}/release-candidate
+        merge-multiple: true
+        digest-mismatch: error
+
+    - name: Verify and exercise the exact tool package
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        EXPECTED_SHA512: ${{ needs.pack.outputs.sha512 }}
+        FRAMEWORK: ${{ matrix.framework }}
+      run: |
+        & ./.github/scripts/Test-ReleasePackage.ps1 `
+          -CandidateDirectory "$env:RUNNER_TEMP/release-candidate" `
+          -Version $env:RELEASE_VERSION -Commit $env:RELEASE_COMMIT `
+          -ExpectedSha512 $env:EXPECTED_SHA512
+        & ./.github/scripts/Test-ToolConsumer.ps1 `
+          -CandidateDirectory "$env:RUNNER_TEMP/release-candidate" `
+          -Version $env:RELEASE_VERSION -Framework $env:FRAMEWORK `
+          -WorkingDirectory "$env:RUNNER_TEMP/tool-consumer"
+
+    - name: Upload tool qualification log
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: qualification-${{ matrix.os }}-${{ matrix.framework }}
+        path: ${{ runner.temp }}/tool-consumer/*.log
+        if-no-files-found: warn
+
+  publish:
+    name: publish-nuget
+    needs: [validate, pack, package-qualification]
+    if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+    runs-on: ubuntu-latest
+    environment: nuget.org
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        ref: ${{ needs.validate.outputs.commit }}
+
+    - name: Verify protected publishing environment
+      shell: pwsh
+      env:
+        ENVIRONMENT_READY: ${{ vars.NUGET_PUBLISH_ENVIRONMENT_READY }}
+      run: |
+        if ($env:ENVIRONMENT_READY -cne 'true')
+        {
+          throw 'Configure the protected nuget.org environment before publishing.'
+        }
+
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: 11.0.x
+
+    - uses: actions/download-artifact@v8
+      with:
+        artifact-ids: ${{ needs.pack.outputs.artifact_id }}
+        path: ${{ runner.temp }}/release-candidate
+        merge-multiple: true
+        digest-mismatch: error
+
+    - name: Revalidate the release and qualified package
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        EXPECTED_SHA512: ${{ needs.pack.outputs.sha512 }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        & ./.github/scripts/Test-ReleaseIdentity.ps1 `
+          -Version $env:RELEASE_VERSION -Tag $env:RELEASE_TAG `
+          -ExpectedCommit $env:RELEASE_COMMIT -RequireNewVersion -RequirePublishedRelease
+        & ./.github/scripts/Test-ReleasePackage.ps1 `
+          -CandidateDirectory "$env:RUNNER_TEMP/release-candidate" `
+          -Version $env:RELEASE_VERSION -Commit $env:RELEASE_COMMIT `
+          -ExpectedSha512 $env:EXPECTED_SHA512
+
+    - name: Authenticate publication to NuGet.org
+      id: nuget
+      uses: NuGet/login@v1
+      with:
+        user: ${{ secrets.NUGET_USER }}
+
+    - name: Push the qualified package without rebuilding
+      shell: pwsh
+      env:
+        NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      run: |
+        if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY))
+        {
+          throw 'NuGet/login did not return a temporary API key.'
+        }
+        dotnet nuget push "$env:RUNNER_TEMP/release-candidate/fhir-candle.$env:RELEASE_VERSION.nupkg" `
+          --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --no-symbols
+        if ($LASTEXITCODE -ne 0) { throw 'NuGet publication failed.' }
+
+  standard-image:
+    name: standard-container
+    needs: [validate, package-qualification, publish]
+    if: >-
+      ${{ !cancelled() && needs.package-qualification.result == 'success' &&
+          (github.event_name == 'workflow_dispatch' || needs.publish.result == 'success') }}
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ./.github/workflows/ghcr-docker.yml
+    with:
+      commit: ${{ needs.validate.outputs.commit }}
+      version: ${{ needs.validate.outputs.version }}
+      tag: ${{ needs.validate.outputs.tag }}
+      publish: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+
+  minimal-image:
+    name: minimal-container
+    needs: [validate, package-qualification, publish]
+    if: >-
+      ${{ !cancelled() && needs.package-qualification.result == 'success' &&
+          (github.event_name == 'workflow_dispatch' || needs.publish.result == 'success') }}
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ./.github/workflows/ghcr-docker-min.yml
+    with:
+      commit: ${{ needs.validate.outputs.commit }}
+      version: ${{ needs.validate.outputs.version }}
+      tag: ${{ needs.validate.outputs.tag }}
+      publish: ${{ github.event_name == 'release' && github.event.action == 'published' }}

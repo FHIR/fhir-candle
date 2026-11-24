@@ -9,7 +9,6 @@ using FhirCandle.Storage;
 using Microsoft.AspNetCore.Mvc;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using Org.BouncyCastle.Asn1.X500;
 
 namespace fhir.candle.McpTools;
 

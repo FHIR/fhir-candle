@@ -1,0 +1,39 @@
+{
+  "resourceType": "Patient",
+  "meta": {
+    "tag": [
+      { "system": "https://example.test/corpus", "code": "synthetic-r4b" }
+    ]
+  },
+  "language": "en",
+  "text": {
+    "status": "generated",
+    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>  Synthetic <b>Avery</b>  &amp; <i>Quinn</i>\n next line.  </p><p> </p></div>"
+  },
+  "identifier": [
+    { "system": "https://example.test/identifier", "value": "wire-r4b" },
+    { "system": "https://example.test/secondary", "value": "second-r4b" }
+  ],
+  "active": true,
+  "name": [
+    { "use": "official", "family": "Wire", "given": ["Avery", "Quinn"] }
+  ],
+  "gender": "other",
+  "birthDate": "1980-02",
+  "_birthDate": {
+    "extension": [
+      {
+        "url": "https://example.test/fhir/StructureDefinition/date-quality",
+        "valueString": "month known"
+      }
+    ]
+  },
+  "multipleBirthInteger": 2,
+  "photo": [
+    { "contentType": "image/png", "data": "AQIDBA==", "title": "Synthetic non-summary photo" }
+  ],
+  "generalPractitioner": [
+    { "reference": "Practitioner/wire-clinician", "display": "Synthetic clinician" }
+  ],
+  "managingOrganization": { "reference": "Organization/wire-organization" }
+}

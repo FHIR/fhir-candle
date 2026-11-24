@@ -22,22 +22,22 @@
         </FluentLabel>
     </FluentStack>
  *@
-    <FluentMessageBar Title="Development Server" Intent="@MessageIntent.Warning" AllowDismiss="false">
+    <FluentMessageBar Title="Development Server" Intent="@MessageBarIntent.Warning" AllowDismiss="false">
         This is an open FHIR endpoint for development, testing, and educational purposes only.
         Uploading real patient data is strictly prohibited.
     </FluentMessageBar>   
 
     @if (!string.IsNullOrEmpty(ServerConfig.ReferenceImplementation))
     {
-        <FluentLabel Typo="Typography.H6">Reference Implementation</FluentLabel>
-        <FluentLabel Typo="Typography.Body">
+        <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">Reference Implementation</FluentLabel>
+        <FluentLabel>
             Note that this server is configured to be a reference implementation (RI) for @ServerConfig.ReferenceImplementation .
         </FluentLabel>
     }
 
     @if (StoreManager.Count() == 1)
     {
-        <FluentLabel Typo="Typography.H6">FHIR Endpoint Information</FluentLabel>
+        <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">FHIR Endpoint Information</FluentLabel>
 
         @switch (StoreManager.First().Value.Config.FhirVersion)
         {
@@ -74,12 +74,12 @@
     }
         else
     {
-        <FluentLabel Typo="Typography.H6">FHIR Endpoints</FluentLabel>
+        <FluentLabel Size="LabelSize.Large" Weight="LabelWeight.Semibold">FHIR Endpoints</FluentLabel>
 
         <FluentTabs Orientation="Orientation.Horizontal">
             @foreach (KeyValuePair<string, IFhirStore> kvp in @StoreManager.OrderBy(kvp => kvp.Key))
             {
-                <FluentTab Label="@kvp.Key" Id="@kvp.Key">
+                <FluentTab Header="@kvp.Key" Id="@kvp.Key">
                     <FluentCard>
                         @switch (kvp.Value.Config.FhirVersion)
                         {
@@ -116,9 +116,9 @@
 
                         @if (kvp.Value.Config.SmartRequired)
                         {
-                            <FluentLabel Typo="Typography.Body">
+                            <FluentText Block="true">
                                 SMART authorization has been set to <code>required</code> for this FHIR endpoint:
-                            </FluentLabel>
+                            </FluentText>
                             <ul>
                                 <li>
                                     The SMART well-known configuration is available at: 
@@ -176,9 +176,9 @@
 
                         @if (kvp.Value.Config.SmartAllowed)
                         {
-                            <FluentLabel Typo="Typography.Body">
+                            <FluentText Block="true">
                                 SMART authorization has been set to <code>optional</code> for this FHIR endpoint:
-                            </FluentLabel>
+                            </FluentText>
                             <ul>
                                 <li>
                                     The SMART well-known configuration is available at:
@@ -219,7 +219,7 @@
         </FluentTabs>
     }
 
-    <FluentDataGrid GenerateHeader="GenerateHeaderOption.None" GridTemplateColumns="1fr 1fr" TGridItem="string" role="grid" ShowHover="true">
+    <FluentDataGrid GenerateHeader="DataGridGeneratedHeaderType.None" GridTemplateColumns="1fr 1fr" TGridItem="string" role="grid" ShowHover="true">
         <FluentDataGridRow RowType="DataGridRowType.Header">
             <FluentDataGridCell GridColumn=1 CellType="DataGridCellType.ColumnHeader">Description</FluentDataGridCell>
             <FluentDataGridCell GridColumn=2 CellType="DataGridCellType.ColumnHeader">Link</FluentDataGridCell>
@@ -228,35 +228,35 @@
         <FluentDataGridRow>
             <FluentDataGridCell GridColumn=1>GitHub Repository for this software</FluentDataGridCell>
             <FluentDataGridCell GridColumn=2>
-                <FluentAnchor Appearance="Appearance.Hypertext" Href="https://github.com/FHIR/fhir-candle" Target="_blank">github.com</FluentAnchor>
+                <FluentLink Href="https://github.com/FHIR/fhir-candle" Target="LinkTarget.Blank">github.com</FluentLink>
             </FluentDataGridCell>
         </FluentDataGridRow>
 
         <FluentDataGridRow>
             <FluentDataGridCell GridColumn=1>FHIR R5 Subscriptions Framework</FluentDataGridCell>
             <FluentDataGridCell GridColumn=2>
-                <FluentAnchor Appearance="Appearance.Hypertext" Href="https://hl7.org/fhir/R5/subscriptions.html" Target="_blank">hl7.org</FluentAnchor>
+                <FluentLink Href="https://hl7.org/fhir/R5/subscriptions.html" Target="LinkTarget.Blank">hl7.org</FluentLink>
             </FluentDataGridCell>
         </FluentDataGridRow>
 
         <FluentDataGridRow>
             <FluentDataGridCell GridColumn=1>FHIR R4/R4B Subscriptions Backport IG</FluentDataGridCell>
             <FluentDataGridCell GridColumn=2>
-                <FluentAnchor Appearance="Appearance.Hypertext" Href="https://www.hl7.org/fhir/uv/subscriptions-backport/" Target="_blank">hl7.org</FluentAnchor>
+                <FluentLink Href="https://www.hl7.org/fhir/uv/subscriptions-backport/" Target="LinkTarget.Blank">hl7.org</FluentLink>
             </FluentDataGridCell>
         </FluentDataGridRow>
 
         <FluentDataGridRow>
             <FluentDataGridCell GridColumn=1>FHIR R4 Specification</FluentDataGridCell>
             <FluentDataGridCell GridColumn=2>
-                <FluentAnchor Appearance="Appearance.Hypertext" Href="https://www.hl7.org/fhir/R4/" Target="_blank">hl7.org</FluentAnchor>
+                <FluentLink Href="https://www.hl7.org/fhir/R4/" Target="LinkTarget.Blank">hl7.org</FluentLink>
             </FluentDataGridCell>
         </FluentDataGridRow>
 
         <FluentDataGridRow>
             <FluentDataGridCell GridColumn=1>FHIR R4B Specification</FluentDataGridCell>
             <FluentDataGridCell GridColumn=2>
-                <FluentAnchor Appearance="Appearance.Hypertext" Href="https://www.hl7.org/fhir/R4B/" Target="_blank">hl7.org</FluentAnchor>
+                <FluentLink Href="https://www.hl7.org/fhir/R4B/" Target="LinkTarget.Blank">hl7.org</FluentLink>
             </FluentDataGridCell>
         </FluentDataGridRow>
 

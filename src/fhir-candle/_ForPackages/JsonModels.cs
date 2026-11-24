@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using Firely.Fhir.Packages;
 using Newtonsoft.Json;
 
 namespace fhir.candle._ForPackages
@@ -239,13 +238,24 @@ namespace fhir.candle._ForPackages
     }
 
 
-    public class AuthorInfo : Firely.Fhir.Packages.AuthorInfo
+    public class AuthorInfo
     {
+        /// <summary>The author's name.</summary>
+        [JsonProperty(PropertyName = "name")]
+        public string? Name;
+
+        /// <summary>The author's email address.</summary>
+        [JsonProperty(PropertyName = "email")]
+        public string? Email;
+
+        /// <summary>The author's URL.</summary>
+        [JsonProperty(PropertyName = "url")]
+        public string? Url;
+
         /// <summary>
         /// The npm specification allows author information to be serialized in json as a single string, or as a complex object. 
         /// This boolean keeps track of it was parsed from either one, so it can be serialized to the same output again.
         /// </summary>
-        /// See issue: https://github.com/FirelyTeam/Firely.Fhir.Packages/issues/94
         [JsonIgnore]
         internal bool ParsedFromString = false;
     }

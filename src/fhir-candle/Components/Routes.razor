@@ -1,8 +1,10 @@
 ﻿@using fhir.candle
 @using fhir.candle.Layout
+@using fhir.candle.Ui
 
 @namespace fhir.candle.Components
 
+<CandleUiRoot>
 <Router AppAssembly="@typeof(Program).Assembly"
         AdditionalAssemblies="new System.Reflection.Assembly[] {
             (System.Reflection.Assembly)(typeof(FhirCandle.Ui.R4.Subscriptions.TourUtils).Assembly),
@@ -19,3 +21,4 @@
         </LayoutView>
     </NotFound>
 </Router>
+</CandleUiRoot>

@@ -1,5 +1,7 @@
 ﻿@using Microsoft.JSInterop;
+@using Microsoft.Extensions.Logging
 @inject IJSRuntime JS
+@inject ILogger<CodeBlock> Logger
 
 <pre class="code"><code class="@Language">
     @ChildContent
@@ -19,6 +21,13 @@
     /// <returns>An asynchronous result.</returns>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await JS.InvokeVoidAsync("highlightSnippet");
+        try
+        {
+            await JS.InvokeVoidAsync("highlightSnippet");
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping code highlighting because the Blazor circuit disconnected.");
+        }
     }
 }

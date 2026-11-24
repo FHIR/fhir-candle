@@ -20,13 +20,10 @@ different Firely SDK NuGet package (`Hl7.Fhir.R4`, `Hl7.Fhir.R4B`,
 `Hl7.Fhir.Model.*` types resolve to the version-specific types automatically —
 **no `#if` directives needed**.
 
-The same pattern applies to the Blazor UI: **`FhirCandle.Ui.Versioned`** shares
-Razor components into `FhirCandle.Ui.R4`, `FhirCandle.Ui.R4B`, and
-`FhirCandle.Ui.R5`.
-
-> The shared store project lives under `src/FhirStore.CommonVersioned/`
-> (`FhirStore.CommonVersioned.projitems`); the shared UI project lives under
-> `src/FhirCandle.Ui.Versioned/`.
+The Blazor UI uses project references instead. `FhirCandle.Ui.R4`,
+`FhirCandle.Ui.R4B`, and `FhirCandle.Ui.R5` reference `FhirCandle.Ui.Common`
+and their matching store library. None imports `FhirCandle.Ui.Versioned.projitems`;
+editing the pickers in that shared project does not change the running UI.
 
 ## Version-independent vs versioned code
 
@@ -43,7 +40,7 @@ Razor components into `FhirCandle.Ui.R4`, `FhirCandle.Ui.R4B`, and
 ```
 fhir-candle (app) → FhirCandle.R4/R4B/R5 + FhirCandle.Ui.R4/R4B/R5 + FhirCandle.Common
 FhirCandle.R4/R4B/R5 → FhirCandle.Common + Hl7.Fhir.Rx + [shared] FhirStore.CommonVersioned
-FhirCandle.Ui.R4/R4B/R5 → FhirCandle.Ui.Common + FhirCandle.Common + [shared] FhirCandle.Ui.Versioned
+FhirCandle.Ui.R4/R4B/R5 → FhirCandle.Ui.Common + FhirCandle.Common + matching FhirCandle.R4/R4B/R5
 ```
 
 Because the R4/R4B/R5 assemblies share namespaces, the host app and tests

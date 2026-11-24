@@ -1,0 +1,9 @@
+{
+  "name": "hl7.fhir.us.davinci-cdex",
+  "version": "0.0.0-sdk6-test",
+  "description": "Synthetic empty expanded package for fhir-candle discovery tests; not official IG content.",
+  "type": "fhir.ig",
+  "license": "MIT",
+  "fhirVersions": [ "4.0.1" ],
+  "directories": { "lib": "package" }
+}

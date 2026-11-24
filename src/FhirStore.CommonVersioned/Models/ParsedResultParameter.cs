@@ -23,6 +23,7 @@ public class ParsedResultParameters
         "_include",
         "_include:iterate",
         "_maxresults",
+        "_offset",
         "_revinclude",
         "_score",
         "_sort",
@@ -63,6 +64,10 @@ public class ParsedResultParameters
     /// requested, even if they don't support paging, but may return less than the client requested.
     /// </summary>
     public int? PageMatchCount { get; private set; } = null;
+
+    internal int? Offset { get; private set; }
+    internal bool InvalidOffset { get; private set; }
+    internal string? TotalMode { get; private set; }
 
     /// <summary>
     /// Gets or sets the maximum number of results to return.
@@ -122,6 +127,8 @@ public class ParsedResultParameters
         List<string> applied = new();
 
         System.Collections.Specialized.NameValueCollection query = System.Web.HttpUtility.ParseQueryString(queryString);
+        // ParseQueryString places bare keys (without '=') among the unnamed values.
+        InvalidOffset = query.GetValues(null)?.Contains("_offset", StringComparer.Ordinal) == true;
         foreach (string key in query)
         {
             if (string.IsNullOrWhiteSpace(key))
@@ -130,6 +137,22 @@ public class ParsedResultParameters
             }
 
             string? value = query[key];
+            if (key == "_offset")
+            {
+                if (query.GetValues(key) is [string literal] &&
+                    int.TryParse(literal, System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture, out int offset))
+                {
+                    Offset = offset;
+                    applied.Add(key + "=" + literal);
+                    _rawParameters.Add((key, literal));
+                }
+                else
+                {
+                    InvalidOffset = true;
+                }
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(value))
             {
                 continue;
@@ -207,8 +230,8 @@ public class ParsedResultParameters
                             }
 
                             Inclusions[components[0]].Add(spDefinition);
-                            applied.Add(key + "=" + value);
-                            _rawParameters.Add((key, value));
+                            applied.Add(key + "=" + val);
+                            _rawParameters.Add((key, val));
                         }
                     }
                     break;
@@ -241,8 +264,8 @@ public class ParsedResultParameters
                             }
 
                             IterativeInclusions[components[0]].Add(spDefinition.Expression);
-                            applied.Add(key + "=" + value);
-                            _rawParameters.Add((key, value));
+                            applied.Add(key + "=" + val);
+                            _rawParameters.Add((key, val));
                         }
                     }
                     break;
@@ -309,8 +332,8 @@ public class ParsedResultParameters
                             }
 
                             ReverseInclusions[components[0]].Add(spDefinition);
-                            applied.Add(key + "=" + value);
-                            _rawParameters.Add((key, value));
+                            applied.Add(key + "=" + val);
+                            _rawParameters.Add((key, val));
                         }
                     }
                     break;
@@ -412,6 +435,12 @@ public class ParsedResultParameters
                     break;
 
                 case "_total":
+                    if (value is "accurate" or "estimate" or "none")
+                    {
+                        TotalMode = value;
+                        applied.Add(key + "=" + value);
+                        _rawParameters.Add((key, value));
+                    }
                     break;
             }
         }

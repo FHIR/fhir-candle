@@ -8,14 +8,14 @@ instead.
 
 - [Getting started](getting-started.md) — install via the .NET tool, Docker, or
   by cloning the repo, then run the server.
-- [FHIR tenants](tenants.md) — the default `/r4`, `/r4b`, `/r5` endpoints and how
-  to override them with `--r4` / `--r4b` / `--r5`.
-- [Loading initial data](loading-data.md) — seed the server with `--fhir-source`
-  and how per-tenant subdirectories are resolved.
+- [FHIR tenants](tenants.md) — configure `/fhir/r4`, `/fhir/r4b`, and `/fhir/r5`,
+  limit resources, page searches, and compare admin and SMART caller views.
+- [Loading initial data](loading-data.md) — seed tenants with `--fhir-source`,
+  select package versions, and configure archive import limits.
 - [Strict mode (`--strict`)](strict-mode.md) — the strict spec-conformant REST
   posture for conformance test rigs.
-- [Subscriptions reference implementation](subscriptions-ri.md) — run the FHIR
-  Subscriptions RI stack.
+- [Subscriptions reference implementation](subscriptions-ri.md) — run the RI,
+  configure subscription lifetimes and delivery limits, and set up Zulip.
 - [Using OpenTelemetry](opentelemetry.md) — export traces via
   `--otel-otlp-endpoint` / `OTEL_EXPORTER_OTLP_ENDPOINT`.
 

@@ -22,6 +22,9 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>The requested resource or null.</returns>
     Hl7.Fhir.Model.Resource? InstanceRead(string id);
 
+    /// <summary>Reads raw Subscription state only while the owning store holds lifecycle protection.</summary>
+    Subscription? ReadRawSubscription(string id);
+
     /// <summary>Gets by canonical.</summary>
     /// <param name="url">URL of the resource.</param>
     /// <returns>The by canonical.</returns>
@@ -80,11 +83,17 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// Performs a type search in this resource store.
     /// </summary>
     /// <param name="parameters">The search parameters.</param>
-    /// <param name="isNestedSearch">If this search has been triggered from inside another search request (for locking)</param>
+    /// <param name="isNestedSearch">Indicates a nested call but does not select different locking or traversal.</param>
     /// <returns>
     /// An enumerator that allows foreach to be used to process the search results in this collection.
     /// </returns>
     IEnumerable<Hl7.Fhir.Model.Resource> TypeSearch(ParsedSearchParameter[] parameters, bool isNestedSearch = false);
+
+    /// <summary>Internal candidate evaluation. Values are borrowed, not bundle or hook resources.</summary>
+    internal IEnumerable<SearchPageSelector.Candidate> SearchCandidates(ParsedSearchParameter[] parameters, DateTimeOffset instant);
+
+    /// <summary>Detach the current version of a selected identity.</summary>
+    internal Resource? DetachMatch(string storeKey, DateTimeOffset instant, Action? onDetach);
 
     /// <summary>
     /// Tests for the presence of any resources matching the given search parameter.
@@ -141,6 +150,9 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>True if it succeeds, false if it fails.</returns>
     bool TryResolveIdentifier(string? system, string? value, out Hl7.Fhir.Model.Resource? r);
 
+    /// <summary>Resolve a logical reference together with the owning index entry's store key.</summary>
+    internal SearchPageSelector.Candidate? ResolveIdentifierCandidate(string? system, string? value);
+
     /// <summary>Sets executable subscription information.</summary>
     /// <param name="url">             URL of the resource.</param>
     void SetExecutableSubscriptionTopic(
@@ -158,7 +170,7 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <param name="topicUrl">URL of the topic.</param>
     /// <param name="id">      The subscription id.</param>
     /// <param name="filters"> The filters.</param>
-    void SetExecutableSubscription(string topicUrl, string id, List<ParsedSearchParameter> filters);
+    void SetExecutableSubscription(string topicUrl, string id, long revision, List<ParsedSearchParameter> filters);
 
     /// <summary>Removes the executable subscription.</summary>
     /// <param name="topicUrl">URL of the topic.</param>

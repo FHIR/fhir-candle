@@ -51,6 +51,11 @@ multiple values) or inside a `Parameters` request body.
 
 ## Response semantics
 
+Reached finite deadlines are normalized before status selection, including when a timer callback
+has not run yet. An expired `active` or `requested` Subscription is reported as `off` and no
+longer matches `status=active`. Ordinary Subscription reads and searches use the same effective
+state. Inactive subscriptions and their retained events remain available for inspection.
+
 | Situation | HTTP status | Body |
 |---|---|---|
 | Status returned | `200 OK` | A searchset `Bundle` of subscription-status resources (empty `Bundle` if nothing matched) |

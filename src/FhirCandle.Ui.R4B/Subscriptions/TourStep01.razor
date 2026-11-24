@@ -1,29 +1,29 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentLabel Typo="Typography.Body">
+    <FluentText Block="true">
         In FHIR @Store.Config.FhirVersion, topics are discovered by searching the server for
         <code>SubscriptionTopic</code> resources.  The list of topics in this
         tenant can be found
-        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-list?store={StoreName}&type=SubscriptionTopic")"
-                 >here</FluentAnchor>,
+        <FluentLink Href="@($"/store/resource-list?store={StoreName}&type=SubscriptionTopic")"
+                 >here</FluentLink>,
         or you can submit a FHIR search to:
         <code class="copy-click">@Store.Config.BaseUrl/SubscriptionTopic</code>.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentText Block="true">
         For this walkthrough, we will be using the included <code>encounter-complete</code>
         topic that has a canonical URL of <code class="copy-click">http://example.org/FHIR/SubscriptionTopic/encounter-complete</code>.
         The definition for this topic can be seen at
-        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=SubscriptionTopic&id=encounter-complete")"
-                 >here</FluentAnchor>,
+        <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=SubscriptionTopic&id=encounter-complete")"
+                 >here</FluentLink>,
         or you can submit a FHIR read to:
         <code class="copy-click">@Store.Config.BaseUrl/SubscriptionTopic/encounter-complete</code>.
-    </FluentLabel>
+    </FluentText>
 
-    <FluentLabel Typo="Typography.Body">
+    <FluentText Block="true">
         Click next to select the <code>encounter-complete</code> topic.
-    </FluentLabel>
+    </FluentText>
 </FluentStack>
 
 @code {

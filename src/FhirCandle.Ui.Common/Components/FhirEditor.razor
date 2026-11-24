@@ -1,7 +1,9 @@
 @using BlazorMonaco
 @using BlazorMonaco.Editor
+@using Microsoft.Extensions.Logging
 
 @inject IJSRuntime JS
+@inject ILogger<FhirEditor> Logger
 
 @implements IDisposable
 
@@ -32,23 +34,12 @@
         }
     }
 
-    private bool _darkMode = true;
-
+    /// <summary>Gets or sets whether to use the dark editor theme.</summary>
     [Parameter]
-    public bool DarkMode 
-    { 
-        get => _darkMode;
-        set
-        {
-            if (value == _darkMode)
-            {
-                return;
-            }
+    public bool DarkMode { get; set; } = true;
 
-            _darkMode = value;
-            _ = UpdateTheme();
-        }
-    }
+    private string EditorTheme => DarkMode ? "vs-dark" : "vs";
+    private bool? _appliedDarkMode;
 
     private string _editorContent = "";
 
@@ -83,7 +74,7 @@
         return new StandaloneEditorConstructionOptions
         {
             Language = _language,
-            Theme = _darkMode ? "vs-dark" : "vs-light",
+            Theme = EditorTheme,
             GlyphMargin = false,
             Value = _editorContent,
             ShowFoldingControls = "false",
@@ -100,9 +91,16 @@
             return;
         }
 
-        await UpdateTheme();
-        await JS.InvokeVoidAsync("setMonacoEditorResize", _editor.Id);
-        await _editor.SetValue(_editorContent ?? string.Empty);
+        try
+        {
+            await UpdateTheme();
+            await JS.InvokeVoidAsync("setMonacoEditorResize", _editor.Id);
+            await _editor.SetValue(_editorContent ?? string.Empty);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping editor initialization because the Blazor circuit disconnected.");
+        }
     }
 
     /// <summary>Updates the theme.</summary>
@@ -114,9 +112,15 @@
             return;
         }
 
-        await JS.InvokeVoidAsync(
-            "blazorMonaco.editor.setTheme",
-            _darkMode ? "vs-dark" : "vs-light");
+        try
+        {
+            _appliedDarkMode = DarkMode;
+            await JS.InvokeVoidAsync("blazorMonaco.editor.setTheme", EditorTheme);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping the editor theme update because the Blazor circuit disconnected.");
+        }
     }
 
     /// <summary>Sets hightlight language.</summary>
@@ -127,21 +131,24 @@
             return;
         }
 
-        // need to get the editor model uri
-        TextModel tm = await _editor.GetModel();
-        await JS.InvokeVoidAsync(
-            "blazorMonaco.editor.setModelLanguage",
-            tm.Uri,
-            _language);
+        try
+        {
+            TextModel tm = await _editor.GetModel();
+            await JS.InvokeVoidAsync(
+                "blazorMonaco.editor.setModelLanguage",
+                tm.Uri,
+                _language);
+        }
+        catch (JSDisconnectedException ex)
+        {
+            Logger.LogDebug(ex, "Skipping the editor language update because the Blazor circuit disconnected.");
+        }
     }
 
 
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-
-        _ = UpdateTheme();
-    }
+    /// <inheritdoc />
+    protected override Task OnParametersSetAsync() =>
+        _appliedDarkMode.HasValue && _appliedDarkMode != DarkMode ? UpdateTheme() : Task.CompletedTask;
 
     /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged

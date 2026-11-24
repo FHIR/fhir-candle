@@ -1,0 +1,421 @@
+// <copyright file="SmartViewerSessionTests.cs" company="Microsoft Corporation">
+//     Copyright (c) Microsoft Corporation. All rights reserved.
+//     Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
+// </copyright>
+
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using fhir.candle.Services;
+using fhir.candle.Tests.Controllers;
+using fhir.candle.Tests.Infrastructure;
+using FhirCandle.Configuration;
+using FhirCandle.Models;
+using FhirCandle.Storage;
+using FhirCandle.Utils;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace fhir.candle.Tests;
+
+/// <summary>Checks the circuit boundary against the in-process REST controller.</summary>
+[Collection(CompatibilityHostCollection.Name)]
+public class SmartViewerSessionTests
+{
+    private static WebApplication BuildViewerHost(DirectoryInfo root, TenantConfiguration tenant, TimeProvider clock)
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton(clock);
+        builder.Services.AddScoped<SmartViewerSession>();
+        CandleConfig config = new()
+        {
+            PublicUrl = "http://localhost",
+            SourceDirectory = root.FullName,
+            FhirCacheDirectory = root.FullName,
+            UseOfficialRegistries = false,
+            TenantsR4 = [tenant.ControllerName],
+        };
+        return Program.BuildAppForTesting(builder, config, new() { [tenant.ControllerName] = tenant });
+    }
+
+    /// <summary>The patient selected on the login grid binds both REST and circuit visibility after consent.</summary>
+    [Fact]
+    public async Task InteractivePatientSelectionSurvivesGrantExchange()
+    {
+        TenantConfiguration tenant = new()
+        {
+            ControllerName = "picker", BaseUrl = "http://localhost/fhir/picker",
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4, SmartAllowed = true, SmartRequired = true,
+            AllowCreateAsUpdate = true, AllowExistingId = true,
+        };
+        DirectoryInfo root = Directory.CreateTempSubdirectory("candle-login-");
+        try
+        {
+            await using WebApplication app = BuildViewerHost(root, tenant, TimeProvider.System);
+            await app.StartAsync();
+            using HttpClient rest = app.GetTestClient();
+            IFhirStoreManager stores = app.Services.GetRequiredService<IFhirStoreManager>();
+            ISmartAuthManager auth = app.Services.GetRequiredService<ISmartAuthManager>();
+            using IFhirStore store = stores[tenant.ControllerName];
+            Put("CompartmentDefinition/patient", """
+                {"resourceType":"CompartmentDefinition","id":"patient","url":"urn:picker:patient","name":"PatientMembership",
+                 "status":"active","code":"Patient","search":true,"resource":[{"code":"Observation","param":["subject"]}]}
+                """);
+            foreach (string id in new[] { "included", "excluded" })
+            {
+                Put($"Patient/{id}", $$"""{"resourceType":"Patient","id":"{{id}}"}""");
+                Put($"Observation/obs-{id}", $$$"""
+                    {"resourceType":"Observation","id":"obs-{{{id}}}","status":"final","code":{"text":"test"},
+                     "subject":{"reference":"Patient/{{{id}}}"}}
+                    """);
+            }
+
+            const string Callback = "http://localhost/return";
+            string[] scopes = ["patient/Observation.rs", "patient/Patient.rs"];
+            string authorize = QueryHelpers.AddQueryString("/_smart/picker/authorize", new Dictionary<string, string?>
+            {
+                ["response_type"] = "code", ["client_id"] = "picker-test", ["redirect_uri"] = Callback,
+                ["scope"] = string.Join(" ", scopes), ["state"] = "picker-state", ["aud"] = tenant.BaseUrl,
+            });
+            using HttpResponseMessage pending = await rest.GetAsync(authorize);
+            Assert.Equal(HttpStatusCode.Redirect, pending.StatusCode);
+            Uri redirect = await FluentUiIntegrationTests.SelectPatientAndApproveAsync(
+                new Uri(rest.BaseAddress!, pending.Headers.Location!), "included", stores, auth);
+            Assert.Equal(Callback, redirect.GetLeftPart(UriPartial.Path));
+            Assert.Equal("picker-state", QueryHelpers.ParseQuery(redirect.Query)["state"].ToString());
+            using FormUrlEncodedContent form = new(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code", ["code"] = QueryHelpers.ParseQuery(redirect.Query)["code"].ToString(),
+                ["client_id"] = "picker-test", ["redirect_uri"] = Callback,
+            });
+            using HttpResponseMessage exchange = await rest.PostAsync("/_smart/picker/token", form);
+            exchange.EnsureSuccessStatusCode();
+            JsonNode issued = JsonNode.Parse(await exchange.Content.ReadAsStringAsync())!;
+            Assert.Equal("included", (string?)issued["patient"]);
+            Assert.Equal(scopes, issued["scope"]!.GetValue<string>().Split(' ').Order(StringComparer.Ordinal));
+            string token = issued["access_token"]!.GetValue<string>();
+            Assert.Equal(GrantStatus.Admitted, auth.ResolveAccessToken(tenant.ControllerName, token, out AuthorizationInfo identity));
+            Assert.Equal("Patient/included", identity.UserId);
+            Assert.Equal("included", identity.LaunchPatient);
+            Assert.Empty(identity.UserScopes);
+            rest.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using IServiceScope circuit = app.Services.CreateScope();
+            SmartViewerSession session = circuit.ServiceProvider.GetRequiredService<SmartViewerSession>();
+            session.SelectTenant(tenant.ControllerName);
+            session.SelectMode(true);
+            session.SignIn(token);
+            foreach ((string type, string selected, string other) in new[]
+                { ("Patient", "included", "excluded"), ("Observation", "obs-included", "obs-excluded") })
+            {
+                SmartViewerSession.Request list = new(tenant.ControllerName, type);
+                await Load(list);
+                Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+                Assert.Equal(selected, Assert.Single(session.Display.Rows).Id);
+                JsonNode bundle = JsonNode.Parse(await rest.GetStringAsync($"{tenant.BaseUrl}/{type}"))!;
+                Assert.Equal(1, (int?)bundle["total"]);
+                Assert.Equal(selected, (string?)Assert.Single(bundle["entry"]!.AsArray())!["resource"]!["id"]);
+
+                await Load(list with { Id = selected });
+                Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+                JsonNode body = JsonNode.Parse(await rest.GetStringAsync($"{tenant.BaseUrl}/{type}/{selected}"))!;
+                Assert.Equal(type, (string?)body["resourceType"]);
+                Assert.Equal(selected, (string?)body["id"]);
+                Assert.True(JsonNode.DeepEquals(body, JsonNode.Parse(session.Display.Body)));
+
+                using HttpResponseMessage denied = await rest.GetAsync($"{tenant.BaseUrl}/{type}/{other}");
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+                Assert.DoesNotContain(other, await denied.Content.ReadAsStringAsync());
+                await Load(list with { Id = other });
+                Assert.Equal(HttpStatusCode.Forbidden, session.Display.Status);
+                AssertEmpty(session);
+            }
+            await app.StopAsync();
+
+            Task Load(SmartViewerSession.Request request) =>
+                session.LoadAsync(request, (_, _) => throw new InvalidOperationException("Unexpected admin load"));
+            void Put(string path, string content)
+            {
+                FhirRequestContext ctx = new(store, "PUT", path) { SourceContent = content, SourceFormat = "application/fhir+json" };
+                Assert.True(store.InstanceUpdate(ctx, out FhirResponseContext response), response.SerializedOutcome);
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    /// <summary>Caller inspection is tenant-bound, expires while idle and never repopulates from admin.</summary>
+    [Fact]
+    public async Task AdminAndCallerReadDifferentViews()
+    {
+        TenantConfiguration tenant = new()
+        {
+            ControllerName = "viewer",
+            BaseUrl = "http://localhost/fhir/viewer",
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
+            SmartAllowed = true,
+            AllowCreateAsUpdate = true,
+            AllowExistingId = true,
+        };
+        DirectoryInfo root = Directory.CreateTempSubdirectory("candle-viewer-");
+        try
+        {
+            ManualTimeProvider clock = new(DateTimeOffset.UtcNow);
+            await using WebApplication app = BuildViewerHost(root, tenant, clock);
+            await app.StartAsync();
+            using IFhirStore store = app.Services.GetRequiredService<IFhirStoreManager>()[tenant.ControllerName];
+            ISmartAuthManager auth = app.Services.GetRequiredService<ISmartAuthManager>();
+            using HttpClient rest = app.GetTestClient();
+            using IServiceScope first = app.Services.CreateScope();
+            using IServiceScope second = app.Services.CreateScope();
+            SmartViewerSession session = first.ServiceProvider.GetRequiredService<SmartViewerSession>();
+            SmartViewerSession peer = second.ServiceProvider.GetRequiredService<SmartViewerSession>();
+            Assert.NotSame(peer, session);
+
+            foreach (string id in new[] { "included", "excluded" })
+            {
+                FhirRequestContext ctx = new(store, "PUT", $"Patient/{id}")
+                {
+                    SourceContent = $$"""{"resourceType":"Patient","id":"{{id}}"}""",
+                    SourceFormat = "application/fhir+json",
+                };
+                Assert.True(store.InstanceUpdate(ctx, out FhirResponseContext response), response.SerializedOutcome);
+            }
+
+            Assert.True(auth.RequestAuth(tenant.ControllerName, "127.0.0.1", "code", "viewer-test", "http://localhost/return",
+                string.Empty, "patient/Patient.rs", string.Empty, tenant.BaseUrl, string.Empty, string.Empty, out _, out string key));
+            Assert.True(auth.TryGetPendingAuthorization(tenant.ControllerName, key, out AuthorizationInfo consent));
+            consent.UserId = "test-user";
+            consent.LaunchPatient = "Patient/included";
+            consent.Scopes["patient/Patient.rs"] = true;
+            Assert.True(auth.TryUpdateAuth(tenant.ControllerName, key, consent));
+            Assert.True(auth.TryCreateSmartResponse(tenant.ControllerName, consent.AuthCode, "viewer-test", string.Empty,
+                string.Empty, out AuthorizationInfo.SmartResponse issued));
+            rest.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.AccessToken);
+
+            SmartViewerSession.Request list = new(tenant.ControllerName, "Patient");
+            SmartViewerSession.Request allowed = list with { Id = "included" };
+            SmartViewerSession.Request denied = list with { Id = "excluded" };
+            session.SelectTenant(list.Tenant);
+            peer.SelectTenant(list.Tenant);
+            await session.LoadAsync(list, SmartViewerSession.LoadAdmin);
+            Assert.Equal(2, session.Display.Rows.Length);
+            await peer.LoadAsync(denied, SmartViewerSession.LoadAdmin);
+            Assert.Contains("excluded", peer.Display.Body);
+
+            // An old admin completion cannot overwrite even a successful result in caller mode.
+            TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using ManualResetEventSlim release = new();
+            Task late = session.LoadAsync(denied, (s, r) =>
+            {
+                entered.SetResult();
+                if (!release.Wait(TimeSpan.FromSeconds(30)))
+                {
+                    throw new TimeoutException();
+                }
+                return SmartViewerSession.LoadAdmin(s, r);
+            });
+            await entered.Task;
+            int adminCalls = 0;
+            Task Load(SmartViewerSession.Request request) => session.LoadAsync(request, (s, r) =>
+            {
+                Interlocked.Increment(ref adminCalls);
+                return SmartViewerSession.LoadAdmin(s, r);
+            });
+            try
+            {
+                session.SelectMode(true);
+                await Load(list);
+                AssertDenied(session);
+                session.SignIn(issued.AccessToken);
+                await Load(new(list.Tenant));
+                Assert.Contains(session.Display.Types, t => t.Name == "Patient");
+                Assert.All(session.Display.Types, t => Assert.Null(t.Count));
+                await Load(list);
+                JsonNode? bundle = JsonNode.Parse(await rest.GetStringAsync($"{tenant.BaseUrl}/Patient"));
+                Assert.Equal("included", Assert.Single(bundle!["entry"]!.AsArray())!["resource"]!["id"]!.GetValue<string>());
+                Assert.Equal("included", Assert.Single(session.Display.Rows).Id);
+
+                using HttpResponseMessage read = await rest.GetAsync($"{tenant.BaseUrl}/Patient/included");
+                await Load(allowed);
+                Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+                Assert.Equal(read.StatusCode, session.Display.Status);
+                Assert.True(JsonNode.DeepEquals(JsonNode.Parse(await read.Content.ReadAsStringAsync()), JsonNode.Parse(session.Display.Body)));
+            }
+            finally
+            {
+                release.Set();
+                await late;
+            }
+            Assert.Contains("included", session.Display.Body);
+            Assert.Null(session.Display.AdminStore);
+
+            using HttpResponseMessage rejected = await rest.GetAsync($"{tenant.BaseUrl}/Patient/excluded");
+            await Load(denied);
+            Assert.False(rejected.IsSuccessStatusCode);
+            Assert.Equal(rejected.StatusCode, session.Display.Status);
+            AssertEmpty(session);
+            using HttpResponseMessage forbiddenSearch = await rest.GetAsync($"{tenant.BaseUrl}/Observation");
+            await Load(list with { Type = "Observation" });
+            Assert.Equal(HttpStatusCode.Unauthorized, forbiddenSearch.StatusCode);
+            Assert.Equal(forbiddenSearch.StatusCode, session.Display.Status);
+            AssertEmpty(session);
+
+            await Load(allowed with { Format = "xml" });
+            Assert.Contains("<Patient", session.Display.Body);
+            Assert.True(auth.TrySmartRefresh(tenant.ControllerName, issued.RefreshToken, "viewer-test", out issued));
+            await Load(allowed with { Format = "json" });
+            AssertDenied(session);
+            session.SignIn(issued.AccessToken);
+            await Load(allowed);
+            Assert.Contains("included", session.Display.Body);
+            session.SignIn("not-issued");
+            await Load(allowed with { Format = "json" });
+            AssertDenied(session);
+
+            session.SignIn(issued.AccessToken);
+            await Load(list);
+            session.SelectTenant("other");
+            Assert.True(session.Smart);
+            AssertEmpty(session);
+            session.SelectTenant(tenant.ControllerName);
+            await Load(allowed);
+            AssertDenied(session);
+
+            session.SignIn(issued.AccessToken);
+            await Load(allowed);
+            Assert.Contains("included", session.Display.Body);
+            int expired = 0;
+            session.Expired += () => expired++;
+            clock.Advance(clock.NextDueTime!.Value - clock.GetUtcNow());
+            Assert.Equal(1, clock.RunDueCallbacks());
+            Assert.Equal(1, expired);
+            AssertDenied(session);
+            await Load(allowed with { Format = "xml" });
+            AssertDenied(session);
+            Assert.False(peer.Smart);
+            Assert.Contains("excluded", peer.Display.Body);
+            Assert.Equal(0, adminCalls);
+
+            session.SelectMode(false);
+            await Load(denied);
+            Assert.Equal(1, adminCalls);
+            Assert.Contains("excluded", session.Display.Body);
+            await app.StopAsync();
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    /// <summary>Search navigation preserves each admitted store key even when the bodies share an ID.</summary>
+    [Fact]
+    public async Task CallerRowsReadDistinctStoreKeys()
+    {
+        TenantConfiguration tenant = new()
+        {
+            ControllerName = "keys", BaseUrl = "http://localhost/fhir/keys",
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4, SmartAllowed = true, SmartRequired = true,
+            AllowCreateAsUpdate = true, AllowExistingId = true,
+        };
+        DirectoryInfo root = Directory.CreateTempSubdirectory("candle-viewer-keys-");
+        try
+        {
+            await using WebApplication app = BuildViewerHost(root, tenant, TimeProvider.System);
+            await app.StartAsync();
+            using IFhirStore store = app.Services.GetRequiredService<IFhirStoreManager>()[tenant.ControllerName];
+            Dictionary<string, string> names = new() { ["first"] = "Alpha", ["second"] = "Beta" };
+            foreach ((string key, string family) in names)
+            {
+                FhirRequestContext ctx = new(store, "PUT", $"Patient/{key}")
+                {
+                    SourceContent = $$"""{"resourceType":"Patient","id":"{{key}}","name":[{"family":"{{family}}"}]}""",
+                    SourceFormat = "application/fhir+json",
+                };
+                Assert.True(store.InstanceUpdate(ctx, out FhirResponseContext response), response.SerializedOutcome);
+                ((Hl7.Fhir.Model.Resource)store["Patient"][key]).Id = "shared";
+            }
+
+            ISmartAuthManager auth = app.Services.GetRequiredService<ISmartAuthManager>();
+            const string Scope = "user/Patient.rs";
+            Assert.True(auth.RequestAuth(tenant.ControllerName, "127.0.0.1", "code", "viewer-test", "http://localhost/return",
+                string.Empty, Scope, string.Empty, tenant.BaseUrl, string.Empty, string.Empty, out _, out string pending));
+            Assert.True(auth.TryGetPendingAuthorization(tenant.ControllerName, pending, out AuthorizationInfo consent));
+            consent.UserId = "Practitioner/viewer";
+            consent.Scopes[Scope] = true;
+            Assert.True(auth.TryUpdateAuth(tenant.ControllerName, pending, consent));
+            Assert.True(auth.TryCreateSmartResponse(tenant.ControllerName, consent.AuthCode, "viewer-test", string.Empty,
+                string.Empty, out AuthorizationInfo.SmartResponse issued));
+
+            using IServiceScope circuit = app.Services.CreateScope();
+            SmartViewerSession session = circuit.ServiceProvider.GetRequiredService<SmartViewerSession>();
+            session.SelectTenant(tenant.ControllerName);
+            session.SelectMode(true);
+            session.SignIn(issued.AccessToken);
+            SmartViewerSession.Request list = new(tenant.ControllerName, "Patient");
+            Task Load(SmartViewerSession.Request request) =>
+                session.LoadAsync(request, (_, _) => throw new InvalidOperationException("Unexpected admin load"));
+            await Load(list);
+            Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+            string[] ids = session.Display.Rows.Select(row => row.Id).Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(new[] { "first", "second" }, ids);
+            foreach (string id in ids)
+            {
+                await Load(list with { Id = id });
+                Assert.Equal(HttpStatusCode.OK, session.Display.Status);
+                JsonNode body = JsonNode.Parse(session.Display.Body)!;
+                Assert.Equal("shared", (string?)body["id"]);
+                Assert.Equal(names[id], (string?)body["name"]![0]!["family"]);
+            }
+            await app.StopAsync();
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    /// <summary>Only a local primary match with an unambiguous FHIR id becomes a detail link.</summary>
+    [Fact]
+    public void CallerRowsOmitNonlocalAndNonmatchEntries()
+    {
+        const string Root = "http://localhost/fhir/keys";
+        const string Prefix = Root + "/Patient/";
+        (string? Url, string? Mode)[] cases =
+        [
+            (Prefix + "A-1.z", "match"), (Prefix + "included", "include"), (Prefix + "missing-mode", null),
+            (null, "match"), (Root + "/Observation/key", "match"), ("Patient/key", "match"),
+            ("https://localhost/fhir/keys/Patient/key", "match"), ("http://elsewhere/fhir/keys/Patient/key", "match"),
+            (Root + "-other/Patient/key", "match"), (Prefix + "x/y", "match"), (Prefix + "x%2Fy", "match"),
+            (Prefix + "x%5Cy", "match"), (Prefix + "x?y", "match"), (Prefix + "x#y", "match"),
+            (Prefix + "../Patient/key", "match"), (Prefix + ".", "match"), (Prefix, "match"),
+            (Prefix + new string('a', 65), "match"), (Prefix + "a_b", "match"),
+        ];
+        JsonElement bundle = JsonSerializer.SerializeToElement(new
+        {
+            entry = cases.Select(c => new { fullUrl = c.Url, search = new { mode = c.Mode }, resource = new { id = "fallback" } }),
+        });
+        Assert.Equal("A-1.z", Assert.Single(SmartViewerSession.CallerRows(bundle, Root, "Patient")).Id);
+    }
+
+    private static void AssertDenied(SmartViewerSession session)
+    {
+        Assert.True(session.Smart);
+        Assert.Equal(HttpStatusCode.Unauthorized, session.Display.Status);
+        AssertEmpty(session);
+    }
+
+    private static void AssertEmpty(SmartViewerSession session)
+    {
+        Assert.Null(session.Display.AdminStore);
+        Assert.Empty(session.Display.Body);
+        Assert.Empty(session.Display.Rows);
+        Assert.Empty(session.Display.Types);
+    }
+}

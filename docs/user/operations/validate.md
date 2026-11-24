@@ -31,9 +31,41 @@ and the server returns an `OperationOutcome` describing any structural problems.
 
 Only `POST` is supported; `GET` is not allowed.
 
+### GET rejection and earlier guards
+
+After the existing route, authorization, operation, and resource guards
+succeed, GET on any of the three operation levels returns **405 Method Not
+Allowed**, including when an instance target or request body is available.
+The HTTP response has exactly **`Allow: POST`** and an OperationOutcome with
+one issue:
+
+- severity: `error`
+- code: `not-supported`
+- diagnostic: `$validate only supports POST; GET is not allowed.`
+
+The outcome uses the negotiated FHIR JSON or XML format. The default response,
+`Prefer: return=representation`, and `Prefer: return=OperationOutcome` return
+that outcome. `Prefer: return=minimal` retains the existing empty-body behavior
+and still sends `Allow: POST`. GET does not parse or validate a submitted body,
+run operation hooks, or change the target's content or metadata.
+
+The method rejection does **not** override earlier guards. Missing instances
+remain 404 even when a body is supplied; `/Parameters/$validate` is still an
+unsupported resource URL (404), as are unknown resource types. Unknown
+operations and missing tenants retain their existing 404 responses.
+Authorization rejection remains 401 before operation dispatch, including
+before the instance-existence check. Early controller tenant/resource errors
+retain their existing plain-text representation, not a newly negotiated
+OperationOutcome.
+
+This rejection is specific to GET `$validate`, not a change to other
+operations' method enforcement. Other unsupported verbs retain their
+existing routing behavior; for example PATCH on these operation routes is
+405 with an empty body and the router's existing GET/POST Allow values.
+
 ## Target resolution
 
-The resource that gets validated is resolved in this priority order:
+For POST, the resource that gets validated is resolved in this priority order:
 
 1. If the request body is a `Parameters` resource with a `resource` parameter,
    the embedded resource is validated.
@@ -44,6 +76,11 @@ The resource that gets validated is resolved in this priority order:
 4. If none of the above yields a target, the server returns **422 Unprocessable
    Entity** with an `error` `OperationOutcome` explaining that a target is
    required.
+
+An instance URL must identify an existing resource before body precedence is
+considered; a supplied resource does not bypass a missing-instance 404.
+`Parameters` is supported as a **body on a proper operation route**, not as
+the URL's resource type.
 
 ## What is covered
 
@@ -75,17 +112,25 @@ The follow-up path to profile and terminology validation is tracked in the
 
 ## Response semantics
 
-Per FHIR convention, validation results are conveyed through `OperationOutcome`
-issues, **not** through HTTP status codes. Once a parseable target is found, the
-operation returns **200 OK** regardless of whether validation passed or failed.
+The POST contract is unchanged: per FHIR convention, validation results are
+conveyed through `OperationOutcome` issues, **not** through HTTP status codes.
+Once a parseable target is found, the operation returns **200 OK** regardless
+of whether validation passed or failed. Method and earlier-guard rejections
+are not validation results.
 
 | Situation | HTTP status | Body |
 |---|---|---|
 | Validation passed | `200 OK` | `OperationOutcome` with a single `information` "All OK" issue |
 | Validation found problems | `200 OK` | `OperationOutcome` with one issue per problem (severity/code from the validator, optional `expression`) |
 | `mode` / `profile` supplied | `200 OK` | The above **plus** one `information` "ignored" issue per parameter |
-| No target resource | `422 Unprocessable Entity` | `error` `OperationOutcome` requesting a target |
+| POST with no target resource | `422 Unprocessable Entity` | `error`/`invalid` `OperationOutcome` requesting a target |
+| Malformed POST JSON/XML | `415 Unsupported Media Type` | `error`/`invalid` `OperationOutcome` from parsing, before validation |
+| GET after earlier guards succeed | `405 Method Not Allowed` | One `error`/`not-supported` issue as specified above; `Allow: POST` |
+| Missing instance, unsupported Parameters/resource URL, unknown operation, or missing tenant | Existing `404 Not Found` | Existing boundary-specific error; not replaced by GET's method rejection |
 | Model inspector failed to initialize at startup | `500 Internal Server Error` | `error` `OperationOutcome` (see server logs) |
+
+The table describes normal body selection. The existing HTTP `Prefer` handling
+is unchanged, including an empty body for `return=minimal`.
 
 > **Note.** A successful validation is **not** an empty body or a 4xx — it is a
 > 200 with an `information` "All OK" issue. If you also send `mode`/`profile`,

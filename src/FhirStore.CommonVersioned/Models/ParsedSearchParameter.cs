@@ -11,7 +11,6 @@ using Hl7.Fhir.Utility;
 using Hl7.FhirPath;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Linq;
 using static FhirCandle.Search.SearchDefinitions;
 using System.Runtime.Versioning;
@@ -1638,123 +1637,17 @@ public class ParsedSearchParameter : ICloneable
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryParseDateString(string dateString, out DateTimeOffset start, out DateTimeOffset end, out TimeSpan approxDelta)
     {
-        approxDelta = TimeSpan.Zero;
-
-        if (string.IsNullOrEmpty(dateString))
+        if (DateSearchLiteral.TryParse(dateString, out DateSearchRange range, out approxDelta))
         {
-            start = DateTimeOffset.MinValue;
-            end = DateTimeOffset.MaxValue;
-            IgnoredReason ??= "Empty date string";
-            return false;
-        }
-
-        // need to check for just year because DateTime refuses to parse that
-        if (dateString.Length == 4)
-        {
-            if (!int.TryParse(dateString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int year))
-            {
-                IgnoredReason ??= $"Invalid date format: {dateString}";
-                start = DateTimeOffset.MinValue;
-                end = DateTimeOffset.MaxValue;
-                return false;
-            }
-
-            start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            end = start.AddYears(1).AddTicks(-1);
-            approxDelta = TimeSpan.FromDays(365);
+            start = range.Start;
+            end = range.End;
             return true;
         }
 
-        // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
-        if (!DateTime.TryParse(dateString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime dt))
-        {
-            Console.WriteLine($"Failed to parse date: {dateString}");
-            IgnoredReason ??= $"Invalid date format: {dateString}";
-            start = DateTimeOffset.MinValue;
-            end = DateTimeOffset.MaxValue;
-            return false;
-        }
-
-        // RoundtripKind preserves any explicit offset as DateTimeKind.Local; normalize to UTC.
-        start = dt.Kind == DateTimeKind.Local
-            ? new DateTimeOffset(dt).ToUniversalTime()
-            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
-
-        switch (dateString.Length)
-        {
-            // YYYY
-            case 4:
-                end = start.AddYears(1).AddTicks(-1);
-                approxDelta = TimeSpan.FromDays(365);
-                break;
-
-            // YYYY-MM
-            case 7:
-                end = start.AddMonths(1).AddTicks(-1);
-                // ±65 days covers any consecutive two-month span (worst case 62 days,
-                // Jul–Aug or Dec–Jan) with a small safety margin for timezone offsets
-                // and inclusive-boundary edge cases. We deliberately use a flat window —
-                // AddMonths(2) would introduce leap-Feb asymmetry the `ap` window does
-                // not need.
-                approxDelta = TimeSpan.FromDays(65);
-                break;
-
-            // YYYY-MM-DD
-            case 10:
-                end = start.AddDays(1).AddTicks(-1);
-                approxDelta = TimeSpan.FromDays(31);
-                break;
-
-            // Note: this is not defined as valid, but wanted to support it
-            // YYYY-MM-DDThh
-            case 13:
-                end = start.AddHours(1).AddTicks(-1);
-                approxDelta = TimeSpan.FromDays(1);
-                break;
-
-            // YYYY-MM-DDThh:mm
-            case 16:
-                end = start.AddMinutes(1).AddTicks(-1);
-                approxDelta = TimeSpan.FromDays(1);
-                break;
-
-            // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
-
-            // YYYY-MM-DDThh:mm:ss
-            case 19:
-            // YYYY-MM-DDThh:mm:ssZ
-            case 20:
-            // YYYY-MM-DDThh:mm:ss+zz
-            // YYYY-MM-DDThh:mm:ss.fZ
-            case 22:
-            // YYYY-MM-DDThh:mm:ss.ffZ
-            case 23:
-            // YYYY-MM-DDThh:mm:ss.fffZ
-            case 24:
-            // YYYY-MM-DDThh:mm:ss+zz:zz
-            // YYYY-MM-DDThh:mm:ss.ffffZ
-            case 25:
-            // YYYY-MM-DDThh:mm:ss.f+zz:zz
-            case 27:
-            // YYYY-MM-DDThh:mm:ss.ff+zz:zz
-            case 28:
-            // YYYY-MM-DDThh:mm:ss.fff+zz:zz
-            case 29:
-            // YYYY-MM-DDThh:mm:ss.ffff+zz:zz
-            case 30:
-                end = start.AddSeconds(1).AddTicks(-1);
-                approxDelta = TimeSpan.FromDays(1);
-                break;
-
-            default:
-                Console.WriteLine($"Invalid date format: {dateString}");
-                IgnoredReason ??= $"Invalid date format: {dateString}";
-                start = DateTimeOffset.MinValue;
-                end = DateTimeOffset.MaxValue;
-                return false;
-        }
-
-        return true;
+        start = DateTimeOffset.MinValue;
+        end = DateTimeOffset.MaxValue;
+        IgnoredReason ??= string.IsNullOrEmpty(dateString) ? "Empty date string" : $"Invalid date format: {dateString}";
+        return false;
     }
 
     /// <summary>Attempts to parse a date string.</summary>
@@ -1764,105 +1657,16 @@ public class ParsedSearchParameter : ICloneable
     /// <returns>True if it succeeds, false if it fails.</returns>
     public static bool TryParseFhirDate(string? dateString, out DateTimeOffset start, out DateTimeOffset end)
     {
-        if (string.IsNullOrEmpty(dateString))
+        if (DateSearchLiteral.TryParse(dateString, out DateSearchRange range, out _))
         {
-            start = DateTimeOffset.MinValue;
-            end = DateTimeOffset.MaxValue;
-            return false;
-        }
-
-        // need to check for just year because DateTime refuses to parse that
-        if (dateString.Length == 4)
-        {
-            if (!int.TryParse(dateString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int year))
-            {
-                start = DateTimeOffset.MinValue;
-                end = DateTimeOffset.MaxValue;
-                return false;
-            }
-
-            start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            end = start.AddYears(1).AddTicks(-1);
+            start = range.Start;
+            end = range.End;
             return true;
         }
 
-        // note that we are using DateTime and converting to DateTimeOffset to work through TZ stuff without manually parsing each format precision
-        if (!DateTime.TryParse(dateString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime dt))
-        {
-            Console.WriteLine($"Failed to parse date: {dateString}");
-            start = DateTimeOffset.MinValue;
-            end = DateTimeOffset.MaxValue;
-            return false;
-        }
-
-        // RoundtripKind preserves any explicit offset as DateTimeKind.Local; normalize to UTC.
-        start = dt.Kind == DateTimeKind.Local
-            ? new DateTimeOffset(dt).ToUniversalTime()
-            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
-
-        switch (dateString.Length)
-        {
-            // YYYY
-            case 4:
-                end = start.AddYears(1).AddTicks(-1);
-                break;
-
-            // YYYY-MM
-            case 7:
-                end = start.AddMonths(1).AddTicks(-1);
-                break;
-
-            // YYYY-MM-DD
-            case 10:
-                end = start.AddDays(1).AddTicks(-1);
-                break;
-
-            // Note: this is not defined as valid, but wanted to support it
-            // YYYY-MM-DDThh
-            case 13:
-                end = start.AddHours(1).AddTicks(-1);
-                break;
-
-            // YYYY-MM-DDThh:mm
-            case 16:
-                end = start.AddMinutes(1).AddTicks(-1);
-                break;
-
-            // Note: servers are allowed to ignore fractional seconds - I am choosing to do so.
-
-            // YYYY-MM-DDThh:mm:ss
-            case 19:
-            // YYYY-MM-DDThh:mm:ssZ
-            case 20:
-            // YYYY-MM-DDThh:mm:ss+zz
-            // YYYY-MM-DDThh:mm:ss.fZ
-            case 22:
-            // YYYY-MM-DDThh:mm:ss.ffZ
-            case 23:
-            // YYYY-MM-DDThh:mm:ss.fffZ
-            case 24:
-            // YYYY-MM-DDThh:mm:ss+zz:zz
-            // YYYY-MM-DDThh:mm:ss.ffffZ
-            case 25:
-            // YYYY-MM-DDThh:mm:ss.f+zz:zz
-            case 27:
-            // YYYY-MM-DDThh:mm:ss.ff+zz:zz
-            case 28:
-            // YYYY-MM-DDThh:mm:ss.fff+zz:zz
-            case 29:
-            // YYYY-MM-DDThh:mm:ss.ffff+zz:zz
-            case 30:
-                end = start.AddSeconds(1).AddTicks(-1);
-                break;
-
-            default:
-                Console.WriteLine($"Invalid date format: {dateString}");
-                start = DateTimeOffset.MinValue;
-                end = DateTimeOffset.MaxValue;
-                return false;
-        }
-
-        return true;
+        start = DateTimeOffset.MinValue;
+        end = DateTimeOffset.MaxValue;
+        return false;
     }
 
     public object Clone() => new ParsedSearchParameter(this);

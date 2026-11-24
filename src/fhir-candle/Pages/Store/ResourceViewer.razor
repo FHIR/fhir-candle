@@ -1,269 +1,36 @@
-﻿@using FhirCandle.Configuration
-@using Microsoft.FluentUI.AspNetCore.Components;
-
 @page "/store/resource-viewer"
-
-@* @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage *@
-@using BlazorMonaco
-@using BlazorMonaco.Editor
-
+@using FhirCandle.Configuration
 @inject CandleConfig ServerConfig
-@inject NavigationManager NavigationManager
-@inject IJSRuntime JS
-@inject IFhirStoreManager StoreManager
-@inject ISmartAuthManager AuthManager
-@* @inject ProtectedLocalStorage BrowserStore *@
-@inject IHttpContextAccessor HttpContextAccessor
+@inject SmartViewerSession Session
 
-@implements IDisposable
-
-<PageTitle>Resource Editor</PageTitle>
-
-<FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentGrid Spacing="8" Justify="JustifyContent.SpaceEvenly" style="width: 90%;">
-        <FluentGridItem Style="min-width: var(--field-container-min-width);">
-            <FluentSelect @bind-Value="ResourceFormatCode" TOption="string" >
-                <FluentOption Value="@("json")">JSON</FluentOption>
-                <FluentOption Value="@("xml")">XML</FluentOption>
-            </FluentSelect>
-        </FluentGridItem>
-
-        <FluentSpacer />
-
-        @switch (_store.Config.FhirVersion)
+<FhirStorePage NamedTenant="@(StoreName ?? string.Empty)" ResourceType="@(ResourceType ?? string.Empty)" Id="@(Id ?? string.Empty)" @bind-Format="_format">
+    @{ SmartViewerSession.View view = Session.Display; }
+    @if (view.AdminStore is IFhirStore store)
+    {
+        @switch (store.Config.FhirVersion)
         {
             case FhirReleases.FhirSequenceCodes.R4:
-                <FhirCandle.Ui.R4.Components.FhirEditorLinks
-                    BaseUrl="@_store.Config.BaseUrl"
-                    ResourceType="@ResourceType"
-                    Id="@Id"
-                    FhirPathLabUrl="@ServerConfig.FhirPathLabUrl"
-                    />
+                <FhirCandle.Ui.R4.Components.FhirEditorLinks BaseUrl="@store.Config.BaseUrl" ResourceType="@ResourceType" Id="@Id" FhirPathLabUrl="@ServerConfig.FhirPathLabUrl" />
                 break;
-
             case FhirReleases.FhirSequenceCodes.R4B:
-                <FhirCandle.Ui.R4B.Components.FhirEditorLinks
-                    BaseUrl="@_store.Config.BaseUrl"
-                    ResourceType="@ResourceType"
-                    Id="@Id"
-                    FhirPathLabUrl="@ServerConfig.FhirPathLabUrl"
-                    />
+                <FhirCandle.Ui.R4B.Components.FhirEditorLinks BaseUrl="@store.Config.BaseUrl" ResourceType="@ResourceType" Id="@Id" FhirPathLabUrl="@ServerConfig.FhirPathLabUrl" />
                 break;
-
             case FhirReleases.FhirSequenceCodes.R5:
-                <FhirCandle.Ui.R5.Components.FhirEditorLinks
-                    BaseUrl="@_store.Config.BaseUrl"
-                    ResourceType="@ResourceType"
-                    Id="@Id"
-                    FhirPathLabUrl="@ServerConfig.FhirPathLabUrl"
-                    />
+                <FhirCandle.Ui.R5.Components.FhirEditorLinks BaseUrl="@store.Config.BaseUrl" ResourceType="@ResourceType" Id="@Id" FhirPathLabUrl="@ServerConfig.FhirPathLabUrl" />
                 break;
         }
-    </FluentGrid>
-
-    <FhirCandle.Ui.Common.Components.FhirEditor
-        Language="@ResourceFormatCode"
-        EditorContent="@_resourceContent"
-        DarkMode="@(NavTracker?.IsDarkMode ?? true)"
-        />
-
-</FluentStack>
-
-@*
-<MudStack>
-    <MudPaper>
-        <MudGrid Spacing="2" Justify="Justify.FlexStart" Style="align-items: center;">
-            <MudItem xs="2">
-                <MudSelect T="string"
-                            Label="Format"
-                            Value="@_resourceFormatCode"
-                            ValueChanged="@OnUserFormatChanged"
-                            FullWidth="false"
-                            Variant="Variant.Outlined">
-                    <MudSelectItem Value="@("json")">JSON</MudSelectItem>
-                    <MudSelectItem Value="@("xml")">XML</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-
-            @switch (_store.Config.FhirVersion)
-            {
-                case FhirReleases.FhirSequenceCodes.R4:
-                    <FhirCandle.Ui.R4.Components.FhirEditorLinks
-                        BaseUrl="@_store.Config.BaseUrl"
-                        ResourceType="@ResourceType"
-                        Id="@Id"
-                        FhirPathLabUrl="@ServerConfig.FhirPathLabUrl"
-                        />
-                    break;
-
-                case FhirReleases.FhirSequenceCodes.R4B:
-                    <FhirCandle.Ui.R4B.Components.FhirEditorLinks
-                        BaseUrl="@_store.Config.BaseUrl"
-                        ResourceType="@ResourceType"
-                        Id="@Id"
-                        FhirPathLabUrl="@ServerConfig.FhirPathLabUrl"
-                        />
-                    break;
-
-                case FhirReleases.FhirSequenceCodes.R5:
-                    <FhirCandle.Ui.R5.Components.FhirEditorLinks
-                        BaseUrl="@_store.Config.BaseUrl"
-                        ResourceType="@ResourceType"
-                        Id="@Id"
-                        FhirPathLabUrl="@ServerConfig.FhirPathLabUrl"
-                        />
-                    break;
-            }
-
-        </MudGrid>
-    </MudPaper>
-
-    <FhirCandle.Ui.Common.Components.FhirEditor
-        Language="@_resourceFormatCode"
-        EditorContent="@_resourceContent"
-        />
- 
-</MudStack>
-*@
+        <FhirCandle.Ui.Common.Components.FhirEditor Language="@_format" EditorContent="@view.Body" DarkMode="@IsDarkMode" />
+    }
+    else if (!string.IsNullOrEmpty(view.Body))
+    {
+        <pre>@view.Body</pre>
+    }
+</FhirStorePage>
 
 @code {
-    /// <summary>Gets or sets the navigation tracker.</summary>
-    [CascadingParameter]
-    public INavTracker? NavTracker { get; set; } = null;
-
-    private NavPageInfoRec[] _navPages => new NavPageInfoRec[]
-    {
-        new() { Display = StoreName, Link = "/store?store=" + StoreName },
-        new() { Display = ResourceType, Link = $"/store/resource-list?store={StoreName}&type={ResourceType}" },
-        new() { Display = Id, Link = $"/store/resource-editor?store={StoreName}&type={ResourceType}&id={Id}" },
-    };
-
-    /// <summary>Gets or sets the package name.</summary>
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "store")]
-    public string StoreName { get; set; } = "";
-
-    /// <summary>Gets or sets the identifier of the resource.</summary>
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "type")]
-    public string ResourceType { get; set; } = "";
-
-    /// <summary>Gets or sets the identifier of the resource.</summary>
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "id")]
-    public string Id { get; set; } = "";
-
-    /// <summary>The FHIR store.</summary>
-    private IFhirStore _store = null!;
-
-    private string _resourceFormatCode = "json";
-
-    /// <summary>The resource format code.</summary>
-    private string ResourceFormatCode 
-    {
-        get => _resourceFormatCode;
-        set
-        {
-            if (value != _resourceFormatCode)
-            {
-                _resourceFormatCode = value;
-                LoadResourceContent();
-            }
-        }
-    }
-
-    private string _resourceContent { get; set; } = "";
-
-    /// <summary>Loads resource content.</summary>
-    private void LoadResourceContent()
-    {
-        FhirResponseContext response;
-
-        // check for needing to generate metadata
-        if (ResourceType.Equals("CapabilityStatement", StringComparison.Ordinal) &&
-            Id.Equals("metadata", StringComparison.Ordinal))
-        {
-            FhirRequestContext ctx = new FhirRequestContext(_store, "GET", $"{_store.Config.BaseUrl}/metadata", HttpContextAccessor.HttpContext?.Request.Host.ToString())
-            {
-                DestinationFormat = $"application/fhir+{_resourceFormatCode}",
-                SerializePretty = true,
-            };
-
-            _ = _store.GetMetadata(ctx, out response);
-        }
-        else
-        {
-            FhirRequestContext ctx = new FhirRequestContext(_store, "GET", $"{_store.Config.BaseUrl}/{ResourceType}/{Id}", HttpContextAccessor.HttpContext?.Request.Host.ToString())
-            {
-                DestinationFormat = $"application/fhir+{_resourceFormatCode}",
-                SerializePretty = true,
-            };
-
-            _ = _store.InstanceRead(ctx, out response);
-        }
-
-        _resourceContent = response.SerializedResource;
-    }
-
-    /// <summary>Executes the initialized asynchronous action.</summary>
-    /// <returns>An asynchronous result.</returns>
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-
-        if ((!string.IsNullOrEmpty(StoreName)) &&
-            (StoreManager.TryGetValue(StoreName, out _store!)))
-        {
-        }
-
-        if (NavTracker is not null)
-        {
-            // notify of store root in case user clicked here directly
-            NavTracker.NotifyNav(_navPages);
-        }
-
-        NavigationManager.LocationChanged += HandleLocationChanged;
-
-        LoadResourceContent();
-    }
-
-    /// <summary>Handles the location changed.</summary>
-    /// <param name="sender">The sender.</param>
-    /// <param name="e">     Location changed event information.</param>
-    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        if (e.Location.ToLowerInvariant().Contains("/store/resource-editor", StringComparison.Ordinal))
-        {
-            if (_store is not null)
-            {
-            }
-
-            if ((!string.IsNullOrEmpty(StoreName)) &&
-                (StoreManager.TryGetValue(StoreName, out _store!)))
-            {
-            }
-
-            if (NavTracker is not null)
-            {
-                // notify of store root in case user clicked here directly
-                NavTracker.NotifyNav(_navPages);
-            }
-
-            LoadResourceContent();
-        }
-    }
-
-    /// <summary>
-    /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged
-    /// resources.
-    /// </summary>
-    public void Dispose()
-    {
-        NavigationManager.LocationChanged -= HandleLocationChanged;
-
-        if (_store is not null)
-        {
-        }
-    }
+    [CascadingParameter(Name = nameof(INavTracker.IsDarkMode))] public bool IsDarkMode { get; set; }
+    [SupplyParameterFromQuery(Name = "store")] public string StoreName { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "type")] public string ResourceType { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "id")] public string Id { get; set; } = string.Empty;
+    private string _format = "json";
 }
-

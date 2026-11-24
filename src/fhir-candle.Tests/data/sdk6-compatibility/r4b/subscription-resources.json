@@ -1,0 +1,109 @@
+{
+  "patient": {
+    "resourceType": "Patient",
+    "id": "sub-patient",
+    "active": true,
+    "name": [ { "family": "Synthetic Subscription", "given": [ "Local" ] } ]
+  },
+  "other-patient": {
+    "resourceType": "Patient",
+    "id": "other-patient",
+    "active": true,
+    "name": [ { "family": "Filter Negative" } ]
+  },
+  "planned": {
+    "resourceType": "Encounter",
+    "id": "encounter-under-test",
+    "language": "en",
+    "status": "planned",
+    "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+    "subject": { "reference": "Patient/sub-patient" }
+  },
+  "complete": {
+    "resourceType": "Encounter",
+    "id": "encounter-under-test",
+    "language": "en",
+    "status": "finished",
+    "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+    "subject": { "reference": "Patient/sub-patient" }
+  },
+  "topic-fhirpath": {
+    "resourceType": "SubscriptionTopic",
+    "id": "sdk6-encounter",
+    "url": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "status": "active",
+    "resourceTrigger": [
+      {
+        "resource": "Encounter",
+        "supportedInteraction": [ "create", "update", "delete" ],
+        "fhirPathCriteria": "((%previous.empty() or (%previous.status != 'finished')) and (%current.status = 'finished')) or (%current.empty() and (%previous.status = 'finished'))"
+      }
+    ],
+    "canFilterBy": [ { "resource": "Encounter", "filterParameter": "patient" } ],
+    "notificationShape": [ { "resource": "Encounter", "include": [ "Encounter:patient" ] } ]
+  },
+  "topic-query": {
+    "resourceType": "SubscriptionTopic",
+    "id": "sdk6-encounter",
+    "url": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "status": "active",
+    "resourceTrigger": [
+      {
+        "resource": "Encounter",
+        "supportedInteraction": [ "create", "update" ],
+        "queryCriteria": {
+          "previous": "status:not=finished",
+          "resultForCreate": "test-passes",
+          "current": "status=finished",
+          "resultForDelete": "test-fails",
+          "requireBoth": true
+        }
+      },
+      {
+        "resource": "Encounter",
+        "supportedInteraction": [ "delete" ],
+        "queryCriteria": {
+          "previous": "status=finished",
+          "resultForCreate": "test-fails",
+          "resultForDelete": "test-passes",
+          "requireBoth": true
+        }
+      }
+    ],
+    "canFilterBy": [ { "resource": "Encounter", "filterParameter": "patient" } ],
+    "notificationShape": [ { "resource": "Encounter", "include": [ "Encounter:patient" ] } ]
+  },
+  "topic-interaction": {
+    "resourceType": "SubscriptionTopic",
+    "id": "sdk6-encounter",
+    "url": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "status": "active",
+    "resourceTrigger": [ { "resource": "Encounter", "supportedInteraction": [ "create", "update", "delete" ] } ],
+    "canFilterBy": [ { "resource": "Encounter", "filterParameter": "patient" } ],
+    "notificationShape": [ { "resource": "Encounter", "include": [ "Encounter:patient" ] } ]
+  },
+  "subscription": {
+    "resourceType": "Subscription",
+    "id": "local-subscription",
+    "status": "active",
+    "reason": "Synthetic local phase 5 subscription",
+    "criteria": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "_criteria": {
+      "extension": [ { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-filter-criteria", "valueString": "Encounter?patient=Patient/sub-patient" } ]
+    },
+    "channel": {
+      "extension": [
+        { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-heartbeat-period", "valueInteger": 120 },
+        { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-timeout", "valueInteger": 15 },
+        { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-max-count", "valueInteger": 5 }
+      ],
+      "type": "rest-hook",
+      "endpoint": "http://localhost/fhir/local-receiver/$subscription-hook",
+      "payload": "application/fhir+json",
+      "_payload": {
+        "extension": [ { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-payload-content", "valueCode": "full-resource" } ]
+      },
+      "header": [ "X-Synthetic: phase5" ]
+    }
+  }
+}

@@ -9,45 +9,50 @@
 
 <PageTitle>Received Notifications</PageTitle>
 
-@if (!_store?.ReceivedNotifications.Any() ?? false)
+@{
+    IReadOnlyDictionary<string, IReadOnlyList<ParsedSubscriptionStatus>>? snapshot = _store?.ReceivedNotifications;
+}
+@if (snapshot is null || snapshot.Count == 0)
 {
-    <FluentLabel Typo="Typography.Body">No events received for this endpoint.</FluentLabel>
+    <FluentLabel>No events received for this endpoint.</FluentLabel>
 }
 else
 {
     <FluentGrid Spacing="4">
-        @foreach (KeyValuePair<string, List<ParsedSubscriptionStatus>> kvp in _store!.ReceivedNotifications.AsEnumerable())
+        @foreach (KeyValuePair<string, IReadOnlyList<ParsedSubscriptionStatus>> kvp in snapshot)
         {
             <FluentGridItem Style="min-width: var(--field-container-min-width);">
-                <FluentCounterBadge Count="@kvp.Value.Count()" Appearance="Appearance.Accent" VerticalPosition="97" HorizontalPosition="97" Max="999">
+                <FluentCounterBadge Count="@kvp.Value.Count()" Appearance="BadgeAppearance.Filled" Color="BadgeColor.Brand" Positioning="Positioning.AfterBottom" OverflowCount="999">
+                    <AnchorContent>
                     <FluentCard>
                         <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                            <FluentTextField Label="Subscription" ReadOnly="true" Value="@kvp.Key"/>
+                            <FluentTextInput Label="Subscription" ReadOnly="true" Value="@kvp.Key"/>
                             @if (kvp.Value.Any() && (kvp.Value.Last() is ParsedSubscriptionStatus status))
                             {
-                                <FluentTextField Label="Topic" ReadOnly="true" Value="@status.SubscriptionTopicCanonical"/>
+                                <FluentTextInput Label="Topic" ReadOnly="true" Value="@status.SubscriptionTopicCanonical"/>
 
-                                <FluentLabel Typo="Typography.Body">Local Bundle</FluentLabel>
-                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={status.BundleId}")">@("Bundle/" + status.BundleId)</FluentAnchor>
+                                <FluentLabel>Local Bundle</FluentLabel>
+                                <FluentLink Href="@($"/store/resource-viewer?store={StoreName}&type=Bundle&id={status.BundleId}")">@("Bundle/" + status.BundleId)</FluentLink>
 
-                                <FluentTextField Label="Received" ReadOnly="true" Value="@status.ProcessedDateTime.ToString("o")"/>
-                                <FluentTextField Label="Type" ReadOnly="true" Value="@status.NotificationType?.ToString()"/>
+                                <FluentTextInput Label="Received" ReadOnly="true" Value="@status.ProcessedDateTime.ToString("o")"/>
+                                <FluentTextInput Label="Type" ReadOnly="true" Value="@status.NotificationType?.ToString()"/>
 
-                                <FluentLabel Typo="Typography.Body">Received Event Details</FluentLabel>
-                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/subscriptions/notification-received-viewer?store={StoreName}&ref={kvp.Key}")" >Received Events</FluentAnchor>
+                                <FluentLabel>Received Event Details</FluentLabel>
+                                <FluentLink Href="@($"/subscriptions/notification-received-viewer?store={StoreName}&ref={kvp.Key}")">Received Events</FluentLink>
     
                                 @if (status.NotificationEvents.Any())
                                 {
-                                    <FluentTextField Label="Focus" ReadOnly="true" Value="@status.NotificationEvents.First().FocusReference"/>
+                                    <FluentTextInput Label="Focus" ReadOnly="true" Value="@status.NotificationEvents.First().FocusReference"/>
                                 }
 
                                 @if (status.Errors.Any())
                                 {
-                                    <FluentTextField Label="Error" ReadOnly="true" Value="@status.Errors.First()"/>
+                                    <FluentTextInput Label="Error" ReadOnly="true" Value="@status.Errors.First()"/>
                                 }
                             }
                         </FluentStack>
                     </FluentCard>
+                    </AnchorContent>
                 </FluentCounterBadge>
             </FluentGridItem>
         }

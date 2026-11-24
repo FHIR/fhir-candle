@@ -17,8 +17,9 @@ public static class EvalReferenceSearch
     /// <summary>Compare references common.</summary>
     /// <param name="r">A ResourceReference to process.</param>
     /// <param name="s">A SegmentedReference to process.</param>
+    /// <param name="baseUrl">The current store's base URL.</param>
     /// <returns>True if it succeeds, false if it fails.</returns>
-    private static bool CompareRefsCommon(ResourceReference r, ParsedSearchParameter.SegmentedReference s)
+    private static bool CompareRefsCommon(ResourceReference r, ParsedSearchParameter.SegmentedReference s, string baseUrl)
     {
         if (!string.IsNullOrEmpty(s.ResourceType) &&
             !string.IsNullOrEmpty(s.Id) &&
@@ -38,6 +39,36 @@ public static class EvalReferenceSearch
         if (s.Url.Equals(r.Reference, StringComparison.Ordinal))
         {
             return true;
+        }
+
+        if (!string.IsNullOrEmpty(baseUrl))
+        {
+            string prefix = baseUrl.TrimEnd('/') + "/";
+            string relative = s.ResourceType + "/" + s.Id;
+
+            // Only an exact typed relative identity can acquire this store's base.
+            if (!string.IsNullOrEmpty(s.ResourceType) &&
+                !string.IsNullOrEmpty(s.Id) &&
+                string.IsNullOrEmpty(s.ResourceVersion) &&
+                (string.IsNullOrEmpty(s.Url) || s.Url.Equals(relative, StringComparison.Ordinal)) &&
+                (r.Reference == prefix + relative))
+            {
+                return true;
+            }
+
+            if (s.Url.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                string local = s.Url[prefix.Length..];
+                string[] parts = local.Split('/');
+                if ((parts.Length == 2) &&
+                    !string.IsNullOrEmpty(parts[0]) &&
+                    !string.IsNullOrEmpty(parts[1]) &&
+                    !parts[0].Contains(':') &&
+                    local.Equals(r.Reference, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
         }
 
         return false;
@@ -78,11 +109,13 @@ public static class EvalReferenceSearch
     /// <summary>Tests reference against most FHIR types.</summary>
     /// <param name="valueNode">         The value node.</param>
     /// <param name="sp">                The sp.</param>
+    /// <param name="baseUrl">           The current store's base URL.</param>
     /// <param name="resourceTypeFilter">(Optional) A filter specifying the resource type.</param>
     /// <returns>True if the test passes, false if the test fails.</returns>
     public static bool TestReference(
         PocoNode? valueNode,
         ParsedSearchParameter sp,
+        string baseUrl,
         string resourceTypeFilter = "")
     {
         if ((valueNode?.Poco is not ResourceReference r) ||
@@ -109,7 +142,7 @@ public static class EvalReferenceSearch
                 continue;
             }
 
-            if (CompareRefsCommon(r, sp.ValueReferences[i]))
+            if (CompareRefsCommon(r, sp.ValueReferences[i], baseUrl))
             {
                 if (string.IsNullOrEmpty(filterMatch))
                 {

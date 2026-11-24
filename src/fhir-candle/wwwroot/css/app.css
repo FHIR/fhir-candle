@@ -1,4 +1,4 @@
-﻿@import '/_content/Microsoft.FluentUI.AspNetCore.Components/css/reboot.css';
+﻿
 
 /*:root {
     --type-ramp-base-font-size: 1rem;
@@ -48,6 +48,24 @@ body {
     margin: 0;
     --field-min-width: 400px;
     --field-container-min-width: 420px;
+    --duration: 0.2s;
+    --ease: ease-in-out;
+    --bounce: ease-out;
+}
+
+.candle-header {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    gap: 0.25rem;
+}
+
+.candle-breadcrumbs li {
+    margin-bottom: 0;
+}
+
+.store-actions > fluent-field {
+    margin-block: 0;
 }
 
 .navmenu-icon {
@@ -56,7 +74,7 @@ body {
 
 .main {
     min-height: calc(100dvh - 86px);
-    color: var(--neutral-foreground-rest);
+    color: var(--candle-foreground);
     align-items: stretch !important;
 }
 
@@ -78,8 +96,8 @@ body {
 footer {
     display: grid;
     grid-template-columns: 10px auto auto 10px;
-    background: var(--neutral-layer-4);
-    color: var(--neutral-foreground-rest);
+    background: var(--candle-layer);
+    color: var(--candle-foreground);
     align-items: center;
     padding: 10px 10px;
 }
@@ -95,7 +113,7 @@ footer {
     }
 
     footer a {
-        color: var(--neutral-foreground-rest);
+        color: var(--candle-foreground);
         text-decoration: none;
     }
 
@@ -109,7 +127,7 @@ footer {
         }
 
 .alert {
-    border: 1px dashed var(--accent-fill-rest);
+    border: 1px dashed var(--candle-brand);
     padding: 5px;
 }
 
@@ -192,29 +210,20 @@ ul {
     width: 100% !important;
 }
 
-.fluent-data-grid-row:not(.highlighted-row):not(:first-child):nth-child(2n+1) {
-    background-color: var(--neutral-fill-secondary-rest);
+.fluent-data-grid tbody tr:not(.highlighted-row):nth-child(odd) {
+    background-color: var(--candle-secondary);
 }
 
-.fluent-data-grid-row:not(:first-child):hover {
-    background-color: var(--accent-base-color) !important;
-    /*background-color: var(--neutral-fill-hover) !important;*/
+.fluent-data-grid tbody tr:hover {
+    background-color: var(--candle-hover) !important;
 }
 
 .highlighted-row {
-    background-color: var(--success) !important;
-    /*background-color: var(--neutral-fill-hover) !important;*/
+    background-color: var(--candle-success) !important;
 }
 
-fluent-text-field {
-    min-width: var(--field-min-width);
-}
-
-fluent-text-area {
-    min-width: var(--field-min-width);
-}
-
-fluent-number-field {
+fluent-text-input,
+fluent-textarea {
     min-width: var(--field-min-width);
 }
 
@@ -229,13 +238,9 @@ fluent-number-field {
         height: 100%;
     }
 
-    #main-menu {
-        width: 100% !important;
+    #main-menu > div:first-child:is(.expander) {
+        display: none;
     }
-
-        #main-menu > div:first-child:is(.expander) {
-            display: none;
-        }
 
     .navmenu {
         width: 100%;
@@ -264,6 +269,13 @@ fluent-number-field {
         height: 20px;
         border: none;
     }
+}
+
+.content fluent-text fluent-link,
+.copy-click {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
 }
 
 .copy-click {

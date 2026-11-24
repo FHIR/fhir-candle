@@ -20,10 +20,9 @@ Before making a contribution, please familiarize yourself with this document, as
 
 ## Coding Style
 
-The coding style is enforced through [StyleCop.Analyzers](https://github.com/DotNetAnalyzers/StyleCopAnalyzers), [.editorconfig](.editorconfig), and [stylecop.json](stylecop.json). Contributors should ensure these guidelines are followed when making submissions.
-
-- **DO** address the StyleCop.Analyzers errors.
-- **DO** follow the [.editorconfig](.editorconfig) and [stylecop.json](stylecop.json) settings.
+Follow [.editorconfig](.editorconfig) and the [contributor style notes](docs/technical/contributing-notes.md).
+Use the documented [build and test commands](docs/technical/building-and-testing.md)
+to check compiler and analyzer diagnostics. There is no separate repository lint gate.
 
 ## Creating Issues
 

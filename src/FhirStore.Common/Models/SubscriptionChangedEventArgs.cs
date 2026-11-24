@@ -14,6 +14,9 @@ public class SubscriptionChangedEventArgs
     /// <summary>Gets or initializes the subscription.</summary>
     public ParsedSubscription? ChangedSubscription { get; init; } = null;
 
+    /// <summary>Gets the lifecycle revision captured before publication.</summary>
+    public long Revision { get; init; }
+
     /// <summary>Gets or initializes the identifier of the removed subscription.</summary>
     public string? RemovedSubscriptionId { get; init; } = string.Empty;
 

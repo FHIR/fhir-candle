@@ -130,7 +130,11 @@ public class SmartController : ControllerBase
 
         if (!string.IsNullOrEmpty(bypassType.ToLowerInvariant()))
         {
-            _ = _smartAuthManager.TryGetAuthorization(storeName, authKey, out AuthorizationInfo auth);
+            if (!_smartAuthManager.TryGetPendingAuthorization(storeName, authKey, out AuthorizationInfo auth))
+            {
+                Response.StatusCode = 400;
+                return;
+            }
 
             string patient = queryPatient ?? headerPatient ?? string.Empty;
             string practitioner = queryPractitioner ?? headerPractitioner ?? string.Empty;
@@ -292,7 +296,7 @@ public class SmartController : ControllerBase
                                 codeVerifier,
                                 out smart))
                         {
-                            _logger.LogWarning($"PostSmartTokenRequest <<< exchange code {authCode} failed!");
+                            _logger.LogWarning("PostSmartTokenRequest <<< authorization code exchange failed.");
                             Response.StatusCode = 400;
                             return;
                         }
@@ -307,7 +311,7 @@ public class SmartController : ControllerBase
                                 clientId,
                                 out smart))
                         {
-                            _logger.LogWarning($"PostSmartTokenRequest <<< exchange refresh token {refreshToken} failed!");
+                            _logger.LogWarning("PostSmartTokenRequest <<< refresh token exchange failed.");
                             Response.StatusCode = 400;
                             return;
                         }
@@ -325,7 +329,7 @@ public class SmartController : ControllerBase
                                 out smart,
                                 out List<string> messages))
                         {
-                            _logger.LogWarning($"PostSmartTokenRequest <<< exchange client assertion {clientAssertion} failed!");
+                            _logger.LogWarning("PostSmartTokenRequest <<< client assertion exchange failed.");
                             
                             Response.ContentType = "text/plain";
                             Response.StatusCode = (int)HttpStatusCode.BadRequest;
@@ -468,17 +472,18 @@ public class SmartController : ControllerBase
         try
         {
             string token = string.Empty;
-            string tokenTypeHint = string.Empty;
 
             foreach ((string key, Microsoft.Extensions.Primitives.StringValues values) in Request.Form)
             {
                 switch (key.ToLowerInvariant())
                 {
                     case "token":
+                        if (values.Count != 1 || string.IsNullOrWhiteSpace(values[0]))
+                        {
+                            Response.StatusCode = 400;
+                            return;
+                        }
                         token = values.FirstOrDefault() ?? string.Empty;
-                        break;
-                    case "token_type_hint":
-                        tokenTypeHint = values.FirstOrDefault() ?? string.Empty;
                         break;
                 }
             }
@@ -497,7 +502,9 @@ public class SmartController : ControllerBase
             Response.ContentType = "application/json";
             Response.StatusCode = (int)HttpStatusCode.OK;
 
-            await Response.WriteAsync(FhirCandle.Serialization.SerializationCommon.SerializeObject(resp));
+            await Response.WriteAsync(resp.HasValue
+                ? FhirCandle.Serialization.SerializationCommon.SerializeObject(resp)
+                : "{\"active\":false}");
         }
         catch (Exception ex)
         {

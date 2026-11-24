@@ -304,9 +304,20 @@ public static class SerializationUtils
             case "application/fhir+xml":
                 try
                 {
+                    // The SDK string overload ignores whitespace, including whitespace-only XHTML text.
+                    // Keep its sanitization and reader policy, but retain narrative whitespace.
+                    using StringReader text = new(SerializationUtil.SanitizeXml(content));
+                    using XmlReader reader = XmlReader.Create(text, new XmlReaderSettings()
+                    {
+                        IgnoreWhitespace = false,
+                        IgnoreComments = true,
+                        IgnoreProcessingInstructions = true,
+                        DtdProcessing = DtdProcessing.Prohibit,
+                        XmlResolver = null,
+                    });
                     Resource parsed = lenient
-                        ? _xmlParserLenient.DeserializeResource(content)
-                        : _xmlParser.DeserializeResource(content);
+                        ? _xmlParserLenient.DeserializeResource(reader)
+                        : _xmlParser.DeserializeResource(reader);
                     if (parsed is TResource)
                     {
                         resource = (TResource)parsed;

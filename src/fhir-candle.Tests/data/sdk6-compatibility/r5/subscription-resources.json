@@ -1,0 +1,101 @@
+{
+  "patient": {
+    "resourceType": "Patient",
+    "id": "sub-patient",
+    "active": true,
+    "name": [ { "family": "Synthetic Subscription", "given": [ "Local" ] } ]
+  },
+  "other-patient": {
+    "resourceType": "Patient",
+    "id": "other-patient",
+    "active": true,
+    "name": [ { "family": "Filter Negative" } ]
+  },
+  "planned": {
+    "resourceType": "Encounter",
+    "id": "encounter-under-test",
+    "language": "en",
+    "status": "planned",
+    "class": [ { "coding": [ { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" } ] } ],
+    "subject": { "reference": "Patient/sub-patient" }
+  },
+  "complete": {
+    "resourceType": "Encounter",
+    "id": "encounter-under-test",
+    "language": "en",
+    "status": "completed",
+    "class": [ { "coding": [ { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" } ] } ],
+    "subject": { "reference": "Patient/sub-patient" }
+  },
+  "topic-fhirpath": {
+    "resourceType": "SubscriptionTopic",
+    "id": "sdk6-encounter",
+    "url": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "status": "active",
+    "resourceTrigger": [
+      {
+        "resource": "Encounter",
+        "supportedInteraction": [ "create", "update", "delete" ],
+        "fhirPathCriteria": "((%previous.empty() or (%previous.status != 'completed')) and (%current.status = 'completed')) or (%current.empty() and (%previous.status = 'completed'))"
+      }
+    ],
+    "canFilterBy": [ { "resource": "Encounter", "filterParameter": "patient" } ],
+    "notificationShape": [ { "resource": "Encounter", "include": [ "Encounter:patient" ] } ]
+  },
+  "topic-query": {
+    "resourceType": "SubscriptionTopic",
+    "id": "sdk6-encounter",
+    "url": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "status": "active",
+    "resourceTrigger": [
+      {
+        "resource": "Encounter",
+        "supportedInteraction": [ "create", "update" ],
+        "queryCriteria": {
+          "previous": "status:not=completed",
+          "resultForCreate": "test-passes",
+          "current": "status=completed",
+          "resultForDelete": "test-fails",
+          "requireBoth": true
+        }
+      },
+      {
+        "resource": "Encounter",
+        "supportedInteraction": [ "delete" ],
+        "queryCriteria": {
+          "previous": "status=completed",
+          "resultForCreate": "test-fails",
+          "resultForDelete": "test-passes",
+          "requireBoth": true
+        }
+      }
+    ],
+    "canFilterBy": [ { "resource": "Encounter", "filterParameter": "patient" } ],
+    "notificationShape": [ { "resource": "Encounter", "include": [ "Encounter:patient" ] } ]
+  },
+  "topic-interaction": {
+    "resourceType": "SubscriptionTopic",
+    "id": "sdk6-encounter",
+    "url": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "status": "active",
+    "resourceTrigger": [ { "resource": "Encounter", "supportedInteraction": [ "create", "update", "delete" ] } ],
+    "canFilterBy": [ { "resource": "Encounter", "filterParameter": "patient" } ],
+    "notificationShape": [ { "resource": "Encounter", "include": [ "Encounter:patient" ] } ]
+  },
+  "subscription": {
+    "resourceType": "Subscription",
+    "id": "local-subscription",
+    "status": "active",
+    "topic": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "reason": "Synthetic local phase 5 subscription",
+    "filterBy": [ { "resourceType": "Encounter", "filterParameter": "patient", "value": "Patient/sub-patient" } ],
+    "channelType": { "system": "http://terminology.hl7.org/CodeSystem/subscription-channel-type", "code": "rest-hook" },
+    "endpoint": "http://localhost/fhir/local-receiver/$subscription-hook",
+    "parameter": [ { "name": "X-Synthetic", "value": "phase5" } ],
+    "heartbeatPeriod": 120,
+    "timeout": 15,
+    "contentType": "application/fhir+json",
+    "content": "full-resource",
+    "maxCount": 5
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "patient": {
+    "resourceType": "Patient",
+    "id": "cdex-patient",
+    "active": true,
+    "name": [ { "family": "Synthetic CDex", "given": [ "Local" ] } ],
+    "birthDate": "1980-02-03"
+  },
+  "eligible": {
+    "resourceType": "Task",
+    "id": "cdex-task",
+    "status": "requested",
+    "intent": "order",
+    "input": [
+      {
+        "type": {
+          "coding": [
+            { "system": "http://hl7.org/fhir/us/davinci-hrex/CodeSystem/hrex-temp", "code": "data-query" }
+          ]
+        },
+        "valueString": "Patient?_id=cdex-patient"
+      }
+    ]
+  },
+  "wrong-status": {
+    "resourceType": "Task",
+    "id": "cdex-task",
+    "status": "draft",
+    "intent": "order",
+    "input": [
+      {
+        "type": {
+          "coding": [
+            { "system": "http://hl7.org/fhir/us/davinci-hrex/CodeSystem/hrex-temp", "code": "data-query" }
+          ]
+        },
+        "valueString": "Patient?_id=cdex-patient"
+      }
+    ]
+  },
+  "wrong-intent": {
+    "resourceType": "Task",
+    "id": "cdex-task",
+    "status": "requested",
+    "intent": "proposal",
+    "input": [
+      {
+        "type": {
+          "coding": [
+            { "system": "http://hl7.org/fhir/us/davinci-hrex/CodeSystem/hrex-temp", "code": "data-query" }
+          ]
+        },
+        "valueString": "Patient?_id=cdex-patient"
+      }
+    ]
+  },
+  "missing-query": {
+    "resourceType": "Task",
+    "id": "cdex-task",
+    "status": "requested",
+    "intent": "order"
+  }
+}

@@ -45,6 +45,11 @@ It is not available at the type or instance level.
 3. The bundle is stored as a `Bundle` resource in the tenant's store.
 4. The server registers that a notification was received for the bundle.
 
+The received-notifications view shows a receipt for ten minutes from the
+receiving tenant's processing time, not the sender's timestamp. Receipt
+expiry does not delete the stored `Bundle`, change the [resource limit](../tenants.md#resource-limit),
+or clear a sending subscription's [`$events` history](events.md).
+
 ## Response semantics
 
 | Situation | HTTP status | Body |

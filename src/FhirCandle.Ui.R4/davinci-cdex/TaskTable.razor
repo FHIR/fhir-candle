@@ -10,11 +10,11 @@
     <PropertyColumn Title="Id" Property="@(t => t.Id)" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(IdFilter)" Tooltip="true"  IsDefaultSortColumn="true">
         <ColumnOptions>
             <div class="search-box">
-                <FluentSearch 
+                <FluentTextInput
                     Autofocus="true"
                     @bind-Value="IdFilter"
-                              @bind-Value:after="HandleFilterClear"
-                    @oninput="@(e => IdFilter = e.Value?.ToString() ?? string.Empty)"
+                    Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                    @bind-Value:after="@(() => HandleSearchInput(IdFilter))"
                     Placeholder="Task ID..." />
             </div>
         </ColumnOptions>
@@ -23,10 +23,10 @@
     <PropertyColumn Title="Status" Property="@(t => t.Status.GetLiteral())" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(StatusFilter)" Tooltip="true">
         <ColumnOptions>
             <div class="search-box">
-                <FluentSearch Autofocus="true"
+                <FluentTextInput Autofocus="true"
                               @bind-Value="StatusFilter"
-                              @bind-Value:after="HandleFilterClear"
-                              @oninput="@(e => StatusFilter = e.Value?.ToString() ?? string.Empty)"
+                              Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                              @bind-Value:after="@(() => HandleSearchInput(StatusFilter))"
                               Placeholder="Task Status..." />
             </div>
         </ColumnOptions>
@@ -35,10 +35,10 @@
     <PropertyColumn Title="Code" Property="@(t => string.Join(',', t.Code!.Coding.Select(c => c.Code)))" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(CodeFilter)" Tooltip="true">
         <ColumnOptions>
             <div class="search-box">
-                <FluentSearch Autofocus="true"
+                <FluentTextInput Autofocus="true"
                               @bind-Value="CodeFilter"
-                              @bind-Value:after="HandleFilterClear"
-                              @oninput="@(e => CodeFilter = e.Value?.ToString() ?? string.Empty)"
+                              Immediate="true" ImmediateDelay="0" TextInputType="TextInputType.Search"
+                              @bind-Value:after="@(() => HandleSearchInput(CodeFilter))"
                               Placeholder="Task Code..." />
             </div>
         </ColumnOptions>
@@ -46,13 +46,13 @@
 
     <TemplateColumn Title="Set Status">
         <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="2">
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "requested"))">Requested</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "accepted"))">Accepted</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "rejected"))">Rejected</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "in-progress"))">In Progress</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "failed"))">Failed</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "completed"))">Completed</FluentButton>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@(() => SetTaskStatus(context, "on-hold"))">On Hold</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "requested"))">Requested</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "accepted"))">Accepted</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "rejected"))">Rejected</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "in-progress"))">In Progress</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "failed"))">Failed</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "completed"))">Completed</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="@(() => SetTaskStatus(context, "on-hold"))">On Hold</FluentButton>
         </FluentStack>
     </TemplateColumn>
 
@@ -200,6 +200,14 @@
     {
         CancelDebounce();
         _ = InvokeAsync(OnSearchChanged);
+    }
+
+    private void HandleSearchInput(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            HandleFilterClear();
+        }
     }
 
     /// <summary>Sets the status.</summary>

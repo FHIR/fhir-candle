@@ -2,15 +2,20 @@ name: Restart Deployment
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: ['Publish on GitHub Container Registry']
+    workflows: ['Publish dotnet tool']
     types: [completed]
-    branches:
-    - main
+
+permissions: {}
 
 jobs:
   restart_deployment:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 10
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.event == 'release' &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
 
     steps:
     - name: Configure Kubectl

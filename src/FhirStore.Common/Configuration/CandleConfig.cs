@@ -61,6 +61,48 @@ public record class CliOptions
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    /// <summary>Gets the compressed package byte limit option.</summary>
+    public Option<long?> PackageMaxCompressedBytes { get; } = new("--package-max-compressed-bytes")
+    {
+        Description = "Maximum compressed package bytes (default 104857600).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the expanded package byte limit option.</summary>
+    public Option<long?> PackageMaxExpandedBytes { get; } = new("--package-max-expanded-bytes")
+    {
+        Description = "Maximum aggregate expanded package bytes (default 1073741824).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the individual archive entry byte limit option.</summary>
+    public Option<long?> PackageMaxEntryBytes { get; } = new("--package-max-entry-bytes")
+    {
+        Description = "Maximum expanded bytes per archive entry (default 134217728).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the archive entry count limit option.</summary>
+    public Option<int?> PackageMaxArchiveEntries { get; } = new("--package-max-archive-entries")
+    {
+        Description = "Maximum archive entries, including directories (default 50000).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the normalized archive path length limit option.</summary>
+    public Option<int?> PackageMaxArchivePathLength { get; } = new("--package-max-archive-path-length")
+    {
+        Description = "Maximum normalized archive path characters (default 1024).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the normalized archive depth limit option.</summary>
+    public Option<int?> PackageMaxArchiveDepth { get; } = new("--package-max-archive-depth")
+    {
+        Description = "Maximum archive path components, including filename (default 32).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
     public Option<bool?> UseOfficialRegistries { get; } = new("--use-official-registries")
     {
         Description = "Use official FHIR registries to resolve packages.",
@@ -202,6 +244,20 @@ public record class CliOptions
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    /// <summary>Gets the server-wide waiting notification limit option.</summary>
+    public Option<int?> NotificationQueueCapacity { get; } = new("--notification-queue-capacity")
+    {
+        Description = "Maximum waiting subscription notifications per server (default 256, at least one per tenant).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
+    /// <summary>Gets the server-wide active notification limit option.</summary>
+    public Option<int?> NotificationConcurrency { get; } = new("--notification-concurrency")
+    {
+        Description = "Maximum concurrent subscription deliveries per server (positive integer, default 4).",
+        Arity = ArgumentArity.ExactlyOne,
+    };
+
     public Option<string?> ZulipEmail { get; } = new("--zulip-email")
     {
         Description = "Zulip bot email address to use for Zulip notifications.",
@@ -290,6 +346,8 @@ public record class CandleConfig
     /// <summary>(Immutable) The default listen port.</summary>
     private const int _defaultListenPort = 5826;
     private const int _defaultSmtpPort = 465;
+    private const int _defaultNotificationQueueCapacity = 256;
+    private const int _defaultNotificationConcurrency = 4;
     private const string _defaultOtelProtocol = "grpc";
 
 
@@ -312,6 +370,30 @@ public record class CandleConfig
 
     [ConfigurationKeyName("Fhir_Package_Cache")]
     public string? FhirCacheDirectory { get; set; } = null;
+
+    /// <summary>Gets or sets the maximum compressed package size in bytes (100 MiB by default).</summary>
+    [ConfigurationKeyName("Package_Max_Compressed_Bytes")]
+    public long PackageMaxCompressedBytes { get; set; } = 104857600;
+
+    /// <summary>Gets or sets the maximum aggregate expanded package bytes (1 GiB by default).</summary>
+    [ConfigurationKeyName("Package_Max_Expanded_Bytes")]
+    public long PackageMaxExpandedBytes { get; set; } = 1073741824;
+
+    /// <summary>Gets or sets the maximum expanded bytes per archive entry (128 MiB by default).</summary>
+    [ConfigurationKeyName("Package_Max_Entry_Bytes")]
+    public long PackageMaxEntryBytes { get; set; } = 134217728;
+
+    /// <summary>Gets or sets the maximum archive entry count, including directories (50000 by default).</summary>
+    [ConfigurationKeyName("Package_Max_Archive_Entries")]
+    public int PackageMaxArchiveEntries { get; set; } = 50000;
+
+    /// <summary>Gets or sets the maximum normalized archive path length in characters (1024 by default).</summary>
+    [ConfigurationKeyName("Package_Max_Archive_Path_Length")]
+    public int PackageMaxArchivePathLength { get; set; } = 1024;
+
+    /// <summary>Gets or sets the maximum normalized archive path components, including filename (32 by default).</summary>
+    [ConfigurationKeyName("Package_Max_Archive_Depth")]
+    public int PackageMaxArchiveDepth { get; set; } = 32;
 
     [ConfigurationKeyName("Use_Official_Registries")]
     public bool UseOfficialRegistries { get; set; } = true;
@@ -428,6 +510,31 @@ public record class CandleConfig
     [ConfigurationKeyName("Max_Subscription_Minutes")]
     public int MaxSubscriptionExpirationMinutes { get; set; } = 0;
 
+    /// <summary>Gets or sets the maximum waiting subscription notifications across all tenants.</summary>
+    [ConfigurationKeyName("Notification_Queue_Capacity")]
+    public int NotificationQueueCapacity { get; set; } = _defaultNotificationQueueCapacity;
+
+    /// <summary>Gets or sets the maximum active subscription deliveries across all tenants.</summary>
+    [ConfigurationKeyName("Notification_Concurrency")]
+    public int NotificationConcurrency { get; set; } = _defaultNotificationConcurrency;
+
+    /// <summary>Checks both notification limits against the number of tenants served by the scheduler.</summary>
+    public void ValidateNotificationBudgets(int tenantCount)
+    {
+        int minimum = Math.Max(1, tenantCount);
+        if (NotificationQueueCapacity < minimum)
+        {
+            throw new ArgumentOutOfRangeException(nameof(NotificationQueueCapacity), NotificationQueueCapacity,
+                $"Notification_Queue_Capacity must be at least {minimum} (one waiting slot per tenant).");
+        }
+
+        if (NotificationConcurrency < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(NotificationConcurrency), NotificationConcurrency,
+                "Notification_Concurrency must be at least 1.");
+        }
+    }
+
     [ConfigurationKeyName("Zulip_Email")]
     public string? ZulipEmail { get; set; } = null;
 
@@ -519,6 +626,13 @@ public record class CandleConfig
 
         FhirCacheDirectory = dir;
 
+        PackageMaxCompressedBytes = pr.GetValue(opt.PackageMaxCompressedBytes) ?? envConfig?.PackageMaxCompressedBytes ?? 104857600;
+        PackageMaxExpandedBytes = pr.GetValue(opt.PackageMaxExpandedBytes) ?? envConfig?.PackageMaxExpandedBytes ?? 1073741824;
+        PackageMaxEntryBytes = pr.GetValue(opt.PackageMaxEntryBytes) ?? envConfig?.PackageMaxEntryBytes ?? 134217728;
+        PackageMaxArchiveEntries = pr.GetValue(opt.PackageMaxArchiveEntries) ?? envConfig?.PackageMaxArchiveEntries ?? 50000;
+        PackageMaxArchivePathLength = pr.GetValue(opt.PackageMaxArchivePathLength) ?? envConfig?.PackageMaxArchivePathLength ?? 1024;
+        PackageMaxArchiveDepth = pr.GetValue(opt.PackageMaxArchiveDepth) ?? envConfig?.PackageMaxArchiveDepth ?? 32;
+
         UseOfficialRegistries = pr.GetValue(opt.UseOfficialRegistries) ?? envConfig?.UseOfficialRegistries ?? true;
         AdditionalFhirRegistryUrls = pr.GetValue(opt.AdditionalFhirRegistryUrls) ?? envConfig?.AdditionalFhirRegistryUrls ?? [];
         AdditionalNpmRegistryUrls = pr.GetValue(opt.AdditionalNpmRegistryUrls) ?? envConfig?.AdditionalNpmRegistryUrls ?? [];
@@ -541,10 +655,19 @@ public record class CandleConfig
         }
 
         ProtectLoadedContent = pr.GetValue(opt.ProtectLoadedContent) ?? envConfig?.ProtectLoadedContent ?? false;
-        TenantsR4 = pr.GetValue(opt.TenantsR4) ?? envConfig?.TenantsR4 ?? [];
-        TenantsR4B = pr.GetValue(opt.TenantsR4B) ?? envConfig?.TenantsR4B ?? [];
-        TenantsR5 = pr.GetValue(opt.TenantsR5) ?? envConfig?.TenantsR5 ?? [];
-        TenantsR6 = pr.GetValue(opt.TenantsR6) ?? envConfig?.TenantsR6 ?? [];
+        // Only explicit CLI tenant options override external values, including when clearing them.
+        TenantsR4 = pr.GetResult(opt.TenantsR4) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR4) ?? []
+            : envConfig?.TenantsR4 ?? [];
+        TenantsR4B = pr.GetResult(opt.TenantsR4B) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR4B) ?? []
+            : envConfig?.TenantsR4B ?? [];
+        TenantsR5 = pr.GetResult(opt.TenantsR5) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR5) ?? []
+            : envConfig?.TenantsR5 ?? [];
+        TenantsR6 = pr.GetResult(opt.TenantsR6) is { Implicit: false }
+            ? pr.GetValue(opt.TenantsR6) ?? []
+            : envConfig?.TenantsR6 ?? [];
         RawSupportNotChanged = pr.GetValue(opt.SupportNotChanged) ?? envConfig?.SupportNotChanged;
         RawAllowExistingId = pr.GetValue(opt.AllowExistingId) ?? envConfig?.AllowExistingId;
         RawAllowCreateAsUpdate = pr.GetValue(opt.AllowCreateAsUpdate) ?? envConfig?.AllowCreateAsUpdate;
@@ -554,6 +677,9 @@ public record class CandleConfig
         AllowCreateAsUpdate = RawAllowCreateAsUpdate ?? true;
         Strict = pr.GetValue(opt.Strict) ?? envConfig?.Strict ?? false;
         MaxSubscriptionExpirationMinutes = pr.GetValue(opt.MaxSubscriptionExpirationMinutes) ?? envConfig?.MaxSubscriptionExpirationMinutes ?? 0;
+        NotificationQueueCapacity = pr.GetValue(opt.NotificationQueueCapacity) ?? envConfig?.NotificationQueueCapacity ?? _defaultNotificationQueueCapacity;
+        NotificationConcurrency = pr.GetValue(opt.NotificationConcurrency) ?? envConfig?.NotificationConcurrency ?? _defaultNotificationConcurrency;
+        ValidateNotificationBudgets(0);
 
         ZulipEmail = pr.GetValue(opt.ZulipEmail) ?? envConfig?.ZulipEmail;
         ZulipKey = pr.GetValue(opt.ZulipKey) ?? envConfig?.ZulipKey;
@@ -912,6 +1038,12 @@ public class CliRootCommand : RootCommand
         Add(_cliOptions.Headless);
 
         Add(_cliOptions.FhirCacheDirectory);
+        Add(_cliOptions.PackageMaxCompressedBytes);
+        Add(_cliOptions.PackageMaxExpandedBytes);
+        Add(_cliOptions.PackageMaxEntryBytes);
+        Add(_cliOptions.PackageMaxArchiveEntries);
+        Add(_cliOptions.PackageMaxArchivePathLength);
+        Add(_cliOptions.PackageMaxArchiveDepth);
 
         Add(_cliOptions.UseOfficialRegistries);
         Add(_cliOptions.AdditionalFhirRegistryUrls);
@@ -944,6 +1076,8 @@ public class CliRootCommand : RootCommand
         Add(_cliOptions.Strict);
 
         Add(_cliOptions.MaxSubscriptionExpirationMinutes);
+        Add(_cliOptions.NotificationQueueCapacity);
+        Add(_cliOptions.NotificationConcurrency);
         Add(_cliOptions.ZulipEmail);
         Add(_cliOptions.ZulipKey);
         Add(_cliOptions.ZulipUrl);

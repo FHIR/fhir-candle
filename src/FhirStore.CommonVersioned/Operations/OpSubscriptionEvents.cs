@@ -89,7 +89,7 @@ public class OpSubscriptionEvents : IFhirOperation
 
         // check for a subscription ID
         if (string.IsNullOrEmpty(ctx.Id) ||
-            (!store._subscriptions.ContainsKey(ctx.Id)))
+            (!store._subscriptions.TryGetValue(ctx.Id, out ParsedSubscription? subscription)))
         {
             opResponse = new()
             {
@@ -140,48 +140,69 @@ public class OpSubscriptionEvents : IFhirOperation
             (bodyResource is Hl7.Fhir.Model.Parameters bodyParams) &&
             (bodyParams.Parameter?.Any() ?? false))
         {
-            eventsSince = bodyParams.Parameter
-                .Where(p => p.Name?.Equals("eventsSinceNumber", StringComparison.Ordinal) ?? false)?
-                .Select(p => p.Value?.ToString() ?? string.Empty)
-                .First() ?? string.Empty;
+            // Component presence, including a valueless component, controls body-over-query precedence.
+            Parameters.ParameterComponent? sinceParameter = bodyParams.Parameter
+                .FirstOrDefault(p => p.Name?.Equals("eventsSinceNumber", StringComparison.Ordinal) ?? false);
+            if (sinceParameter is not null)
+            {
+                eventsSince = sinceParameter.Value?.ToString() ?? string.Empty;
+            }
 
-            eventsUntil = bodyParams.Parameter
-                .Where(p => p.Name?.Equals("eventsUntilNumber", StringComparison.Ordinal) ?? false)?
-                .Select(p => p.Value?.ToString() ?? string.Empty)
-                .First() ?? string.Empty;
+            Parameters.ParameterComponent? untilParameter = bodyParams.Parameter
+                .FirstOrDefault(p => p.Name?.Equals("eventsUntilNumber", StringComparison.Ordinal) ?? false);
+            if (untilParameter is not null)
+            {
+                eventsUntil = untilParameter.Value?.ToString() ?? string.Empty;
+            }
 
-            contentLevel = bodyParams.Parameter
-                .Where(p => p.Name?.Equals("content", StringComparison.Ordinal) ?? false)?
-                .Select(p => p.Value?.ToString() ?? string.Empty)
-                .First() ?? string.Empty;
+            Parameters.ParameterComponent? contentParameter = bodyParams.Parameter
+                .FirstOrDefault(p => p.Name?.Equals("content", StringComparison.Ordinal) ?? false);
+            if (contentParameter is not null)
+            {
+                contentLevel = contentParameter.Value?.ToString() ?? string.Empty;
+            }
         }
 
-        long highestEvent = store._subscriptions[ctx.Id].CurrentEventCount;
-
-        if (!long.TryParse(eventsSince, out long sinceNumber))
+        bool sinceParsed = long.TryParse(eventsSince, out long sinceNumber);
+        bool untilParsed = long.TryParse(eventsUntil, out long untilNumber);
+        if (!sinceParsed)
         {
             sinceNumber = 0;
         }
 
-        if (!long.TryParse(eventsUntil, out long untilNumber))
+        if ((sinceParsed && (sinceNumber < 0)) ||
+            (untilParsed && (untilNumber < 0)))
         {
-            untilNumber = highestEvent;
+            OperationOutcome outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
+                HttpStatusCode.BadRequest,
+                "Event number bounds must be nonnegative.");
+            opResponse = new()
+            {
+                StatusCode = HttpStatusCode.BadRequest,
+                Resource = outcome,
+                Outcome = outcome,
+            };
+
+            return false;
         }
 
-        List<long> eventNumbers = new();
-        for (long i = sinceNumber; i <= untilNumber; i++)
+        Bundle? bundle = store.RetainedSubscriptionEvents(
+            ctx.Id, sinceNumber, untilParsed ? untilNumber : null, contentLevel);
+        if (bundle is null)
         {
-            eventNumbers.Add(i);
+            opResponse = new()
+            {
+                StatusCode = HttpStatusCode.NotFound,
+                Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
+                    HttpStatusCode.NotFound, $"Subscription {ctx.Id} was not found."),
+            };
+            return false;
         }
 
         opResponse = new()
         {
             StatusCode = HttpStatusCode.OK,
-            Resource = store.BundleForSubscriptionEvents(
-                ctx.Id,
-                eventNumbers,
-                "query-event",
-                contentLevel),
+            Resource = bundle,
             Outcome = FhirCandle.Serialization.SerializationUtils.BuildOutcomeForRequest(
                 HttpStatusCode.OK,
                 $"Events for subscription {ctx.Id}."),
@@ -219,7 +240,7 @@ public class OpSubscriptionEvents : IFhirOperation
             Min = 0,
             Max = "1",
             Type = VersionedUtils.GetInt64Type,
-            Documentation = "The starting event number, inclusive of this event (lower bound)."
+            Documentation = "The nonnegative starting event number, inclusive (lower bound). Omitted or unparseable values default to 0; negative values return 400."
         });
 
         def.Parameter.Add(new()
@@ -229,7 +250,7 @@ public class OpSubscriptionEvents : IFhirOperation
             Min = 0,
             Max = "1",
             Type = VersionedUtils.GetInt64Type,
-            Documentation = "The ending event number, inclusive of this event (upper bound)."
+            Documentation = "The nonnegative ending event number, inclusive (upper bound), clipped to the captured current highest event number. Omitted or unparseable values default to that captured number; negative values return 400. Reversed or unmatched ranges return a status-only bundle."
         });
 
         def.Parameter.Add(new()

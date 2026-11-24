@@ -6,11 +6,20 @@
 
 using fhir.candle.Services;
 using fhir.candle.Tests.Extensions;
+using fhir.candle.Tests.Infrastructure;
+using fhir.candle.Controllers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Primitives;
 using FhirCandle.Models;
 using FhirCandle.Smart;
 using FhirCandle.Utils;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Shouldly;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using Xunit.Abstractions;
 
 namespace fhir.candle.Tests;
@@ -112,7 +121,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         key.ShouldNotBeNull();
         key.ShouldNotBeEmpty();
 
-        _fixture.AuthR4.TryGetAuthorization(_fixture.Name, key, out AuthorizationInfo authInfo).ShouldBeTrue();
+        _fixture.AuthR4.TryGetPendingAuthorization(_fixture.Name, key, out AuthorizationInfo authInfo).ShouldBeTrue();
         authInfo.ShouldNotBeNull();
         authInfo.Tenant.ShouldBe(_fixture.Name);
         authInfo.Expires.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
@@ -151,7 +160,7 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         queryAuthKey.ShouldNotBeNullOrEmpty();
         authKey.ShouldBeEquivalentTo(queryAuthKey);
 
-        _fixture.AuthR4.TryGetAuthorization(
+        _fixture.AuthR4.TryGetPendingAuthorization(
             _fixture.Name,
             authKey,
             out AuthorizationInfo auth).ShouldBeTrue();
@@ -190,6 +199,112 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         }
 
         response.AccessToken.ShouldNotBeNullOrEmpty();
+    }
+
+    /// <summary>Both exchange paths publish a detached grant with one current token and deadline.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IssuedGrantLifecycleAgreesWithIntrospection(bool assertion)
+    {
+        ManualTimeProvider clock = new(DateTimeOffset.UtcNow);
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant, clock);
+        string name = tenant.ControllerName;
+        string client = "interactive";
+        AuthorizationInfo.SmartResponse grant;
+        manager.ResolveAccessToken(name, null, out _).ShouldBe(GrantStatus.Missing);
+        if (assertion)
+        {
+            (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys("RS384", "lifecycle-key");
+            client = RegisterAssertionClient(manager, publicKey);
+            string jwt = manager.GenerateSignedJwt(client, client, tenant.BaseUrl, Guid.NewGuid().ToString(),
+                clock.GetUtcNow().AddMinutes(10).UtcDateTime, privateKey);
+            manager.TryClientAssertionExchange(name, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                jwt, ["system/Patient.r"], out grant, out _).ShouldBeTrue();
+        }
+        else
+        {
+            manager.RequestAuth(name, string.Empty, "code", client, "http://localhost/callback", null, "user/Patient.r",
+                string.Empty, tenant.BaseUrl, null, null, out _, out string key).ShouldBeTrue();
+            manager.TryGetPendingAuthorization(name, key, out AuthorizationInfo pending).ShouldBeTrue();
+            Check(name, key, GrantStatus.NotCurrent);
+            Check(name, pending.AuthCode, GrantStatus.NotCurrent);
+            pending.LaunchPatient = "Patient/consented";
+            manager.TryUpdateAuth(name, key, pending).ShouldBeTrue();
+            manager.TryCreateSmartResponse(name, pending.AuthCode, client, string.Empty, string.Empty, out grant).ShouldBeTrue();
+            manager.TryCreateSmartResponse(name, pending.AuthCode, client, string.Empty, string.Empty, out _).ShouldBeFalse();
+            manager.TryGetPendingAuthorization(name, key, out _).ShouldBeFalse();
+            pending.LaunchPatient = "Patient/edited";
+            pending.UserScopes.Add("*.*");
+            manager.TryUpdateAuth(name, key, pending).ShouldBeFalse();
+        }
+
+        Check(name, grant.AccessToken, GrantStatus.Admitted);
+        Check(name, grant.RefreshToken, GrantStatus.NotCurrent);
+        Check("other", grant.AccessToken, GrantStatus.NotCurrent);
+        int count = manager.SmartAuthorizations.Count;
+        AuthorizationInfo.SmartResponse?[] rotations = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+            manager.TrySmartRefresh(name, grant.RefreshToken, client, out AuthorizationInfo.SmartResponse rotated) ? rotated : null)));
+        AuthorizationInfo.SmartResponse current = Assert.Single(rotations.OfType<AuthorizationInfo.SmartResponse>());
+        manager.SmartAuthorizations.Count.ShouldBe(count);
+        Check(name, grant.AccessToken, GrantStatus.NotCurrent);
+        clock.Advance(TimeSpan.FromSeconds(current.ExpiresInSeconds) - TimeSpan.FromTicks(1));
+        AuthorizationInfo diagnostic = manager.SmartAuthorizations.Values.Single(auth => auth.Key != Guid.Empty.ToString());
+        diagnostic.Expires = DateTimeOffset.MaxValue;
+        diagnostic.UserScopes.Clear();
+        Check(name, current.AccessToken, GrantStatus.Admitted);
+        clock.Advance(TimeSpan.FromTicks(1));
+        Check(name, current.AccessToken, GrantStatus.Expired);
+
+        DefaultHttpContext context = new();
+        context.Request.ContentType = "application/x-www-form-urlencoded";
+        context.Request.Form = new FormCollection(new Dictionary<string, StringValues> { ["token"] = current.AccessToken });
+        using MemoryStream body = new();
+        context.Response.Body = body;
+        SmartController controller = new(manager, NullLogger<ISmartAuthManager>.Instance)
+        {
+            ControllerContext = new() { HttpContext = context },
+        };
+        await controller.PostSmartTokenIntrospect(name);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("{\"active\":false}", System.Text.Encoding.UTF8.GetString(body.ToArray()));
+
+        void Check(string tenantName, string token, GrantStatus expected)
+        {
+            manager.ResolveAccessToken(tenantName, token, out AuthorizationInfo auth).ShouldBe(expected);
+            manager.TryIntrospection(tenantName, token, out AuthorizationInfo.IntrospectionResponse? info).ShouldBeTrue();
+            if (expected != GrantStatus.Admitted)
+            {
+                auth.ShouldBeNull();
+                info.ShouldBeNull();
+                return;
+            }
+
+            AuthorizationInfo.IntrospectionResponse active = Assert.IsType<AuthorizationInfo.IntrospectionResponse>(info);
+            active.Active.ShouldBeTrue();
+            active.ExpiresAt.ShouldBe(auth.Expires.ToUnixTimeSeconds());
+            active.Scopes.ShouldBe(assertion ? "system/Patient.r" : "user/Patient.r");
+            auth.UserScopes.SetEquals(["Patient.r"]).ShouldBeTrue();
+            auth.LaunchPatient.ShouldBe(assertion ? string.Empty : "Patient/consented");
+            auth.UserScopes.Clear();
+            auth.Expires = DateTimeOffset.MaxValue;
+        }
+    }
+
+    [Fact]
+    public void SimulatorRequiresItsExplicitIdentity()
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        string name = tenant.ControllerName;
+        manager.TryGetSimulator(name, out AuthorizationInfo simulator).ShouldBeTrue();
+        manager.ResolveAccessToken(name, simulator.Key, out _).ShouldBe(GrantStatus.NotCurrent);
+        manager.TryGetPendingAuthorization(name, simulator.Key, out _).ShouldBeFalse();
+        manager.TryCreateSmartResponse(name, simulator.Key, simulator.RequestParameters.ClientId,
+            string.Empty, string.Empty, out AuthorizationInfo.SmartResponse response).ShouldBeTrue();
+        manager.ResolveAccessToken(name, response.AccessToken, out AuthorizationInfo auth).ShouldBe(GrantStatus.Admitted);
+        auth.UserScopes.SetEquals(["*.*"]).ShouldBeTrue();
+        manager.TryIntrospection(name, response.AccessToken, out AuthorizationInfo.IntrospectionResponse? info).ShouldBeTrue();
+        Assert.True(info?.Active);
     }
 
     /// <summary>Tests a dynamic client registration and token request with an invalid token.</summary>
@@ -335,6 +450,310 @@ public class AuthTests : IClassFixture<AuthTestFixture>
         success.ShouldBeTrue("should be a valid client assertion!\n" + string.Join('\n', messages) + "\n");
         response.ShouldNotBeNull();
         response.AccessToken.ShouldNotBeNullOrEmpty();
+    }
+    /// <summary>Preserves the client assertion audience defaults at the service boundary.</summary>
+    /// <param name="audience">The assertion audience.</param>
+    /// <param name="expectSuccess">Whether the assertion should be accepted.</param>
+    [Theory]
+    [InlineData("http://localhost:5826/fhir/r4", true)]
+    [InlineData("http://localhost:5826/fhir/R4", false)]
+    [InlineData("http://localhost:5826/fhir/r4/", true)]
+    public void ClientAssertionAudienceMatchingPreservesCurrentDefaults(string audience, bool expectSuccess)
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys("RS384", "audience-key");
+        string clientId = RegisterAssertionClient(manager, publicKey);
+        int authorizationCount = manager.SmartAuthorizations.Count;
+        string assertion = manager.GenerateSignedJwt(
+            clientId, clientId, audience, Guid.NewGuid().ToString(), DateTime.UtcNow.AddMinutes(10), privateKey);
+
+        bool success = manager.TryClientAssertionExchange(
+            tenant.ControllerName, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            assertion, ["system/*.rs"], out AuthorizationInfo.SmartResponse response, out List<string> messages);
+
+        success.ShouldBe(expectSuccess, string.Join("\n", messages));
+        if (expectSuccess)
+        {
+            AssertAssertionResponse(manager, tenant, clientId, response);
+            messages.ShouldBeEmpty();
+            manager.SmartAuthorizations.Count.ShouldBe(authorizationCount + 1);
+        }
+        else
+        {
+            response.ShouldBeNull();
+            messages.Count.ShouldBe(1);
+            messages[0].ShouldContain("IDX10214: Audience validation failed");
+            manager.SmartAuthorizations.Count.ShouldBe(authorizationCount);
+        }
+
+        WriteAssertionRuntime("RS384");
+    }
+
+    /// <summary>Rejects a wrong signer even when the assertion names a registered key.</summary>
+    [Fact]
+    public void ClientAssertionRejectsInvalidSignature()
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys("RS384", "registered-key");
+        (JsonWebKey wrongPrivateKey, JsonWebKey wrongPublicKey) = CreateAssertionKeys("RS384", publicKey.Kid);
+        wrongPublicKey.N.ShouldNotBe(publicKey.N);
+        string clientId = RegisterAssertionClient(manager, publicKey);
+        manager.SmartClients[clientId].Keys.ShouldContainKey(wrongPrivateKey.Kid);
+        int authorizationCount = manager.SmartAuthorizations.Count;
+        string assertion = manager.GenerateSignedJwt(
+            clientId, clientId, tenant.BaseUrl, Guid.NewGuid().ToString(), DateTime.UtcNow.AddMinutes(10), wrongPrivateKey);
+
+        manager.TryClientAssertionExchange(
+            tenant.ControllerName, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            assertion, ["system/*.rs"], out AuthorizationInfo.SmartResponse response, out List<string> messages).ShouldBeFalse();
+
+        response.ShouldBeNull();
+        messages.ShouldNotBeEmpty();
+        messages.All(message => message.Contains("IDX10511: Signature validation failed")).ShouldBeTrue(string.Join("\n", messages));
+        manager.SmartAuthorizations.Count.ShouldBe(authorizationCount);
+
+        // A correctly signed assertion with an unregistered key ID must also fail before issuance.
+        privateKey.Kid = "unregistered-key";
+        assertion = manager.GenerateSignedJwt(
+            clientId, clientId, tenant.BaseUrl, Guid.NewGuid().ToString(), DateTime.UtcNow.AddMinutes(10), privateKey);
+        manager.TryClientAssertionExchange(
+            tenant.ControllerName, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            assertion, ["system/*.rs"], out response, out messages).ShouldBeFalse();
+        response.ShouldBeNull();
+        messages.Count.ShouldBe(1);
+        messages[0].ShouldContain("signing key id (kid) unregistered-key was not found");
+        manager.SmartAuthorizations.Count.ShouldBe(authorizationCount);
+        WriteAssertionRuntime("RS384");
+    }
+
+    /// <summary>Exercises each advertised registered signing algorithm through JWT issuance and exchange.</summary>
+    /// <param name="algorithm">The existing registered signing algorithm.</param>
+    [Theory]
+    [InlineData("RS384")]
+    [InlineData("ES384")]
+    public void ClientAssertionPreservesRegisteredSigningAlgorithms(string algorithm)
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys(algorithm, "algorithm-key");
+        if (algorithm == "ES384")
+        {
+            privateKey.Crv.ShouldBe("P-384");
+            publicKey.Crv.ShouldBe("P-384");
+        }
+
+        string clientId = RegisterAssertionClient(manager, publicKey);
+        string jti = Guid.NewGuid().ToString();
+        string assertion = manager.GenerateSignedJwt(
+            clientId, clientId, tenant.BaseUrl, jti, DateTime.UtcNow.AddMinutes(10), privateKey);
+
+        JsonWebToken jwt = new(assertion);
+        jwt.Alg.ShouldBe(algorithm);
+        jwt.Kid.ShouldBe(publicKey.Kid);
+        jwt.Issuer.ShouldBe(clientId);
+        jwt.Subject.ShouldBe(clientId);
+        jwt.Id.ShouldBe(jti);
+        jwt.Audiences.ShouldBe([tenant.BaseUrl]);
+        IEnumerable<string>? signingAlgorithms = manager.SmartConfigurationByTenant[tenant.ControllerName].TokenEndpointAuthSigningAlgs;
+        signingAlgorithms.ShouldNotBeNull();
+        signingAlgorithms.ShouldContain(algorithm);
+
+        manager.TryClientAssertionExchange(
+            tenant.ControllerName, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            assertion, ["system/*.rs"], out AuthorizationInfo.SmartResponse response, out List<string> messages)
+            .ShouldBeTrue(string.Join("\n", messages));
+
+        messages.ShouldBeEmpty();
+        AssertAssertionResponse(manager, tenant, clientId, response);
+        WriteAssertionRuntime(algorithm);
+    }
+
+    /// <summary>Rejects a different EC signer even when the assertion names a registered key.</summary>
+    [Fact]
+    public void Es384ClientAssertionRejectsInvalidSignature()
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys("ES384", "registered-ec-key");
+        (JsonWebKey wrongPrivateKey, JsonWebKey wrongPublicKey) = CreateAssertionKeys("ES384", publicKey.Kid);
+        wrongPublicKey.X.ShouldNotBe(publicKey.X);
+        wrongPrivateKey.D.ShouldNotBe(privateKey.D);
+        string clientId = RegisterAssertionClient(manager, publicKey);
+        manager.SmartClients[clientId].Keys.ShouldContainKey(wrongPrivateKey.Kid);
+        int authorizationCount = manager.SmartAuthorizations.Count;
+        string assertion = manager.GenerateSignedJwt(
+            clientId, clientId, tenant.BaseUrl, Guid.NewGuid().ToString(), DateTime.UtcNow.AddMinutes(10), wrongPrivateKey);
+
+        manager.TryClientAssertionExchange(
+            tenant.ControllerName, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            assertion, ["system/*.rs"], out AuthorizationInfo.SmartResponse response, out List<string> messages).ShouldBeFalse();
+
+        response.ShouldBeNull();
+        messages.ShouldNotBeEmpty();
+        messages.All(message => message.Contains("IDX10511: Signature validation failed")).ShouldBeTrue(string.Join("\n", messages));
+        manager.SmartAuthorizations.Count.ShouldBe(authorizationCount);
+        WriteAssertionRuntime("ES384");
+    }
+
+    /// <summary>Preserves registration diagnostics and unusable-key behavior for missing EC fields.</summary>
+    /// <param name="missingField">The public JWK field to omit.</param>
+    /// <param name="diagnosticField">The existing diagnostic field description.</param>
+    [Theory]
+    [InlineData("crv", "ECDSA Curve (crv)")]
+    [InlineData("x", "ECDSA X coordinate (x)")]
+    [InlineData("y", "ECDSA Y coordinate (y)")]
+    public void Es384RegistrationPreservesMissingKeyFieldDiagnostics(string missingField, string diagnosticField)
+    {
+        using SmartAuthManager manager = CreateAssertionManager(out TenantConfiguration tenant);
+        (JsonWebKey privateKey, JsonWebKey publicKey) = CreateAssertionKeys("ES384", "missing-field-key");
+        switch (missingField)
+        {
+            case "crv":
+                publicKey.Crv = null;
+                break;
+            case "x":
+                publicKey.X = null;
+                break;
+            case "y":
+                publicKey.Y = null;
+                break;
+        }
+
+        JsonWebKeySet keySet = new();
+        keySet.Keys.Add(publicKey);
+        SmartClientRegistration registration = new()
+        {
+            ClientName = "https://client.example.test/" + Guid.NewGuid().ToString(),
+            KeySet = keySet,
+        };
+        int authorizationCount = manager.SmartAuthorizations.Count;
+        manager.TryRegisterClient(registration, out string clientId, out List<string> messages).ShouldBeTrue();
+        clientId.ShouldBe(registration.ClientName);
+        messages.ShouldBe(new[]
+        {
+            $"TryRegisterClient <<< request {clientId}:ES384 is missing the {diagnosticField}.",
+            $"TryRegisterClient <<< request {clientId}:ES384 could not be processed and will not be available.",
+            $"TryRegisterClient <<< request {clientId} has no keys.",
+        });
+        manager.SmartClients[clientId].Keys.ShouldBeEmpty();
+
+        // The unchanged private key can sign, but the unusable public registration cannot authorize it.
+        string assertion = manager.GenerateSignedJwt(
+            clientId, clientId, tenant.BaseUrl, Guid.NewGuid().ToString(), DateTime.UtcNow.AddMinutes(10), privateKey);
+        manager.TryClientAssertionExchange(
+            tenant.ControllerName, string.Empty, "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            assertion, ["system/*.rs"], out AuthorizationInfo.SmartResponse response, out messages).ShouldBeFalse();
+        response.ShouldBeNull();
+        messages.ShouldBe(new[] { "TryClientAssertionExchange <<< client has NO keys." });
+        manager.SmartAuthorizations.Count.ShouldBe(authorizationCount);
+        WriteAssertionRuntime("ES384");
+    }
+
+    /// <summary>Creates isolated SMART state without opening a listener or using shared fixture clients.</summary>
+    private static SmartAuthManager CreateAssertionManager(out TenantConfiguration tenant, TimeProvider? clock = null)
+    {
+        tenant = new()
+        {
+            FhirVersion = FhirReleases.FhirSequenceCodes.R4,
+            ControllerName = "r4",
+            BaseUrl = "http://localhost:5826/fhir/r4",
+            SmartRequired = true,
+        };
+        SmartAuthManager manager = new(
+            new Dictionary<string, TenantConfiguration> { [tenant.ControllerName] = tenant },
+            new()
+            {
+                PublicUrl = "http://localhost:5826",
+                ListenPort = 5826,
+                OpenBrowser = false,
+                TenantsR4 = [tenant.ControllerName],
+                SmartRequiredTenants = [tenant.ControllerName],
+            },
+            null, clock);
+        manager.Init();
+        return manager;
+    }
+
+    /// <summary>Generates synthetic private/public JWKs in memory using the existing algorithms.</summary>
+    private static (JsonWebKey PrivateKey, JsonWebKey PublicKey) CreateAssertionKeys(string algorithm, string keyId)
+    {
+        JsonWebKey privateKey;
+        JsonWebKey publicKey;
+        if (algorithm == "RS384")
+        {
+            using RSA rsa = RSA.Create(2048);
+            privateKey = JsonWebKeyConverter.ConvertFromRSASecurityKey(new RsaSecurityKey(rsa.ExportParameters(true)));
+            publicKey = JsonWebKeyConverter.ConvertFromRSASecurityKey(new RsaSecurityKey(rsa.ExportParameters(false)));
+        }
+        else
+        {
+            algorithm.ShouldBe("ES384");
+            using ECDsa ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+            using ECDsa publicEcdsa = ECDsa.Create(ecdsa.ExportParameters(false));
+            privateKey = JsonWebKeyConverter.ConvertFromECDsaSecurityKey(new ECDsaSecurityKey(ecdsa));
+            publicKey = JsonWebKeyConverter.ConvertFromECDsaSecurityKey(new ECDsaSecurityKey(publicEcdsa));
+        }
+
+        privateKey.Alg = algorithm;
+        privateKey.Kid = keyId;
+        privateKey.KeyOps.Add("sign");
+        publicKey.Alg = algorithm;
+        publicKey.Kid = keyId;
+        publicKey.KeyOps.Add("verify");
+        publicKey.D.ShouldBeNullOrEmpty();
+        return (privateKey, publicKey);
+    }
+
+    /// <summary>Registers only the public key and verifies it was actually processed.</summary>
+    private static string RegisterAssertionClient(SmartAuthManager manager, JsonWebKey publicKey)
+    {
+        JsonWebKeySet keySet = new();
+        keySet.Keys.Add(publicKey);
+        SmartClientRegistration registration = new()
+        {
+            ClientName = "https://client.example.test/" + Guid.NewGuid().ToString(),
+            KeySet = keySet,
+        };
+        manager.TryRegisterClient(registration, out string clientId, out List<string> messages)
+            .ShouldBeTrue(string.Join("\n", messages));
+        messages.ShouldBeEmpty();
+        clientId.ShouldBe(registration.ClientName);
+        manager.SmartClients[clientId].Keys.ShouldContainKey(publicKey.Kid);
+        return clientId;
+    }
+
+    /// <summary>Checks that an accepted assertion issues a usable token for the intended tenant and scopes.</summary>
+    private static void AssertAssertionResponse(
+        SmartAuthManager manager, TenantConfiguration tenant, string clientId, AuthorizationInfo.SmartResponse response)
+    {
+        response.ShouldNotBeNull();
+        response.AccessToken.ShouldNotBeNullOrEmpty();
+        response.RefreshToken.ShouldNotBeNullOrEmpty();
+        response.IdToken.ShouldNotBeNullOrEmpty();
+        response.ClientId.ShouldBe(clientId);
+        response.TokenType.ShouldBe("bearer");
+        response.Scopes.ShouldBe("system/*.rs");
+        manager.ResolveAccessToken(tenant.ControllerName, response.AccessToken, out AuthorizationInfo auth).ShouldBe(GrantStatus.Admitted);
+        auth.Tenant.ShouldBe(tenant.ControllerName);
+        auth.RequestParameters.ClientId.ShouldBe(clientId);
+        auth.RequestParameters.Audience.ShouldBe(tenant.BaseUrl);
+        auth.RequestParameters.Scope.ShouldBe("system/*.rs");
+        auth.Expires.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>Records loaded assemblies, not merely restored package declarations.</summary>
+    private void WriteAssertionRuntime(string algorithm)
+    {
+        Console.WriteLine($"SMART service algorithm={algorithm}; runtime={RuntimeInformation.FrameworkDescription}; OS={RuntimeInformation.OSDescription}");
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies().OrderBy(assembly => assembly.FullName))
+        {
+            string name = assembly.GetName().Name ?? string.Empty;
+            if (name.StartsWith("Microsoft.IdentityModel.", StringComparison.Ordinal) ||
+                name == "Microsoft.Bcl.Cryptography" ||
+                name == "System.Formats.Asn1" ||
+                name == "Microsoft.Extensions.Logging.Abstractions")
+            {
+                Console.WriteLine($"{assembly.FullName}; location={assembly.Location}");
+            }
+        }
     }
 }
 

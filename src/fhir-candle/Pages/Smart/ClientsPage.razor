@@ -13,7 +13,7 @@
 <PageTitle>SMART Clients</PageTitle>
 
 <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-    <FluentAnchor Appearance="Appearance.Accent" Href="/smart/client_details">Register New Client</FluentAnchor>
+    <FluentAnchorButton Appearance="ButtonAppearance.Primary" Href="/smart/client_details">Register New Client</FluentAnchorButton>
 
     @if (!AuthManager.SmartClients.Any())
     {
@@ -21,25 +21,25 @@
     }
     else
     {
-        <FluentGrid Spacing="8" style="background-color: var(--neutral-layer-3)">
+        <FluentGrid Spacing="8" style="background-color: var(--candle-layer)">
             @foreach (ClientInfo smartClient in AuthManager.SmartClients.Values.OrderBy(sc => sc.ClientName))
             {
                 <FluentGridItem Style="min-width: var(--field-container-min-width);">
                     <FluentCard>
                         <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                            <FluentTextField ReadOnly="true" Label="Client Name" Value="@smartClient.ClientName" />
-                            <FluentTextField ReadOnly="true" Label="Client ID" Value="@smartClient.ClientId" />
+                            <FluentTextInput ReadOnly="true" Label="Client Name" Value="@smartClient.ClientName" />
+                            <FluentTextInput ReadOnly="true" Label="Client ID" Value="@smartClient.ClientId" />
 
                             @if (smartClient.Registration is not null)
                             {
                                 @if (!string.IsNullOrEmpty(smartClient.Registration.JwksUri))
                                 {
-                                    <FluentTextField Label="JWKS URI" ReadOnly="true" Value="@smartClient.Registration.JwksUri" />
+                                    <FluentTextInput Label="JWKS URI" ReadOnly="true" Value="@smartClient.Registration.JwksUri" />
                                 }
 
                                 @foreach (JsonWebKey key in (smartClient.Registration.KeySet.Keys ?? Enumerable.Empty<JsonWebKey>()))
                                 {
-                                    <FluentTextField Label="Key Info" ReadOnly="true" Value="@(key.Alg + ": " + key.KeyId)" />
+                                    <FluentTextInput Label="Key Info" ReadOnly="true" Value="@(key.Alg + ": " + key.KeyId)" />
                                 }
                             }
 
@@ -47,15 +47,15 @@
                             {
                                 @foreach (ClientInfo.ClientActivityRecord activity in smartClient.Activity.OrderByDescending(a => a.Timestamp).Take(3))
                                 {
-                                    <FluentTextField Label="Activity" ReadOnly="true" Value="@(activity.RequestType + " " + activity.Timestamp.ToString("o") + " " + (activity.Success ? "success" : "fail"))" />
+                                    <FluentTextInput Label="Activity" ReadOnly="true" Value="@(activity.RequestType + " " + activity.Timestamp.ToString("o") + " " + (activity.Success ? "success" : "fail"))" />
                                     @if (!string.IsNullOrEmpty(activity.Message))
                                     {
-                                        <FluentTextField Label="Message" ReadOnly="true" Value="@activity.Message" />
+                                        <FluentTextInput Label="Message" ReadOnly="true" Value="@activity.Message" />
                                     }
                                 }
                             }
 
-                            <FluentAnchor Appearance="Appearance.Accent" Href="@($"/smart/client_details?smartClientId={smartClient.ClientId}")">Edit</FluentAnchor>
+                            <FluentAnchorButton Appearance="ButtonAppearance.Primary" Href="@($"/smart/client_details?smartClientId={smartClient.ClientId}")">Edit</FluentAnchorButton>
                         </FluentStack>
                     </FluentCard>
                 </FluentGridItem>

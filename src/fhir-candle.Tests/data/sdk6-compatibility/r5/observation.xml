@@ -1,0 +1,40 @@
+<Observation xmlns="http://hl7.org/fhir">
+  <meta>
+    <tag>
+      <system value="https://example.test/corpus"/>
+      <code value="synthetic-r5"/>
+    </tag>
+  </meta>
+  <identifier>
+    <system value="https://example.test/identifier"/>
+    <value value="quantity-r5"/>
+  </identifier>
+  <status value="final"/>
+  <code>
+    <text value="Synthetic precision observation"/>
+  </code>
+  <subject>
+    <reference value="Patient/wire-patient"/>
+  </subject>
+  <effectiveDateTime value="2024-06-03T10:11:12.3400-05:00"/>
+  <valueQuantity>
+    <value value="1234567890.123400"/>
+    <unit value="mg/dL"/>
+    <system value="http://unitsofmeasure.org"/>
+    <code value="mg/dL"/>
+  </valueQuantity>
+  <derivedFrom>
+    <reference value="Observation/prior-a"/>
+  </derivedFrom>
+  <derivedFrom>
+    <reference value="Observation/prior-b"/>
+  </derivedFrom>
+  <component>
+    <code><text value="First synthetic component"/></code>
+    <valueString value="first"/>
+  </component>
+  <component>
+    <code><text value="Second synthetic component"/></code>
+    <valueBoolean value="true"/>
+  </component>
+</Observation>

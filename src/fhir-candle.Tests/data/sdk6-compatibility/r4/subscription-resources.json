@@ -1,0 +1,158 @@
+{
+  "patient": {
+    "resourceType": "Patient",
+    "id": "sub-patient",
+    "active": true,
+    "name": [ { "family": "Synthetic Subscription", "given": [ "Local" ] } ]
+  },
+  "other-patient": {
+    "resourceType": "Patient",
+    "id": "other-patient",
+    "active": true,
+    "name": [ { "family": "Filter Negative" } ]
+  },
+  "planned": {
+    "resourceType": "Encounter",
+    "id": "encounter-under-test",
+    "language": "en",
+    "status": "planned",
+    "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+    "subject": { "reference": "Patient/sub-patient" }
+  },
+  "complete": {
+    "resourceType": "Encounter",
+    "id": "encounter-under-test",
+    "language": "en",
+    "status": "finished",
+    "class": { "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" },
+    "subject": { "reference": "Patient/sub-patient" }
+  },
+  "topic-fhirpath": {
+    "resourceType": "Basic",
+    "id": "sdk6-encounter",
+    "extension": [
+      { "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.url", "valueUri": "http://localhost/SubscriptionTopic/sdk6-encounter" },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger",
+        "extension": [
+          { "url": "resource", "valueUri": "Encounter" },
+          { "url": "supportedInteraction", "valueCode": "create" },
+          { "url": "supportedInteraction", "valueCode": "update" },
+          { "url": "supportedInteraction", "valueCode": "delete" },
+          { "url": "fhirPathCriteria", "valueString": "((%previous.empty() or (%previous.status != 'finished')) and (%current.status = 'finished')) or (%current.empty() and (%previous.status = 'finished'))" }
+        ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy",
+        "extension": [ { "url": "resource", "valueUri": "Encounter" }, { "url": "filterParameter", "valueString": "patient" } ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape",
+        "extension": [ { "url": "resource", "valueUri": "Encounter" }, { "url": "include", "valueString": "Encounter:patient" } ]
+      }
+    ],
+    "modifierExtension": [ { "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.status", "valueCode": "active" } ],
+    "code": { "coding": [ { "system": "http://hl7.org/fhir/fhir-types", "code": "SubscriptionTopic" } ] }
+  },
+  "topic-query": {
+    "resourceType": "Basic",
+    "id": "sdk6-encounter",
+    "extension": [
+      { "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.url", "valueUri": "http://localhost/SubscriptionTopic/sdk6-encounter" },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger",
+        "extension": [
+          { "url": "resource", "valueUri": "Encounter" },
+          { "url": "supportedInteraction", "valueCode": "create" },
+          { "url": "supportedInteraction", "valueCode": "update" },
+          {
+            "url": "queryCriteria",
+            "extension": [
+              { "url": "previous", "valueString": "status:not=finished" },
+              { "url": "resultForCreate", "valueCode": "test-passes" },
+              { "url": "current", "valueString": "status=finished" },
+              { "url": "resultForDelete", "valueCode": "test-fails" },
+              { "url": "requireBoth", "valueBoolean": true }
+            ]
+          }
+        ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger",
+        "extension": [
+          { "url": "resource", "valueUri": "Encounter" },
+          { "url": "supportedInteraction", "valueCode": "delete" },
+          {
+            "url": "queryCriteria",
+            "extension": [
+              { "url": "previous", "valueString": "status=finished" },
+              { "url": "resultForCreate", "valueCode": "test-fails" },
+              { "url": "resultForDelete", "valueCode": "test-passes" },
+              { "url": "requireBoth", "valueBoolean": true }
+            ]
+          }
+        ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy",
+        "extension": [ { "url": "resource", "valueUri": "Encounter" }, { "url": "filterParameter", "valueString": "patient" } ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape",
+        "extension": [ { "url": "resource", "valueUri": "Encounter" }, { "url": "include", "valueString": "Encounter:patient" } ]
+      }
+    ],
+    "modifierExtension": [ { "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.status", "valueCode": "active" } ],
+    "code": { "coding": [ { "system": "http://hl7.org/fhir/fhir-types", "code": "SubscriptionTopic" } ] }
+  },
+  "topic-interaction": {
+    "resourceType": "Basic",
+    "id": "sdk6-encounter",
+    "extension": [
+      { "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.url", "valueUri": "http://localhost/SubscriptionTopic/sdk6-encounter" },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.resourceTrigger",
+        "extension": [
+          { "url": "resource", "valueUri": "Encounter" },
+          { "url": "supportedInteraction", "valueCode": "create" },
+          { "url": "supportedInteraction", "valueCode": "update" },
+          { "url": "supportedInteraction", "valueCode": "delete" }
+        ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.canFilterBy",
+        "extension": [ { "url": "resource", "valueUri": "Encounter" }, { "url": "filterParameter", "valueString": "patient" } ]
+      },
+      {
+        "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.notificationShape",
+        "extension": [ { "url": "resource", "valueUri": "Encounter" }, { "url": "include", "valueString": "Encounter:patient" } ]
+      }
+    ],
+    "modifierExtension": [ { "url": "http://hl7.org/fhir/5.0/StructureDefinition/extension-SubscriptionTopic.status", "valueCode": "active" } ],
+    "code": { "coding": [ { "system": "http://hl7.org/fhir/fhir-types", "code": "SubscriptionTopic" } ] }
+  },
+  "subscription": {
+    "resourceType": "Subscription",
+    "id": "local-subscription",
+    "status": "active",
+    "reason": "Synthetic local phase 5 subscription",
+    "criteria": "http://localhost/SubscriptionTopic/sdk6-encounter",
+    "_criteria": {
+      "extension": [ { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-filter-criteria", "valueString": "Encounter?patient=Patient/sub-patient" } ]
+    },
+    "channel": {
+      "extension": [
+        { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-heartbeat-period", "valueInteger": 120 },
+        { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-timeout", "valueInteger": 15 },
+        { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-max-count", "valueInteger": 5 }
+      ],
+      "type": "rest-hook",
+      "endpoint": "http://localhost/fhir/local-receiver/$subscription-hook",
+      "payload": "application/fhir+json",
+      "_payload": {
+        "extension": [ { "url": "http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-payload-content", "valueCode": "full-resource" } ]
+      },
+      "header": [ "X-Synthetic: phase5" ]
+    }
+  }
+}

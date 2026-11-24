@@ -2,10 +2,14 @@
 
     <!-- Solution-wide properties for NuGet packaging -->
 
+  <PropertyGroup>
+    <CandleFluentUIVersion>5.1.0</CandleFluentUIVersion>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.3" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="4.14.3" />
-    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.3" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="$(CandleFluentUIVersion)" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="$(CandleFluentUIVersion)" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="$(CandleFluentUIVersion)" />
     <PackageReference Include="BlazorMonaco" Version="3.5.0" IncludeAssets="all" />
   </ItemGroup>
 

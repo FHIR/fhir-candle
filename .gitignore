@@ -389,3 +389,8 @@ msbuild.wrn
 /scratch
 
 *.local.json
+
+# >>> dev-* skills (managed by dev-setup) >>>
+# Shared skills and agents are not ignored.
+# The local scratch workspace is already covered by /scratch above.
+# <<< dev-* skills (managed by dev-setup) <<<

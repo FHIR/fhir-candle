@@ -5,21 +5,30 @@ fhir-candle is a small in-memory FHIR server for testing and development. It sup
 ## Build and Test
 
 ```bash
-# Build (multi-targets net10.0, net9.0, net8.0)
-dotnet build --configuration Release --framework net10.0
+# Build (multi-targets net11.0 and net10.0)
+dotnet build --configuration Release --framework net11.0
 
 # Run all tests
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal
 
 # Run a single test (xUnit — use FullyQualifiedName filter)
-dotnet test --configuration Release --framework net10.0 --no-restore --verbosity normal \
+dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal \
   --filter "FullyQualifiedName~fhir.candle.Tests.R4TestsPatient.PatientSearch"
 
 # Run the server locally
-dotnet run --project src/fhir-candle/fhir-candle.csproj
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
 ```
 
 Prefer running single tests over the full suite for performance. Tests use xUnit with `FullyQualifiedName` filter expressions.
+
+The separate theme-adapter check requires Node.js 24 or later (locally
+verified with 24.22.1), with no npm install. It executes the actual script
+with isolated browser-boundary doubles, not a browser. Ordinary .NET tests
+do not require Node:
+
+```powershell
+node --test .github\scripts\tests\candle-theme.test.cjs
+```
 
 ## Architecture
 
@@ -27,7 +36,7 @@ Prefer running single tests over the full suite for performance. Tests use xUnit
 
 The core FHIR store logic lives in **`FhirStore.CommonVersioned`**, a shared project (`.shproj`) that gets compiled into each version-specific library (`FhirStore.R4`, `FhirStore.R4B`, `FhirStore.R5`). Each version-specific project imports the shared `.projitems` and references a different Firely SDK NuGet package (`Hl7.Fhir.R4`, `Hl7.Fhir.R4B`, `Hl7.Fhir.R5`). The same C# code compiles three times — `Hl7.Fhir.Model.*` types resolve to version-specific types automatically. No `#if` directives needed.
 
-The same pattern applies to UI: **`FhirCandle.Ui.Versioned`** shares Razor components into `Ui.R4`, `Ui.R4B`, `Ui.R5`.
+The version-specific UI projects reference `FhirCandle.Ui.Common` and their matching store libraries. They do not import `FhirCandle.Ui.Versioned.projitems`.
 
 ### Assembly Aliases
 
@@ -44,7 +53,7 @@ new candleR4::FhirCandle.Storage.VersionedFhirStore();
 ```
 fhir-candle (app) → FhirCandle.R4/R4B/R5 + FhirCandle.Ui.R4/R4B/R5 + FhirCandle.Common
 FhirCandle.R4/R4B/R5 → FhirCandle.Common + Hl7.Fhir.Rx + [shared] FhirStore.CommonVersioned
-FhirCandle.Ui.R4/R4B/R5 → FhirCandle.Ui.Common + FhirCandle.Common + [shared] FhirCandle.Ui.Versioned
+FhirCandle.Ui.R4/R4B/R5 → FhirCandle.Ui.Common + FhirCandle.Common + matching FhirCandle.R4/R4B/R5
 ```
 
 - **`FhirStore.Common`** (`FhirCandle.Common`): Version-independent interfaces (`IFhirStore`, `IResourceStore`), models, configuration, search definitions
@@ -122,4 +131,4 @@ Named with `Op` prefix (e.g., `OpConvert`, `OpResetStore`). Implement `IFhirOper
 
 ### Multi-targeting
 
-The solution targets `net10.0;net9.0;net8.0` via `src/fhir-candle.props`. CI tests on all three. When building locally, specify `--framework net10.0`.
+The solution targets `net11.0;net10.0` via `src/fhir-candle.props`. Use the .NET 11 SDK. CI tests both targets on Windows, Linux, and macOS. When building locally, specify `--framework net11.0`; also check `net10.0` for shared changes.

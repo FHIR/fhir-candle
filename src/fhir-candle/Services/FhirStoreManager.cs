@@ -16,7 +16,6 @@ using FhirCandle.Models;
 using FhirCandle.Storage;
 using FhirCandle.Utils;
 using FhirStore.Smart;
-using Firely.Fhir.Packages;
 using Hl7.Fhir.Utility;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
@@ -24,6 +23,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
+using PackageReference = FhirCandle.Models.PackageReference;
 
 namespace fhir.candle.Services;
 
@@ -551,13 +551,26 @@ public class FhirStoreManager : IFhirStoreManager, IDisposable
 
         List<FhirReleases.FhirSequenceCodes> allTenantFhirVersions = _tenants.Values.Select(t => t.FhirVersion).Distinct().ToList();
 
-        List<PackageReference> localPackages = await _packageService.InstallPackages(
-            _serverConfig.PublishedPackages,
-            _serverConfig.CiPackages,
-            allTenantFhirVersions);
+        List<PackageReference> localPackages;
+        IEnumerable<PackageReference> loadOrder;
+        if (_packageService.GetType() == typeof(FhirPackageService))
+        {
+            localPackages = await ((FhirPackageService)_packageService).InstallPackagesForTenantLoad(
+                _serverConfig.PublishedPackages,
+                _serverConfig.CiPackages,
+                allTenantFhirVersions);
+            loadOrder = localPackages;
+        }
+        else
+        {
+            localPackages = await _packageService.InstallPackages(
+                _serverConfig.PublishedPackages,
+                _serverConfig.CiPackages,
+                allTenantFhirVersions);
+            loadOrder = localPackages.OrderBy(r => r.Version);
+        }
 
-        // loop over package references to load - go in ascending version order the newest versions are loaded last
-        foreach (PackageReference pr in localPackages.OrderBy(r => r.Version))
+        foreach (PackageReference pr in loadOrder)
         {
             _logger.LogInformation($"FhirStoreManager <<< discovering and loading additional content for {pr.Moniker}...");
 

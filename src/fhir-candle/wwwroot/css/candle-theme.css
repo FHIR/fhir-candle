@@ -1,0 +1,100 @@
+/* Copyright (c) Microsoft Corporation. Licensed under the MIT License. */
+html {
+    --candle-document-background: #ffffff;
+    --candle-document-foreground: #242424;
+    background: var(--candle-document-background);
+    color: var(--candle-document-foreground);
+}
+
+html[data-candle-theme="dark"] {
+    --candle-document-background: #1f1f1f;
+    --candle-document-foreground: #ffffff;
+}
+
+html[data-candle-theme] body {
+    background: inherit;
+    color: inherit;
+}
+
+.candle-ui-root {
+    font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+    font-size: 1rem;
+    line-height: 1.4rem;
+    --candle-brand: var(--colorBrandBackground, #6264a7);
+    --candle-foreground: var(--colorNeutralForeground1, #242424);
+    --candle-background: var(--colorNeutralBackground1, #ffffff);
+    --candle-layer: var(--colorNeutralBackground3, #f5f5f5);
+    --candle-secondary: var(--colorNeutralBackground2, #fafafa);
+    --candle-hover: var(--colorNeutralBackground2Hover, #e0e0e0);
+    --candle-success: var(--colorStatusSuccessBackground2, #dff6dd);
+    --candle-error: var(--colorStatusDangerBackground3, #c50f1f);
+    --candle-neutral: var(--candle-neutral-preference, var(--colorNeutralStroke1, #d1d1d1));
+    min-height: 100dvh;
+    background: var(--candle-background);
+    color: var(--candle-foreground);
+}
+
+.candle-ui-root[data-candle-theme="dark"] {
+    --candle-foreground: var(--colorNeutralForeground1, #ffffff);
+    --candle-background: var(--colorNeutralBackground1, #1f1f1f);
+    --candle-layer: var(--colorNeutralBackground3, #292929);
+    --candle-secondary: var(--colorNeutralBackground2, #242424);
+}
+
+/* A saved brand color can be arbitrarily dark. Keep content links readable even on hovered grid rows. */
+html[data-candle-theme="dark"] .content {
+    --colorBrandForegroundLink: #9fceff;
+    --colorBrandForegroundLinkHover: #c5e3ff;
+    --colorBrandForegroundLinkPressed: #b1d7ff;
+    --colorBrandForegroundLinkSelected: var(--colorBrandForegroundLinkPressed);
+}
+
+html[data-candle-theme="dark"] .content fluent-link[href] {
+    text-decoration-line: underline;
+}
+
+/* Until interactive hydration, use the app bootstrap rather than defaulting to light. */
+.candle-ui-root:not([data-candle-theme]) {
+    --candle-background: var(--candle-document-background);
+    --candle-secondary: var(--candle-document-background);
+    --candle-foreground: var(--candle-document-foreground);
+}
+
+/* Above application chrome (85), below the released modal overlay (999). */
+.candle-messages-top {
+    position: fixed;
+    inset: 0 1rem auto;
+    max-height: 40dvh;
+    overflow-y: auto;
+    z-index: 100;
+    pointer-events: none;
+}
+
+.candle-messages-top > * {
+    pointer-events: auto;
+}
+
+.candle-breadcrumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.candle-breadcrumbs li + li::before {
+    content: "/";
+    margin-right: 0.5rem;
+}
+
+.candle-breadcrumbs a {
+    color: inherit;
+}
+
+.candle-header[area="header"] {
+    color: var(--candle-foreground);
+    background-color: var(--candle-secondary);
+    border-bottom: 1px solid var(--candle-neutral);
+}

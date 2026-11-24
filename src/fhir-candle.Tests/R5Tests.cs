@@ -153,6 +153,21 @@ public class R5Tests
             PatientScopes = ["*.*"],
         });
     }
+
+    internal void AssertTypeSearchSelfLink(string selfLink, string resourceType, string search)
+    {
+        selfLink.ShouldNotBeNullOrEmpty();
+        selfLink.ShouldStartWith($"{_config.BaseUrl}/{resourceType}?");
+        string query = new Uri(selfLink).Query[1..];
+        Assert.Equal(Occurrences(search), Occurrences(query));
+
+        static (string Name, string Value)[] Occurrences(string query) => query.Split('&')
+            .Select(part => part.Split('=', 2))
+            .Select(parts => (Name: WebUtility.UrlDecode(parts[0]), Value: WebUtility.UrlDecode(parts[1])))
+            .OrderBy(pair => pair.Name, StringComparer.Ordinal)
+            .ThenBy(pair => pair.Value, StringComparer.Ordinal)
+            .ToArray();
+    }
 }
 
 /// <summary>Test R5 patient looped.</summary>
@@ -283,12 +298,7 @@ public class R5TestsEncounter : IClassFixture<R5Tests>
 
         results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.ShouldNotBeNullOrEmpty();
-        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Encounter?");
-        foreach (string searchPart in search.Split('&'))
-        {
-            selfLink.ShouldContain(searchPart);
-        }
+        _fixture.AssertTypeSearchSelfLink(selfLink, "Encounter", search);
 
         //_testOutputHelper.WriteLine(bundle);
     }
@@ -416,12 +426,7 @@ public class R5TestsObservation : IClassFixture<R5Tests>
 
         results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.ShouldNotBeNullOrEmpty();
-        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Observation?");
-        foreach (string searchPart in search.Split('&'))
-        {
-            selfLink.ShouldContain(searchPart);
-        }
+        _fixture.AssertTypeSearchSelfLink(selfLink, "Observation", search);
 
         //_testOutputHelper.WriteLine(bundle);
 
@@ -458,12 +463,7 @@ public class R5TestsObservation : IClassFixture<R5Tests>
 
         results!.Links.ShouldNotBeNullOrEmpty();
         selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.ShouldNotBeNullOrEmpty();
-        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Observation?");
-        foreach (string searchPart in search.Split('&'))
-        {
-            selfLink.ShouldContain(searchPart);
-        }
+        _fixture.AssertTypeSearchSelfLink(selfLink, "Observation", search);
     }
 
     [Theory]
@@ -753,12 +753,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
 
         results!.Links.ShouldNotBeNullOrEmpty();
         string selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.ShouldNotBeNullOrEmpty();
-        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Patient?");
-        foreach (string searchPart in search.Split('&'))
-        {
-            selfLink.ShouldContain(searchPart);
-        }
+        _fixture.AssertTypeSearchSelfLink(selfLink, "Patient", search);
 
         //_testOutputHelper.WriteLine(bundle);
 
@@ -795,12 +790,7 @@ public class R5TestsPatient : IClassFixture<R5Tests>
 
         results!.Links.ShouldNotBeNullOrEmpty();
         selfLink = results!.Links!.Where(l => l.Relation.Equals("self"))?.Select(l => l.Url).First() ?? string.Empty;
-        selfLink.ShouldNotBeNullOrEmpty();
-        selfLink.ShouldStartWith(_fixture._config.BaseUrl + "/Patient?");
-        foreach (string searchPart in search.Split('&'))
-        {
-            selfLink.ShouldContain(searchPart);
-        }
+        _fixture.AssertTypeSearchSelfLink(selfLink, "Patient", search);
     }
 
     /// <summary>
@@ -1201,7 +1191,7 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
         s.TimeoutSeconds.ShouldBe(0);
         s.ContentType.ShouldBe("application/fhir+json");
         s.ContentLevel.ShouldBe("id-only");
-        s.CurrentStatus.ShouldBe("active");
+        s.CurrentStatus.ShouldBe("requested");
     }
 
     [Theory]
@@ -1297,7 +1287,7 @@ public class R5TestSubscriptions : IClassFixture<R5Tests>
             {
                 { resourceType, new List<ParsedSubscription.SubscriptionFilter>() },
             },
-            ExpirationTicks = DateTime.Now.AddMinutes(10).Ticks,
+            ExpirationTicks = DateTimeOffset.UtcNow.AddMinutes(10).UtcTicks,
             ChannelSystem = string.Empty,
             ChannelCode = "rest-hook",
             ContentType = "application/fhir+json",

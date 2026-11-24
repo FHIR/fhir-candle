@@ -1,0 +1,48 @@
+<Patient xmlns="http://hl7.org/fhir">
+  <meta>
+    <tag>
+      <system value="https://example.test/corpus"/>
+      <code value="synthetic-r5"/>
+    </tag>
+  </meta>
+  <language value="en"/>
+  <text>
+    <status value="generated"/>
+    <div xmlns="http://www.w3.org/1999/xhtml"><p>  Synthetic <b>Avery</b>  &amp; <i>Quinn</i>
+ next line.  </p><p> </p></div>
+  </text>
+  <identifier>
+    <system value="https://example.test/identifier"/>
+    <value value="wire-r5"/>
+  </identifier>
+  <identifier>
+    <system value="https://example.test/secondary"/>
+    <value value="second-r5"/>
+  </identifier>
+  <active value="true"/>
+  <name>
+    <use value="official"/>
+    <family value="Wire"/>
+    <given value="Avery"/>
+    <given value="Quinn"/>
+  </name>
+  <gender value="other"/>
+  <birthDate value="1980-02">
+    <extension url="https://example.test/fhir/StructureDefinition/date-quality">
+      <valueString value="month known"/>
+    </extension>
+  </birthDate>
+  <multipleBirthInteger value="2"/>
+  <photo>
+    <contentType value="image/png"/>
+    <data value="AQIDBA=="/>
+    <title value="Synthetic non-summary photo"/>
+  </photo>
+  <generalPractitioner>
+    <reference value="Practitioner/wire-clinician"/>
+    <display value="Synthetic clinician"/>
+  </generalPractitioner>
+  <managingOrganization>
+    <reference value="Organization/wire-organization"/>
+  </managingOrganization>
+</Patient>
