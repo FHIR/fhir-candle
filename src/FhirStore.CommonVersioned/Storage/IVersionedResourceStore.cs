@@ -150,6 +150,9 @@ public interface IVersionedResourceStore : IResourceStore, IDisposable, IReadOnl
     /// <returns>True if it succeeds, false if it fails.</returns>
     bool TryResolveIdentifier(string? system, string? value, out Hl7.Fhir.Model.Resource? r);
 
+    /// <summary>Resolve a logical reference together with the owning index entry's store key.</summary>
+    internal SearchPageSelector.Candidate? ResolveIdentifierCandidate(string? system, string? value);
+
     /// <summary>Sets executable subscription information.</summary>
     /// <param name="url">             URL of the resource.</param>
     void SetExecutableSubscriptionTopic(

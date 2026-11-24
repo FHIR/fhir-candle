@@ -512,16 +512,23 @@ public class ResourceStore<T> : IVersionedResourceStore
     /// <returns>True if identifier, false if not.</returns>
     public bool TryResolveIdentifier(string? system, string? value, out Hl7.Fhir.Model.Resource? r)
     {
+        r = ResolveIdentifierCandidate(system, value)?.Body;
+        return r is not null;
+    }
+
+    SearchPageSelector.Candidate? IVersionedResourceStore.ResolveIdentifierCandidate(string? system, string? value) =>
+        ResolveIdentifierCandidate(system, value);
+
+    private SearchPageSelector.Candidate? ResolveIdentifierCandidate(string? system, string? value)
+    {
         if (_identifierToId.TryGetValue($"{system}|{value}", out string? id) &&
             !string.IsNullOrEmpty(id) &&
             _resourceStore.TryGetValue(id, out T? resource))
         {
-            r = resource;
-            return true;
+            return new SearchPageSelector.Candidate(new(resource.TypeName, id), resource);
         }
 
-        r = null;
-        return false;
+        return null;
     }
 
     /// <summary>

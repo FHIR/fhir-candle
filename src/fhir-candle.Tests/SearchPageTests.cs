@@ -277,6 +277,76 @@ public class SearchPageTests
 
     [Theory]
     [MemberData(nameof(Versions))]
+    public void ForwardIncludesUseResolvedStoreKeys(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        SeedObservations(fixture);
+        fixture.Put(JsonNode.Parse("""
+            {"resourceType":"Practitioner","id":"logical","identifier":[{"system":"urn:test:staff","value":"two"}]}
+            """)!.AsObject());
+        fixture.Put(JsonNode.Parse("""
+            {"resourceType":"Observation","id":"o0","status":"final","code":{"text":"sample"},
+             "subject":{"reference":"Patient/a"},"hasMember":[{"reference":"Observation/o1"},{"reference":"Observation/o5"}],
+             "performer":[{"reference":"Practitioner/doctor"},{"reference":"Practitioner/doctor"},
+                          {"type":"Practitioner","identifier":{"system":"urn:test:staff","value":"two"}}]}
+            """)!.AsObject());
+        foreach (string key in new[] { "doctor", "logical" })
+        {
+            ((Hl7.Fhir.Model.Resource)fixture.Store["Practitioner"][key]).Id = "shared";
+        }
+        foreach (string key in new[] { "o0", "o1" })
+        {
+            ((Hl7.Fhir.Model.Resource)fixture.Store["Observation"][key]).Id = "focus";
+        }
+
+        JsonObject page = Page(fixture.Store, "Observation?_id=focus&_sort=value-quantity" +
+            "&_include=Observation:performer&_include=Observation:has-member", _ => { }, Grant());
+        Assert.Equal(2, (int?)page["total"]);
+        AssertPageEntries(fixture.Store, page,
+            ("Observation/o0", "match", "focus"), ("Observation/o1", "match", "focus"),
+            ("Practitioner/doctor", "include", "shared"), ("Practitioner/logical", "include", "shared"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
+    public void ReverseIncludesUseBothStoreKeys(FhirReleases.FhirSequenceCodes version)
+    {
+        using LifecycleTestStore fixture = new(version);
+        SeedObservations(fixture);
+        foreach (string key in new[] { "o0", "o1" })
+        {
+            ((Hl7.Fhir.Model.Resource)fixture.Store["Observation"][key]).Id = "focus";
+        }
+        ((Hl7.Fhir.Model.Resource)fixture.Store["Observation"]["o2"]).Id = "referrer";
+        List<string> events = [];
+        JsonObject page = Page(fixture.Store, "Observation?_id=focus&_sort=value-quantity&_revinclude=Observation:has-member", boundary =>
+        {
+            events.Add(boundary);
+            if (boundary == "selected")
+            {
+                // The first key fails its recheck. Only o1 may drive reverse expansion.
+                fixture.Put(JsonNode.Parse("""
+                    {"resourceType":"Observation","id":"o0","status":"final","code":{"text":"replacement"},
+                     "subject":{"reference":"Patient/b"}}
+                    """)!.AsObject());
+            }
+        }, Grant());
+        Assert.Equal(2, (int?)page["total"]);
+        Assert.Equal(new[] { "selected", "detached", "detached", "expanded" }, events);
+        AssertPageEntries(fixture.Store, page, ("Observation/o1", "match", "focus"),
+            ("Observation/o2", "include", "referrer"), ("Observation/o3", "include", "o3"),
+            ("Observation/o4", "include", "o4"));
+    }
+
+    private static void AssertPageEntries(IFhirStore store, JsonObject page, params (string Path, string Mode, string Id)[] expected)
+    {
+        Assert.Equal(expected.Select(e => ($"{store.Config.BaseUrl}/{e.Path}", e.Mode, e.Id)).Order(),
+            page["entry"]!.AsArray().Select(e => ((string)e!["fullUrl"]!, (string)e["search"]!["mode"]!,
+                (string)e["resource"]!["id"]!)).Order());
+    }
+
+    [Theory]
+    [MemberData(nameof(Versions))]
     public void RecheckPrecedesBundleAndExpansion(FhirReleases.FhirSequenceCodes version)
     {
         using LifecycleTestStore fixture = new(version);

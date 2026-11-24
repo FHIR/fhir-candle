@@ -1137,32 +1137,33 @@ public partial class VersionedFhirStore : IFhirStore
     /// <returns>True if it succeeds, false if it fails.</returns>
     public bool TryResolveAsResource(string uri, out Resource? resource)
     {
+        resource = ResolveLiteralCandidate(uri)?.Body;
+        return resource is not null;
+    }
+
+    private SearchPageSelector.Candidate? ResolveLiteralCandidate(string uri)
+    {
         if (string.IsNullOrEmpty(uri))
         {
-            resource = null;
-            return false;
+            return null;
         }
 
         string[] components = uri.Split('/');
 
         if (components.Length < 2)
         {
-            resource = null;
-            return false;
+            return null;
         }
 
         string resourceType = components[^2];
         string id = components[^1];
 
-        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs))
+        if (!_store.TryGetValue(resourceType, out IVersionedResourceStore? rs) || rs.InstanceRead(id) is not Resource resource)
         {
-            resource = null;
-            return false;
+            return null;
         }
 
-        resource = rs.InstanceRead(id);
-
-        return resource is not null;
+        return new SearchPageSelector.Candidate(new(resourceType, id), resource);
     }
 
     /// <summary>Resolves the given URI into a resource.</summary>
@@ -5217,14 +5218,16 @@ rs,
         };
         PageObservers.TryGetValue(ctx, out Action<string>? observe);
         observe?.Invoke("selected");
-        HashSet<string> addedIds = [];
+        HashSet<SearchPageSelector.Identity> addedIds = [];
+        List<SearchPageSelector.Candidate> primaries = [];
         foreach (SearchPageSelector.Identity id in page.Matches)
         {
             Resource? resource = _store[id.Type].DetachMatch(id.StoreKey, instant, observe is null ? null : () => observe("detached"));
             if (resource is not null && CanReturn(ctx, resource, 's'))
             {
                 string relativeUrl = $"{id.Type}/{id.StoreKey}";
-                addedIds.Add(relativeUrl);
+                primaries.Add(new(id, resource));
+                addedIds.Add(id);
                 bundle.AddSearchEntry(resource, $"{root}/{relativeUrl}", Bundle.SearchEntryMode.Match);
             }
         }
@@ -5232,11 +5235,20 @@ rs,
         {
             bundle.Link.Add(new() { Relation = "next", Url = Link(next) });
         }
-        foreach (Bundle.EntryComponent entry in bundle.Entry.ToArray())
+        foreach (SearchPageSelector.Candidate primary in primaries)
         {
-            ParsedResultParameters resultParameters = byType[entry.Resource!.TypeName];
-            AddInclusions(ctx, bundle, entry.Resource!, resultParameters, root, addedIds);
-            AddReverseInclusions(ctx, bundle, entry.Resource!, resultParameters, root, addedIds);
+            ParsedResultParameters result = byType[primary.Identity.Type];
+            if (result.Inclusions.ContainsKey(primary.Identity.Type))
+            {
+                observe?.Invoke("expanded");
+                AddVisibleInclusions(ctx, bundle, InclusionCandidates(primary.Body, primary.Body.ToPocoNode(), result, null), root, addedIds);
+            }
+            if (result.ReverseInclusions.Any())
+            {
+                observe?.Invoke("expanded");
+                AddVisibleInclusions(ctx, bundle, ReverseInclusionSearches(primary.Identity, result)
+                    .SelectMany(search => search.Store.SearchCandidates(search.Parameters, instant)), root, addedIds);
+            }
         }
 
         return bundle;
@@ -5906,21 +5918,21 @@ rs,
         return FinishSearch(ctx, hooks, null, bundle, "System search successful", out response);
     }
 
-    private void AddVisibleInclusions(FhirRequestContext ctx, Bundle bundle, IEnumerable<Resource> inclusions,
-        string rootUrl, HashSet<string> addedIds)
+    private void AddVisibleInclusions(FhirRequestContext ctx, Bundle bundle, IEnumerable<SearchPageSelector.Candidate> inclusions,
+        string rootUrl, HashSet<SearchPageSelector.Identity> addedIds)
     {
-        foreach (Resource inclusion in inclusions)
+        foreach (SearchPageSelector.Candidate inclusion in inclusions)
         {
-            string id = $"{inclusion.TypeName}/{inclusion.Id}";
-            Resource detached = (Resource)inclusion.DeepCopy();
+            SearchPageSelector.Identity id = inclusion.Identity;
+            if (addedIds.Contains(id))
+            {
+                continue;
+            }
+            Resource detached = (Resource)inclusion.Body.DeepCopy();
             if (CanReturn(ctx, detached, 's'))
             {
-                bundle.AddSearchEntry(detached, $"{rootUrl}/{id}", Bundle.SearchEntryMode.Include);
-            }
-            else
-            {
-                // The resolver reserved the identity, but no entry was admitted.
-                addedIds.Remove(id);
+                addedIds.Add(id);
+                bundle.AddSearchEntry(detached, $"{rootUrl}/{id.Type}/{id.StoreKey}", Bundle.SearchEntryMode.Include);
             }
         }
     }
@@ -5941,82 +5953,29 @@ rs,
     internal IEnumerable<Resource> ResolveReverseInclusions(
         Resource focus,
         ParsedResultParameters resultParameters,
-        HashSet<string> addedIds)
-    {
-        List<Resource> inclusions = new();
+        HashSet<string> addedIds) =>
+        ReverseInclusionSearches(new(focus.TypeName, focus.Id ?? string.Empty), resultParameters)
+            .SelectMany(search => search.Store.TypeSearch(search.Parameters))
+            .Where(r => addedIds.Add($"{r.TypeName}/{r.Id}")).ToArray();
 
-        string matchId = $"{focus.TypeName}/{focus.Id}";
+    private IEnumerable<(IVersionedResourceStore Store, ParsedSearchParameter[] Parameters)> ReverseInclusionSearches(
+        SearchPageSelector.Identity focus, ParsedResultParameters resultParameters)
+    {
+        string matchId = $"{focus.Type}/{focus.StoreKey}";
 
         foreach ((string reverseResourceType, List<SearchParamDefinition> sps) in resultParameters.ReverseInclusions)
         {
-            if (!_store.ContainsKey(reverseResourceType))
+            if (!_store.TryGetValue(reverseResourceType, out IVersionedResourceStore? store))
             {
                 continue;
             }
 
             foreach (SearchParamDefinition sp in sps)
             {
-                List<ParsedSearchParameter> parameters = new()
-                {
-                    new ParsedSearchParameter(
-                        this,
-                        _store[reverseResourceType],
-                        reverseResourceType,
-                        sp.Name!,
-                        string.Empty,
-                        SearchModifierCodes.None,
-                        matchId,
-                        sp),
-                };
-
-                // execute search
-                IEnumerable<Resource> results = _store[reverseResourceType].TypeSearch(parameters.ToArray());
-                foreach (Resource revIncludeRes in results)
-                {
-                    string id = $"{revIncludeRes.TypeName}/{revIncludeRes.Id}";
-
-                    if (!addedIds.Contains(id))
-                    {
-                        // add the result to the list
-                        inclusions.Add(revIncludeRes);
-
-                        // track we have added this id
-                        addedIds.Add(id);
-                    }
-                }
+                yield return (store, [new ParsedSearchParameter(this, store, reverseResourceType,
+                    sp.Name!, string.Empty, SearchModifierCodes.None, matchId, sp)]);
             }
         }
-
-        return inclusions;
-    }
-
-    /// <summary>Adds a reverse inclusions.</summary>
-    /// <param name="ctx">             The request and its visibility constraints.</param>
-    /// <param name="bundle">          The bundle.</param>
-    /// <param name="resource">        [out] The resource.</param>
-    /// <param name="resultParameters">Options for controlling the result.</param>
-    /// <param name="rootUrl">         URL of the root.</param>
-    /// <param name="addedIds">        List of identifiers for the added.</param>
-    private void AddReverseInclusions(
-        FhirRequestContext ctx,
-        Bundle bundle,
-        Resource resource,
-        ParsedResultParameters resultParameters,
-        string rootUrl,
-        HashSet<string> addedIds)
-    {
-        if (!resultParameters.ReverseInclusions.Any())
-        {
-            return;
-        }
-
-        if (PageObservers.TryGetValue(ctx, out Action<string>? observe))
-        {
-            observe("expanded");
-        }
-        IEnumerable<Resource> reverseInclusions = ResolveReverseInclusions(resource, resultParameters, addedIds);
-
-        AddVisibleInclusions(ctx, bundle, reverseInclusions, rootUrl, addedIds);
     }
 
     /// <summary>Enumerates resolve inclusions in this collection.</summary>
@@ -6033,12 +5992,17 @@ rs,
         PocoNode focusPN,
         ParsedResultParameters resultParameters,
         HashSet<string> addedIds,
-        FhirEvaluationContext? fpContext)
+        FhirEvaluationContext? fpContext) =>
+        InclusionCandidates(focus, focusPN, resultParameters, fpContext).Select(c => c.Body)
+            .Where(r => addedIds.Add($"{r.TypeName}/{r.Id}")).ToArray();
+
+    private IEnumerable<SearchPageSelector.Candidate> InclusionCandidates(Resource focus, PocoNode focusPN,
+        ParsedResultParameters resultParameters, FhirEvaluationContext? fpContext)
     {
         // check for include directives
         if (!resultParameters.Inclusions.ContainsKey(focus.TypeName))
         {
-            return Array.Empty<Resource>();
+            yield break;
         }
 
         if (fpContext is null)
@@ -6050,8 +6014,6 @@ rs,
                 ElementResolver = Resolve,
             };
         }
-
-        List<Resource> inclusions = new();
 
         foreach (SearchParamDefinition sp in resultParameters.Inclusions[focus.TypeName])
         {
@@ -6066,11 +6028,6 @@ rs,
                 sp.Expression)
                 .Invoke(focusPN, fpContext);
 
-            if (!extracted.Any())
-            {
-                continue;
-            }
-
             foreach (PocoNode element in extracted)
             {
                 if ((element.Poco is not ResourceReference reference))
@@ -6080,129 +6037,46 @@ rs,
                     continue;
                 }
 
-                //ResourceReference reference = element.ToPoco<ResourceReference>();
-                Resource? resolved = null;
-
                 if ((!string.IsNullOrEmpty(reference.Reference)) &&
-                    TryResolveAsResource(reference.Reference, out resolved) &&
-                    (resolved is not null))
+                    ResolveLiteralCandidate(reference.Reference) is SearchPageSelector.Candidate literal)
                 {
                     if (sp.Target?.Any() ?? false)
                     {
                         // verify this is a valid target type
-                        Hl7.Fhir.Model.ResourceType? rt = ModelInfo.FhirTypeNameToResourceType(resolved.TypeName);
+                        Hl7.Fhir.Model.ResourceType? rt = ModelInfo.FhirTypeNameToResourceType(literal.Identity.Type);
 
                         if (rt is null ||
-                            !sp.Target.Any(t => EnumUtility.GetLiteral(t) == resolved.TypeName))
+                            !sp.Target.Any(t => EnumUtility.GetLiteral(t) == literal.Identity.Type))
                         {
                             continue;
                         }
                     }
 
-                    string includedId = $"{resolved.TypeName}/{resolved.Id}";
-                    if (addedIds.Contains(includedId))
-                    {
-                        continue;
-                    }
-
-                    // add the matched result
-                    inclusions.Add(resolved);
-
-                    // track we have added this id
-                    addedIds.Add(includedId);
-
+                    yield return literal;
                     continue;
                 }
 
                 if (reference.Identifier is not null)
                 {
                     // check if a type was specified
-                    if (!string.IsNullOrEmpty(reference.Type) && _store.ContainsKey(reference.Type))
+                    if (!string.IsNullOrEmpty(reference.Type) && _store.TryGetValue(reference.Type, out IVersionedResourceStore? typed) &&
+                        typed.ResolveIdentifierCandidate(reference.Identifier.System, reference.Identifier.Value) is SearchPageSelector.Candidate match)
                     {
-                        if (_store[reference.Type].TryResolveIdentifier(reference.Identifier.System, reference.Identifier.Value, out resolved) &&
-                            (resolved is not null))
-                        {
-                            string includedId = $"{resolved.TypeName}/{resolved.Id}";
-                            if (addedIds.Contains(includedId))
-                            {
-                                continue;
-                            }
-
-                            // add the matched result
-                            inclusions.Add(resolved);
-
-                            // track we have added this id
-                            addedIds.Add(includedId);
-
-                            continue;
-                        }
+                        yield return match;
+                        continue;
                     }
 
                     // look through all resources
-                    foreach (string resourceType in _store.Keys)
+                    foreach (IVersionedResourceStore store in _store.Values)
                     {
-                        if (_store[resourceType].TryResolveIdentifier(reference.Identifier.System, reference.Identifier.Value, out resolved) &&
-                            (resolved is not null))
+                        if (store.ResolveIdentifierCandidate(reference.Identifier.System, reference.Identifier.Value) is SearchPageSelector.Candidate candidate)
                         {
-                            string includedId = $"{resolved.TypeName}/{resolved.Id}";
-                            if (addedIds.Contains(includedId))
-                            {
-                                continue;
-                            }
-
-                            // add the matched result
-                            inclusions.Add(resolved);
-
-                            // track we have added this id
-                            addedIds.Add(includedId);
-
-                            continue;
+                            yield return candidate;
                         }
                     }
                 }
             }
         }
-
-        return inclusions;
-    }
-
-    /// <summary>Adds the inclusions.</summary>
-    /// <param name="ctx">             The request and its visibility constraints.</param>
-    /// <param name="bundle">          The bundle.</param>
-    /// <param name="resource">        [out] The resource.</param>
-    /// <param name="resultParameters">Options for controlling the result.</param>
-    /// <param name="rootUrl">         URL of the root.</param>
-    /// <param name="addedIds">        List of identifiers for the added.</param>
-    private void AddInclusions(
-        FhirRequestContext ctx,
-        Bundle bundle,
-        Resource resource,
-        ParsedResultParameters resultParameters,
-        string rootUrl,
-        HashSet<string> addedIds)
-    {
-        // check for include directives
-        if (!resultParameters.Inclusions.ContainsKey(resource.TypeName))
-        {
-            return;
-        }
-
-        PocoNode resourcePN = resource.ToPocoNode();
-
-        FhirEvaluationContext fpContext = new FhirEvaluationContext()
-        {
-            Resource = resourcePN,
-            TerminologyService = _terminology,
-            ElementResolver = Resolve,
-        };
-
-        if (PageObservers.TryGetValue(ctx, out Action<string>? observe))
-        {
-            observe("expanded");
-        }
-        IEnumerable<Resource> inclusions = ResolveInclusions(resource, resourcePN, resultParameters, addedIds, fpContext);
-
-        AddVisibleInclusions(ctx, bundle, inclusions, rootUrl, addedIds);
     }
 
     /// <summary>Gets the server capabilities.</summary>
