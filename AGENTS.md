@@ -70,7 +70,7 @@ Build after a series of code changes. Success requires zero errors; a
 warning-free baseline is not documented. Investigate diagnostics and compare
 with `HEAD` before calling them regressions.
 
-CI covers both target frameworks by omitting `--framework`. Changes to
+CI builds both target frameworks together and tests each in a separate step. Changes to
 shared versioned code must remain compatible with all three Firely SDKs,
 not merely the first version compiled locally.
 

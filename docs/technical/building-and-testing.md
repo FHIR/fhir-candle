@@ -66,9 +66,12 @@ dotnet test --configuration Release --framework net11.0 --no-restore --verbosity
 
 The normal build restores dependencies; these test commands reuse that
 restore. No separate lint/format command or new runner is required.
-CI builds both targets before running tests with `--no-build` and
-`-p:TestTfmsInParallel=false`, avoiding a second build and concurrent
-framework test hosts. CI also runs the PowerShell release-validator
+Each OS job builds both targets once, then runs `Test .NET 11` and
+`Test .NET 10` sequentially with `--no-build`. The job timeout is temporarily
+180 minutes to measure the full suite. Use each step's duration for elapsed
+time and the `test-results-<os>` artifact for per-test TRX timings. Results
+are retained for seven days; a .NET 11 test failure does not skip .NET 10
+or turn the job green. CI also runs the PowerShell release-validator
 regressions in `.github/scripts/tests/Test-ReleaseScripts.ps1` and the
 standalone theme-adapter tests. To run the latter locally with Node.js 24 or
 later (no npm install):
@@ -113,6 +116,12 @@ local full-suite commands, the existing workflow's all-target sequence, all
 six current OS/framework cells, and the manual browser records. UI data-path tests
 do not exercise Blazor rendering or user interaction. Keep unexecuted cells
 and workflows explicitly pending rather than treating compilation as a pass.
+
+On macOS, the performance-evidence tests use `/private/tmp` for probe sockets
+and private evidence directories. The default per-user `TMPDIR` under
+`/var/folders` can make a .NET named pipe exceed the 104-byte Unix socket
+limit (including its terminator), and `/var` is a symlink. The fixtures do
+not require overriding `TMPDIR` or allowing symlinks in saved evidence.
 
 ## Delivery
 

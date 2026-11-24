@@ -307,7 +307,8 @@ sequence on each available Windows/Linux/macOS environment:
 ```powershell
 dotnet restore
 dotnet build --configuration Release --no-restore
-dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false
+dotnet test --configuration Release --framework net11.0 --no-build --verbosity normal --logger trx
+dotnet test --configuration Release --framework net10.0 --no-build --verbosity normal --logger trx
 ```
 
 Prerequisites are the .NET 11 SDK and .NET 11 and 10 runtimes. Record tree/commit identity,

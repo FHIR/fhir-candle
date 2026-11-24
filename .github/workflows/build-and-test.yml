@@ -40,7 +40,7 @@ jobs:
   build-and-test:
     name: build-and-test-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +89,25 @@ jobs:
       run: dotnet restore
 
     - name: Build
+      id: build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Test
-      run: dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false
+    - name: Test .NET 11
+      run: >-
+        dotnet test --configuration Release --framework net11.0 --no-build --verbosity normal
+        --logger trx --results-directory "${{ runner.temp }}/test-results/net11.0"
+
+    - name: Test .NET 10
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: >-
+        dotnet test --configuration Release --framework net10.0 --no-build --verbosity normal
+        --logger trx --results-directory "${{ runner.temp }}/test-results/net10.0"
+
+    - name: Upload test timings and results
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-results-${{ matrix.os }}
+        path: ${{ runner.temp }}/test-results/**/*.trx
+        if-no-files-found: error
+        retention-days: 7
