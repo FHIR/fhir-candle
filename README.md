@@ -122,13 +122,13 @@ Note: items are unsorted within their priorities
 * Persistent 'unsubscribe' list
 * Finish search evaluators (remaining modifier combinations)
 * Save/restore points
-* Resource editor design improvements
 * Add loading packages/profiles to CapabilityStatement
 * Configuration and content loading via GH repos
 * SQL-on-FHIR ViewDefinition and runner support
 * Additional MCP support
 
 ## Mid Priority
+* Add a US Core Patient Data Feed page
 * Complete SMART support
 * Additional Transaction support
 * OpenAPI generation
@@ -138,7 +138,6 @@ Note: items are unsorted within their priorities
 * Explore Native AOT for further size reduction
 * Add 'core' operations (e.g., `$meta-add`).
 * Extend operation support within `transaction` bundles
-* CQL support
 
 ## The long tail
 * Versioned Resource support

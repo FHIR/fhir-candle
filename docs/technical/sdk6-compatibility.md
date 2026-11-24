@@ -79,7 +79,7 @@ build/UI props; each versioned UI references its matching store project.
 | `Pages/Subscriptions/SubscriptionsLocal.razor`, `NotificationLocalViewer.razor` | Current subscriptions/status/errors and generated-event counts, focus/additional-context links via `TryGetResourceInfo`. The local viewer's serialized-content control is already commented out. |
 | `Pages/Subscriptions/NotificationsReceived.razor`, `NotificationReceivedViewer.razor` | Received status/event/reference fields and links to stored Bundles; raw JSON/XML is viewed through the linked resource viewer, not a fictional notification format selector. |
 | `Pages/RI/subscriptions/Tour.razor`; each version's `Subscriptions/TourStep01.razor` and `TourUtils.cs` | Active version-selected tour, topic text/encounter fixtures, subscription creation and event bindings. R4B/R5 tour/link components are real consumers, not R4-only coverage. |
-| `Pages/RI/subscriptions/UsCoreHti2.razor` and `FhirCandle.Ui.R4/Subscriptions/UsCoreHti2ContentsR4.razor` | Active R4 HTI-2 Patient/subscription selectors and editing/content options. Not an R4B/R5 HTI-2 implementation. |
+| `Pages/RI/subscriptions/UsCoreHti2.razor` and `FhirCandle.Ui.R4/Subscriptions/UsCoreHti2ContentsR4.razor` | Unfinished R4 prototype. Its selectors are tested as components, but it has no route or package-page entry. |
 | `Pages/RI/davinci-cdex/TaskList.razor` and `FhirCandle.Ui.R4/davinci-cdex/TaskTable.razor` | Active R4 Task ID/status/code table and status buttons. Package setup and meaningful synthetic Task inputs are required. |
 | `Pages/RI/davinci-cdex/PasWalkthrough.razor` and `FhirCandle.Ui.R4/davinci-pas/PasWalkthroughR4.razor` | PAS's current “incomplete” page shell and SDK-dependent compiled claim/bundle code. Its interactive markup was already commented out. Do not require or activate claim-entry/submission controls. |
 | `FhirCandle.Ui.Versioned/FhirCandle.Ui.Versioned.projitems` | Shared Patient/Practitioner pickers are **not imported** by the current versioned UI projects. They are inspected inventory, not currently compiled or exercised controls. Do not activate them to expand coverage. |
@@ -401,7 +401,7 @@ unexpected packages, and reports its actual listening URL. Use the documented
    removed, and visit the missing instance using current viewer behavior:
    empty resource content, not an invented outcome banner.
 
-### Subscriptions, generated and received events, RI tour and R4 HTI-2
+### Subscriptions, generated and received events, and RI tour
 
 Prepare an isolated Firely-compatible offline cache containing
 **`hl7.fhir.uv.subscriptions-backport#1.1.0`**, including required locally
@@ -438,10 +438,7 @@ dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 --no
    JSON/XML content. Do not activate commented notification-content controls
    or invent a format selector on event cards.
 5. Exercise `/subscriptions/tour?store=r4`, then r4b/r5, using the current
-   versioned tour steps and their local notification target. Visit
-   `/subscriptions/uscore-hti-2?store=r4` for the active Patient/subscription
-   selector/editor workflow. Record its actual exposed content options and
-   results, not an assumed R4B/R5 HTI-2 feature.
+   versioned tour steps and their local notification target.
 
 ### Active R4 CDex and the existing PAS shell
 
@@ -486,7 +483,6 @@ neither the default launch profile nor a successful compilation substitutes.
 | Store/count/filter/viewer/update/delete/metadata | r4, r4b, r5 | Not run |
 | Local generated and received subscriptions | r4, r4b, r5 | Not run; offline RI setup/receiver evidence outstanding |
 | RI tour | r4, r4b, r5 | Not run |
-| Active HTI-2 | r4 | Not run |
 | CDex Task table/status/output | provider/payer, R4 | Not run; pinned cache and Task seed caveat outstanding |
 | Current PAS incomplete shell | provider/payer, R4 | Not run; no claim-submission workflow asserted |
 

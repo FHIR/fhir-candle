@@ -361,7 +361,7 @@ public class FluentUiIntegrationTests
             FhirRequestContext request = new(store, "POST", store.Config.BaseUrl + "/Patient")
             {
                 SourceFormat = "application/fhir+json",
-                SourceContent = $$"""{"resourceType":"Patient","id":"{{id}}","name":[{"family":"{{id}}"}]}""",
+                SourceContent = $$"""{"resourceType":"Patient","id":"{{id}}","name":[{"family":"{{id}}"},{"given":["Al"]}]}""",
             };
             Assert.True(store.InstanceCreate(request, out _, forceAllowExistingId: true));
         }
@@ -447,6 +447,7 @@ public class FluentUiIntegrationTests
             await firstHti2Renderer.Dispatcher.InvokeAsync(() => patients.OnOptionsSearch.InvokeAsync(patientSearch));
             PatientR4 patient = Assert.Single(patientSearch.Items!);
             Assert.Equal("alpha", patient.Id);
+            Assert.Equal("alpha: alpha; Al", patients.OptionText!(patient));
             await firstHti2Renderer.Dispatcher.InvokeAsync(() => patients.SelectedItemsChanged.InvokeAsync([patient]));
             Assert.Equal("alpha", Assert.Single(patients.SelectedItems).Id);
             await firstHti2Renderer.Dispatcher.InvokeAsync(() => patients.SelectedItemsChanged.InvokeAsync([]));

@@ -86,6 +86,11 @@ The subscriptions tour and its notification viewers use read-only text fields
 for heartbeat seconds and event numbers. The HTI-2 heartbeat remains an
 optional integer. Neither displaying nor editing these values loads IMask.
 
+The unfinished HTI-2 component is tested in isolation and is not routed or
+listed in the subscriptions UI. Its patient picker shows the avatar in search
+results only. The selected value uses Fluent's text and built-in clear action
+instead of placing a second remove button and a wrapping name inside the input.
+
 Managed regressions exercise drawer/feedback delivery, search/row activation,
 autocomplete selection, and SMART key-family RSA→RS384 / EC→ES384 callbacks.
 They do not infer working callbacks from unmatched attributes compiling.

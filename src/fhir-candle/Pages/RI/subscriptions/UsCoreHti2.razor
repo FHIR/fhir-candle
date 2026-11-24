@@ -1,8 +1,7 @@
 ﻿@using Microsoft.FluentUI.AspNetCore.Components;
 @using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
 
-
-@page "/subscriptions/uscore-hti-2"
+@* Keep this prototype out of routing and IPackagePage discovery until it can create subscriptions. *@
 
 @inject NavigationManager NavigationManager
 @inject IFhirStoreManager StoreManager
@@ -14,7 +13,6 @@
 @* @inject ProtectedLocalStorage BrowserStore *@
 
 @implements IDisposable
-@implements IPackagePage
 
 <PageTitle>HTI-2 Proposed Requirements Testing for US Core Subscriptions</PageTitle>
 

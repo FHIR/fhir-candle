@@ -5,14 +5,13 @@
 @inject IHttpContextAccessor HttpContextAccessor
 
 <FluentAccordion>
-    <FluentAccordionItem Header="Patient Selection" Expanded="true">
-         <FluentAutocomplete Id="patient-selector"
+    <FluentAccordionItem Header="Patient Selection" Expanded="true" Style="max-width: 100%; --field-min-width: 0px;">
+        <FluentAutocomplete Id="patient-selector"
                 @ref="PatientSelector"
                 TOption="Hl7.Fhir.Model.Patient"
                 TValue="string"
                 Width="100%"
                 Placeholder="search"
-                MaximumSelectedOptions="1"
                 Multiple="false"
                 OnOptionsSearch="@OnPatientSearch"
                 OptionText="@(item => displayFor(item!))"
@@ -22,18 +21,6 @@
                 Select a patient
                 <FluentIcon Value="@(new Icons.Regular.Size20.Person())" Style="margin: 0 4px;" />
             </LabelTemplate>
-            <SelectedOptionTemplate>
-                <FluentStack Orientation="Orientation.Horizontal" Style="min-height: 26px; background: var(--candle-hover)">
-                    <FluentPresenceBadge Status="PresenceStatus.Available">
-                        <AnchorContent>
-                            <FluentAvatar Name="@(displayFor(context))" Size="AvatarSize.Size24" Initials="@(getInitials(context.Name))" />
-                        </AnchorContent>
-                    </FluentPresenceBadge>
-                    <FluentText>@displayFor(context)</FluentText>
-                    <FluentButton Title="Remove" IconEnd="@(new Icons.Regular.Size20.Dismiss())"
-                                  OnClick="@(() => SelectedPatients = [])" />
-                </FluentStack>
-            </SelectedOptionTemplate>
             <OptionTemplate>
                 <FluentStack Orientation="Orientation.Horizontal" Style="min-height: 40px;">
                     <FluentPresenceBadge Status="PresenceStatus.Available">
@@ -44,9 +31,6 @@
                     <FluentText>@displayFor(context)</FluentText>
                 </FluentStack>
             </OptionTemplate>
-            <MaximumSelectedOptionsMessage>
-                Only one patient can be selected.
-            </MaximumSelectedOptionsMessage>
             <FooterContent>
                 @if (!context.Items.Any())
                 {
@@ -489,16 +473,17 @@
         switch (o)
         {
             case Hl7.Fhir.Model.Patient p:
-                return $"{p.Id}: {string.Join(", ", p.Name.Select(n => $"{n.Family}, {string.Join(' ', n.Given)}"))}";
+                return $"{p.Id}: {displayFor(p.Name)}";
 
             case ParsedSubscription parsedSubscription:
                 return $"{parsedSubscription.Id}: {parsedSubscription.Endpoint} ({parsedSubscription.CurrentStatus})";
 
             case IEnumerable<Hl7.Fhir.Model.HumanName> hns:
-                return string.Join("; ", hns.Select(hn => $"{hn.Family}, {string.Join(' ', hn.Given)}"));
+                return string.Join("; ", hns.Select(displayFor).Where(name => !string.IsNullOrEmpty(name)));
 
             case Hl7.Fhir.Model.HumanName hn:
-                return $"{hn.Family}, {string.Join(' ', hn.Given)}";
+                return string.Join(", ", new[] { hn.Family, string.Join(' ', hn.Given) }
+                    .Where(part => !string.IsNullOrEmpty(part)));
 
             case Hl7.Fhir.Model.FhirString s:
                 return s.Value ?? string.Empty;
