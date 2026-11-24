@@ -1,5 +1,9 @@
 # Sealed-artifact performance comparison
 
+The results below apply to the specific baseline, candidate, and runtime
+identified in the experiment. They are not measurements of the current
+.NET 10/11 release candidate.
+
 ## Current boundary: fixed trials, calibration and evidence-only reporting
 
 `FhirCandle.Performance` is a BCL-only external HTTP client. Its optional

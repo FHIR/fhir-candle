@@ -14,7 +14,9 @@ or in your editor.
 
 ## Quick links
 
+- [Changelog](../changelog.md) and [release process](technical/releasing.md)
 - [Getting started](user/getting-started.md)
+- [Tenants, search paging, and SMART access](user/tenants.md)
 - [`$validate` operation reference](user/operations/validate.md)
 - [Strict mode (`--strict`)](user/strict-mode.md)
 - [Architecture](technical/architecture.md)

@@ -14,13 +14,13 @@ names the override.
 
 | Behavior | Status code | Lenient default | Spec |
 |---|---|---|---|
-| `PUT` body missing `Resource.id` | 422 | Stamps URL id onto empty body | `http.html#update` |
+| `PUT` body missing `Resource.id` | 422 | Stamps the URL id onto the supplied resource | `http.html#update` |
 | `PUT` body id ≠ URL id (always on) | 422 | Same — always rejected | `http.html#update` |
-| `POST` with client-supplied `Resource.id` | 400 | Silently re-assigns id (with `--create-existing-id`) | `http.html#create` |
+| `POST` create with client-supplied `Resource.id` | 400 | Assigns a server id regardless of `--create-existing-id` | `http.html#create` |
 | `PUT` on a missing resource id | 404 | Creates as update (with `--create-as-update`) | `http.html#upsert` |
 | `Resource.id` not matching `[A-Za-z0-9\-\.]{1,64}` | 400 (or 422 at parse) | Best-effort accept | `datatypes.html#id` |
 | Unknown / malformed search parameter | 400 | Silently dropped | `search.html#errors` |
-| `CapabilityStatement.url` matches tenant base URL | n/a | Same — already correct | n/a |
+| `CapabilityStatement.url` is `{tenant-base}/CapabilityStatement/metadata` | n/a | Same | n/a |
 | `CapabilityStatement.fhirVersion` matches tenant version | n/a | Same — already correct | n/a |
 
 Search handling honors the standard `Prefer: handling=strict` /
@@ -31,6 +31,8 @@ strict handling reports malformed values. Lenient handling ignores an invalid
 date filter or drops its invalid alternatives while keeping valid ones. Valid
 date precision ranges are compared in UTC, including the first and last
 representable ticks; only a nonempty portion within those bounds is retained.
+An invalid or repeated [paging offset](tenants.md#paging-search-results)
+returns `400` in either handling mode.
 
 Strict mode is **not** advertised in `CapabilityStatement` — clients running
 conformance tests should not have to read out-of-band metadata to know the server

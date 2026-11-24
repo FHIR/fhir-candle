@@ -1,5 +1,10 @@
 # NuGet dependency refresh — October 2026
 
+This is the October decision record. Its versions, target frameworks, and
+deferrals describe that checkout. For the current targets see [building and
+testing](../building-and-testing.md); for subsequent dependency changes see
+the [changelog](../../../changelog.md) and [SDK compatibility record](../sdk6-compatibility.md).
+
 ## Final Windows disposition — 2026-10-16
 
 **Windows pass complete; Linux/macOS validation pending.** All 36 direct IDs have a final assessment: **20 upgraded to the evaluated latest stable, one upgraded at a cap (Emoji), nine outdated IDs deferred, four current, two legacy prereleases retained**. The 21 upgraded IDs belong to **18 package-unit commits**, not 21 commits. Two separately authorized code-only repairs are not upgrades.

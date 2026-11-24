@@ -27,7 +27,7 @@ persistence are deliberate design choices.
 | `src\FhirStore.Common\` | Version-independent interfaces, models, and configuration |
 | `src\FhirStore.CommonVersioned\` | Shared store implementation compiled into each FHIR-version library |
 | `src\FhirStore.R4\`, `src\FhirStore.R4B\`, `src\FhirStore.R5\` | Version-specific libraries and Firely SDK references |
-| `src\FhirCandle.Ui.Common\`, `src\FhirCandle.Ui.Versioned\` | Common and shared versioned UI components |
+| `src\FhirCandle.Ui.Common\`, `src\FhirCandle.Ui.Versioned\` | Common UI library; the separate shared project is not imported by the version-specific UIs |
 | `src\FhirCandle.Ui.R4\`, `src\FhirCandle.Ui.R4B\`, `src\FhirCandle.Ui.R5\` | Version-specific UI libraries |
 | `src\fhir-candle.Tests\` | xUnit tests and fixtures under `data\` |
 | `src\fhir-candle.props`, `src\fhir-candle-ui.props` | Shared build and UI dependency settings |
@@ -171,8 +171,8 @@ rules. Match surrounding code and avoid unrelated formatting.
   imported by the R4, R4B, and R5 projects. The same source resolves against
   each project's Firely model types; do not duplicate shared fixes across
   version-specific libraries.
-- The UI follows the same shared-project pattern through
-  `FhirCandle.Ui.Versioned`. Changes must work for all importing UI projects.
+- The version-specific UIs reference `FhirCandle.Ui.Common` and the matching
+  store library. They do not import `FhirCandle.Ui.Versioned.projitems`.
 - Preserve assembly aliases such as `candleR4`, `candleR4B`, and `candleR5`,
   and the `AddPackageAliases` targets. They disambiguate assemblies with
   identical namespaces.

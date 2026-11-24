@@ -19,7 +19,8 @@ No stable replacement, alias/asset-policy change, transitive pin, package remova
 
 ## Active consumer and limitations
 
-[ZulipClientPool](../../../src/fhir-candle/Zulip/ZulipClientPool.cs) creates and reuses supplier `ZulipClient(site, email, key)` instances.
+At the October checkpoint, [ZulipClientPool](https://github.com/FHIR/fhir-candle/blob/d0626ce5635095c5c4589af4dac1571987cf149b/src/fhir-candle/Zulip/ZulipClientPool.cs) created and reused supplier `ZulipClient(site, email, key)` instances.
+The behavior below is historical; for the current sender and credential rules see [Zulip delivery](../../user/subscriptions-ri.md#zulip-delivery).
 [CandleConfig](../../../src/FhirStore.Common/Configuration/CandleConfig.cs) retains external/CLI URL, email and key configuration.
 [NotificationManager](../../../src/fhir-candle/Services/NotificationManager.cs) registers a client only with complete configuration and dispatches the **zulip** notification channel.
 `TryNotifyZulip` allows subscription site/email/key overrides, rejects missing configuration, builds the message, and sends to parsed stream/user IDs through `Messages.TrySendStream` / `TrySendPrivate`.

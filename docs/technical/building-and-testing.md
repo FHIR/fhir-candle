@@ -68,8 +68,14 @@ The normal build restores dependencies; these test commands reuse that
 restore. No separate lint/format command or new runner is required.
 CI builds both targets before running tests with `--no-build` and
 `-p:TestTfmsInParallel=false`, avoiding a second build and concurrent
-framework test hosts. It also runs the PowerShell release-validator
-regressions in `.github/scripts/tests/Test-ReleaseScripts.ps1`.
+framework test hosts. CI also runs the PowerShell release-validator
+regressions in `.github/scripts/tests/Test-ReleaseScripts.ps1` and the
+standalone theme-adapter tests. To run the latter locally with Node.js 24 or
+later (no npm install):
+
+```powershell
+node --test .github\scripts\tests\candle-theme.test.cjs
+```
 
 ## Test organization
 

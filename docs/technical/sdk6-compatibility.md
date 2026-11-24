@@ -12,17 +12,17 @@ requirements still prevent final acceptance; see the dated evidence below.
 
 ## Current dependency versions
 
-The 2026-11-12 same-major dependency refresh uses **6.8.0** for the R4, R4B,
-R5, and test-only R6 SDK packages, with matching Base/Conformance dependencies.
-`Firely.Fhir.Packages` remains **5.0.2**. FHIR tenant versions and assembly
-aliases are unchanged. The migration-time inventory and evidence below retain
-their original **6.2.1** identities; they are not new acceptance evidence for
-the refreshed dependencies.
+The R4, R4B, R5, and test-only R6 model packages are pinned to **6.9.0**.
+FHIR tenant versions and [assembly aliases](assembly-aliases.md) are unchanged.
+The host now uses **`fhir-pkg-lib` 2026.1113.1815** instead of
+`Firely.Fhir.Packages`; see [package selection and import limits](../user/loading-data.md).
 
-On Windows, the refreshed solution builds for both `net11.0` and `net10.0`
-with zero warnings or errors. The full test suite passes **4,458 tests per
-framework**, with no failures or skips. This does not close the historical
-platform, browser, or offline RI-package acceptance gates below.
+The November 12 Windows checkpoint used **Firely 6.8.0** and
+**`Firely.Fhir.Packages` 5.0.2**. At that checkpoint the `net11.0` and
+`net10.0` builds had no warnings or errors, and **4,458 tests per framework**
+passed with no skips. Those results and the original **6.2.1** migration
+inventory below describe their respective source trees, not qualification of
+the current release candidate.
 
 ## Migration-time dependency and product envelope
 
@@ -301,13 +301,13 @@ dotnet build --configuration Release --framework net11.0
 dotnet test --configuration Release --framework net11.0 --no-restore --verbosity normal
 ```
 
-At the final implementation tree, run the existing workflow's exact all-target
+At the final implementation tree, run the workflow's all-target .NET
 sequence on each available Windows/Linux/macOS environment:
 
 ```powershell
 dotnet restore
 dotnet build --configuration Release --no-restore
-dotnet test --configuration Release --no-restore --verbosity normal
+dotnet test --configuration Release --no-build --verbosity normal -p:TestTfmsInParallel=false
 ```
 
 Prerequisites are the .NET 11 SDK and .NET 11 and 10 runtimes. Record tree/commit identity,
@@ -357,12 +357,11 @@ This environment-variable path is a reproducible example, not an installed
 machine path. Ensure unrelated configuration supplies no extra packages,
 registries, notification credentials, or initial resources.
 
-The bare run command inherits an R5-only launch profile and a live core-package
-request. Pass these explicit application arguments after `--`; they take
-precedence over profile arguments without editing launch settings:
+Use `--no-launch-profile` to skip the R5-only development profile and its
+live core-package request. Pass the isolated configuration after `--`:
 
 ```powershell
-dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 -- --r4 r4 --r4b r4b --r5 r5 --fhir-source "$env:TEMP\fhir-candle-sdk6-0919-01\source" --fhir-package-cache "$env:TEMP\fhir-candle-sdk6-0919-01\cache" --use-official-registries false
+dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 --no-launch-profile -- --r4 r4 --r4b r4b --r5 r5 --fhir-source "$env:TEMP\fhir-candle-sdk6-0919-01\source" --fhir-package-cache "$env:TEMP\fhir-candle-sdk6-0919-01\cache" --use-official-registries false
 ```
 
 Confirm startup names all three tenants and the isolated source/cache, has no
@@ -412,7 +411,7 @@ resolved contents. The version is pinned by
 seeding. Stop the preceding server and run:
 
 ```powershell
-dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 -- --reference-implementation subscriptions --load-package "hl7.fhir.uv.subscriptions-backport#1.1.0" --load-examples false --protect-source true -m 1000 --r4 r4 --r4b r4b --r5 r5 --fhir-source "$env:TEMP\fhir-candle-sdk6-0919-01\source" --fhir-package-cache "$env:TEMP\fhir-candle-sdk6-0919-01\cache" --use-official-registries false
+dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 --no-launch-profile -- --reference-implementation subscriptions --load-package "hl7.fhir.uv.subscriptions-backport#1.1.0" --load-examples false --protect-source true -m 1000 --r4 r4 --r4b r4b --r5 r5 --fhir-source "$env:TEMP\fhir-candle-sdk6-0919-01\source" --fhir-package-cache "$env:TEMP\fhir-candle-sdk6-0919-01\cache" --use-official-registries false
 ```
 
 1. Confirm RI/package/version/tenants and no unintended outbound requests.
@@ -453,7 +452,7 @@ profile, and required locally resolved contents. The owned source and its
 seeding. Stop the subscriptions server before running:
 
 ```powershell
-dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 -- --reference-implementation hl7.fhir.us.davinci-cdex --load-package "hl7.fhir.us.davinci-cdex#2.0.0" --load-examples false --r4 provider --r4 payer --fhir-source "$env:TEMP\fhir-candle-sdk6-0919-01\source" --fhir-package-cache "$env:TEMP\fhir-candle-sdk6-0919-01\cache" --use-official-registries false
+dotnet run --project src\fhir-candle\fhir-candle.csproj --framework net10.0 --no-launch-profile -- --reference-implementation hl7.fhir.us.davinci-cdex --load-package "hl7.fhir.us.davinci-cdex#2.0.0" --load-examples false --r4 provider --r4 payer --fhir-source "$env:TEMP\fhir-candle-sdk6-0919-01\source" --fhir-package-cache "$env:TEMP\fhir-candle-sdk6-0919-01\cache" --use-official-registries false
 ```
 
 1. Confirm both R4 tenants and the exact package, with no package examples or

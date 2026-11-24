@@ -1,16 +1,39 @@
 # FHIR tenants
 
-By default, this software loads three FHIR 'tenants':
+With no configured tenants, the server exposes `/fhir/r4`, `/fhir/r4b`, and
+`/fhir/r5`. Each URL is a separate in-memory store.
 
-- a FHIR R4 endpoint at `/r4`,
-- a FHIR R4B endpoint at `/r4b`, and
-- a FHIR R5 endpoint at `/r5`.
+`--r4`, `--r4b`, and `--r5` each replace the configured list **for that FHIR
+version** (`Tenants_R4`, `Tenants_R4B`, `Tenants_R5`). Omit an option to keep
+its list from external configuration; supply it with no names to clear that
+list. The three defaults apply only if all three resulting lists are empty.
+For example, with no external tenants, `--r5 alpha --r5 beta` serves only
+`/fhir/alpha` and `/fhir/beta`.
 
-The tenants can be controlled by command line arguments — note that manually
-specifying any tenants overrides the default configuration and will *only* load
-the ones specified. To load only an R4 endpoint at `fhir`, the arguments would
-include `--r4 fhir`. You can specify multiple tenants for the same version; for
-example, `--r5 fhir --r5 also-fhir` will create two endpoints.
+## Resource limit
+
+`--max-resources N` (`-m N`, configuration key `Max_Resources`) sets a limit
+per tenant, shared across its resource types. The host defaults to `0` (no
+limit); the container's default arguments set `1000`. Inserting a resource
+above a positive limit evicts the oldest eligible resource immediately.
+Updating an existing resource does not move it to the back of the queue.
+Protected startup resources and generated capability metadata do not count.
+
+## Paging search results
+
+For example, `GET /fhir/r4/Patient?_count=20&_sort=_id` returns at most
+20 matching Patients. Follow the Bundle's `link` with `relation: "next"` using
+GET, even if the original search was a form POST to `_search`. The link retains
+the applied filters, including repeated parameters. Pages are evaluated against
+the live store, not a frozen snapshot.
+
+Type, system, and compartment searches apply `_offset` and `_count` to
+caller-visible primary matches. `_include` and `_revinclude` entries do not
+consume page slots or contribute to `Bundle.total`. `_maxresults` caps matches
+across pages, not the total. `_count=0` or `_summary=count` returns the visible
+total without entries or a next link, even with `_total=none`. If supplying
+`_offset` directly, use a single nonnegative 32-bit integer; invalid or repeated
+offsets return `400 Bad Request`.
 
 ## Compare the store and caller views
 
@@ -49,7 +72,11 @@ signed JWT assertion with `POST /_smart/<tenant>/token`. Send
 `client_assertion=<signed-assertion>`, and `scope=system/Patient.rs`.
 After a successful exchange, use the actual returned `access_token` as
 `Authorization: Bearer <access_token>` on requests to `/fhir/<tenant>/...`.
-Do not use the assertion itself as the FHIR bearer token.
+Do not use the assertion itself as the FHIR bearer token. A refresh token or
+authorization code is not a FHIR bearer token either. Refresh rotates the
+access token: use the new token for this tenant; the old one is no longer
+current. An expired or wrong-tenant token does not grant anonymous access
+on a SMART-optional tenant.
 
 On a SMART-required tenant, that limited token allows `GET
 /fhir/<tenant>/Patient/<id>` and `GET /fhir/<tenant>/Patient`, including matching

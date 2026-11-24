@@ -86,7 +86,7 @@ SOFTWARE.
 
 ### fhir-pkg-lib - https://github.com/GinoCanessa/dotnet-fhir-packages
 
-Version 2026.1113.1240, source commit 9059ebb310d0c0ad8a7079f806d238bc9b25611c.
+Version 2026.1113.1815, source commit de9b68a943ab1f0ea67c27a6cf122c2d006058ec.
 
 MIT License
 
@@ -441,6 +441,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+### SemanticVersioning - https://github.com/adamreeve/semver.net
+
+Version 3.0.0. Copyright (c) Adam Reeve.
+Distributed under the MIT license; see the `LICENSE` file in the
+[SemanticVersioning 3.0.0 package](https://www.nuget.org/packages/SemanticVersioning/3.0.0/License).
 
 ### XUnit - https://github.com/xunit/xunit
 

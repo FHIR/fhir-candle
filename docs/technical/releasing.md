@@ -61,7 +61,11 @@ frameworks, independently of earlier CI runs on `main`.
 
 ## Prepare and publish
 
-1. Choose the version and prepare its entry in `changelog.md`: insert
+During PR review, keep unreleased changes under `* Work in Progress` in the
+[changelog](../../changelog.md). A branch build's clock-based version is not
+a release number.
+
+1. Once a maintainer chooses the release version, prepare its changelog entry: insert
    **`* v<version>`** beneath `* Work in Progress`, move the accumulated
    indented entries under the new version, and leave the work-in-progress
    section empty. Preserve historical entries. The tagged commit must contain

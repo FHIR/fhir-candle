@@ -36,7 +36,7 @@ node --test .github\scripts\tests\candle-theme.test.cjs
 
 The core FHIR store logic lives in **`FhirStore.CommonVersioned`**, a shared project (`.shproj`) that gets compiled into each version-specific library (`FhirStore.R4`, `FhirStore.R4B`, `FhirStore.R5`). Each version-specific project imports the shared `.projitems` and references a different Firely SDK NuGet package (`Hl7.Fhir.R4`, `Hl7.Fhir.R4B`, `Hl7.Fhir.R5`). The same C# code compiles three times — `Hl7.Fhir.Model.*` types resolve to version-specific types automatically. No `#if` directives needed.
 
-The same pattern applies to UI: **`FhirCandle.Ui.Versioned`** shares Razor components into `Ui.R4`, `Ui.R4B`, `Ui.R5`.
+The version-specific UI projects reference `FhirCandle.Ui.Common` and their matching store libraries. They do not import `FhirCandle.Ui.Versioned.projitems`.
 
 ### Assembly Aliases
 
@@ -53,7 +53,7 @@ new candleR4::FhirCandle.Storage.VersionedFhirStore();
 ```
 fhir-candle (app) → FhirCandle.R4/R4B/R5 + FhirCandle.Ui.R4/R4B/R5 + FhirCandle.Common
 FhirCandle.R4/R4B/R5 → FhirCandle.Common + Hl7.Fhir.Rx + [shared] FhirStore.CommonVersioned
-FhirCandle.Ui.R4/R4B/R5 → FhirCandle.Ui.Common + FhirCandle.Common + [shared] FhirCandle.Ui.Versioned
+FhirCandle.Ui.R4/R4B/R5 → FhirCandle.Ui.Common + FhirCandle.Common + matching FhirCandle.R4/R4B/R5
 ```
 
 - **`FhirStore.Common`** (`FhirCandle.Common`): Version-independent interfaces (`IFhirStore`, `IResourceStore`), models, configuration, search definitions

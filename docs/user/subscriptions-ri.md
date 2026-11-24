@@ -19,16 +19,16 @@ Only active, unexpired subscriptions generate events or begin event/heartbeat de
 Requested, unexpired subscriptions may handshake; a successful handshake activates only that
 same still-current requested revision. Supported inactive and terminal statuses are preserved.
 
-Subscription deadlines are absolute UTC instants. The default maximum lifetime is 30 minutes:
-the effective deadline is the earlier of the client's End and acceptance time plus the configured
-maximum. Zero disables only the configured cap; an explicit End still applies. Zero with no End
-is unlimited. Negative maximums are rejected. The client's stored End representation is preserved;
-reverse conversion exposes the effective deadline.
+Subscription deadlines are absolute UTC instants. The host defaults to `--max-subscription-minutes 0`
+(`Max_Subscription_Minutes`): there is no server-imposed cap, but a client's explicit `end` still
+applies. Set a positive value to use the earlier of that `end` and acceptance time plus the cap.
+Negative values are rejected. The stored `end` retains the client's representation. For callers
+embedding a store directly, `TenantConfiguration` defaults to 30 minutes unless overridden.
 
 Accepted resource replacements establish a new deadline and revision. Status changes, handshake
 completion, heartbeat activity, and topic/startup reprocessing do not renew it. Loaded and protected
 startup content obey the same limits. A dedicated store timer enforces expiry independently of
-resource-capacity monitoring; reads and delivery admission also enforce reached deadlines.
+the resource limit; reads and delivery admission also enforce reached deadlines.
 
 Turning a subscription off, replacing it, deleting it, or reaching its deadline invalidates queued
 work. Each actual transport start is admitted against its captured revision, including SMTP send
@@ -56,6 +56,8 @@ slots are divided evenly among tenants, with any remainder assigned deterministi
 slots are not lent to other tenants. When a tenant's queue is full, the server declines the new
 notification without evicting an accepted one. A `queue_saturated` diagnostic reports refusals,
 not transport failures. As workers become available, they take turns among nonempty tenant queues.
+On shutdown the server stops accepting notifications, discards those still waiting, and waits
+for active workers. The queues are in memory; a restart does not replay undelivered work.
 
 ## Zulip delivery
 

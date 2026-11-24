@@ -6,7 +6,7 @@ run it: as a global .NET tool, via Docker, or by cloning this repository.
 
 ## Get started with .NET
 
-[Install .NET 10 or 11](https://get.dot.net) and run this command:
+[Install the .NET 10 or 11 SDK](https://get.dot.net) and run this command:
 
 ```
 dotnet tool install --global fhir-candle
@@ -27,11 +27,11 @@ commands:
 
 ```
 docker pull ghcr.io/fhir/fhir-candle:latest
-docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest
+docker run -p 8080:5826 -e Public_Url=http://localhost:8080 ghcr.io/fhir/fhir-candle:latest
 ```
 
-This runs the Docker image with the default configuration, mapping port `5826`
-from the container to port `8080` on the host. Once running, you can access
+This maps container port `5826` to host port `8080`. `Public_Url` makes
+absolute links (including search continuations) point to the host port. You can access
 `http://localhost:8080/` in the browser to use fhir-candle's UI, or access the
 default endpoints:
 
@@ -39,11 +39,12 @@ default endpoints:
 - `http://localhost:8080/fhir/r4b/` for FHIR R4B
 - `http://localhost:8080/fhir/r5/` for FHIR R5
 
-Additional arguments can be passed directly via the `docker run` command. For
-example, to run the server with only an R4 endpoint named `test`:
+The image defaults to `-m 1000` (a [per-tenant resource limit](tenants.md#resource-limit)).
+Arguments after the image name **replace** that default. To keep the limit
+and run only an R4 endpoint named `test`:
 
 ```
-docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest --r4 test
+docker run -p 8080:5826 -e Public_Url=http://localhost:8080 ghcr.io/fhir/fhir-candle:latest -m 1000 --r4 test
 ```
 
 Both `latest` and `minimal` images use .NET 11 on Ubuntu 26.04 and support
@@ -61,10 +62,11 @@ unchanged.
 Install the .NET 11 SDK. All projects target .NET 11 and .NET 10; .NET 8 and 9
 are no longer supported.
 
-To run the default server from the command line:
+To run the default three tenants without the development launch profile
+(which selects R5 and requests its core package):
 
 ```
-dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0 --no-launch-profile
 ```
 
 To pass arguments when using `dotnet run`, add an extra `--`. For example, to see

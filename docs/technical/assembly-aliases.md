@@ -21,7 +21,7 @@ and tests use C# **extern aliases**.
 
 The `candle*` aliases select fhir-candle's versioned store assemblies. The
 `core*` aliases select the Firely SDK model assemblies, not the stores. With
-SDK 6.2.1, the model files are `Hl7.Fhir.R4.dll`, `Hl7.Fhir.R4B.dll`, and
+SDK 6, the model files are `Hl7.Fhir.R4.dll`, `Hl7.Fhir.R4B.dll`, and
 `Hl7.Fhir.R5.dll`; the historical alias names remain, but the assembly names
 have no `.Core` suffix. The existing R6 package alias is test-only and does not
 add R6 server support.
@@ -53,10 +53,10 @@ items instead. Its active `AddPackageAliases` entries only assign store
 aliases:
 
 ```xml
-<PackageReference Include="Hl7.Fhir.R4" Version="6.2.1" Aliases="coreR4" />
-<PackageReference Include="Hl7.Fhir.R4B" Version="6.2.1" Aliases="coreR4B" />
-<PackageReference Include="Hl7.Fhir.R5" Version="6.2.1" Aliases="coreR5" />
-<PackageReference Include="Hl7.Fhir.R6" Version="6.2.1" Aliases="coreR6" />
+<PackageReference Include="Hl7.Fhir.R4" Version="6.9.0" Aliases="coreR4" />
+<PackageReference Include="Hl7.Fhir.R4B" Version="6.9.0" Aliases="coreR4B" />
+<PackageReference Include="Hl7.Fhir.R5" Version="6.9.0" Aliases="coreR5" />
+<PackageReference Include="Hl7.Fhir.R6" Version="6.9.0" Aliases="coreR6" />
 ```
 
 ## Using an alias in code

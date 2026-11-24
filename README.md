@@ -1,7 +1,7 @@
 # fhir-candle
 [![Tests](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/build-and-test.yml)
-[![Publish dotnet tool](https://img.shields.io/nuget/v/fhir-candle.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml)
-[![Publish Docker image to ghcr.io](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/ghcr-docker.yml)
+[![NuGet version](https://img.shields.io/nuget/v/fhir-candle.svg)](https://www.nuget.org/packages/fhir-candle)
+[![Release workflow](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/nuget-tool.yml)
 [![Deploy to `argo.run`](https://github.com/FHIR/fhir-candle/actions/workflows/argo-ris.yml/badge.svg)](https://github.com/FHIR/fhir-candle/actions/workflows/argo-ris.yml)
 
 When you need a small FHIR.
@@ -44,7 +44,7 @@ For more information, please see the [Security Readme](SECURITY.MD).
 
 # Documentation
 
-Full documentation lives in the [`docs/`](docs/) tree:
+See the [changelog](changelog.md) for release notes. Full documentation lives in the [`docs/`](docs/) tree:
 
 - **Users** — running, configuring, and calling the server: [docs/user/](docs/user/)
   - [Getting started](docs/user/getting-started.md)
@@ -60,9 +60,9 @@ Full documentation lives in the [`docs/`](docs/) tree:
 
 The sections below are a quick-start; deeper detail lives in `docs/`.
 
-## Get Started with .Net
+## Get Started with .NET
 
-[Install .NET 10 or 11](https://get.dot.net) and run this command:
+[Install the .NET 10 or 11 SDK](https://get.dot.net) and run this command:
 
 ```
 dotnet tool install --global fhir-candle
@@ -82,10 +82,10 @@ fhir-candle -o
 
 ```
 docker pull ghcr.io/fhir/fhir-candle:latest
-docker run -p 8080:5826 ghcr.io/fhir/fhir-candle:latest
+docker run -p 8080:5826 -e Public_Url=http://localhost:8080 ghcr.io/fhir/fhir-candle:latest
 ```
 
-This runs the Docker image with the default configuration, mapping port 5826 from the container to port 8080 on the host. Once running, access http://localhost:8080/ for the UI, or the default endpoints:
+This maps container port 5826 to host port 8080 and advertises the host URL in FHIR links. Once running, access http://localhost:8080/ for the UI, or the default endpoints:
 * http://localhost:8080/fhir/r4/ for FHIR R4
 * http://localhost:8080/fhir/r4b/ for FHIR R4B
 * http://localhost:8080/fhir/r5/ for FHIR R5
@@ -93,7 +93,7 @@ This runs the Docker image with the default configuration, mapping port 5826 fro
 ## Get Started by cloning this repository
 
 ```
-dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0
+dotnet run --project src/fhir-candle/fhir-candle.csproj --framework net11.0 --no-launch-profile
 ```
 
 Building from source requires the .NET 11 SDK. Projects target .NET 11 and
@@ -122,7 +122,6 @@ Note: items are unsorted within their priorities
 * Persistent 'unsubscribe' list
 * Finish search evaluators (remaining modifier combinations)
 * Save/restore points
-* Resource display / edit in UI
 * Resource editor design improvements
 * Add loading packages/profiles to CapabilityStatement
 * Configuration and content loading via GH repos
@@ -136,10 +135,9 @@ Note: items are unsorted within their priorities
 * Contained resources
 * Subscription websocket support
 * Runtime Operation definitions with static/template or JS scripted responses.
-* Minimal build (project and image) focused on size reduction
-    * Use Native AOT deployment
+* Explore Native AOT for further size reduction
 * Add 'core' operations (e.g., `$meta-add`).
-* Add support for operaions within `transaction` bundles
+* Extend operation support within `transaction` bundles
 * CQL support
 
 ## The long tail

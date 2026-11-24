@@ -3,13 +3,14 @@
 This page captures the in-repo coding conventions. For the contribution
 *process*, see [CONTRIBUTING.MD](../../CONTRIBUTING.MD).
 
-## C# style (enforced by `.editorconfig`)
+## C# style
 
 - **Explicit types** — avoid `var` even when the type is apparent.
 - **Empty collections** — use `[]` rather than `new List<T>()` or `new()`.
 - **Private/static fields** — `_camelCase` (underscore prefix).
 - **Constants** — `PascalCase`.
-- **File-scoped namespaces** (`namespace X;`).
+- **File-scoped namespaces** (`namespace X;`) are preferred for new code;
+  preserve the surrounding style when editing existing files.
 - **Allman braces** (opening brace on its own new line).
 - **Accessibility modifiers** required on all non-interface members (warning
   level).
