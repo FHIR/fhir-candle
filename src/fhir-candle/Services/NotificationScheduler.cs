@@ -70,10 +70,13 @@ internal sealed class NotificationScheduler
         _workers = Task.WhenAll(Enumerable.Range(0, _concurrency).Select(_ => Task.Run(WorkerAsync)));
     }
 
-    internal bool TryEnqueue(IFhirStore store, SubscriptionSendEventArgs args)
+    internal sealed record SaturationWarning(string Tenant, ParsedSubscription.NotificationTypeCodes Kind, int Depth, long RefusedCount);
+
+    internal bool TryEnqueue(IFhirStore store, SubscriptionSendEventArgs args, out SaturationWarning? warning)
     {
         lock (Gate)
         {
+            warning = null;
             if (IsStopped)
             {
                 return false;
@@ -89,8 +92,7 @@ internal sealed class NotificationScheduler
                     now - last >= TimeSpan.FromMinutes(1))
                 {
                     queue.LastWarning[args.NotificationType] = now;
-                    _logger.LogWarning("queue_saturated tenant={Tenant} kind={Kind} depth={Depth} refused={RefusedCount}",
-                        tenant, args.NotificationType, queue.Requests.Count, queue.Refused);
+                    warning = new(tenant, args.NotificationType, queue.Requests.Count, queue.Refused);
                 }
                 return false;
             }
@@ -101,6 +103,15 @@ internal sealed class NotificationScheduler
                 WakeWorkers();
             }
             return true;
+        }
+    }
+
+    internal void EmitWarning(SaturationWarning? warning)
+    {
+        if (warning is not null)
+        {
+            _logger.LogWarning("queue_saturated tenant={Tenant} kind={Kind} depth={Depth} refused={RefusedCount}",
+                warning.Tenant, warning.Kind, warning.Depth, warning.RefusedCount);
         }
     }
 

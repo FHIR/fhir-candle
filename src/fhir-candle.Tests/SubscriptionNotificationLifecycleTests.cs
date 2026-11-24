@@ -1723,6 +1723,78 @@ public sealed class SubscriptionNotificationLifecycleTests
 
     [Theory]
     [MemberData(nameof(Managers))]
+    public async Task BlockedSaturationWarningAllowsOtherTenantDelivery(FhirReleases.FhirSequenceCodes version, bool restOnly)
+    {
+        foreach (string producer in new[] { "event", "handshake", "startup", "heartbeat" })
+        {
+            using LifecycleTestStore quiet = new(version);
+            // First in scheduler order: the single manual permit will dispatch its event.
+            quiet.Store.Config.ControllerName = "first-quiet";
+            quiet.Seed();
+            quiet.Subscription.HeartbeatSeconds = 0;
+            quiet.Subscription.Endpoint = "https://quiet.unit.test/notify";
+            using NotificationFixture fixture = new(version, restOnly, sibling: quiet, capacity: 2, concurrency: 1);
+            TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<Uri?> started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Log.OnSaturation = () =>
+            {
+                entered.TrySetResult();
+                release.Task.WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            };
+            fixture.Handler.SendOperation = (request, _) =>
+            {
+                started.TrySetResult(request.RequestUri);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            };
+
+            Action refuse;
+            if (producer == "startup")
+            {
+                fixture.Store.PutSubscription("requested");
+                JsonObject second = fixture.Store.SubscriptionJson("requested");
+                second["id"] = "second-requested";
+                fixture.Store.Put(second);
+                refuse = fixture.Start;
+            }
+            else
+            {
+                fixture.Start();
+                fixture.Scan();
+                fixture.Store.Match("fill");
+                fixture.Store.Clock.Advance(TimeSpan.FromMinutes(2));
+                refuse = producer switch
+                {
+                    "event" => () => fixture.Store.Match("refused"),
+                    "handshake" => () => fixture.Store.PutSubscription("requested"),
+                    _ => fixture.Scan,
+                };
+            }
+
+            Task blocked = Task.Run(refuse);
+            Task dispatch = Task.CompletedTask;
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                dispatch = Task.Run(async () =>
+                {
+                    quiet.Match("quiet-event");
+                    await fixture.DrainOneAsync();
+                });
+                Uri? endpoint = await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.Equal(quiet.Subscription.Endpoint, endpoint?.AbsoluteUri);
+                Assert.False(blocked.IsCompleted);
+            }
+            finally
+            {
+                release.TrySetResult();
+                await Task.WhenAll(blocked, dispatch).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Managers))]
     public async Task SaturationDoesNotReserveOrCompleteDelivery(FhirReleases.FhirSequenceCodes version, bool restOnly)
     {
         foreach (string kind in new[] { "event", "heartbeat", "handshake" })
@@ -2142,6 +2214,7 @@ public sealed class SubscriptionNotificationLifecycleTests
         internal ConcurrentQueue<string> Failures { get; } = new();
         internal ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
         internal ConcurrentQueue<IReadOnlyDictionary<string, object?>> Saturation { get; } = new();
+        internal Action? OnSaturation { get; set; }
         internal ConcurrentQueue<int> Discards { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -2154,6 +2227,7 @@ public sealed class SubscriptionNotificationLifecycleTests
                 if (message.StartsWith("queue_saturated", StringComparison.Ordinal))
                 {
                     Saturation.Enqueue(fields.ToDictionary(pair => pair.Key, pair => pair.Value));
+                    OnSaturation?.Invoke();
                 }
                 if (message.StartsWith("queue_discarded", StringComparison.Ordinal))
                 {

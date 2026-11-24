@@ -14,6 +14,7 @@ using fhir.candle.Models;
 using FhirCandle.Configuration;
 using Outcome = FhirCandle.Models.SubscriptionNotificationOutcome;
 using OutcomeKind = FhirCandle.Models.SubscriptionNotificationOutcome.OutcomeKind;
+using SaturationWarning = fhir.candle.Services.NotificationScheduler.SaturationWarning;
 
 namespace fhir.candle.Services;
 
@@ -714,6 +715,7 @@ public class NotificationManager : INotificationManager
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        List<SaturationWarning> warnings = [];
         lock (Scheduler.Gate)
         {
             ObjectDisposedException.ThrowIf(_hasDisposed, this);
@@ -736,13 +738,14 @@ public class NotificationManager : INotificationManager
                 foreach (ParsedSubscription subscription in store.CurrentSubscriptions)
                 {
                     long revision = subscription.Revision;
-                    Store_OnSubscriptionsChanged(store, new()
+                    SaturationWarning? warning = ApplySubscriptionChangeLocked(store, new()
                     {
                         Tenant = store.Config,
                         ChangedSubscription = subscription,
                         Revision = revision,
                         SendHandshake = subscription.CurrentStatus == "requested",
                     });
+                    if (warning is not null) { warnings.Add(warning); }
                 }
             }
 
@@ -752,6 +755,7 @@ public class NotificationManager : INotificationManager
                 TimeSpan.Zero,
                 TimeSpan.FromSeconds(2));
         }
+        foreach (SaturationWarning warning in warnings) { Scheduler.EmitWarning(warning); }
         return Task.CompletedTask;
     }
 
@@ -795,6 +799,7 @@ public class NotificationManager : INotificationManager
     /// <param name="state">The state.</param>
     private void CheckAndSendHeartbeats(object? state)
     {
+        List<SaturationWarning> warnings = [];
         lock (Scheduler.Gate)
         {
             if (Scheduler.IsStopped)
@@ -825,17 +830,21 @@ public class NotificationManager : INotificationManager
                         next = currentTicks + interval;
                         _heartbeatReservations[key] = next;
                     }
-                    if (next != long.MaxValue && currentTicks >= Math.Max(next, sub.LastCommunicationTicks + interval) &&
-                        Scheduler.TryEnqueue(store, new()
-                        {
-                            Tenant = store.Config,
-                            Subscription = sub,
-                            Revision = revision,
-                            NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
-                        }))
+                    if (next == long.MaxValue || currentTicks < Math.Max(next, sub.LastCommunicationTicks + interval))
+                    {
+                        continue;
+                    }
+                    if (Scheduler.TryEnqueue(store, new()
+                    {
+                        Tenant = store.Config,
+                        Subscription = sub,
+                        Revision = revision,
+                        NotificationType = ParsedSubscription.NotificationTypeCodes.Heartbeat,
+                    }, out SaturationWarning? warning))
                     {
                         _heartbeatReservations[key] = long.MaxValue;
                     }
+                    else if (warning is not null) { warnings.Add(warning); }
                 }
             }
             foreach ((IFhirStore Store, string Id, long Revision) key in _heartbeatReservations.Keys.Where(key => !current.Contains(key)).ToArray())
@@ -848,6 +857,7 @@ public class NotificationManager : INotificationManager
                 _handshakeRevisions.Remove(entry.Key);
             }
         }
+        foreach (SaturationWarning warning in warnings) { Scheduler.EmitWarning(warning); }
     }
 
     /// <summary>Event handler. Called by Store for on subscription events.</summary>
@@ -855,6 +865,7 @@ public class NotificationManager : INotificationManager
     /// <param name="e">     Subscription event information.</param>
     private void Store_OnSubscriptionSendEvent(object? sender, SubscriptionSendEventArgs e)
     {
+        SaturationWarning? warning;
         lock (Scheduler.Gate)
         {
             if (Scheduler.IsStopped)
@@ -867,8 +878,9 @@ public class NotificationManager : INotificationManager
                 return;
             }
 
-            Scheduler.TryEnqueue(_storeManager[e.Tenant.ControllerName], e);
+            Scheduler.TryEnqueue(_storeManager[e.Tenant.ControllerName], e, out warning);
         }
+        Scheduler.EmitWarning(warning);
     }
 
     /// <summary>Event handler. Called by Store for on subscriptions changed events.</summary>
@@ -876,6 +888,7 @@ public class NotificationManager : INotificationManager
     /// <param name="e">     Subscription changed event information.</param>
     private void Store_OnSubscriptionsChanged(object? sender, SubscriptionChangedEventArgs e)
     {
+        SaturationWarning? warning;
         lock (Scheduler.Gate)
         {
             if (Scheduler.IsStopped || !_storeManager.ContainsKey(e.Tenant.ControllerName))
@@ -883,43 +896,47 @@ public class NotificationManager : INotificationManager
                 return;
             }
 
-            IFhirStore store = _storeManager[e.Tenant.ControllerName];
-            string? changedId = string.IsNullOrEmpty(e.RemovedSubscriptionId) ? e.ChangedSubscription?.Id : e.RemovedSubscriptionId;
-            foreach ((IFhirStore Store, string Id, long Revision) key in _heartbeatReservations.Keys
-                .Where(key => ReferenceEquals(key.Store, store) && key.Id == changedId && key.Revision < e.Revision).ToArray())
-            {
-                _heartbeatReservations.Remove(key);
-            }
-            if (changedId is not null && _handshakeRevisions.TryGetValue((store, changedId), out long priorRevision) &&
-                priorRevision < e.Revision)
-            {
-                _handshakeRevisions.Remove((store, changedId));
-            }
-
-            if (e.SendHandshake && e.ChangedSubscription is not null)
-            {
-                // Subscription changes publish after unlocking and may race the startup snapshot.
-                ParsedSubscription? current = store.CurrentSubscriptions.FirstOrDefault(subscription => subscription.Id == changedId);
-                if (current is null || !ReferenceEquals(current, e.ChangedSubscription) || current.Revision != e.Revision ||
-                    !SubscriptionLifecyclePolicy.CanDeliverNotification(current.CurrentStatus, current.ExpirationTicks,
-                        ParsedSubscription.NotificationTypeCodes.Handshake, _clock.GetUtcNow()) ||
-                    (_handshakeRevisions.TryGetValue((store, current.Id), out long queuedRevision) && queuedRevision >= e.Revision))
-                {
-                    return;
-                }
-
-                if (Scheduler.TryEnqueue(store, new()
-                {
-                    Tenant = e.Tenant,
-                    Subscription = current,
-                    Revision = e.Revision,
-                    NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
-                }))
-                {
-                    _handshakeRevisions[(store, current.Id)] = e.Revision;
-                }
-            }
+            warning = ApplySubscriptionChangeLocked(_storeManager[e.Tenant.ControllerName], e);
         }
+        Scheduler.EmitWarning(warning);
+    }
+
+    private SaturationWarning? ApplySubscriptionChangeLocked(IFhirStore store, SubscriptionChangedEventArgs e)
+    {
+        string? changedId = string.IsNullOrEmpty(e.RemovedSubscriptionId) ? e.ChangedSubscription?.Id : e.RemovedSubscriptionId;
+        foreach ((IFhirStore Store, string Id, long Revision) key in _heartbeatReservations.Keys
+            .Where(key => ReferenceEquals(key.Store, store) && key.Id == changedId && key.Revision < e.Revision).ToArray())
+        {
+            _heartbeatReservations.Remove(key);
+        }
+        if (changedId is not null && _handshakeRevisions.TryGetValue((store, changedId), out long priorRevision) &&
+            priorRevision < e.Revision)
+        {
+            _handshakeRevisions.Remove((store, changedId));
+        }
+
+        if (!e.SendHandshake || e.ChangedSubscription is null) { return null; }
+        // Subscription changes publish after unlocking and may race the startup snapshot.
+        ParsedSubscription? current = store.CurrentSubscriptions.FirstOrDefault(subscription => subscription.Id == changedId);
+        if (current is null || !ReferenceEquals(current, e.ChangedSubscription) || current.Revision != e.Revision ||
+            !SubscriptionLifecyclePolicy.CanDeliverNotification(current.CurrentStatus, current.ExpirationTicks,
+                ParsedSubscription.NotificationTypeCodes.Handshake, _clock.GetUtcNow()) ||
+            (_handshakeRevisions.TryGetValue((store, current.Id), out long queuedRevision) && queuedRevision >= e.Revision))
+        {
+            return null;
+        }
+
+        if (Scheduler.TryEnqueue(store, new()
+        {
+            Tenant = e.Tenant,
+            Subscription = current,
+            Revision = e.Revision,
+            NotificationType = ParsedSubscription.NotificationTypeCodes.Handshake,
+        }, out SaturationWarning? warning))
+        {
+            _handshakeRevisions[(store, current.Id)] = e.Revision;
+        }
+        return warning;
     }
 
     /// <summary>Triggered when the application host is performing a graceful shutdown.</summary>
