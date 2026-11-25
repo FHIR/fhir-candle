@@ -23,10 +23,31 @@ namespace fhir.candle.Tests;
 /// <summary>Tooling negative controls; these fixtures are never released-artifact feasibility evidence.</summary>
 public class PerformanceEvidenceTests
 {
+    // The physical path avoids both the /var symlink in macOS TMPDIR and its long per-user prefix.
+    private const string MacFixtureRoot = "/private/tmp";
+
     // Pure configured identity; these fixtures never read or create this path.
     private static readonly string _sourceDirectory = OperatingSystem.IsWindows()
         ? @"C:\candle-perf-fixture\child\empty-source" : "/candle-perf-fixture/child/empty-source";
     private static long _fixtureTimestamp = 1000000;
+
+    private static string NewFixturePipeName()
+    {
+        string name = "candle-perf-" + Guid.NewGuid().ToString("N");
+        // .NET uses an absolute Unix socket path as-is instead of prepending TMPDIR/CoreFxPipe_.
+        return OperatingSystem.IsMacOS() ? Path.Combine(MacFixtureRoot, name) : name;
+    }
+
+    private static string CreateEvidenceFixtureDirectory(string prefix)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return Directory.CreateTempSubdirectory(prefix).FullName;
+        }
+
+        return Directory.CreateDirectory(Path.Combine(MacFixtureRoot, prefix + Guid.NewGuid().ToString("N")),
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute).FullName;
+    }
 
     /// <summary>The manifest cannot silently select another release, source, runtime, output or concurrency.</summary>
     [Fact]
@@ -272,7 +293,7 @@ public class PerformanceEvidenceTests
 
         start.ArgumentList.Add("exit " + ExitCode.ToString(CultureInfo.InvariantCulture));
         using Process child = new() { StartInfo = start };
-        using NamedPipeServerStream pipe = ProbeProtocol.CreateServer("candle-perf-" + Guid.NewGuid().ToString("N"));
+        using NamedPipeServerStream pipe = ProbeProtocol.CreateServer(NewFixturePipeName());
         using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(10));
         string stderrPath = Path.Combine(Path.GetTempPath(), "candle-perf-fixture", "stderr.log");
         Assert.True(child.Start());
@@ -304,7 +325,7 @@ public class PerformanceEvidenceTests
     public async Task ProbeConnectionPreservesCancellationAndCallerOwnership()
     {
         using Process child = Process.GetCurrentProcess();
-        string pipeName = "candle-perf-" + Guid.NewGuid().ToString("N");
+        string pipeName = NewFixturePipeName();
         using NamedPipeServerStream pipe = ProbeProtocol.CreateServer(pipeName);
         using NamedPipeClientStream client = new(".", pipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
@@ -1704,11 +1725,11 @@ public class PerformanceEvidenceTests
     [Fact]
     public async Task SavedLifecycleRejectsForgedIdentityAndMissingClockEvidence()
     {
-        string root = Path.Combine(Path.GetTempPath(), "candle-clock-lifecycle-fixture-" + Guid.NewGuid().ToString("N"));
+        string root = CreateEvidenceFixtureDirectory("candle-clock-lifecycle-fixture-");
         const string DirectoryName = "unit-child";
-        Directory.CreateDirectory(Path.Combine(root, DirectoryName));
         try
         {
+            Directory.CreateDirectory(Path.Combine(root, DirectoryName));
             TrialRecord trial = MeasurementTrialFixture(MeasurementFixtureSchedule()[0]);
             ClockObservation issued = trial.Started with { Before = 100010, After = 100011 };
             ClockObservation requested = issued with { Utc = trial.StartedUtc.AddSeconds(-2), Before = 100020, After = 100021 };
@@ -3061,8 +3082,7 @@ public class PerformanceEvidenceTests
     [Fact]
     public async Task RendererReproducesSavedEvidenceWithoutServerExecution()
     {
-        string directory = Path.Combine(Path.GetTempPath(), "candle-perf-render-fixture-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        string directory = CreateEvidenceFixtureDirectory("candle-perf-render-fixture-");
         try
         {
             (FrozenMeasurement frozen, TrialRecord[] trials) = MeasurementFixture();
